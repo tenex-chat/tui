@@ -57,6 +57,9 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Cached delegations extracted from messages
     @Published private(set) var delegations: [DelegationItem] = []
 
+    /// Cached activity status for each direct delegation conversation
+    @Published private(set) var delegationActivityByConversationId: [String: Bool] = [:]
+
     /// Cached latest reply (most recent non-tool-call message)
     @Published private(set) var latestReply: MessageInfo?
 
@@ -84,8 +87,12 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Messages for descendant conversations (for todo parsing)
     private var descendantMessages: [String: [MessageInfo]] = [:]
 
-    /// Cached parsed todo states per conversation (avoid re-parsing)
+    /// Cached parsed todo states per descendant conversation.
     private var parsedTodoStates: [String: TodoState] = [:]
+    /// Descendants whose message snapshots changed and need todo re-parse.
+    private var dirtyDescendantTodoConversationIds: Set<String> = []
+    /// Profile-name cache to avoid repeated FFI lookups during recompute.
+    private var profileNameCache: [String: String] = [:]
 
     /// Children lookup map for efficient subtree traversal
     private var childrenByParentId: [String: [String]] = [:]
@@ -113,6 +120,10 @@ final class ConversationDetailViewModel: ObservableObject {
     private weak var coreManager: TenexCoreManager?
 
     private var subscriptions = Set<AnyCancellable>()
+    private let profiler = PerformanceProfiler.shared
+    private var recomputeTask: Task<Void, Never>?
+    private var recomputePending = false
+    private var didCompleteInitialLoad = false
 
     // MARK: - Initialization
 
@@ -134,6 +145,7 @@ final class ConversationDetailViewModel: ObservableObject {
     }
 
     deinit {
+        recomputeTask?.cancel()
         subscriptions.removeAll()
     }
 
@@ -142,6 +154,11 @@ final class ConversationDetailViewModel: ObservableObject {
         guard self.coreManager == nil else { return }
         self.coreManager = coreManager
         bindToCoreManager()
+        profiler.logEvent(
+            "ConversationDetailViewModel bound coreManager conversationId=\(conversation.id)",
+            category: .general,
+            level: .debug
+        )
     }
     private func bindToCoreManager() {
         guard let coreManager = coreManager else { return }
@@ -168,7 +185,7 @@ final class ConversationDetailViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self = self else { return }
-                Task { await self.recomputeDerivedState() }
+                self.scheduleDerivedStateRecompute()
             }
             .store(in: &subscriptions)
 
@@ -185,18 +202,30 @@ final class ConversationDetailViewModel: ObservableObject {
     /// then loading children/descendants in the background.
     func loadData() async {
         guard !isLoading, let coreManager = coreManager else { return }
+        let loadStartedAt = CFAbsoluteTimeGetCurrent()
+        profiler.logEvent(
+            "loadData start conversationId=\(conversation.id)",
+            category: .general
+        )
 
         isLoading = true
         error = nil
 
         do {
             // PHASE 1: Load messages first to show latest reply immediately
+            let phase1StartedAt = CFAbsoluteTimeGetCurrent()
             await coreManager.ensureMessagesLoaded(conversationId: conversation.id)
             let fetchedMessages = coreManager.messagesByConversation[conversation.id] ?? []
             try Task.checkCancellation()
+            let phase1Ms = (CFAbsoluteTimeGetCurrent() - phase1StartedAt) * 1000
+            profiler.logEvent(
+                "loadData phase=messages conversationId=\(conversation.id) count=\(fetchedMessages.count) elapsedMs=\(String(format: "%.2f", phase1Ms))",
+                category: .general,
+                level: phase1Ms >= 120 ? .error : .info
+            )
 
             // Update messages and compute latest reply immediately
-            applyMessages(fetchedMessages)
+            applyMessages(fetchedMessages, scheduleRecompute: false)
 
             // Start runtime loading (non-blocking)
             Task {
@@ -204,40 +233,79 @@ final class ConversationDetailViewModel: ObservableObject {
             }
 
             // PHASE 2: Load children/descendants for delegations and aggregated stats
+            let phase2StartedAt = CFAbsoluteTimeGetCurrent()
             let (directChildren, descendants, descendantMsgs) = try await loadChildrenFromCore(
                 coreManager: coreManager,
                 conversationId: conversation.id
+            )
+            let phase2Ms = (CFAbsoluteTimeGetCurrent() - phase2StartedAt) * 1000
+            profiler.logEvent(
+                "loadData phase=children conversationId=\(conversation.id) directChildren=\(directChildren.count) descendants=\(descendants.count) descendantMsgMaps=\(descendantMsgs.count) elapsedMs=\(String(format: "%.2f", phase2Ms))",
+                category: .general,
+                level: phase2Ms >= 250 ? .error : .info
             )
 
             // Update state
             self.childConversations = directChildren
             self.allDescendants = descendants
             self.descendantMessages = descendantMsgs
+            self.dirtyDescendantTodoConversationIds.formUnion(descendantMsgs.keys)
 
             // Recompute remaining derived state (delegations, participants, aggregated todos)
-            await recomputeDerivedState()
+            let phase3StartedAt = CFAbsoluteTimeGetCurrent()
+            await recomputeDerivedStateNow()
+            let phase3Ms = (CFAbsoluteTimeGetCurrent() - phase3StartedAt) * 1000
+            profiler.logEvent(
+                "loadData phase=derived-state conversationId=\(conversation.id) elapsedMs=\(String(format: "%.2f", phase3Ms))",
+                category: .general,
+                level: phase3Ms >= 120 ? .error : .info
+            )
 
+            didCompleteInitialLoad = true
+            loadMissingDescendantMessages(from: allDescendants)
             isLoading = false
+            let totalMs = (CFAbsoluteTimeGetCurrent() - loadStartedAt) * 1000
+            profiler.logEvent(
+                "loadData complete conversationId=\(conversation.id) totalMs=\(String(format: "%.2f", totalMs)) messages=\(messages.count) children=\(childConversations.count)",
+                category: .general,
+                level: totalMs >= 350 ? .error : .info
+            )
         } catch is CancellationError {
             isLoading = false
+            let totalMs = (CFAbsoluteTimeGetCurrent() - loadStartedAt) * 1000
+            profiler.logEvent(
+                "loadData cancelled conversationId=\(conversation.id) elapsedMs=\(String(format: "%.2f", totalMs))",
+                category: .general,
+                level: .info
+            )
         } catch {
             self.error = error
             isLoading = false
+            let totalMs = (CFAbsoluteTimeGetCurrent() - loadStartedAt) * 1000
+            profiler.logEvent(
+                "loadData failed conversationId=\(conversation.id) elapsedMs=\(String(format: "%.2f", totalMs)) error=\(error.localizedDescription)",
+                category: .general,
+                level: .error
+            )
         }
     }
 
     /// Loads children and descendants - separated from message loading for faster initial render
     private func loadChildrenFromCore(coreManager: TenexCoreManager, conversationId: String) async throws -> ([ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) {
         try Task.checkCancellation()
+        let startedAt = CFAbsoluteTimeGetCurrent()
 
         // Get all descendants
+        let descendantsLookupStartedAt = CFAbsoluteTimeGetCurrent()
         let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversationId)
         let allDescendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
+        let descendantsLookupMs = (CFAbsoluteTimeGetCurrent() - descendantsLookupStartedAt) * 1000
 
         // Get direct children from descendants
         let directChildren = allDescendants.filter { $0.parentId == conversationId }
 
         // Fetch messages for all descendants CONCURRENTLY
+        let descendantMessagesStartedAt = CFAbsoluteTimeGetCurrent()
         let descendantMsgs = await withTaskGroup(
             of: (String, [MessageInfo]).self,
             returning: [String: [MessageInfo]].self
@@ -255,17 +323,46 @@ final class ConversationDetailViewModel: ObservableObject {
             }
             return results
         }
+        let descendantMessagesMs = (CFAbsoluteTimeGetCurrent() - descendantMessagesStartedAt) * 1000
+        let totalMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+        profiler.logEvent(
+            "loadChildrenFromCore conversationId=\(conversationId) descendantIds=\(descendantIds.count) descendants=\(allDescendants.count) directChildren=\(directChildren.count) descendantMessageMaps=\(descendantMsgs.count) lookupMs=\(String(format: "%.2f", descendantsLookupMs)) messageFetchMs=\(String(format: "%.2f", descendantMessagesMs)) totalMs=\(String(format: "%.2f", totalMs))",
+            category: .general,
+            level: totalMs >= 250 ? .error : .info
+        )
 
         return (directChildren, allDescendants, descendantMsgs)
     }
 
     // MARK: - Reactive Updates
 
-    private func applyMessages(_ fetchedMessages: [MessageInfo]) {
+    private func scheduleDerivedStateRecompute() {
+        recomputePending = true
+        guard recomputeTask == nil else { return }
+
+        recomputeTask = Task { [weak self] in
+            guard let self = self else { return }
+            while self.recomputePending, !Task.isCancelled {
+                self.recomputePending = false
+                await self.recomputeDerivedState()
+            }
+            self.recomputeTask = nil
+        }
+    }
+
+    private func recomputeDerivedStateNow() async {
+        scheduleDerivedStateRecompute()
+        await recomputeTask?.value
+    }
+
+    private func applyMessages(_ fetchedMessages: [MessageInfo], scheduleRecompute: Bool = true) {
+        guard messages != fetchedMessages else { return }
         messages = fetchedMessages
         latestReply = fetchedMessages.last { !$0.isToolCall && !$0.content.isEmpty }
         todoState = TodoParser.parse(messages: fetchedMessages)
-        Task { await recomputeDerivedState() }
+        if scheduleRecompute {
+            scheduleDerivedStateRecompute()
+        }
     }
 
     private func applyConversationUpdates(_ conversations: [ConversationFullInfo]) {
@@ -291,12 +388,22 @@ final class ConversationDetailViewModel: ObservableObject {
 
         let descendantIds = collectDescendantIds(startId: conversation.id, childrenMap: childrenMap)
         let descendants = conversations.filter { descendantIds.contains($0.id) }
-        allDescendants = descendants
-        childConversations = descendants
+        let nextChildConversations = descendants
             .filter { $0.parentId == conversation.id }
             .sorted { $0.effectiveLastActivity > $1.effectiveLastActivity }
+        let descendantsChanged = allDescendants != descendants
+        let childrenChanged = childConversations != nextChildConversations
+        allDescendants = descendants
+        childConversations = nextChildConversations
+        pruneDescendantCaches(keeping: Set(descendantIds))
 
-        loadMissingDescendantMessages(from: descendants)
+        if didCompleteInitialLoad {
+            loadMissingDescendantMessages(from: descendants)
+        }
+
+        if descendantsChanged || childrenChanged {
+            scheduleDerivedStateRecompute()
+        }
     }
 
     private func collectDescendantIds(startId: String, childrenMap: [String: [ConversationFullInfo]]) -> [String] {
@@ -322,8 +429,14 @@ final class ConversationDetailViewModel: ObservableObject {
 
         let missing = descendants.filter { descendantMessages[$0.id] == nil }
         guard !missing.isEmpty else { return }
+        profiler.logEvent(
+            "loadMissingDescendantMessages conversationId=\(conversation.id) missingCount=\(missing.count)",
+            category: .general,
+            level: .debug
+        )
 
         Task {
+            let startedAt = CFAbsoluteTimeGetCurrent()
             let fetched = await withTaskGroup(
                 of: (String, [MessageInfo]).self,
                 returning: [String: [MessageInfo]].self
@@ -346,8 +459,15 @@ final class ConversationDetailViewModel: ObservableObject {
                 guard let self = self else { return }
                 for (id, msgs) in fetched {
                     self.descendantMessages[id] = msgs
+                    self.dirtyDescendantTodoConversationIds.insert(id)
                 }
-                Task { await self.recomputeDerivedState() }
+                self.scheduleDerivedStateRecompute()
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+                self.profiler.logEvent(
+                    "loadMissingDescendantMessages complete conversationId=\(self.conversation.id) fetchedConversations=\(fetched.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+                    category: .general,
+                    level: elapsedMs >= 150 ? .error : .info
+                )
             }
         }
     }
@@ -356,34 +476,50 @@ final class ConversationDetailViewModel: ObservableObject {
         guard !allDescendants.isEmpty else { return }
         var updated = false
         for descendant in allDescendants {
-            if let msgs = cache[descendant.id] {
+            if let msgs = cache[descendant.id], descendantMessages[descendant.id] != msgs {
                 descendantMessages[descendant.id] = msgs
+                dirtyDescendantTodoConversationIds.insert(descendant.id)
                 updated = true
             }
         }
         if updated {
-            Task { await recomputeDerivedState() }
+            scheduleDerivedStateRecompute()
         }
+    }
+
+    private func pruneDescendantCaches(keeping descendantIds: Set<String>) {
+        descendantMessages = descendantMessages.filter { descendantIds.contains($0.key) }
+        parsedTodoStates = parsedTodoStates.filter { descendantIds.contains($0.key) }
+        dirtyDescendantTodoConversationIds = dirtyDescendantTodoConversationIds.filter { descendantIds.contains($0) }
+    }
+
+    private func profileName(for pubkey: String, coreManager: TenexCoreManager) async -> String {
+        if let cached = profileNameCache[pubkey] {
+            return cached
+        }
+        let name = await coreManager.safeCore.getProfileName(pubkey: pubkey)
+        profileNameCache[pubkey] = name
+        return name
     }
 
     // MARK: - Derived State Computation
 
     /// Recomputes all cached derived state when messages/children change
     private func recomputeDerivedState() async {
-        // Compute participating agent infos with pubkeys for avatar lookups
-        // Use pubkey as unique key to avoid duplicates from same agent
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        let currentDescendantIds = Set(allDescendants.map(\.id))
+        pruneDescendantCaches(keeping: currentDescendantIds)
+
+        let participantsStartedAt = CFAbsoluteTimeGetCurrent()
+        // Compute participating agent infos with pubkeys for avatar lookups.
         var agentInfosByPubkey: [String: AgentAvatarInfo] = [:]
 
-        // Store author info separately for avatar group
         authorInfo = AgentAvatarInfo(
             name: conversation.author,
             pubkey: conversation.authorPubkey
         )
-
-        // Add conversation author to full list
         agentInfosByPubkey[conversation.authorPubkey] = authorInfo
 
-        // Add all descendant authors
         for descendant in allDescendants {
             agentInfosByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
                 name: descendant.author,
@@ -391,27 +527,24 @@ final class ConversationDetailViewModel: ObservableObject {
             )
         }
 
-        // Sort by name for consistent display
         participatingAgentInfos = agentInfosByPubkey.values.sorted { $0.name < $1.name }
 
-        // Extract p-tagged recipient info (first p-tag from conversation)
         if let pTaggedPubkey = conversation.pTags.first, let coreManager = coreManager {
-            let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
+            let name = await profileName(for: pTaggedPubkey, coreManager: coreManager)
             pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
         } else {
             pTaggedRecipientInfo = nil
         }
 
-        // Other participants excluding author and p-tagged (for avatar group)
         let pTaggedPubkey = conversation.pTags.first
         otherParticipantsInfo = participatingAgentInfos.filter {
             $0.pubkey != conversation.authorPubkey && $0.pubkey != pTaggedPubkey
         }
 
-        // Compute latest reply (last non-tool-call, non-empty message)
         latestReply = messages.last { !$0.isToolCall && !$0.content.isEmpty }
+        let participantsMs = (CFAbsoluteTimeGetCurrent() - participantsStartedAt) * 1000
 
-        // Build children lookup map for efficient subtree traversal
+        let todoStartedAt = CFAbsoluteTimeGetCurrent()
         childrenByParentId = [:]
         for descendant in allDescendants {
             if let parentId = descendant.parentId {
@@ -419,28 +552,48 @@ final class ConversationDetailViewModel: ObservableObject {
             }
         }
 
-        // Parse and cache todos for all conversations (parse once, use many times)
-        parsedTodoStates = [:]
-        for (convId, msgs) in descendantMessages {
-            parsedTodoStates[convId] = TodoParser.parse(messages: msgs)
+        if dirtyDescendantTodoConversationIds.isEmpty && parsedTodoStates.count != descendantMessages.count {
+            dirtyDescendantTodoConversationIds.formUnion(descendantMessages.keys)
         }
 
-        // Parse todos from current conversation's messages
-        todoState = TodoParser.parse(messages: messages)
+        for conversationId in dirtyDescendantTodoConversationIds {
+            guard let descendantMessagesForId = descendantMessages[conversationId] else {
+                parsedTodoStates.removeValue(forKey: conversationId)
+                continue
+            }
+            parsedTodoStates[conversationId] = TodoParser.parse(messages: descendantMessagesForId)
+        }
+        dirtyDescendantTodoConversationIds.removeAll()
 
-        // Compute aggregated todo stats (current + all descendants)
         var stats = AggregateTodoStats.empty
         stats.add(todoState)
-        for (_, todos) in parsedTodoStates {
-            stats.add(todos)
+        for descendant in allDescendants {
+            if let todos = parsedTodoStates[descendant.id] {
+                stats.add(todos)
+            }
         }
         aggregatedTodoStats = stats
+        let todoMs = (CFAbsoluteTimeGetCurrent() - todoStartedAt) * 1000
 
-        // Compute delegations with their subtree todo stats
+        delegationActivityByConversationId = ConversationActivityMetrics.delegationActivityByConversationId(
+            directChildren: childConversations,
+            allDescendants: allDescendants
+        )
+
+        let delegationsStartedAt = CFAbsoluteTimeGetCurrent()
         delegations = await extractDelegations()
+        let delegationsMs = (CFAbsoluteTimeGetCurrent() - delegationsStartedAt) * 1000
 
-        // Compute reports referenced by this conversation's a-tags
+        let reportsStartedAt = CFAbsoluteTimeGetCurrent()
         referencedReports = extractReferencedReports()
+        let reportsMs = (CFAbsoluteTimeGetCurrent() - reportsStartedAt) * 1000
+
+        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+        profiler.logEvent(
+            "recomputeDerivedState conversationId=\(conversation.id) messages=\(messages.count) descendants=\(allDescendants.count) delegations=\(delegations.count) referencedReports=\(referencedReports.count) participantsMs=\(String(format: "%.2f", participantsMs)) todoMs=\(String(format: "%.2f", todoMs)) delegationsMs=\(String(format: "%.2f", delegationsMs)) reportsMs=\(String(format: "%.2f", reportsMs)) totalMs=\(String(format: "%.2f", elapsedMs))",
+            category: .general,
+            level: elapsedMs >= 100 ? .error : .info
+        )
     }
 
     /// Computes todo stats for a conversation and all its descendants using cached data
@@ -474,6 +627,7 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Extracts delegation items from messages and child conversations
     private func extractDelegations() async -> [DelegationItem] {
         guard let coreManager = coreManager else { return [] }
+        let startedAt = CFAbsoluteTimeGetCurrent()
 
         var result: [DelegationItem] = []
 
@@ -486,7 +640,7 @@ final class ConversationDetailViewModel: ObservableObject {
                     if let childConv = childConversations.first(where: { $0.id == qTag }) {
                         // Get recipient from p-tag of the child conversation (who was delegated TO)
                         let recipientPubkey = childConv.pTags.first ?? childConv.authorPubkey
-                        let recipient = await coreManager.safeCore.getProfileName(pubkey: recipientPubkey)
+                        let recipient = await profileName(for: recipientPubkey, coreManager: coreManager)
 
                         // Compute subtree todo stats for this delegation
                         let todoStats = computeSubtreeTodoStats(forConversationId: qTag)
@@ -511,7 +665,7 @@ final class ConversationDetailViewModel: ObservableObject {
             if !result.contains(where: { $0.conversationId == child.id }) {
                 // Get recipient from child's p-tag if available
                 let recipientPubkey = child.pTags.first ?? child.authorPubkey
-                let recipient = await coreManager.safeCore.getProfileName(pubkey: recipientPubkey)
+                let recipient = await profileName(for: recipientPubkey, coreManager: coreManager)
 
                 // Compute subtree todo stats for this delegation
                 let todoStats = computeSubtreeTodoStats(forConversationId: child.id)
@@ -529,7 +683,14 @@ final class ConversationDetailViewModel: ObservableObject {
             }
         }
 
-        return result.sorted { $0.timestamp > $1.timestamp }
+        let sorted = result.sorted { $0.timestamp > $1.timestamp }
+        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+        profiler.logEvent(
+            "extractDelegations conversationId=\(conversation.id) messages=\(messages.count) children=\(childConversations.count) result=\(sorted.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+            category: .general,
+            level: elapsedMs >= 120 ? .error : .info
+        )
+        return sorted
     }
 
     /// Extracts report references from message a-tags, deduplicated by full a-tag coordinate.
