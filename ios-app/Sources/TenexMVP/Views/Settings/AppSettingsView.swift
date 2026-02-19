@@ -50,9 +50,6 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var isSavingApiKey = false
     @Published var errorMessage: String?
 
-    // Backward-compatible multi-model encoding stored in the existing single-model field.
-    private static let multiModelPrefix = "tenex:openrouter_models:v1:"
-
     private static let defaultAudioPrompt = """
         You are a text preprocessor for a text-to-speech system. Your task is to convert technical \
         conversation text into natural, speakable prose. Remove code blocks, simplify technical jargon, \
@@ -73,7 +70,7 @@ final class AppSettingsViewModel: ObservableObject {
             let settings = try await coreManager.safeCore.getAiAudioSettings()
             audioEnabled = settings.enabled
             audioPrompt = settings.audioPrompt
-            selectedModelIds = Self.decodeSelectedModelIds(from: settings.openrouterModel)
+            selectedModelIds = OpenRouterModelSelectionCodec.decodeSelectedModelIds(from: settings.openrouterModel)
             selectedVoiceIds = Set(settings.selectedVoiceIds)
             ttsInactivityThresholdSecs = settings.ttsInactivityThresholdSecs
         } catch {
@@ -318,42 +315,12 @@ final class AppSettingsViewModel: ObservableObject {
 
     private func persistSelectedModels(coreManager: TenexCoreManager, rollbackTo previous: Set<String>) async {
         do {
-            let encoded = Self.encodeSelectedModelIds(selectedModelIds)
+            let encoded = OpenRouterModelSelectionCodec.encodeSelectedModelIds(selectedModelIds)
             try await coreManager.safeCore.setOpenRouterModel(model: encoded)
         } catch {
             selectedModelIds = previous
             errorMessage = "Failed to save model selection: \(error.localizedDescription)"
         }
-    }
-
-    private static func decodeSelectedModelIds(from storedValue: String?) -> Set<String> {
-        guard let storedValue, !storedValue.isEmpty else { return [] }
-
-        if storedValue.hasPrefix(multiModelPrefix) {
-            let payload = String(storedValue.dropFirst(multiModelPrefix.count))
-            if let data = payload.data(using: .utf8),
-               let decoded = try? JSONSerialization.jsonObject(with: data) as? [String] {
-                return Set(decoded.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
-            }
-        }
-
-        return [storedValue]
-    }
-
-    private static func encodeSelectedModelIds(_ modelIds: Set<String>) -> String? {
-        let normalized = modelIds
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted()
-
-        guard !normalized.isEmpty else { return nil }
-        if normalized.count == 1 { return normalized[0] }
-
-        guard let data = try? JSONSerialization.data(withJSONObject: normalized),
-              let payload = String(data: data, encoding: .utf8) else {
-            return normalized[0]
-        }
-        return multiModelPrefix + payload
     }
 }
 
