@@ -39,9 +39,9 @@ pub fn init() -> Result<Tui> {
 
 pub fn restore() -> Result<()> {
     let mut stdout = io::stdout();
-    if supports_keyboard_enhancement().unwrap_or(false) {
-        let _ = execute!(stdout, PopKeyboardEnhancementFlags);
-    }
+    // Always pop keyboard enhancement flags — querying supports_keyboard_enhancement()
+    // during teardown is unreliable and may fail, leaving the terminal broken.
+    let _ = execute!(stdout, PopKeyboardEnhancementFlags);
     disable_raw_mode()?;
     execute!(
         stdout,
