@@ -3,7 +3,7 @@ import Security
 
 // MARK: - Keychain Error Types
 
-/// Errors that can occur during Keychain operations
+/// Errors that can occur during credential storage operations
 enum KeychainError: Error, LocalizedError {
     case itemNotFound
     case duplicateItem
@@ -16,15 +16,15 @@ enum KeychainError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .itemNotFound:
-            return "No credential found in Keychain"
+            return "No credential found"
         case .duplicateItem:
-            return "Credential already exists in Keychain"
+            return "Credential already exists"
         case .unexpectedData:
-            return "Unexpected data format in Keychain"
+            return "Unexpected credential data format"
         case .accessDenied:
-            return "Access to Keychain denied"
+            return "Access to credential storage denied"
         case .unhandledError(let status):
-            return "Keychain error: \(status)"
+            return "Credential storage error: \(status)"
         case .encodingFailed:
             return "Failed to encode credential data"
         case .decodingFailed:
@@ -38,8 +38,9 @@ typealias KeychainResult<T> = Result<T, KeychainError>
 
 // MARK: - Keychain Service
 
-/// Service for securely storing and retrieving credentials from iOS Keychain
-/// All operations are designed to be called from background threads
+/// Service for storing and retrieving credentials.
+/// On iOS/iPadOS this uses Keychain; on macOS this uses plaintext files.
+/// All operations are designed to be called from background threads.
 final class KeychainService {
 
     // MARK: - Constants
@@ -56,6 +57,11 @@ final class KeychainService {
     private static let openRouterServiceKey = "com.tenex.mvp.openrouter"
     private static let openRouterAccountKey = "tenex-openrouter-api-key"
 
+    /// Plaintext file names used by macOS storage backend.
+    private static let nsecFileName = "nsec.txt"
+    private static let elevenLabsFileName = "elevenlabs_api_key.txt"
+    private static let openRouterFileName = "openrouter_api_key.txt"
+
     // MARK: - Singleton
 
     static let shared = KeychainService()
@@ -64,12 +70,16 @@ final class KeychainService {
 
     // MARK: - Internal Sync API (Background Thread Only)
 
-    /// Saves the nsec credential to Keychain
+    /// Saves the nsec credential to credential storage
     /// - Parameter nsec: The nsec string to save
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveNsec(_ nsec: String) -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return saveFileCredential(nsec, fileName: Self.nsecFileName)
+        #else
         guard let nsecData = nsec.data(using: .utf8) else {
             return .failure(.encodingFailed)
         }
@@ -102,13 +112,18 @@ final class KeychainService {
         }
 
         return mapOSStatus(status)
+        #endif
     }
 
-    /// Retrieves the stored nsec credential from Keychain
+    /// Retrieves the stored nsec credential from credential storage
     /// - Returns: Result containing the nsec string or specific failure
     /// - Precondition: Must be called from a background thread
     func loadNsec() -> KeychainResult<String> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return loadFileCredential(fileName: Self.nsecFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.nsecServiceKey,
@@ -133,13 +148,18 @@ final class KeychainService {
         }
 
         return .success(nsec)
+        #endif
     }
 
-    /// Deletes the stored nsec credential from Keychain
+    /// Deletes the stored nsec credential from credential storage
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteNsec() -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return deleteFileCredential(fileName: Self.nsecFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.nsecServiceKey,
@@ -154,13 +174,18 @@ final class KeychainService {
         }
 
         return mapOSStatus(status)
+        #endif
     }
 
-    /// Checks if nsec credential exists in Keychain without retrieving it
+    /// Checks if nsec credential exists in credential storage without retrieving it
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasStoredNsec() -> KeychainResult<Bool> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return hasFileCredential(fileName: Self.nsecFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.nsecServiceKey,
@@ -178,16 +203,21 @@ final class KeychainService {
         default:
             return .failure(mapOSStatusToError(status))
         }
+        #endif
     }
 
     // MARK: - ElevenLabs API Key Methods
 
-    /// Saves the ElevenLabs API key to Keychain
+    /// Saves the ElevenLabs API key to credential storage
     /// - Parameter key: The API key string to save
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveElevenLabsApiKey(_ key: String) -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return saveFileCredential(key, fileName: Self.elevenLabsFileName)
+        #else
         guard let keyData = key.data(using: .utf8) else {
             return .failure(.encodingFailed)
         }
@@ -218,13 +248,18 @@ final class KeychainService {
         }
 
         return mapOSStatus(status)
+        #endif
     }
 
-    /// Retrieves the stored ElevenLabs API key from Keychain
+    /// Retrieves the stored ElevenLabs API key from credential storage
     /// - Returns: Result containing the API key or specific failure
     /// - Precondition: Must be called from a background thread
     func loadElevenLabsApiKey() -> KeychainResult<String> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return loadFileCredential(fileName: Self.elevenLabsFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.elevenLabsServiceKey,
@@ -249,13 +284,18 @@ final class KeychainService {
         }
 
         return .success(key)
+        #endif
     }
 
-    /// Deletes the stored ElevenLabs API key from Keychain
+    /// Deletes the stored ElevenLabs API key from credential storage
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteElevenLabsApiKey() -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return deleteFileCredential(fileName: Self.elevenLabsFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.elevenLabsServiceKey,
@@ -269,13 +309,18 @@ final class KeychainService {
         }
 
         return mapOSStatus(status)
+        #endif
     }
 
-    /// Checks if ElevenLabs API key exists in Keychain without retrieving it
+    /// Checks if ElevenLabs API key exists in credential storage without retrieving it
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasElevenLabsApiKey() -> KeychainResult<Bool> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return hasFileCredential(fileName: Self.elevenLabsFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.elevenLabsServiceKey,
@@ -293,16 +338,21 @@ final class KeychainService {
         default:
             return .failure(mapOSStatusToError(status))
         }
+        #endif
     }
 
     // MARK: - OpenRouter API Key Methods
 
-    /// Saves the OpenRouter API key to Keychain
+    /// Saves the OpenRouter API key to credential storage
     /// - Parameter key: The API key string to save
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveOpenRouterApiKey(_ key: String) -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return saveFileCredential(key, fileName: Self.openRouterFileName)
+        #else
         guard let keyData = key.data(using: .utf8) else {
             return .failure(.encodingFailed)
         }
@@ -333,13 +383,18 @@ final class KeychainService {
         }
 
         return mapOSStatus(status)
+        #endif
     }
 
-    /// Retrieves the stored OpenRouter API key from Keychain
+    /// Retrieves the stored OpenRouter API key from credential storage
     /// - Returns: Result containing the API key or specific failure
     /// - Precondition: Must be called from a background thread
     func loadOpenRouterApiKey() -> KeychainResult<String> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return loadFileCredential(fileName: Self.openRouterFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.openRouterServiceKey,
@@ -364,13 +419,18 @@ final class KeychainService {
         }
 
         return .success(key)
+        #endif
     }
 
-    /// Deletes the stored OpenRouter API key from Keychain
+    /// Deletes the stored OpenRouter API key from credential storage
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteOpenRouterApiKey() -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return deleteFileCredential(fileName: Self.openRouterFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.openRouterServiceKey,
@@ -384,13 +444,18 @@ final class KeychainService {
         }
 
         return mapOSStatus(status)
+        #endif
     }
 
-    /// Checks if OpenRouter API key exists in Keychain without retrieving it
+    /// Checks if OpenRouter API key exists in credential storage without retrieving it
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasOpenRouterApiKey() -> KeychainResult<Bool> {
-        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return hasFileCredential(fileName: Self.openRouterFileName)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: Self.openRouterServiceKey,
@@ -408,9 +473,106 @@ final class KeychainService {
         default:
             return .failure(mapOSStatusToError(status))
         }
+        #endif
     }
 
     // MARK: - Private Helpers
+
+    private var credentialDirectoryURL: URL {
+        if let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return applicationSupport
+                .appendingPathComponent("com.tenex.mvp", isDirectory: true)
+                .appendingPathComponent("credentials", isDirectory: true)
+        }
+
+        return URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("Application Support", isDirectory: true)
+            .appendingPathComponent("com.tenex.mvp", isDirectory: true)
+            .appendingPathComponent("credentials", isDirectory: true)
+    }
+
+    private func credentialFileURL(fileName: String) -> URL {
+        credentialDirectoryURL.appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    private func ensureCredentialDirectoryExists() throws {
+        let directoryURL = credentialDirectoryURL
+        if !FileManager.default.fileExists(atPath: directoryURL.path) {
+            try FileManager.default.createDirectory(
+                at: directoryURL,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        }
+    }
+
+    private func mapFileError(_ error: Error) -> KeychainError {
+        guard let cocoaError = error as? CocoaError else {
+            return .unhandledError(status: errSecIO)
+        }
+
+        switch cocoaError.code {
+        case .fileReadNoSuchFile, .fileNoSuchFile:
+            return .itemNotFound
+        case .fileReadNoPermission, .fileWriteNoPermission:
+            return .accessDenied
+        default:
+            return .unhandledError(status: errSecIO)
+        }
+    }
+
+    private func saveFileCredential(_ value: String, fileName: String) -> KeychainResult<Void> {
+        guard let data = value.data(using: .utf8) else {
+            return .failure(.encodingFailed)
+        }
+
+        do {
+            try ensureCredentialDirectoryExists()
+            let fileURL = credentialFileURL(fileName: fileName)
+            try data.write(to: fileURL, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+            return .success(())
+        } catch {
+            return .failure(mapFileError(error))
+        }
+    }
+
+    private func loadFileCredential(fileName: String) -> KeychainResult<String> {
+        let fileURL = credentialFileURL(fileName: fileName)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return .failure(.itemNotFound)
+        }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            guard let value = String(data: data, encoding: .utf8) else {
+                return .failure(.decodingFailed)
+            }
+            return .success(value)
+        } catch {
+            return .failure(mapFileError(error))
+        }
+    }
+
+    private func deleteFileCredential(fileName: String) -> KeychainResult<Void> {
+        let fileURL = credentialFileURL(fileName: fileName)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return .success(())
+        }
+
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+            return .success(())
+        } catch {
+            return .failure(mapFileError(error))
+        }
+    }
+
+    private func hasFileCredential(fileName: String) -> KeychainResult<Bool> {
+        let fileURL = credentialFileURL(fileName: fileName)
+        return .success(FileManager.default.fileExists(atPath: fileURL.path))
+    }
 
     /// Maps an OSStatus to a Result<Void, KeychainError>
     private func mapOSStatus(_ status: OSStatus) -> KeychainResult<Void> {
@@ -438,7 +600,7 @@ final class KeychainService {
 // MARK: - Async Extensions
 
 extension KeychainService {
-    /// Runs synchronous keychain work on a background queue and returns the result asynchronously.
+    /// Runs synchronous credential storage work on a background queue and returns the result asynchronously.
     private func runAsync<T>(_ operation: @escaping () -> KeychainResult<T>) async -> KeychainResult<T> {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

@@ -358,7 +358,7 @@ private struct NudgeSkillSelectorRow: View {
 
             Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                 .font(.title2)
-                .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
+                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())

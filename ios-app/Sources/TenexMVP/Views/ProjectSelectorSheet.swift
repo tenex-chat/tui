@@ -250,7 +250,7 @@ struct ProjectRowSelectView: View {
             // Selection indicator
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                 .font(.title2)
-                .foregroundStyle(isSelected ? .blue : .secondary)
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
         }
         .padding(.vertical, 8)
     }
@@ -277,7 +277,7 @@ struct ProjectRowSelectView: View {
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isSelected ? Color.agentBrand : Color.clear, lineWidth: 2)
+                    .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
             )
     }
 

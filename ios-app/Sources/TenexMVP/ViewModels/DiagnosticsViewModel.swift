@@ -197,7 +197,7 @@ class DiagnosticsViewModel: ObservableObject {
     }
 
     private func bindToUpdates() {
-        coreManager.$diagnosticsVersion
+        coreManager.diagnosticsVersionPublisher
             .removeDuplicates()
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
             .sink { [weak self] _ in

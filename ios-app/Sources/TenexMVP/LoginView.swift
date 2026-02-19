@@ -92,10 +92,17 @@ struct LoginView: View {
 
                     // Footer Info
                     VStack(spacing: 2) {
+                        #if os(macOS)
+                        Text("Your key is stored in a local file on this Mac")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        #else
                         Text("Your key is stored securely in Keychain when available")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
+                        #endif
 
                         Text("If saved, you'll be auto-logged in on next launch")
                             .font(.caption2)
@@ -150,7 +157,7 @@ struct LoginView: View {
                 let result = try await coreManager.safeCore.login(nsec: trimmedInput)
 
                 if result.success {
-                    // Save credential to keychain
+                    // Save credential for future auto-login.
                     _ = await coreManager.saveCredential(nsec: trimmedInput)
                     isLoading = false
                     userNpub = result.npub

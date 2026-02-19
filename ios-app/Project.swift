@@ -92,6 +92,24 @@ let project = Project(
             )
         ),
         .target(
+            name: "TenexMVPTests",
+            destinations: [.mac],
+            product: .unitTests,
+            bundleId: "com.tenex.mvp.tests",
+            deploymentTargets: .macOS("15.0"),
+            infoPlist: .default,
+            sources: ["Tests/UnitTests/**/*.swift"],
+            dependencies: [
+                .target(name: "TenexMVP")
+            ],
+            settings: .settings(
+                base: [
+                    "DEVELOPMENT_TEAM": "456SHKPP26",
+                    "CODE_SIGN_STYLE": "Automatic"
+                ]
+            )
+        ),
+        .target(
             name: "TenexMVPUITests",
             destinations: [.iPhone, .iPad],
             product: .uiTests,
@@ -108,6 +126,22 @@ let project = Project(
                     "CODE_SIGN_STYLE": "Automatic"
                 ]
             )
+        )
+    ],
+    schemes: [
+        .scheme(
+            name: "TenexMVP-UnitTests",
+            shared: true,
+            buildAction: .buildAction(targets: ["TenexMVP", "TenexMVPTests"]),
+            testAction: .targets(
+                ["TenexMVPTests"],
+                configuration: .debug,
+                options: .options(coverage: true, codeCoverageTargets: ["TenexMVP"])
+            ),
+            runAction: .runAction(configuration: .debug, executable: "TenexMVP"),
+            archiveAction: .archiveAction(configuration: .release),
+            profileAction: .profileAction(configuration: .release, executable: "TenexMVP"),
+            analyzeAction: .analyzeAction(configuration: .debug)
         )
     ]
 )

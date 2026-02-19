@@ -6,9 +6,13 @@ enum AgentDefinitionsLayoutMode {
     case shellDetail
 }
 
+private func awesomeAgentsProfileURL(for pubkey: String) -> URL? {
+    guard let npub = Bech32.hexToNpub(pubkey) else { return nil }
+    return URL(string: "https://awesome-agents.com/p/\(npub)")
+}
+
 struct AgentDefinitionsTabView: View {
     @EnvironmentObject private var coreManager: TenexCoreManager
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     let layoutMode: AgentDefinitionsLayoutMode
     private let selectedAgentBindingOverride: Binding<AgentInfo?>?
@@ -49,7 +53,7 @@ struct AgentDefinitionsTabView: View {
             }
             await viewModel.loadIfNeeded()
         }
-        .onChange(of: coreManager.diagnosticsVersion) { _, _ in
+        .onReceive(coreManager.diagnosticsVersionPublisher) { _ in
             Task { await viewModel.refresh() }
         }
         .sheet(item: $assignmentTarget) { item in
@@ -110,7 +114,7 @@ struct AgentDefinitionsTabView: View {
                         item: item,
                         canDelete: viewModel.canDelete(item),
                         onAssign: {
-                            assignmentTarget = item
+                            presentAssignmentSheet(for: item)
                         },
                         onDelete: {
                             let deleted = await viewModel.deleteAgentDefinition(id: item.id)
@@ -163,14 +167,14 @@ struct AgentDefinitionsTabView: View {
 
     private var listContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 24) {
                 headerSection
 
                 if viewModel.filteredMine.isEmpty, viewModel.filteredCommunity.isEmpty {
                     emptyState
                 } else {
                     if !viewModel.filteredMine.isEmpty {
-                        sectionGrid(
+                        sectionList(
                             title: "Mine",
                             subtitle: "Definitions you authored",
                             items: viewModel.filteredMine
@@ -178,7 +182,7 @@ struct AgentDefinitionsTabView: View {
                     }
 
                     if !viewModel.filteredCommunity.isEmpty {
-                        sectionGrid(
+                        sectionList(
                             title: "Community",
                             subtitle: "Definitions from other authors",
                             items: viewModel.filteredCommunity
@@ -186,9 +190,12 @@ struct AgentDefinitionsTabView: View {
                     }
                 }
             }
-            .padding(20)
+            .frame(maxWidth: 800, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 24)
         }
-        .background(listBackground)
+        .background(Color.systemBackground.ignoresSafeArea())
         #if os(iOS)
         .refreshable {
             await viewModel.refresh()
@@ -196,51 +203,24 @@ struct AgentDefinitionsTabView: View {
         #endif
     }
 
-    private var listBackground: some View {
-        LinearGradient(
-            colors: [
-                Color.agentBrand.opacity(reduceTransparency ? 0.04 : 0.10),
-                Color.systemGroupedBackground,
-                Color.systemGroupedBackground
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
-    }
-
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Agent Definitions")
-                .font(.largeTitle.weight(.bold))
+                .font(.largeTitle.weight(.semibold))
 
-            Text("Reusable agent templates (kind:4199) in a single card browser")
+            Text("Reusable agent templates (kind:4199)")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-
-            Text("\(viewModel.filteredMine.count + viewModel.filteredCommunity.count) visible")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.55))
-                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(reduceTransparency ? 0.05 : 0.16), lineWidth: 1)
-        }
     }
 
-    private func sectionGrid(
+    private func sectionList(
         title: String,
         subtitle: String,
         items: [AgentDefinitionListItem]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
@@ -249,22 +229,39 @@ struct AgentDefinitionsTabView: View {
                     .foregroundStyle(.secondary)
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 14)], spacing: 14) {
-                ForEach(items) { item in
-                    AgentDefinitionCardView(
+            Divider()
+
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    AgentDefinitionRowView(
                         item: item,
-                        reduceTransparency: reduceTransparency,
                         onOpen: {
                             selectedAgentBinding.wrappedValue = item.agent
                             navigationPath.append(item)
                         },
                         onAssign: {
-                            assignmentTarget = item
+                            presentAssignmentSheet(for: item)
                         }
                     )
+
+                    if index < items.count - 1 {
+                        Divider()
+                    }
                 }
             }
         }
+    }
+
+    private func presentAssignmentSheet(for item: AgentDefinitionListItem) {
+        if assignmentTarget?.id == item.id {
+            assignmentTarget = nil
+            DispatchQueue.main.async {
+                assignmentTarget = item
+            }
+            return
+        }
+
+        assignmentTarget = item
     }
 
     private var emptyState: some View {
@@ -277,9 +274,10 @@ struct AgentDefinitionsTabView: View {
     }
 }
 
-private struct AgentDefinitionCardView: View {
+private struct AgentDefinitionRowView: View {
+    @Environment(\.openURL) private var openURL
+
     let item: AgentDefinitionListItem
-    let reduceTransparency: Bool
     let onOpen: () -> Void
     let onAssign: () -> Void
 
@@ -292,113 +290,78 @@ private struct AgentDefinitionCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Button(action: onOpen) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .top, spacing: 10) {
-                        AgentAvatarView(
-                            agentName: displayName,
-                            pubkey: item.agent.pubkey,
-                            fallbackPictureUrl: item.agent.picture,
-                            size: 36,
-                            fontSize: 12,
-                            showBorder: false,
-                            isSelected: false
-                        )
-
-                        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                Button(action: onOpen) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
                             Text(displayName)
                                 .font(.headline)
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
 
-                            HStack(spacing: 6) {
-                                if !item.agent.role.isEmpty {
-                                    tag(item.agent.role)
-                                }
-                                if let model = item.agent.model, !model.isEmpty {
-                                    tag(model)
-                                }
+                            if let version = item.agent.version, !version.isEmpty {
+                                Text("v\(version)")
+                                    .font(.caption2.weight(.medium))
+                                    .foregroundStyle(.secondary)
                             }
                         }
 
-                        Spacer(minLength: 0)
-
-                        if let version = item.agent.version, !version.isEmpty {
-                            Text("v\(version)")
-                                .font(.caption2.weight(.medium))
+                        if !item.agent.role.isEmpty {
+                            Text(item.agent.role)
+                                .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
                     }
-
-                    Text(item.agent.description.isEmpty ? "No description provided" : item.agent.description)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-
-                    HStack(spacing: 10) {
-                        Label(item.authorDisplayName, systemImage: "person")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-
-                        if attachmentCount > 0 {
-                            Label("\(attachmentCount) file\(attachmentCount == 1 ? "" : "s")", systemImage: "paperclip")
-                                .font(.caption)
-                                .foregroundStyle(Color.skillBrand)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Divider()
-                .overlay(.white.opacity(reduceTransparency ? 0.06 : 0.14))
-
-            HStack {
-                Button {
-                    onAssign()
-                } label: {
-                    Label("Add to Projects", systemImage: "plus.circle")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.agentBrand)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                Spacer()
+                Button(action: onAssign) {
+                    Label("Add", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Add to Projects")
+            }
 
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+            Text(item.agent.description.isEmpty ? "No description provided" : item.agent.description)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+
+            HStack(spacing: 12) {
+                Button(action: openAuthorProfile) {
+                    Text(item.authorDisplayName)
+                        .font(.caption)
+                        .foregroundStyle(Color.agentBrand)
+                        .underline()
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .disabled(awesomeAgentsProfileURL(for: item.agent.pubkey) == nil)
+
+                if attachmentCount > 0 {
+                    Label("\(attachmentCount) file\(attachmentCount == 1 ? "" : "s")", systemImage: "paperclip")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.55))
-                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
-        }
+        .padding(.vertical, 10)
     }
 
-    private func tag(_ text: String) -> some View {
-        Text(text)
-            .font(.caption2)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Color.systemGray6.opacity(0.7))
-            .clipShape(Capsule())
+    private func openAuthorProfile() {
+        guard let url = awesomeAgentsProfileURL(for: item.agent.pubkey) else { return }
+        openURL(url)
     }
 }
 
 private struct AgentDefinitionDetailView: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.openURL) private var openURL
 
     let item: AgentDefinitionListItem
     let canDelete: Bool
@@ -419,37 +382,37 @@ private struct AgentDefinitionDetailView: View {
         item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name
     }
 
+    private var authorProfileURL: URL? {
+        awesomeAgentsProfileURL(for: item.agent.pubkey)
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 24) {
                 header
-                metadataCard
-                descriptionCard
-                instructionsCard
+                metadataSection
+                descriptionSection
+                instructionsSection
 
                 if !item.agent.useCriteria.isEmpty {
-                    useCriteriaCard
+                    useCriteriaSection
                 }
                 if !item.agent.tools.isEmpty {
-                    toolsCard
+                    toolsSection
                 }
                 if !item.agent.mcpServers.isEmpty {
-                    mcpServersCard
+                    mcpServersSection
                 }
                 if !item.agent.fileIds.isEmpty {
-                    fileReferencesCard
+                    fileReferencesSection
                 }
             }
-            .padding(20)
+            .frame(maxWidth: 800, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 24)
         }
-        .background(
-            LinearGradient(
-                colors: [Color.agentBrand.opacity(reduceTransparency ? 0.03 : 0.08), Color.systemGroupedBackground],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-        )
+        .background(Color.systemBackground.ignoresSafeArea())
         .navigationTitle(displayName)
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -475,73 +438,73 @@ private struct AgentDefinitionDetailView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 12) {
-            AgentAvatarView(
-                agentName: displayName,
-                pubkey: item.agent.pubkey,
-                fallbackPictureUrl: item.agent.picture,
-                size: 48,
-                fontSize: 16,
-                showBorder: false,
-                isSelected: false
-            )
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(displayName)
+                        .font(.title2.weight(.bold))
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(displayName)
-                    .font(.title2.weight(.bold))
+                    HStack(spacing: 8) {
+                        if !item.agent.role.isEmpty {
+                            chip(text: item.agent.role, foreground: .primary, background: Color.systemGray6)
+                        }
+                        if let model = item.agent.model, !model.isEmpty {
+                            chip(text: model, foreground: Color.agentBrand, background: Color.agentBrand.opacity(0.15))
+                        }
+                        if let version = item.agent.version, !version.isEmpty {
+                            chip(text: "v\(version)", foreground: .secondary, background: Color.systemGray6)
+                        }
+                    }
+                }
 
-                HStack(spacing: 8) {
-                    if !item.agent.role.isEmpty {
-                        chip(text: item.agent.role, foreground: .primary, background: Color.systemGray6)
+                Spacer(minLength: 0)
+
+                Button(action: onAssign) {
+                    Label("Add to Projects", systemImage: "plus")
+                }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Add to Projects")
+
+                if canDelete {
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        if isDeleting {
+                            ProgressView()
+                        } else {
+                            Label("Delete", systemImage: "trash")
+                        }
                     }
-                    if let model = item.agent.model, !model.isEmpty {
-                        chip(text: model, foreground: Color.agentBrand, background: Color.agentBrand.opacity(0.15))
-                    }
-                    if let version = item.agent.version, !version.isEmpty {
-                        chip(text: "v\(version)", foreground: .secondary, background: Color.systemGray6)
-                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isDeleting)
                 }
             }
 
-            Spacer(minLength: 0)
-
-            Button(action: onAssign) {
-                Label("Add to Projects", systemImage: "plus")
-            }
-            .adaptiveGlassButtonStyle()
-
-            if canDelete {
-                Button(role: .destructive) {
-                    showDeleteConfirmation = true
-                } label: {
-                    if isDeleting {
-                        ProgressView()
-                    } else {
-                        Label("Delete", systemImage: "trash")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(isDeleting)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.55))
-                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
+            Divider()
         }
     }
 
-    private var metadataCard: some View {
-        card(title: "Metadata") {
+    private var metadataSection: some View {
+        section(title: "Metadata") {
             VStack(alignment: .leading, spacing: 8) {
-                metadataRow(title: "Author", value: item.authorDisplayName)
-                metadataRow(title: "Author Pubkey", value: shortHex(item.agent.pubkey))
+                HStack(alignment: .center, spacing: 10) {
+                    Text("Author")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 110, alignment: .leading)
+
+                    Button(action: openAuthorProfile) {
+                        Text(item.authorDisplayName)
+                            .font(.caption)
+                            .foregroundStyle(Color.agentBrand)
+                            .underline()
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(authorProfileURL == nil)
+
+                    Spacer(minLength: 0)
+                }
                 metadataRow(title: "Created", value: formatDate(item.agent.createdAt))
                 metadataRow(title: "Event ID", value: shortHex(item.agent.id))
 
@@ -552,16 +515,16 @@ private struct AgentDefinitionDetailView: View {
         }
     }
 
-    private var descriptionCard: some View {
-        card(title: "Description") {
+    private var descriptionSection: some View {
+        section(title: "Description") {
             Text(item.agent.description.isEmpty ? "No description provided" : item.agent.description)
                 .font(.body)
                 .foregroundStyle(item.agent.description.isEmpty ? .secondary : .primary)
         }
     }
 
-    private var instructionsCard: some View {
-        card(title: "Instructions") {
+    private var instructionsSection: some View {
+        section(title: "Instructions") {
             if item.agent.instructions.isEmpty {
                 Text("No instructions provided")
                     .foregroundStyle(.secondary)
@@ -571,8 +534,8 @@ private struct AgentDefinitionDetailView: View {
         }
     }
 
-    private var useCriteriaCard: some View {
-        card(title: "Use Criteria") {
+    private var useCriteriaSection: some View {
+        section(title: "Use Criteria") {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(item.agent.useCriteria, id: \.self) { criteria in
                     HStack(alignment: .top, spacing: 6) {
@@ -586,8 +549,8 @@ private struct AgentDefinitionDetailView: View {
         }
     }
 
-    private var toolsCard: some View {
-        card(title: "Tools") {
+    private var toolsSection: some View {
+        section(title: "Tools") {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 6)], alignment: .leading, spacing: 6) {
                 ForEach(item.agent.tools, id: \.self) { tool in
                     chip(text: tool, foreground: Color.skillBrand, background: Color.skillBrandBackground)
@@ -596,8 +559,8 @@ private struct AgentDefinitionDetailView: View {
         }
     }
 
-    private var mcpServersCard: some View {
-        card(title: "MCP Servers") {
+    private var mcpServersSection: some View {
+        section(title: "MCP Servers") {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(item.agent.mcpServers, id: \.self) { serverId in
                     Text(serverId)
@@ -609,8 +572,8 @@ private struct AgentDefinitionDetailView: View {
         }
     }
 
-    private var fileReferencesCard: some View {
-        card(title: "File References (NIP-94 kind:1063)") {
+    private var fileReferencesSection: some View {
+        section(title: "File References (NIP-94 kind:1063)") {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(item.agent.fileIds, id: \.self) { fileId in
                     HStack(spacing: 8) {
@@ -626,22 +589,13 @@ private struct AgentDefinitionDetailView: View {
         }
     }
 
-    private func card<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+    private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.headline)
             content()
         }
-        .padding(16)
-        .background {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.56))
-                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
-        }
+        .padding(.bottom, 2)
     }
 
     private func chip(text: String, foreground: Color, background: Color) -> some View {
@@ -649,9 +603,8 @@ private struct AgentDefinitionDetailView: View {
             .font(.caption)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(background)
+            .background(background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .foregroundStyle(foreground)
-            .clipShape(Capsule())
     }
 
     private func metadataRow(title: String, value: String) -> some View {
@@ -676,6 +629,11 @@ private struct AgentDefinitionDetailView: View {
     private func shortHex(_ value: String) -> String {
         guard value.count > 16 else { return value }
         return "\(value.prefix(8))...\(value.suffix(8))"
+    }
+
+    private func openAuthorProfile() {
+        guard let url = authorProfileURL else { return }
+        openURL(url)
     }
 }
 
@@ -811,7 +769,7 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
                 } else {
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
-                        .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
+                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                 }
             }
             .contentShape(Rectangle())

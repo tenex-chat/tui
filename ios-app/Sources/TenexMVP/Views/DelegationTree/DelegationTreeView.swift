@@ -308,7 +308,7 @@ private struct DelegationNodeCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? Color.agentBrand : Color.systemGray4, lineWidth: isSelected ? 2 : 0.5)
+                .stroke(isSelected ? Color.accentColor : Color.systemGray4, lineWidth: isSelected ? 2 : 0.5)
         )
         .shadow(color: .black.opacity(0.06), radius: 4, x: 0, y: 2)
         .onTapGesture(perform: onTap)
