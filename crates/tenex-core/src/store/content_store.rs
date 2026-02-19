@@ -1,4 +1,4 @@
-use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, Skill};
+use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, Skill, TeamPack};
 use nostrdb::{Filter, Ndb, Note, Transaction};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,6 +7,7 @@ use std::sync::Arc;
 /// These are all simple keyed collections with no cross-dependencies to other domains.
 pub struct ContentStore {
     pub agent_definitions: HashMap<String, AgentDefinition>,
+    pub team_packs: HashMap<String, TeamPack>,
     pub mcp_tools: HashMap<String, MCPTool>,
     pub nudges: HashMap<String, Nudge>,
     pub skills: HashMap<String, Skill>,
@@ -23,6 +24,7 @@ impl ContentStore {
     pub fn new() -> Self {
         Self {
             agent_definitions: HashMap::new(),
+            team_packs: HashMap::new(),
             mcp_tools: HashMap::new(),
             nudges: HashMap::new(),
             skills: HashMap::new(),
@@ -32,6 +34,7 @@ impl ContentStore {
 
     pub fn clear(&mut self) {
         self.agent_definitions.clear();
+        self.team_packs.clear();
         self.mcp_tools.clear();
         self.nudges.clear();
         self.skills.clear();
@@ -48,6 +51,16 @@ impl ContentStore {
 
     pub fn get_agent_definition(&self, id: &str) -> Option<&AgentDefinition> {
         self.agent_definitions.get(id)
+    }
+
+    pub fn get_team_packs(&self) -> Vec<&TeamPack> {
+        let mut teams: Vec<_> = self.team_packs.values().collect();
+        teams.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        teams
+    }
+
+    pub fn get_team_pack(&self, id: &str) -> Option<&TeamPack> {
+        self.team_packs.get(id)
     }
 
     pub fn get_mcp_tools(&self) -> Vec<&MCPTool> {
@@ -90,6 +103,12 @@ impl ContentStore {
         if let Some(agent_def) = AgentDefinition::from_note(note) {
             self.agent_definitions
                 .insert(agent_def.id.clone(), agent_def);
+        }
+    }
+
+    pub fn handle_team_pack_event(&mut self, note: &Note) {
+        if let Some(team_pack) = TeamPack::from_note(note) {
+            self.team_packs.insert(team_pack.id.clone(), team_pack);
         }
     }
 
@@ -217,6 +236,25 @@ impl ContentStore {
             }
         }
     }
+
+    pub fn load_team_packs(&mut self, ndb: &Arc<Ndb>) {
+        let Ok(txn) = Transaction::new(ndb) else {
+            return;
+        };
+
+        let filter = Filter::new().kinds([34199]).build();
+        let Ok(results) = ndb.query(&txn, &[filter], 2000) else {
+            return;
+        };
+
+        for result in results {
+            if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+                if let Some(team_pack) = TeamPack::from_note(&note) {
+                    self.team_packs.insert(team_pack.id.clone(), team_pack);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +293,21 @@ mod tests {
             capabilities: vec![],
             server_url: None,
             version: None,
+            created_at,
+        }
+    }
+
+    fn make_test_team_pack(id: &str, title: &str, created_at: u64) -> TeamPack {
+        TeamPack {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            image: None,
+            agent_ids: vec![],
+            categories: vec![],
+            tags: vec![],
             created_at,
         }
     }
@@ -307,6 +360,7 @@ mod tests {
     fn test_empty_store_returns_empty() {
         let store = ContentStore::new();
         assert!(store.get_agent_definitions().is_empty());
+        assert!(store.get_team_packs().is_empty());
         assert!(store.get_mcp_tools().is_empty());
         assert!(store.get_nudges().is_empty());
         assert!(store.get_skills().is_empty());
@@ -363,6 +417,22 @@ mod tests {
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].name, "New Tool");
         assert_eq!(tools[1].name, "Old Tool");
+    }
+
+    #[test]
+    fn test_team_packs_sorted_descending() {
+        let mut store = ContentStore::new();
+        store
+            .team_packs
+            .insert("t1".to_string(), make_test_team_pack("t1", "Old Team", 100));
+        store
+            .team_packs
+            .insert("t2".to_string(), make_test_team_pack("t2", "New Team", 200));
+
+        let teams = store.get_team_packs();
+        assert_eq!(teams.len(), 2);
+        assert_eq!(teams[0].title, "New Team");
+        assert_eq!(teams[1].title, "Old Team");
     }
 
     #[test]
@@ -439,6 +509,9 @@ mod tests {
             .agent_definitions
             .insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
         store
+            .team_packs
+            .insert("tp1".to_string(), make_test_team_pack("tp1", "Team", 100));
+        store
             .mcp_tools
             .insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
         store
@@ -454,6 +527,7 @@ mod tests {
         store.clear();
 
         assert!(store.get_agent_definitions().is_empty());
+        assert!(store.get_team_packs().is_empty());
         assert!(store.get_mcp_tools().is_empty());
         assert!(store.get_nudges().is_empty());
         assert!(store.get_skills().is_empty());

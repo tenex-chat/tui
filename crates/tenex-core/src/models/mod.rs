@@ -13,6 +13,7 @@ pub mod project_status;
 pub mod report;
 pub mod skill;
 pub mod tag_utils;
+pub mod team_pack;
 pub mod thread;
 pub mod time_filter;
 
@@ -34,5 +35,6 @@ pub use project_draft::{PreferencesStorage, ProjectDraft, ProjectDraftStorage, W
 pub use project_status::{ProjectAgent, ProjectStatus};
 pub use report::Report;
 pub use skill::Skill;
+pub use team_pack::TeamPack;
 pub use thread::Thread;
 pub use time_filter::TimeFilter;

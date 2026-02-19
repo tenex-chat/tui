@@ -2,10 +2,14 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use anyhow::Result;
+use nostr_ndb::database::{
+    Backend, DatabaseError, DatabaseEventStatus, Events, NostrDatabase, RejectedReason,
+    SaveEventStatus,
+};
 use nostr_sdk::prelude::*;
 use nostrdb::{Ndb, Transaction};
 use tokio::runtime::Runtime;
@@ -23,7 +27,9 @@ use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
 // Event kind constants
 const KIND_TEXT_NOTE: u16 = 1;
+const KIND_REACTION: u16 = 7;
 const KIND_LONG_FORM_CONTENT: u16 = 30023;
+const KIND_COMMENT: u16 = 1111;
 const KIND_PROJECT_METADATA: u16 = 513;
 const KIND_AGENT: u16 = 4199;
 const KIND_MCP_TOOL: u16 = 4200;
@@ -31,10 +37,83 @@ const KIND_NUDGE: u16 = 4201;
 const KIND_SKILL: u16 = 4202;
 const KIND_PROJECT_STATUS: u16 = 24010;
 const KIND_PROJECT_DRAFT: u16 = 31933;
+const KIND_TEAM_PACK: u16 = 34199;
 const KIND_AGENT_STATUS: u16 = 24133;
+
+/// Wrapper around `nostr_ndb::NdbDatabase` that rejects ephemeral events.
+///
+/// This keeps relay notifications flowing, but avoids persisting ephemeral kinds
+/// (20000-29999) into the shared `nostrdb` cache.
+#[derive(Debug, Clone)]
+struct EphemeralFilteringNdbDatabase {
+    inner: nostr_ndb::NdbDatabase,
+}
+
+type NostrBoxedFuture<'a, T> = nostr_ndb::database::nostr::util::BoxedFuture<'a, T>;
+
+impl EphemeralFilteringNdbDatabase {
+    fn new(inner: nostr_ndb::NdbDatabase) -> Self {
+        Self { inner }
+    }
+}
+
+impl NostrDatabase for EphemeralFilteringNdbDatabase {
+    fn backend(&self) -> Backend {
+        self.inner.backend()
+    }
+
+    fn save_event<'a>(
+        &'a self,
+        event: &'a Event,
+    ) -> NostrBoxedFuture<'a, Result<SaveEventStatus, DatabaseError>> {
+        if event.kind.is_ephemeral() {
+            return Box::pin(async { Ok(SaveEventStatus::Rejected(RejectedReason::Ephemeral)) });
+        }
+
+        self.inner.save_event(event)
+    }
+
+    fn check_id<'a>(
+        &'a self,
+        event_id: &'a EventId,
+    ) -> NostrBoxedFuture<'a, Result<DatabaseEventStatus, DatabaseError>> {
+        self.inner.check_id(event_id)
+    }
+
+    fn event_by_id<'a>(
+        &'a self,
+        event_id: &'a EventId,
+    ) -> NostrBoxedFuture<'a, Result<Option<Event>, DatabaseError>> {
+        self.inner.event_by_id(event_id)
+    }
+
+    fn count(&self, filter: Filter) -> NostrBoxedFuture<'_, Result<usize, DatabaseError>> {
+        self.inner.count(filter)
+    }
+
+    fn query(&self, filter: Filter) -> NostrBoxedFuture<'_, Result<Events, DatabaseError>> {
+        self.inner.query(filter)
+    }
+
+    fn negentropy_items(
+        &self,
+        filter: Filter,
+    ) -> NostrBoxedFuture<'_, Result<Vec<(EventId, Timestamp)>, DatabaseError>> {
+        self.inner.negentropy_items(filter)
+    }
+
+    fn delete(&self, filter: Filter) -> NostrBoxedFuture<'_, Result<(), DatabaseError>> {
+        self.inner.delete(filter)
+    }
+
+    fn wipe(&self) -> NostrBoxedFuture<'_, Result<(), DatabaseError>> {
+        self.inner.wipe()
+    }
+}
 
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+static LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// Set the log file path. Must be called before any logging occurs.
 pub fn set_log_path(path: PathBuf) {
@@ -53,12 +132,15 @@ pub fn elapsed_ms() -> u64 {
 }
 
 pub fn log_to_file(tag: &str, msg: &str) {
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(get_log_path())
-    {
-        let _ = writeln!(file, "[{:>8}ms] [{}] {}", elapsed_ms(), tag, msg);
+    let lock = LOG_LOCK.get_or_init(|| Mutex::new(()));
+    if let Ok(_guard) = lock.lock() {
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(get_log_path())
+        {
+            let _ = writeln!(file, "[{:>8}ms] [{}] {}", elapsed_ms(), tag, msg);
+        }
     }
 }
 
@@ -400,6 +482,26 @@ pub enum NostrCommand {
     /// Delete a nudge (kind:5 deletion event referencing the nudge)
     DeleteNudge {
         nudge_id: String,
+    },
+    /// React to a team pack (kind:7 NIP-25).
+    ReactToTeam {
+        team_coordinate: String,
+        team_event_id: String,
+        team_pubkey: String,
+        is_like: bool,
+        /// Optional channel to send back the reaction event ID after signing
+        response_tx: Option<EventIdSender>,
+    },
+    /// Post a team comment (kind:1111 NIP-22).
+    PostTeamComment {
+        team_coordinate: String,
+        team_event_id: String,
+        team_pubkey: String,
+        content: String,
+        parent_comment_id: Option<String>,
+        parent_comment_pubkey: Option<String>,
+        /// Optional channel to send back the comment event ID after signing
+        response_tx: Option<EventIdSender>,
     },
     /// Disconnect from relays but keep the worker running
     Disconnect {
@@ -850,6 +952,61 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to delete nudge: {}", e);
                         }
                     }
+                    NostrCommand::ReactToTeam {
+                        team_coordinate,
+                        team_event_id,
+                        team_pubkey,
+                        is_like,
+                        response_tx,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Reacting to team {} ({})",
+                            &team_event_id[..8.min(team_event_id.len())],
+                            if is_like { "like" } else { "unlike" }
+                        ));
+                        match rt.block_on(self.handle_react_to_team(
+                            team_coordinate,
+                            team_event_id,
+                            team_pubkey,
+                            is_like,
+                        )) {
+                            Ok(event_id) => {
+                                if let Some(tx) = response_tx {
+                                    let _ = tx.send(event_id);
+                                }
+                            }
+                            Err(e) => tlog!("ERROR", "Failed to react to team: {}", e),
+                        }
+                    }
+                    NostrCommand::PostTeamComment {
+                        team_coordinate,
+                        team_event_id,
+                        team_pubkey,
+                        content,
+                        parent_comment_id,
+                        parent_comment_pubkey,
+                        response_tx,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Posting team comment on {}",
+                            &team_event_id[..8.min(team_event_id.len())]
+                        ));
+                        match rt.block_on(self.handle_post_team_comment(
+                            team_coordinate,
+                            team_event_id,
+                            team_pubkey,
+                            content,
+                            parent_comment_id,
+                            parent_comment_pubkey,
+                        )) {
+                            Ok(event_id) => {
+                                if let Some(tx) = response_tx {
+                                    let _ = tx.send(event_id);
+                                }
+                            }
+                            Err(e) => tlog!("ERROR", "Failed to post team comment: {}", e),
+                        }
+                    }
                     NostrCommand::Disconnect { response_tx } => {
                         debug_log("Worker: Disconnecting");
                         let result = rt.block_on(self.handle_disconnect());
@@ -905,7 +1062,8 @@ impl NostrWorker {
         // Clone the existing Ndb and wrap it in NdbDatabase for the Client
         // This avoids opening a second database handle (which would cause LMDB concurrency crashes)
         // The clone is safe - Ndb internally uses Arc for the LMDB environment
-        let ndb_database = nostr_ndb::NdbDatabase::from((*self.ndb).clone());
+        let ndb_database =
+            EphemeralFilteringNdbDatabase::new(nostr_ndb::NdbDatabase::from((*self.ndb).clone()));
 
         let client = Client::builder()
             .signer(keys.clone())
@@ -1108,12 +1266,15 @@ impl NostrWorker {
             KIND_AGENT_STATUS
         );
 
-        // 3. Global event definitions (kind:4199, 4200, 4201, 4202)
+        // 3. Global definitions/social (kind:34199, 4199, 4200, 4201, 4202, 1111, 7)
         let global_filter = Filter::new().kinds(vec![
+            Kind::Custom(KIND_TEAM_PACK),
             Kind::Custom(KIND_AGENT),
             Kind::Custom(KIND_MCP_TOOL),
             Kind::Custom(KIND_NUDGE),
             Kind::Custom(KIND_SKILL),
+            Kind::Custom(KIND_COMMENT),
+            Kind::Custom(KIND_REACTION),
         ]);
         let global_filter_json = serde_json::to_string(&global_filter).ok();
         let output = client.subscribe(global_filter.clone(), None).await?;
@@ -1121,18 +1282,29 @@ impl NostrWorker {
             output.val.to_string(),
             SubscriptionInfo::new(
                 "Global definitions".to_string(),
-                vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE, KIND_SKILL],
+                vec![
+                    KIND_TEAM_PACK,
+                    KIND_AGENT,
+                    KIND_MCP_TOOL,
+                    KIND_NUDGE,
+                    KIND_SKILL,
+                    KIND_COMMENT,
+                    KIND_REACTION,
+                ],
                 None,
             )
             .with_raw_filter(global_filter_json.unwrap_or_default()),
         );
         tlog!(
             "CONN",
-            "Subscribed to global definitions (kind:{}, kind:{}, kind:{}, kind:{})",
+            "Subscribed to global definitions/social (kind:{}, kind:{}, kind:{}, kind:{}, kind:{}, kind:{}, kind:{})",
+            KIND_TEAM_PACK,
             KIND_AGENT,
             KIND_MCP_TOOL,
             KIND_NUDGE,
-            KIND_SKILL
+            KIND_SKILL,
+            KIND_COMMENT,
+            KIND_REACTION
         );
 
         // 4. Per-project subscriptions (kind:513 metadata, kind:1 messages, kind:30023 reports)
@@ -2124,8 +2296,8 @@ impl NostrWorker {
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
         // Build kind:24020 agent config update event with project a-tag
-        let base = EventBuilder::new(Kind::Custom(24020), "")
-            .tag(Tag::coordinate(coordinate, None));
+        let base =
+            EventBuilder::new(Kind::Custom(24020), "").tag(Tag::coordinate(coordinate, None));
         let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &tags);
         let signed_event = event.sign_with_keys(keys)?;
 
@@ -2185,7 +2357,10 @@ impl NostrWorker {
                 "Failed to send global agent config update to relay: {}",
                 e
             ),
-            Err(_) => tlog!("ERROR", "Timeout sending global agent config update to relay"),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending global agent config update to relay"
+            ),
         }
 
         Ok(())
@@ -2558,6 +2733,162 @@ impl NostrWorker {
 
         Ok(())
     }
+
+    /// React to a team pack via NIP-25 kind:7 with dual anchors (`a` + `e`).
+    async fn handle_react_to_team(
+        &self,
+        team_coordinate: String,
+        team_event_id: String,
+        team_pubkey: String,
+        is_like: bool,
+    ) -> Result<String> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let reaction_content = if is_like { "+" } else { "-" };
+        let mut event = EventBuilder::new(Kind::Custom(KIND_REACTION), reaction_content)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("k")),
+                vec![KIND_TEAM_PACK.to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("a")),
+                vec![team_coordinate.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("e")),
+                vec![team_event_id.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-ios".to_string()],
+            ));
+
+        if let Ok(pk) = PublicKey::parse(&team_pubkey) {
+            event = event.tag(Tag::public_key(pk));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+        let event_id = signed_event.id.to_hex();
+
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send team reaction to relay: {}", e),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending team reaction to relay (saved locally)"
+            ),
+        }
+
+        Ok(event_id)
+    }
+
+    /// Post a team comment via NIP-22 kind:1111 with dual anchors and optional reply.
+    async fn handle_post_team_comment(
+        &self,
+        team_coordinate: String,
+        team_event_id: String,
+        team_pubkey: String,
+        content: String,
+        parent_comment_id: Option<String>,
+        parent_comment_pubkey: Option<String>,
+    ) -> Result<String> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let mut event = EventBuilder::new(Kind::Custom(KIND_COMMENT), &content)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("K")),
+                vec![KIND_TEAM_PACK.to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("k")),
+                vec![KIND_TEAM_PACK.to_string()],
+            ))
+            // Dual root context anchors for best interoperability.
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("A")),
+                vec![team_coordinate.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("E")),
+                vec![team_event_id.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("a")),
+                vec![team_coordinate.clone(), "".to_string(), "root".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("e")),
+                vec![team_event_id.clone(), "".to_string(), "root".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-ios".to_string()],
+            ));
+
+        if let Ok(pk) = PublicKey::parse(&team_pubkey) {
+            event = event.tag(Tag::public_key(pk));
+        }
+
+        if let Some(parent_id) = parent_comment_id {
+            event = event
+                .tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("E")),
+                    vec![parent_id.clone()],
+                ))
+                .tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("e")),
+                    vec![parent_id, "".to_string(), "reply".to_string()],
+                ));
+        }
+
+        if let Some(parent_pubkey) = parent_comment_pubkey {
+            if let Ok(pk) = PublicKey::parse(&parent_pubkey) {
+                event = event.tag(Tag::public_key(pk));
+            }
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+        let event_id = signed_event.id.to_hex();
+
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send team comment to relay: {}", e),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending team comment to relay (saved locally)"
+            ),
+        }
+
+        Ok(event_id)
+    }
 }
 
 /// Attach the common tags to a kind:24020 agent config `EventBuilder`.
@@ -2616,7 +2947,7 @@ fn build_agent_config_event(
 /// Run negentropy sync loop with adaptive timing
 /// Syncs project-scoped kinds: 31933 (projects), 513 (conversation metadata),
 /// 1 (messages), and 30023 (long-form content).
-/// Global event types (4199, 4200, 4201) are handled via real-time subscriptions only.
+/// Also syncs global definitions/social kinds to back cold-start queries.
 async fn run_negentropy_sync(
     client: Client,
     ndb: Arc<Ndb>,
@@ -2702,6 +3033,10 @@ async fn sync_all_filters(
     );
     total_new += sync_filter(client, project_p_filter, "31933-p-tagged", stats).await;
 
+    // Team packs (kind 34199)
+    let team_filter = Filter::new().kind(Kind::Custom(KIND_TEAM_PACK));
+    total_new += sync_filter(client, team_filter, "34199", stats).await;
+
     // Agent definitions (kind 4199)
     let agent_filter = Filter::new().kind(Kind::Custom(4199));
     total_new += sync_filter(client, agent_filter, "4199", stats).await;
@@ -2727,6 +3062,14 @@ async fn sync_all_filters(
     // Skills (kind 4202) - global, like nudges and agent definitions
     let skill_filter = Filter::new().kind(Kind::Custom(4202));
     total_new += sync_filter(client, skill_filter, "4202", stats).await;
+
+    // Comments (kind 1111)
+    let comment_filter = Filter::new().kind(Kind::Custom(KIND_COMMENT));
+    total_new += sync_filter(client, comment_filter, "1111", stats).await;
+
+    // Reactions (kind 7)
+    let reaction_filter = Filter::new().kind(Kind::Custom(KIND_REACTION));
+    total_new += sync_filter(client, reaction_filter, "7", stats).await;
 
     // Messages (kind 1) and long-form content (kind 30023) with project a-tags
     // OPTIMIZATION: Only sync for projects we're actually subscribed to (online/active projects)
@@ -2859,6 +3202,65 @@ async fn sync_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_ephemeral_filtering_database_rejects_ephemeral_events() {
+        let dir = tempdir().unwrap();
+        let db = crate::store::Database::new(dir.path()).unwrap();
+        let ndb_database =
+            EphemeralFilteringNdbDatabase::new(nostr_ndb::NdbDatabase::from((*db.ndb).clone()));
+
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(KIND_PROJECT_STATUS), "{}")
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let status = rt.block_on(ndb_database.save_event(&event)).unwrap();
+
+        assert_eq!(status, SaveEventStatus::Rejected(RejectedReason::Ephemeral));
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let filter = nostrdb::Filter::new()
+            .kinds([KIND_PROJECT_STATUS as u64])
+            .build();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(
+            results.is_empty(),
+            "ephemeral events must not be cached in nostrdb"
+        );
+    }
+
+    #[test]
+    fn test_ephemeral_filtering_database_still_saves_non_ephemeral_events() {
+        let dir = tempdir().unwrap();
+        let db = crate::store::Database::new(dir.path()).unwrap();
+        let ndb_database =
+            EphemeralFilteringNdbDatabase::new(nostr_ndb::NdbDatabase::from((*db.ndb).clone()));
+
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::TextNote, "hello world")
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let status = rt.block_on(ndb_database.save_event(&event)).unwrap();
+        assert_eq!(status, SaveEventStatus::Success);
+
+        let filter = nostrdb::Filter::new()
+            .kinds([KIND_TEXT_NOTE as u64])
+            .build();
+        let found = crate::store::events::wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+        assert!(
+            found,
+            "non-ephemeral event was not processed within timeout"
+        );
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 1, "non-ephemeral events should still cache");
+    }
 
     #[test]
     fn test_coordinate_parse() {
