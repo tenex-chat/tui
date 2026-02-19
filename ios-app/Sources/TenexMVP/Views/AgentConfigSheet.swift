@@ -25,6 +25,8 @@ struct AgentConfigSheet: View {
     // User selections
     @State private var selectedModelIndex: Int = 0
     @State private var selectedTools: Set<String> = []
+    @State private var isPm: Bool = false
+    @State private var saveGlobally: Bool = false
 
     // MARK: - Body
 
@@ -129,6 +131,15 @@ struct AgentConfigSheet: View {
                 }
             } footer: {
                 Text("Select the tools available to this agent")
+            }
+
+            // Options section
+            Section {
+                Toggle("Set as Project Manager", isOn: $isPm)
+
+                Toggle("Change all projects this agent is in", isOn: $saveGlobally)
+            } header: {
+                Text("Options")
             }
         }
         #if os(iOS)
@@ -271,17 +282,27 @@ struct AgentConfigSheet: View {
 
         do {
             let selectedModel = allModels.isEmpty ? nil : allModels[selectedModelIndex]
+            let tags: [String] = isPm ? ["pm"] : []
 
-            try await coreManager.safeCore.updateAgentConfig(
-                projectId: projectId,
-                agentPubkey: agent.pubkey,
-                model: selectedModel,
-                tools: Array(selectedTools)
-            )
+            if saveGlobally {
+                try await coreManager.safeCore.updateGlobalAgentConfig(
+                    agentPubkey: agent.pubkey,
+                    model: selectedModel,
+                    tools: Array(selectedTools),
+                    tags: tags
+                )
+            } else {
+                try await coreManager.safeCore.updateAgentConfig(
+                    projectId: projectId,
+                    agentPubkey: agent.pubkey,
+                    model: selectedModel,
+                    tools: Array(selectedTools),
+                    tags: tags
+                )
+            }
 
             dismiss()
         } catch {
-            // Could show an alert here, but for now just log
             isSaving = false
         }
     }

@@ -213,24 +213,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
     let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
     let mut should_close = false;
 
-    // Track whether Shift is held — used to show global-save hint and project list.
-    // We update this on every key event so the hint reflects the current modifier state.
-    let previously_shift_held = state.shift_held;
-    state.shift_held = has_shift;
-
-    // When Shift starts being held, populate the list of projects for the active agent.
-    if has_shift && !previously_shift_held {
-        if let Some(ref pubkey) = state.active_agent_pubkey {
-            state.agent_projects = app.projects_containing_agent(pubkey);
-        } else {
-            state.agent_projects = Vec::new();
-        }
-    }
-    // When Shift is released, clear the list.
-    if !has_shift && previously_shift_held {
-        state.agent_projects = Vec::new();
-    }
-
     match key.code {
         KeyCode::Esc => {
             should_close = true;
@@ -300,6 +282,16 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
+        // Ctrl+G: toggle save scope (project vs global)
+        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            state.save_globally = !state.save_globally;
+        }
+        // Ctrl+M: toggle PM marker
+        KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(settings) = state.settings.as_mut() {
+                settings.is_pm = !settings.is_pm;
+            }
+        }
         KeyCode::Char(c)
             if state.focus == AgentConfigFocus::Agents
                 && !key
@@ -314,8 +306,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
             state.selector.backspace_filter();
             app.refresh_agent_config_modal_state(&mut state);
         }
-        // Shift+Enter: save as global agent config (kind:24020 without a-tag) then close.
-        KeyCode::Enter if has_shift => {
+        KeyCode::Enter => {
             select_active_agent(app, &state);
 
             if state.has_config_changes() {
@@ -329,33 +320,54 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                         Vec::new()
                     };
 
-                    if let Some(ref core_handle) = app.core_handle {
-                        if let Err(e) =
-                            core_handle.send(NostrCommand::UpdateGlobalAgentConfig {
-                                agent_pubkey,
-                                model,
-                                tools,
-                                tags,
-                            })
-                        {
-                            app.set_warning_status(&format!(
-                                "Failed to update global agent config: {}",
-                                e
-                            ));
-                        } else {
-                            app.set_warning_status("Global agent config update sent");
+                    if state.save_globally {
+                        if let Some(ref core_handle) = app.core_handle {
+                            if let Err(e) =
+                                core_handle.send(NostrCommand::UpdateGlobalAgentConfig {
+                                    agent_pubkey,
+                                    model,
+                                    tools,
+                                    tags,
+                                })
+                            {
+                                app.set_warning_status(&format!(
+                                    "Failed to save global config: {}",
+                                    e
+                                ));
+                            } else {
+                                app.set_warning_status("Agent config saved globally");
+                            }
                         }
                     } else {
-                        app.set_warning_status("Not connected — global agent config not saved");
+                        match app.selected_project.as_ref().map(|p| p.a_tag()) {
+                            Some(project_a_tag) => {
+                                if let Some(ref core_handle) = app.core_handle {
+                                    if let Err(e) =
+                                        core_handle.send(NostrCommand::UpdateAgentConfig {
+                                            project_a_tag,
+                                            agent_pubkey,
+                                            model,
+                                            tools,
+                                            tags,
+                                        })
+                                    {
+                                        app.set_warning_status(&format!(
+                                            "Failed to save config: {}",
+                                            e
+                                        ));
+                                    } else {
+                                        app.set_warning_status("Agent config saved for project");
+                                    }
+                                }
+                            }
+                            None => {
+                                app.set_warning_status("No active project — toggle 'g' for global");
+                            }
+                        }
                     }
                 }
             }
 
-            should_close = true;
-        }
-        // Plain Enter: select the agent and close without saving config changes.
-        KeyCode::Enter => {
-            select_active_agent(app, &state);
             should_close = true;
         }
         _ => {}

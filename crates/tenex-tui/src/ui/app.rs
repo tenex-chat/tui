@@ -7,7 +7,7 @@ use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::audio_player::{AudioPlaybackState, AudioPlayer};
 use crate::ui::components::{ReportCoordinate, SidebarDelegation, SidebarReport, SidebarState};
-use crate::ui::modal::{AgentConfigState, AgentProjectRef, CommandPaletteState, ModalState};
+use crate::ui::modal::{AgentConfigState, CommandPaletteState, ModalState};
 use crate::ui::notifications::Notification;
 use crate::ui::selector::SelectorState;
 use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
@@ -1872,26 +1872,6 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Find all projects that contain the given agent in their kind:24010 status.
-    /// Returns a list of (project_name, project_a_tag) pairs.
-    pub fn projects_containing_agent(&self, agent_pubkey: &str) -> Vec<AgentProjectRef> {
-        let store = self.data_store.borrow();
-        let projects = store.get_projects();
-        let mut result = Vec::new();
-        for project in projects {
-            let a_tag = project.a_tag();
-            if let Some(status) = store.get_project_status(&a_tag) {
-                if status.agents.iter().any(|a| a.pubkey == agent_pubkey) {
-                    result.push(AgentProjectRef {
-                        name: project.name.clone(),
-                        a_tag,
-                    });
-                }
-            }
-        }
-        result
-    }
-
     /// Get the most recent agent that published a message in the current conversation.
     /// Returns the agent from available_agents whose pubkey matches the most recent
     /// non-user message in the conversation.
@@ -2025,7 +2005,7 @@ impl App {
             project.a_tag(),
             agent.model.clone(),
             agent.tools.clone(),
-            agent.is_pm,
+            false,
             all_models,
             all_tools,
         ))
@@ -2051,7 +2031,7 @@ impl App {
             settings,
             agent.model.clone(),
             agent.tools.iter().cloned().collect(),
-            agent.is_pm,
+            false,
         );
     }
 
