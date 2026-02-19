@@ -841,7 +841,7 @@ private struct AIAssistedPromptRewriteSheet: View {
             guard let settings = try? await coreManager.safeCore.getAiAudioSettings() else {
                 return
             }
-            guard let configuredModel = settings.openrouterModel?.tenexTrimmed, !configuredModel.isEmpty else {
+            guard let configuredModel = OpenRouterModelSelectionCodec.preferredModel(from: settings.openrouterModel) else {
                 return
             }
 
