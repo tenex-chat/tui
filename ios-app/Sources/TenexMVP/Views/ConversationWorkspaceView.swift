@@ -137,12 +137,11 @@ struct ConversationWorkspaceView: View {
     @State private var selectedDelegationConversation: ConversationFullInfo?
     @State private var selectedReportDestination: SelectedReportDestination?
     @State private var availableAgents: [OnlineAgentInfo] = []
-    @State private var isAtBottom = true
-    @State private var scrollViewHeight: CGFloat = 0
+    @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var navigationErrorMessage: String?
+    private let profiler = PerformanceProfiler.shared
 
     private let bottomAnchorId = "workspace-bottom-anchor"
-    private let bottomThreshold: CGFloat = 60
 
     init(source: ConversationWorkspaceSource, onThreadCreated: ((String) -> Void)? = nil) {
         self.source = source
@@ -188,11 +187,9 @@ struct ConversationWorkspaceView: View {
         isNewThreadMode ? [] : viewModel.messages
     }
 
-    private var messagesWithConsecutive: [(message: MessageInfo, isConsecutive: Bool)] {
-        transcriptMessages.enumerated().map { index, msg in
-            let isConsecutive = index > 0 && transcriptMessages[index - 1].authorNpub == msg.authorNpub
-            return (msg, isConsecutive)
-        }
+    /// Keep row iteration lightweight by avoiding tuple arrays with full MessageInfo copies.
+    private var messageIndices: Range<Int> {
+        transcriptMessages.indices
     }
 
     private var streamingBuffer: StreamingBuffer? {
@@ -230,6 +227,46 @@ struct ConversationWorkspaceView: View {
         return viewModel.formattedRuntime.isEmpty ? "0s" : viewModel.formattedRuntime
     }
 
+    private var workspaceBackdropColor: Color {
+        #if os(macOS)
+        return .conversationWorkspaceBackdropMac
+        #else
+        return .systemBackground
+        #endif
+    }
+
+    private var workspaceSurfaceColor: Color {
+        #if os(macOS)
+        return .conversationWorkspaceSurfaceMac
+        #else
+        return .systemBackground
+        #endif
+    }
+
+    private var workspaceBorderColor: Color {
+        #if os(macOS)
+        return .conversationWorkspaceBorderMac
+        #else
+        return Color.secondary.opacity(0.15)
+        #endif
+    }
+
+    private var workspaceComposerShellColor: Color {
+        #if os(macOS)
+        return .conversationComposerShellMac
+        #else
+        return workspaceSurfaceColor
+        #endif
+    }
+
+    private var workspaceComposerStrokeColor: Color {
+        #if os(macOS)
+        return .conversationComposerStrokeMac
+        #else
+        return workspaceBorderColor
+        #endif
+    }
+
     var body: some View {
         workspaceLayout
         .navigationTitle(conversationTitle)
@@ -251,6 +288,10 @@ struct ConversationWorkspaceView: View {
             .environmentObject(coreManager)
         }
         .task(id: source.identity) {
+            profiler.logEvent(
+                "workspace task start source=\(source.identity) mode=\(isNewThreadMode ? "new-thread" : "existing")",
+                category: .general
+            )
             await initializeWorkspace()
         }
         .onReceive(coreManager.$onlineAgents) { _ in
@@ -271,34 +312,38 @@ struct ConversationWorkspaceView: View {
         } message: {
             Text(navigationErrorMessage ?? "")
         }
+        .background(workspaceBackdropColor)
     }
 
     @ViewBuilder
     private var workspaceLayout: some View {
-        #if os(macOS)
-        HSplitView {
-            transcriptColumn
-                .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
+        Group {
+            #if os(macOS)
+            HSplitView {
+                transcriptColumn
+                    .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
 
-            if inspectorVisible {
-                inspectorColumn
-                    .frame(minWidth: 320, idealWidth: 360, maxWidth: 440, maxHeight: .infinity)
+                if inspectorVisible {
+                    inspectorColumn
+                        .frame(minWidth: 320, idealWidth: 360, maxWidth: 440, maxHeight: .infinity)
+                }
             }
-        }
-        #else
-        HStack(spacing: 0) {
-            transcriptColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            #else
+            HStack(spacing: 0) {
+                transcriptColumn
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if inspectorVisible {
-                Divider()
-                inspectorColumn
-                    .frame(width: 360)
-                    .frame(maxHeight: .infinity)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                if inspectorVisible {
+                    Divider()
+                    inspectorColumn
+                        .frame(width: 360)
+                        .frame(maxHeight: .infinity)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
+            #endif
         }
-        #endif
+        .background(workspaceBackdropColor)
     }
 
     private var inspectorToggleButton: some View {
@@ -316,18 +361,20 @@ struct ConversationWorkspaceView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(messagesWithConsecutive, id: \.message.id) { item in
+                    ForEach(messageIndices, id: \.self) { index in
+                        let message = transcriptMessages[index]
                         SlackMessageRow(
-                            message: item.message,
-                            isConsecutive: item.isConsecutive,
+                            message: message,
+                            isConsecutive: index > 0 && transcriptMessages[index - 1].authorNpub == message.authorNpub,
                             conversationId: currentConversation.id,
                             projectId: currentConversation.extractedProjectId,
                             onDelegationTap: { delegationId in
                                 openDelegation(byId: delegationId)
                             }
                         )
+                        .equatable()
                         .environmentObject(coreManager)
-                        .id(item.message.id)
+                        .id(message.id)
                     }
 
                     if let buffer = streamingBuffer {
@@ -342,27 +389,11 @@ struct ConversationWorkspaceView: View {
                     Color.clear
                         .frame(height: 1)
                         .id(bottomAnchorId)
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear.preference(
-                                    key: WorkspaceBottomAnchorOffsetKey.self,
-                                    value: geo.frame(in: .named("workspaceScroll")).maxY
-                                )
-                            }
-                        )
                 }
                 .padding()
                 .padding(.bottom, 12)
             }
-            .coordinateSpace(name: "workspaceScroll")
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: WorkspaceScrollViewHeightKey.self,
-                        value: geo.size.height
-                    )
-                }
-            )
+            .background(workspaceBackdropColor)
             .onAppear {
                 if let lastMessage = transcriptMessages.last {
                     proxy.scrollTo(lastMessage.id, anchor: .bottom)
@@ -370,29 +401,16 @@ struct ConversationWorkspaceView: View {
             }
             .onChange(of: transcriptMessages.last?.id) { _, _ in
                 guard let lastMessage = transcriptMessages.last else { return }
-                if isAtBottom {
-                    DispatchQueue.main.async {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                        }
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
                 }
             }
             .onChange(of: streamingTextCount) { _, _ in
-                if isAtBottom {
-                    DispatchQueue.main.async {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("streaming-row", anchor: .bottom)
-                        }
-                    }
+                DispatchQueue.main.async {
+                    maybeScrollToStreamingRow(with: proxy)
                 }
-            }
-            .onPreferenceChange(WorkspaceScrollViewHeightKey.self) { height in
-                scrollViewHeight = height
-            }
-            .onPreferenceChange(WorkspaceBottomAnchorOffsetKey.self) { bottomY in
-                let distanceFromBottom = bottomY - scrollViewHeight
-                isAtBottom = distanceFromBottom <= bottomThreshold
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -415,19 +433,23 @@ struct ConversationWorkspaceView: View {
             )
             .environmentObject(coreManager)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.systemBackground)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(workspaceComposerShellColor)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(workspaceComposerStrokeColor, lineWidth: 1)
                     )
             )
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 10)
         }
+        #if os(macOS)
+        .background(workspaceBackdropColor)
+        #else
         .background(.ultraThinMaterial)
+        #endif
     }
 
     private var inspectorColumn: some View {
@@ -447,62 +469,65 @@ struct ConversationWorkspaceView: View {
             }
             .padding(14)
         }
+        #if os(macOS)
+        .background(workspaceBackdropColor)
+        #else
         .background(Color.systemGroupedBackground.opacity(0.32))
+        #endif
     }
 
     private var inspectorPrimaryMetadata: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(conversationTitle)
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let summary = currentConversation.summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundStyle(Color.secondary.opacity(0.86))
-                    .padding(.top, 4)
+        WorkspaceInspectorCard(title: nil, tone: .primary) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(conversationTitle)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
 
-            HStack(alignment: .center, spacing: 10) {
-                HStack(spacing: 8) {
-                    StatusBadge(status: statusText, isActive: isActiveState)
-
-                    if let project {
-                        ProjectBadge(projectTitle: project.title)
-                    }
+                if let summary = currentConversation.summary, !summary.isEmpty {
+                    Text(summary)
+                        .font(.subheadline)
+                        .foregroundStyle(Color.secondary.opacity(0.86))
+                        .padding(.top, 4)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Text(runtimeText)
-                    .font(.callout.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.secondary.opacity(0.9))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
+                HStack(alignment: .center, spacing: 10) {
+                    HStack(spacing: 8) {
+                        StatusBadge(status: statusText, isActive: isActiveState)
 
-            if let currentActivity = currentActivityText, !currentActivity.isEmpty {
-                Text(currentActivity)
-                    .font(.caption)
-                    .foregroundStyle(Color.statusWaiting.opacity(0.72))
-                    .fixedSize(horizontal: false, vertical: true)
+                        if let project {
+                            ProjectBadge(projectTitle: project.title)
+                        }
+                    }
+
+                    Text(runtimeText)
+                        .font(.callout.weight(.medium))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.secondary.opacity(0.9))
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+
+                if let currentActivity = currentActivityText, !currentActivity.isEmpty {
+                    Text(currentActivity)
+                        .font(.caption)
+                        .foregroundStyle(Color.statusWaiting.opacity(0.72))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
 
     private var inspectorTodoSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Todos")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.primary.opacity(0.66))
-                .textCase(.uppercase)
+        WorkspaceInspectorCard(title: "Todos", tone: .secondary) {
+            VStack(alignment: .leading, spacing: 12) {
+                TodoProgressView(stats: viewModel.aggregatedTodoStats)
 
-            TodoProgressView(stats: viewModel.aggregatedTodoStats)
-
-            if !viewModel.todoState.items.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(viewModel.todoState.items) { todo in
-                        TodoRowView(todo: todo)
+                if !viewModel.todoState.items.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(viewModel.todoState.items) { todo in
+                            TodoRowView(todo: todo)
+                        }
                     }
                 }
             }
@@ -513,19 +538,20 @@ struct ConversationWorkspaceView: View {
         WorkspaceInspectorCard(title: "Delegations (\(viewModel.delegations.count))", tone: .secondary) {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(viewModel.delegations) { delegation in
+                    let isWorking = viewModel.delegationActivityByConversationId[delegation.conversationId] ?? false
                     if let delegatedConversation = delegationConversation(for: delegation) {
                         NavigationLink {
                             ConversationAdaptiveDetailView(conversation: delegatedConversation)
                                 .environmentObject(coreManager)
                         } label: {
-                            delegationRowLabel(delegation)
+                            delegationRowLabel(delegation, isWorking: isWorking)
                         }
                         .buttonStyle(.plain)
                     } else {
                         Button {
                             openDelegation(byId: delegation.conversationId)
                         } label: {
-                            delegationRowLabel(delegation)
+                            delegationRowLabel(delegation, isWorking: isWorking)
                         }
                         .buttonStyle(.plain)
                     }
@@ -535,12 +561,7 @@ struct ConversationWorkspaceView: View {
     }
 
     private var inspectorReportsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Reports (\(viewModel.referencedReports.count))")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.primary.opacity(0.66))
-                .textCase(.uppercase)
-
+        WorkspaceInspectorCard(title: "Reports (\(viewModel.referencedReports.count))", tone: .secondary) {
             if viewModel.referencedReports.isEmpty {
                 Text("No report references found.")
                     .font(.caption)
@@ -584,11 +605,18 @@ struct ConversationWorkspaceView: View {
     }
 
     private func initializeWorkspace() async {
+        let startedAt = CFAbsoluteTimeGetCurrent()
         if !isNewThreadMode {
             viewModel.setCoreManager(coreManager)
             await viewModel.loadData()
         }
         refreshAvailableAgents()
+        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+        profiler.logEvent(
+            "workspace initialized source=\(source.identity) messages=\(viewModel.messages.count) children=\(viewModel.childConversations.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+            category: .general,
+            level: elapsedMs >= 250 ? .error : .info
+        )
     }
 
     private func refreshAvailableAgents() {
@@ -599,18 +627,41 @@ struct ConversationWorkspaceView: View {
         }
     }
 
+    private func maybeScrollToStreamingRow(with proxy: ScrollViewProxy) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastStreamingAutoScrollAt >= 0.10 else { return }
+        lastStreamingAutoScrollAt = now
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            proxy.scrollTo("streaming-row", anchor: .bottom)
+        }
+    }
+
     private func openDelegation(byId delegationId: String) {
         if let cached = coreManager.conversations.first(where: { $0.id == delegationId }) {
             selectedDelegationConversation = cached
+            profiler.logEvent(
+                "delegation navigation cache-hit id=\(delegationId)",
+                category: .general,
+                level: .debug
+            )
             return
         }
 
         if let child = viewModel.childConversation(for: delegationId) {
             selectedDelegationConversation = child
+            profiler.logEvent(
+                "delegation navigation child-cache-hit id=\(delegationId)",
+                category: .general,
+                level: .debug
+            )
             return
         }
 
         Task {
+            let startedAt = CFAbsoluteTimeGetCurrent()
             let convs = await coreManager.safeCore.getConversationsByIds(conversationIds: [delegationId])
             await MainActor.run {
                 if let conv = convs.first {
@@ -618,6 +669,12 @@ struct ConversationWorkspaceView: View {
                 } else {
                     navigationErrorMessage = "Unable to load the selected delegated conversation."
                 }
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+                profiler.logEvent(
+                    "delegation navigation fetch id=\(delegationId) found=\(convs.first != nil) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+                    category: .general,
+                    level: elapsedMs >= 120 ? .error : .info
+                )
             }
         }
     }
@@ -645,7 +702,7 @@ struct ConversationWorkspaceView: View {
     }
 
     @ViewBuilder
-    private func delegationRowLabel(_ delegation: DelegationItem) -> some View {
+    private func delegationRowLabel(_ delegation: DelegationItem, isWorking: Bool) -> some View {
         HStack(spacing: 8) {
             AgentAvatarView(
                 agentName: delegation.recipient,
@@ -668,6 +725,11 @@ struct ConversationWorkspaceView: View {
             }
 
             Spacer()
+
+            if isWorking {
+                WorkingActivityBadge()
+            }
+
             Image(systemName: "chevron.right")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -712,36 +774,38 @@ private struct WorkspaceInspectorCard<Content: View>: View {
     }
 
     private var cardFill: Color {
+        #if os(macOS)
+        switch tone {
+        case .primary:
+            return Color.conversationWorkspaceSurfaceMac.opacity(0.95)
+        case .secondary:
+            return Color.conversationWorkspaceSurfaceMac.opacity(0.82)
+        }
+        #else
         switch tone {
         case .primary:
             return Color.systemBackground.opacity(0.9)
         case .secondary:
             return Color.systemBackground.opacity(0.78)
         }
+        #endif
     }
 
     private var cardBorder: Color {
+        #if os(macOS)
+        switch tone {
+        case .primary:
+            return Color.conversationWorkspaceBorderMac.opacity(0.92)
+        case .secondary:
+            return Color.conversationWorkspaceBorderMac.opacity(0.74)
+        }
+        #else
         switch tone {
         case .primary:
             return Color.secondary.opacity(0.2)
         case .secondary:
             return Color.secondary.opacity(0.14)
         }
-    }
-}
-
-private struct WorkspaceScrollViewHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct WorkspaceBottomAnchorOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
+        #endif
     }
 }

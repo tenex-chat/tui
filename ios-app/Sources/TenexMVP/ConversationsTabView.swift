@@ -1,175 +1,8 @@
 import SwiftUI
-import CryptoKit
-
-// MARK: - Conversation Full Hierarchy
-
-/// Precomputed hierarchy data for ConversationFullInfo with activity tracking.
-/// Computes parent→children map and hierarchical activity status once per refresh,
-/// avoiding O(n²) traversals during sorting and rendering.
-final class ConversationFullHierarchy {
-    /// Map from conversation ID to its direct children
-    let childrenByParentId: [String: [ConversationFullInfo]]
-
-    /// Map from conversation ID to conversation for O(1) lookups
-    let conversationById: [String: ConversationFullInfo]
-
-    /// Precomputed hierarchical activity status: true if conversation or any descendant is active
-    let hierarchicallyActiveById: [String: Bool]
-
-    /// Root conversations (no parent or parent doesn't exist in the set)
-    let rootConversations: [ConversationFullInfo]
-
-    /// Root conversations sorted by: hierarchically active first, then by effective last activity
-    let sortedRootConversations: [ConversationFullInfo]
-
-    /// Initialize hierarchy from a flat list of conversations
-    /// - Parameter conversations: All conversations to process
-    init(conversations: [ConversationFullInfo]) {
-        // Step 1: Build O(1) lookup maps
-        let byId = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
-        self.conversationById = byId
-
-        // Step 2: Build parent→children map (O(n))
-        var childrenMap: [String: [ConversationFullInfo]] = [:]
-        for conversation in conversations {
-            if let parentId = conversation.parentId {
-                childrenMap[parentId, default: []].append(conversation)
-            }
-        }
-        self.childrenByParentId = childrenMap
-
-        // Step 3: Identify root conversations (no parent OR orphaned)
-        let allIds = Set(conversations.map { $0.id })
-        let roots = conversations.filter { conv in
-            if let parentId = conv.parentId {
-                return !allIds.contains(parentId) // Orphaned: parent doesn't exist
-            }
-            return true // No parent - true root
-        }
-        self.rootConversations = roots
-
-        // Step 4: Compute hierarchical activity status using bottom-up BFS
-        // We process in reverse topological order (leaves first)
-        var activityMap: [String: Bool] = [:]
-        Self.computeHierarchicalActivity(
-            conversations: conversations,
-            childrenMap: childrenMap,
-            activityMap: &activityMap
-        )
-        self.hierarchicallyActiveById = activityMap
-
-        // Step 5: Sort roots by hierarchical activity first, then by effective last activity
-        self.sortedRootConversations = roots.sorted { a, b in
-            let aActive = activityMap[a.id] ?? a.isActive
-            let bActive = activityMap[b.id] ?? b.isActive
-
-            // Active conversations come first
-            if aActive && !bActive { return true }
-            if !aActive && bActive { return false }
-
-            // Within same activity status, sort by effective last activity (newest first)
-            return a.effectiveLastActivity > b.effectiveLastActivity
-        }
-    }
-
-    /// Compute hierarchical activity for all conversations in O(n) time.
-    /// Uses DFS with memoization - each conversation is processed exactly once.
-    private static func computeHierarchicalActivity(
-        conversations: [ConversationFullInfo],
-        childrenMap: [String: [ConversationFullInfo]],
-        activityMap: inout [String: Bool]
-    ) {
-        let conversationsById = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
-        var visited = Set<String>()
-
-        // Process all conversations using DFS with memoization
-        for conversation in conversations {
-            if activityMap[conversation.id] == nil {
-                _ = computeActivityRecursive(
-                    conversationId: conversation.id,
-                    conversations: conversationsById,
-                    childrenMap: childrenMap,
-                    activityMap: &activityMap,
-                    visited: &visited
-                )
-            }
-        }
-    }
-
-    /// Recursively compute activity with memoization.
-    /// Uses inout visited set to prevent cycles without copying.
-    private static func computeActivityRecursive(
-        conversationId: String,
-        conversations: [String: ConversationFullInfo],
-        childrenMap: [String: [ConversationFullInfo]],
-        activityMap: inout [String: Bool],
-        visited: inout Set<String>
-    ) -> Bool {
-        // Return cached result if available
-        if let cached = activityMap[conversationId] {
-            return cached
-        }
-
-        // Cycle detection
-        if visited.contains(conversationId) {
-            return false
-        }
-        visited.insert(conversationId)
-
-        // Get the conversation
-        guard let conversation = conversations[conversationId] else {
-            activityMap[conversationId] = false
-            visited.remove(conversationId)
-            return false
-        }
-
-        // Check if directly active
-        if conversation.isActive {
-            activityMap[conversationId] = true
-            visited.remove(conversationId)
-            return true
-        }
-
-        // Check children recursively
-        let children = childrenMap[conversationId] ?? []
-        for child in children {
-            if computeActivityRecursive(
-                conversationId: child.id,
-                conversations: conversations,
-                childrenMap: childrenMap,
-                activityMap: &activityMap,
-                visited: &visited
-            ) {
-                activityMap[conversationId] = true
-                visited.remove(conversationId)
-                return true
-            }
-        }
-
-        // Not active
-        activityMap[conversationId] = false
-        visited.remove(conversationId)
-        return false
-    }
-
-    /// Check if a conversation is hierarchically active (O(1) lookup)
-    func isHierarchicallyActive(_ conversationId: String) -> Bool {
-        hierarchicallyActiveById[conversationId] ?? false
-    }
-}
-
-
-
-/// Main tab view for Conversations - uses sidebar-first controls on iPad/macOS
-/// and compact toolbar controls on iPhone.
-enum ConversationsLayoutMode {
-    case adaptive
-    case shellList
-    case shellDetail
-}
 
 struct ConversationsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
+    @ObservedObject private var audioPlayer = AudioNotificationPlayer.shared
     let layoutMode: ConversationsLayoutMode
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
     private let newConversationProjectIdBindingOverride: Binding<String?>?
@@ -186,8 +19,12 @@ struct ConversationsTabView: View {
     @State private var newConversationProjectIdState: String?
     @State private var runtimeText: String = "0m"
     @State private var projectForNewConversation: SelectedProjectForComposer?
+    @State private var selectedProjectForNewConversation: ProjectInfo?
+    @State private var showProjectSelector = false
     @State private var pendingCreatedConversationId: String?
     @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
+    @State private var projectMenuState = ProjectMenuState()
+    @State private var projectTitleById: [String: String] = [:]
     // Conversation reference feature state - uses .sheet(item:) pattern for safe state management
     @State private var conversationToReference: ConversationFullInfo?
     #if os(iOS)
@@ -213,7 +50,7 @@ struct ConversationsTabView: View {
     }
 
     private var useSplitView: Bool {
-        if layoutMode == .shellList || layoutMode == .shellDetail {
+        if layoutMode == .shellList || layoutMode == .shellDetail || layoutMode == .shellComposite {
             return true
         }
         #if os(macOS)
@@ -249,21 +86,33 @@ struct ConversationsTabView: View {
         }
     }
 
-    private var sortedProjects: [ProjectInfo] {
-        coreManager.projects.sorted { a, b in
-            let aOnline = coreManager.projectOnlineStatus[a.id] ?? false
-            let bOnline = coreManager.projectOnlineStatus[b.id] ?? false
+    private func rebuildProjectCaches() {
+        let projects = coreManager.projects
+        let onlineStatus = coreManager.projectOnlineStatus
+
+        projectTitleById = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0.title) })
+
+        let sorted = projects.sorted { a, b in
+            let aOnline = onlineStatus[a.id] ?? false
+            let bOnline = onlineStatus[b.id] ?? false
             if aOnline != bOnline { return aOnline }
             return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
         }
-    }
 
-    private var bootedProjects: [ProjectInfo] {
-        sortedProjects.filter { coreManager.projectOnlineStatus[$0.id] ?? false }
-    }
+        var booted: [ProjectInfo] = []
+        var unbooted: [ProjectInfo] = []
+        booted.reserveCapacity(sorted.count)
+        unbooted.reserveCapacity(sorted.count)
 
-    private var unbootedProjects: [ProjectInfo] {
-        sortedProjects.filter { !(coreManager.projectOnlineStatus[$0.id] ?? false) }
+        for project in sorted {
+            if onlineStatus[project.id] ?? false {
+                booted.append(project)
+            } else {
+                unbooted.append(project)
+            }
+        }
+
+        projectMenuState = ProjectMenuState(booted: booted, unbooted: unbooted)
     }
 
     /// Filtered conversations based on archived status and scheduled status.
@@ -289,6 +138,8 @@ struct ConversationsTabView: View {
                 shellListLayout
             case .shellDetail:
                 shellDetailLayout
+            case .shellComposite:
+                shellCompositeLayout
             case .adaptive:
                 if useSplitView {
                     splitViewLayout
@@ -299,6 +150,7 @@ struct ConversationsTabView: View {
         }
         .task {
             rebuildHierarchy()
+            rebuildProjectCaches()
             await updateRuntime()
             await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
             if let settings = try? await coreManager.safeCore.getAiAudioSettings() {
@@ -318,6 +170,12 @@ struct ConversationsTabView: View {
         }
         .onChange(of: showArchived) { _, _ in
             rebuildHierarchy()
+        }
+        .onChange(of: coreManager.projects) { _, _ in
+            rebuildProjectCaches()
+        }
+        .onChange(of: coreManager.projectOnlineStatus) { _, _ in
+            rebuildProjectCaches()
         }
         .onChange(of: hideScheduled) { _, _ in
             rebuildHierarchy()
@@ -417,7 +275,11 @@ struct ConversationsTabView: View {
                 newConversationMenuButton
             }
         }
-        .modifier(ShellConversationListStyle(isShellColumn: layoutMode == .shellList))
+        .modifier(
+            ShellConversationListStyle(
+                isShellColumn: layoutMode == .shellList || layoutMode == .shellComposite
+            )
+        )
         .refreshable {
             await coreManager.manualRefresh()
         }
@@ -457,6 +319,28 @@ struct ConversationsTabView: View {
         conversationDetailContent
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .accessibilityIdentifier("detail_column")
+    }
+
+    private var shellCompositeLayout: some View {
+        #if os(macOS)
+        HSplitView {
+            shellListLayout
+                .frame(minWidth: 340, idealWidth: 430, maxWidth: 520)
+
+            shellDetailLayout
+                .frame(minWidth: 520)
+        }
+        #else
+        HStack(spacing: 0) {
+            shellListLayout
+                .frame(minWidth: 340, idealWidth: 430, maxWidth: 520)
+
+            Divider()
+
+            shellDetailLayout
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        #endif
     }
 
     // MARK: - Stack Layout (iPhone)
@@ -517,29 +401,41 @@ struct ConversationsTabView: View {
             .listRowSeparator(.hidden)
         } else {
             ForEach(cachedHierarchy.sortedRootConversations, id: \.id) { conversation in
+                let hierarchy = coreManager.hierarchyCache.getHierarchy(for: conversation.id)
+                let pTaggedRecipientInfo = hierarchy?.pTaggedRecipientInfo
+                let delegationAgentInfos = hierarchy?.delegationAgentInfos ?? []
+                let isPlayingAudio = audioPlayer.playbackState != .idle && audioPlayer.currentConversationId == conversation.id
                 #if os(iOS)
                 if isSplitInteraction {
                     ConversationRowFull(
                         conversation: conversation,
                         projectTitle: projectTitle(for: conversation),
                         isHierarchicallyActive: cachedHierarchy.isHierarchicallyActive(conversation.id),
+                        pTaggedRecipientInfo: pTaggedRecipientInfo,
+                        delegationAgentInfos: delegationAgentInfos,
+                        isPlayingAudio: isPlayingAudio,
+                        isAudioPlaying: audioPlayer.isPlaying,
                         showsChevron: false,
                         onSelect: nil
                     )
+                    .equatable()
                     .tag(conversation)
-                    .environmentObject(coreManager)
                 } else {
                     ConversationRowFull(
                         conversation: conversation,
                         projectTitle: projectTitle(for: conversation),
                         isHierarchicallyActive: cachedHierarchy.isHierarchicallyActive(conversation.id),
+                        pTaggedRecipientInfo: pTaggedRecipientInfo,
+                        delegationAgentInfos: delegationAgentInfos,
+                        isPlayingAudio: isPlayingAudio,
+                        isAudioPlaying: audioPlayer.isPlaying,
                         showsChevron: true,
                         onSelect: { selected in
                             selectedConversationBinding.wrappedValue = selected
                         }
                     )
+                    .equatable()
                     .tag(conversation)
-                    .environmentObject(coreManager)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
                             // Archive action placeholder
@@ -561,24 +457,50 @@ struct ConversationsTabView: View {
                     conversation: conversation,
                     projectTitle: projectTitle(for: conversation),
                     isHierarchicallyActive: cachedHierarchy.isHierarchicallyActive(conversation.id),
+                    pTaggedRecipientInfo: pTaggedRecipientInfo,
+                    delegationAgentInfos: delegationAgentInfos,
+                    isPlayingAudio: isPlayingAudio,
+                    isAudioPlaying: audioPlayer.isPlaying,
                     showsChevron: false,
                     onSelect: nil
                 )
+                .equatable()
                 .tag(conversation)
-                .environmentObject(coreManager)
                 #endif
             }
         }
     }
 
     private var newConversationMenuButton: some View {
+        #if os(macOS)
+        Button {
+            selectedProjectForNewConversation = nil
+            showProjectSelector = true
+        } label: {
+            Image(systemName: "plus")
+        }
+        .accessibilityLabel("Create conversation")
+        .sheet(isPresented: $showProjectSelector) {
+            ProjectSelectorSheet(
+                projects: projectMenuState.booted + projectMenuState.unbooted,
+                projectOnlineStatus: coreManager.projectOnlineStatus,
+                selectedProject: $selectedProjectForNewConversation,
+                onDone: {
+                    if let project = selectedProjectForNewConversation {
+                        startNewConversation(in: project)
+                    }
+                    selectedProjectForNewConversation = nil
+                }
+            )
+        }
+        #else
         Menu {
-            if bootedProjects.isEmpty && unbootedProjects.isEmpty {
+            if projectMenuState.booted.isEmpty && projectMenuState.unbooted.isEmpty {
                 Text("No projects available")
             } else {
-                if !bootedProjects.isEmpty {
+                if !projectMenuState.booted.isEmpty {
                     Section("Booted Projects") {
-                        ForEach(bootedProjects, id: \.id) { project in
+                        ForEach(projectMenuState.booted, id: \.id) { project in
                             Button {
                                 startNewConversation(in: project)
                             } label: {
@@ -588,9 +510,9 @@ struct ConversationsTabView: View {
                     }
                 }
 
-                if !unbootedProjects.isEmpty {
+                if !projectMenuState.unbooted.isEmpty {
                     Menu("Unbooted Projects") {
-                        ForEach(unbootedProjects, id: \.id) { project in
+                        ForEach(projectMenuState.unbooted, id: \.id) { project in
                             Button {
                                 startNewConversation(in: project)
                             } label: {
@@ -604,6 +526,7 @@ struct ConversationsTabView: View {
             Image(systemName: "plus")
         }
         .accessibilityLabel("Create conversation")
+        #endif
     }
 
     private var runtimeButton: some View {
@@ -703,13 +626,18 @@ struct ConversationsTabView: View {
 
     private func projectTitle(for conversation: ConversationFullInfo) -> String? {
         let projectId = TenexCoreManager.projectId(fromATag: conversation.projectATag)
-        return coreManager.projects.first { $0.id == projectId }?.title
+        return projectTitleById[projectId]
     }
 }
 
 private struct SelectedProjectForComposer: Identifiable {
     let project: ProjectInfo
     var id: String { project.id }
+}
+
+private struct ProjectMenuState {
+    var booted: [ProjectInfo] = []
+    var unbooted: [ProjectInfo] = []
 }
 
 private struct ShellConversationListStyle: ViewModifier {
@@ -733,13 +661,26 @@ private struct ShellConversationListStyle: ViewModifier {
 /// Conversation row that uses ConversationFullInfo's rich data.
 /// PERFORMANCE: Uses cached hierarchy data instead of per-row FFI calls.
 /// The cache is preloaded in ConversationsTabView.task for all visible conversations.
-private struct ConversationRowFull: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
-    @ObservedObject var player = AudioNotificationPlayer.shared
+private struct ConversationRowFull: View, Equatable {
+    static func == (lhs: ConversationRowFull, rhs: ConversationRowFull) -> Bool {
+        lhs.conversation == rhs.conversation &&
+            lhs.projectTitle == rhs.projectTitle &&
+            lhs.isHierarchicallyActive == rhs.isHierarchicallyActive &&
+            lhs.pTaggedRecipientInfo == rhs.pTaggedRecipientInfo &&
+            lhs.delegationAgentInfos == rhs.delegationAgentInfos &&
+            lhs.isPlayingAudio == rhs.isPlayingAudio &&
+            lhs.isAudioPlaying == rhs.isAudioPlaying &&
+            lhs.showsChevron == rhs.showsChevron
+    }
+
     let conversation: ConversationFullInfo
     let projectTitle: String?
     /// Whether this conversation or any of its descendants has active work
     let isHierarchicallyActive: Bool
+    let pTaggedRecipientInfo: AgentAvatarInfo?
+    let delegationAgentInfos: [AgentAvatarInfo]
+    let isPlayingAudio: Bool
+    let isAudioPlaying: Bool
     let showsChevron: Bool
     let onSelect: ((ConversationFullInfo) -> Void)?
 
@@ -748,28 +689,9 @@ private struct ConversationRowFull: View {
     @State private var isHovered = false
     #else
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @EnvironmentObject private var coreManager: TenexCoreManager
     @State private var showDelegationTree = false
     #endif
-
-    /// Whether this conversation is currently playing audio
-    private var isPlayingAudio: Bool {
-        player.playbackState != .idle && player.currentConversationId == conversation.id
-    }
-
-    /// Get cached hierarchy data (O(1) lookup, no FFI calls)
-    private var cachedHierarchy: ConversationHierarchyCache.ConversationHierarchy? {
-        coreManager.hierarchyCache.getHierarchy(for: conversation.id)
-    }
-
-    /// Delegation agent infos from cache (or empty if not yet loaded)
-    private var delegationAgentInfos: [AgentAvatarInfo] {
-        cachedHierarchy?.delegationAgentInfos ?? []
-    }
-
-    /// P-tagged recipient info from cache
-    private var pTaggedRecipientInfo: AgentAvatarInfo? {
-        cachedHierarchy?.pTaggedRecipientInfo
-    }
 
     private var statusColor: Color {
         Color.conversationStatus(for: conversation.status, isActive: isHierarchicallyActive)
@@ -801,7 +723,7 @@ private struct ConversationRowFull: View {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.caption)
                             .foregroundStyle(Color.agentBrand)
-                            .symbolEffect(.variableColor.iterative, isActive: player.isPlaying)
+                            .symbolEffect(.variableColor.iterative, isActive: isAudioPlaying)
                     }
 
                     Spacer()
@@ -869,7 +791,6 @@ private struct ConversationRowFull: View {
                         otherParticipants: delegationAgentInfos,
                         maxVisibleAvatars: maxVisibleAvatars
                     )
-                    .environmentObject(coreManager)
 
                     Spacer()
 
@@ -885,6 +806,26 @@ private struct ConversationRowFull: View {
                         .padding(.vertical, 2)
                         .background(Color.projectBrandBackground)
                         .foregroundStyle(Color.projectBrand)
+                        .clipShape(Capsule())
+                    }
+
+                    if conversation.isActive {
+                        HStack(spacing: 3) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.presenceOnline)
+                                    .frame(width: 6, height: 6)
+                                Circle()
+                                    .stroke(Color.presenceOnline.opacity(0.45), lineWidth: 1.5)
+                                    .frame(width: 10, height: 10)
+                            }
+                            Text("Working")
+                        }
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.presenceOnline.opacity(0.16))
+                        .foregroundStyle(Color.presenceOnline)
                         .clipShape(Capsule())
                     }
 

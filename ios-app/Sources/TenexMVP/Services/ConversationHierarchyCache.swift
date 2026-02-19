@@ -25,10 +25,13 @@ import Foundation
 /// ```
 @MainActor
 final class ConversationHierarchyCache: ObservableObject {
+    private static let preloadBatchSize = 20
+
     // MARK: - Types
 
-    /// Cached hierarchy data for a single conversation
-    struct ConversationHierarchy {
+    /// Cached hierarchy data for a single conversation.
+    /// Reference semantics avoid repeated value copies when rows read cached hierarchy.
+    final class ConversationHierarchy: @unchecked Sendable {
         /// P-tagged recipient info (first p-tag from conversation root)
         let pTaggedRecipientInfo: AgentAvatarInfo?
 
@@ -40,6 +43,18 @@ final class ConversationHierarchyCache: ObservableObject {
 
         /// Direct child conversation IDs
         let directChildIds: [String]
+
+        init(
+            pTaggedRecipientInfo: AgentAvatarInfo?,
+            delegationAgentInfos: [AgentAvatarInfo],
+            descendantIds: [String],
+            directChildIds: [String]
+        ) {
+            self.pTaggedRecipientInfo = pTaggedRecipientInfo
+            self.delegationAgentInfos = delegationAgentInfos
+            self.descendantIds = descendantIds
+            self.directChildIds = directChildIds
+        }
     }
 
     // MARK: - State
@@ -51,6 +66,7 @@ final class ConversationHierarchyCache: ObservableObject {
     // MARK: - Dependencies
 
     private weak var coreManager: TenexCoreManager?
+    private let profiler = PerformanceProfiler.shared
 
     // MARK: - Initialization
 
@@ -79,11 +95,19 @@ final class ConversationHierarchyCache: ObservableObject {
     func preloadForConversations(_ conversations: [ConversationFullInfo]) async {
         guard let coreManager = coreManager else { return }
         guard !isLoading else { return }
+        let startedAt = CFAbsoluteTimeGetCurrent()
 
         // Check if we need to load anything
         let newConversationIds = Set(conversations.map(\.id))
         let needsLoading = newConversationIds.subtracting(loadedForConversationIds)
         guard !needsLoading.isEmpty else { return }
+        let pendingConversations = conversations.filter { needsLoading.contains($0.id) }
+        let batch = Array(pendingConversations.prefix(Self.preloadBatchSize))
+        profiler.logEvent(
+            "hierarchy preload start roots=\(conversations.count) new=\(needsLoading.count) batch=\(batch.count) cached=\(loadedForConversationIds.count)",
+            category: .general,
+            level: .debug
+        )
 
         isLoading = true
         defer { isLoading = false }
@@ -93,7 +117,7 @@ final class ConversationHierarchyCache: ObservableObject {
         // that returns descendants for multiple roots
 
         await withTaskGroup(of: (String, ConversationHierarchy).self) { group in
-            for conversation in conversations where needsLoading.contains(conversation.id) {
+            for conversation in batch {
                 group.addTask { [coreManager] in
                     let hierarchy = await Self.loadHierarchy(
                         for: conversation,
@@ -108,6 +132,22 @@ final class ConversationHierarchyCache: ObservableObject {
                 loadedForConversationIds.insert(id)
             }
         }
+
+        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+        let remaining = needsLoading.count - batch.count
+        profiler.logEvent(
+            "hierarchy preload complete roots=\(conversations.count) loadedBatch=\(batch.count) remaining=\(remaining) cacheSize=\(cache.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+            category: .general,
+            level: elapsedMs >= 200 ? .error : .info
+        )
+
+        // Continue in small chunks to avoid monopolizing the core actor during startup.
+        if remaining > 0 {
+            Task(priority: .utility) { [weak self] in
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                await self?.preloadForConversations(conversations)
+            }
+        }
     }
 
     /// Load hierarchy for a single conversation (used by TaskGroup)
@@ -119,6 +159,7 @@ final class ConversationHierarchyCache: ObservableObject {
         // Run all heavy FFI work off the MainActor in a detached task
         // This prevents blocking the UI during profile lookups and hierarchy traversal
         return await Task.detached {
+            let startedAt = CFAbsoluteTimeGetCurrent()
             // Load p-tagged recipient
             var pTaggedRecipientInfo: AgentAvatarInfo?
             if let pTaggedPubkey = conversation.pTags.first {
@@ -153,6 +194,14 @@ final class ConversationHierarchyCache: ObservableObject {
             }
 
             let delegationAgentInfos = agentsByPubkey.values.sorted { $0.name < $1.name }
+            let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+            if elapsedMs >= 20 || !descendantIds.isEmpty || !delegationAgentInfos.isEmpty {
+                PerformanceProfiler.shared.logEvent(
+                    "hierarchy load root=\(conversation.id) descendants=\(descendantIds.count) directChildren=\(directChildIds.count) delegationAgents=\(delegationAgentInfos.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+                    category: .general,
+                    level: elapsedMs >= 120 ? .error : .info
+                )
+            }
 
             return ConversationHierarchy(
                 pTaggedRecipientInfo: pTaggedRecipientInfo,
