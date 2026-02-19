@@ -149,7 +149,11 @@ struct AISettingsView: View {
             } header: {
                 Text("API Keys")
             } footer: {
+                #if os(macOS)
+                Text("API keys are stored in local files on this Mac.")
+                #else
                 Text("API keys are stored securely in your device's keychain.")
+                #endif
             }
 
             // Audio Settings Section (only show if both keys are configured)
@@ -538,7 +542,7 @@ struct AISettingsView: View {
             guard case .success(let apiKey) = keyResult else {
                 await MainActor.run {
                     isLoadingVoices = false
-                    errorMessage = "ElevenLabs API key not found in keychain"
+                    errorMessage = "ElevenLabs API key not found in local storage"
                     showError = true
                 }
                 return
@@ -568,7 +572,7 @@ struct AISettingsView: View {
             guard case .success(let apiKey) = keyResult else {
                 await MainActor.run {
                     isLoadingModels = false
-                    errorMessage = "OpenRouter API key not found in keychain"
+                    errorMessage = "OpenRouter API key not found in local storage"
                     showError = true
                 }
                 return

@@ -48,7 +48,7 @@ class StatsViewModel: ObservableObject {
     }
 
     private func bindToUpdates() {
-        coreManager.$statsVersion
+        coreManager.statsVersionPublisher
             .removeDuplicates()
             .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
             .sink { [weak self] _ in

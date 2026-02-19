@@ -65,6 +65,6 @@ struct StreamingMessageRow: View {
                 }
             }
         }
-        .padding(.vertical, isConsecutive ? 1 : 6)
+        .padding(.vertical, isConsecutive ? 3 : 8)
     }
 }

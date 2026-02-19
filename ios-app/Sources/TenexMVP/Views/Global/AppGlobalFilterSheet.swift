@@ -8,10 +8,15 @@ struct AppGlobalFilterToolbarButton: View {
         Button {
             isPresented = true
         } label: {
+            #if os(macOS)
+            Image(systemName: filterIcon)
+            #else
             Label(coreManager.appFilterSummaryLabel, systemImage: filterIcon)
                 .lineLimit(1)
+            #endif
         }
         .accessibilityIdentifier("global_filter_button")
+        .accessibilityLabel("Global Filter")
         .accessibilityValue(coreManager.appFilterSummaryLabel)
         .help("Filter by time and project")
         #if os(macOS)

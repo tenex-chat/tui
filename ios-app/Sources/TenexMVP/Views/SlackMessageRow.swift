@@ -10,7 +10,7 @@ import SwiftUI
 /// - Consecutive message handling (hides avatar/header when same author)
 /// - Tool call rendering via ToolCallRow
 /// - Q-tag handling for delegations and ask events
-struct SlackMessageRow: View {
+struct SlackMessageRow: View, Equatable {
     @EnvironmentObject var coreManager: TenexCoreManager
 
     let message: MessageInfo
@@ -20,6 +20,13 @@ struct SlackMessageRow: View {
 
     /// Callback when a delegation card is tapped
     var onDelegationTap: ((String) -> Void)?
+
+    static func == (lhs: SlackMessageRow, rhs: SlackMessageRow) -> Bool {
+        lhs.message == rhs.message &&
+        lhs.isConsecutive == rhs.isConsecutive &&
+        lhs.conversationId == rhs.conversationId &&
+        lhs.projectId == rhs.projectId
+    }
 
     /// State for expanded/collapsed content
     @State private var isExpanded = false
@@ -44,82 +51,175 @@ struct SlackMessageRow: View {
         deterministicColor(for: message.authorNpub)
     }
 
-    /// Denylist of tools that use q-tags internally (not for delegations)
-    private static let qTagDenylist = [
-        "report_write", "report_read", "report_delete",
-        "lesson_learn", "lesson_get"
-    ]
-
-    /// Check if q-tags should be rendered for this tool
-    private func shouldRenderQTags(_ toolName: String?) -> Bool {
-        guard let name = toolName?.lowercased() else { return true }
-        return !Self.qTagDenylist.contains(where: { name.contains($0) })
+    /// Match TUI semantics: q-tag presence should also classify as tool use.
+    private var isToolUse: Bool {
+        message.toolName != nil || !message.qTags.isEmpty
     }
 
-    /// Check if this is an ask or delegate tool (rendered via q-tags, not ToolCallRow)
-    private func isAskOrDelegateTool(_ toolName: String?) -> Bool {
-        guard let name = toolName?.lowercased() else { return false }
-        return name.contains("ask") || name.contains("delegate")
+    private var hasPTags: Bool {
+        !message.pTags.isEmpty
+    }
+
+    /// P-tagged messages always show the header even in consecutive groups.
+    private var shouldShowHeader: Bool {
+        !isConsecutive || hasPTags
+    }
+
+    private var directedRecipientsText: String {
+        message.pTags
+            .map(recipientDisplayName(for:))
+            .map { "@\($0)" }
+            .joined(separator: ", ")
+    }
+
+    private var readMoreFadeBackground: Color {
+        #if os(macOS)
+        return .conversationWorkspaceBackdropMac
+        #else
+        return .systemBackground
+        #endif
+    }
+
+    private var targetedMessageFill: Color {
+        #if os(macOS)
+        return .conversationWorkspaceSurfaceMac.opacity(0.72)
+        #else
+        return .systemGray6.opacity(0.58)
+        #endif
+    }
+
+    private var targetedMessageBorder: Color {
+        #if os(macOS)
+        return .conversationWorkspaceBorderMac.opacity(0.84)
+        #else
+        return Color.secondary.opacity(0.22)
+        #endif
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            // Header with inline avatar (hidden when consecutive)
-            if !isConsecutive {
-                HStack(spacing: 6) {
-                    AgentAvatarView(
-                        agentName: message.author,
-                        pubkey: message.authorNpub.isEmpty ? nil : npubToHex(message.authorNpub),
-                        size: avatarSize,
-                        fontSize: avatarFontSize,
-                        showBorder: false
+        Group {
+            VStack(alignment: .leading, spacing: 2) {
+                // Header with inline avatar (hidden for normal consecutive messages)
+                if shouldShowHeader {
+                    HStack(spacing: 6) {
+                        AgentAvatarView(
+                            agentName: message.author,
+                            pubkey: message.authorNpub.isEmpty ? nil : npubToHex(message.authorNpub),
+                            size: avatarSize,
+                            fontSize: avatarFontSize,
+                            showBorder: false
+                        )
+                        .environmentObject(coreManager)
+
+                        if hasPTags {
+                            Text(AgentNameFormatter.format(message.author))
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(authorColor)
+                            Text("->")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Text(directedRecipientsText)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(Color.agentBrand)
+                        } else {
+                            Text(AgentNameFormatter.format(message.author))
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(authorColor)
+                        }
+
+                        Text(ConversationFormatters.formatRelativeTime(message.createdAt))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+                    }
+                }
+
+                // Tool-use messages render only compact summaries (no markdown body),
+                // matching TUI per-tool selection precedence.
+                if isToolUse {
+                    ToolCallRow(
+                        toolName: message.toolName,
+                        toolArgs: message.toolArgs,
+                        contentFallback: message.content
+                    )
+                } else if !message.content.isEmpty {
+                    collapsibleContent
+                }
+
+                // Inline ask event on the message itself (root ask message).
+                if let askEvent = message.askEvent, let hexPubkey = npubToHex(message.authorNpub) {
+                    InlineAskView(
+                        askEvent: askEvent,
+                        askEventId: message.id,
+                        askAuthorPubkey: hexPubkey,
+                        conversationId: conversationId,
+                        projectId: projectId
                     )
                     .environmentObject(coreManager)
+                }
 
-                    Text(AgentNameFormatter.format(message.author))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(authorColor)
-
-                    Text(ConversationFormatters.formatRelativeTime(message.createdAt))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Spacer()
+                // Q-tags can resolve to either ask events or delegation threads.
+                if ConversationRenderPolicy.shouldRenderQTags(toolName: message.toolName), !message.qTags.isEmpty {
+                    ForEach(message.qTags, id: \.self) { qTag in
+                        QTagReferenceRow(
+                            qTag: qTag,
+                            recipientPubkeys: message.pTags,
+                            conversationId: conversationId,
+                            projectId: projectId,
+                            onDelegationTap: onDelegationTap
+                        )
+                        .environmentObject(coreManager)
+                    }
                 }
             }
-
-            // Tool call (if applicable and not ask/delegate)
-            if message.isToolCall && !isAskOrDelegateTool(message.toolName) {
-                ToolCallRow(
-                    toolName: message.toolName,
-                    toolArgs: message.toolArgs
-                )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, hasPTags ? 10 : 0)
+            .padding(.vertical, hasPTags ? 8 : 0)
+            .background {
+                if hasPTags {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(targetedMessageFill)
+                }
             }
-
-            // Message content (if not empty)
-            if !message.content.isEmpty {
-                collapsibleContent
-            }
-
-            // Q-tag previews (ask events and delegations)
-            if shouldRenderQTags(message.toolName) {
-                qTagContent
+            .overlay {
+                if hasPTags {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(targetedMessageBorder, lineWidth: 1)
+                }
             }
         }
-        .padding(.vertical, isConsecutive ? 1 : 6)
+        .padding(.vertical, isConsecutive ? 3 : 8)
+        #if os(macOS)
+        // Large transcripts can trigger expensive accessibility tree traversals on every host update.
+        // Keep a compact per-row accessibility representation to avoid deep subtree recomputation.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilitySummary)
+        #endif
     }
 
     // MARK: - Collapsible Content
 
     @ViewBuilder
     private var collapsibleContent: some View {
+        #if os(macOS)
+        // macOS transcript performance: avoid per-row geometry measurement and collapse state churn.
+        // Most rows are short; rendering directly keeps large transcripts responsive.
+        MarkdownView(content: message.content)
+            .font(.body)
+            .foregroundStyle(.primary)
+        #else
         VStack(alignment: .leading, spacing: 0) {
             // Content with height measurement
             MarkdownView(content: message.content)
                 .font(.body)
                 .foregroundStyle(.primary)
+                #if !os(macOS)
                 .textSelection(.enabled)
+                #endif
                 .background(
                     GeometryReader { geometry in
                         Color.clear
@@ -140,8 +240,8 @@ struct SlackMessageRow: View {
                     // Gradient fade overlay
                     LinearGradient(
                         gradient: Gradient(colors: [
-                            Color.systemBackground.opacity(0),
-                            Color.systemBackground
+                            readMoreFadeBackground.opacity(0),
+                            readMoreFadeBackground
                         ]),
                         startPoint: .top,
                         endPoint: .bottom
@@ -189,37 +289,7 @@ struct SlackMessageRow: View {
                 .padding(.top, 8)
             }
         }
-    }
-
-    // MARK: - Q-Tag Content
-
-    @ViewBuilder
-    private var qTagContent: some View {
-        // Inline ask event (if present)
-        // Only render if we can convert npub to hex - required for answerAsk FFI call
-        if let askEvent = message.askEvent, let hexPubkey = npubToHex(message.authorNpub) {
-            InlineAskView(
-                askEvent: askEvent,
-                askEventId: message.id,
-                askAuthorPubkey: hexPubkey,
-                conversationId: conversationId,
-                projectId: projectId
-            )
-            .environmentObject(coreManager)
-        }
-
-        // Delegation cards for q-tags (only if no ask event)
-        if message.askEvent == nil && !message.qTags.isEmpty {
-            ForEach(message.qTags, id: \.self) { qTag in
-                InlineDelegationCard(
-                    conversationId: qTag,
-                    recipientPubkeys: message.pTags
-                ) {
-                    onDelegationTap?(qTag)
-                }
-                .environmentObject(coreManager)
-            }
-        }
+        #endif
     }
 
     // MARK: - Helpers
@@ -228,6 +298,91 @@ struct SlackMessageRow: View {
     private func npubToHex(_ npub: String) -> String? {
         guard !npub.isEmpty else { return nil }
         return Bech32.npubToHex(npub)
+    }
+
+    private func recipientDisplayName(for recipientPubkey: String) -> String {
+        for agents in coreManager.onlineAgents.values {
+            if let agent = agents.first(where: { $0.pubkey == recipientPubkey }) {
+                return AgentNameFormatter.format(agent.name)
+            }
+        }
+
+        if let npub = Bech32.hexToNpub(recipientPubkey) {
+            return String(npub.prefix(12))
+        }
+
+        return String(recipientPubkey.prefix(8))
+    }
+
+    #if os(macOS)
+    private var accessibilitySummary: String {
+        var parts: [String] = []
+        if !message.author.isEmpty {
+            parts.append("From \(AgentNameFormatter.format(message.author))")
+        }
+
+        let normalizedContent = message.content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !normalizedContent.isEmpty {
+            let preview: String
+            if normalizedContent.count > 220 {
+                preview = String(normalizedContent.prefix(220)) + "..."
+            } else {
+                preview = normalizedContent
+            }
+            parts.append(preview)
+        }
+
+        if !message.qTags.isEmpty {
+            parts.append("\(message.qTags.count) delegation reference\(message.qTags.count == 1 ? "" : "s")")
+        }
+
+        return parts.isEmpty ? "Message" : parts.joined(separator: ". ")
+    }
+    #endif
+}
+
+private struct QTagReferenceRow: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+
+    let qTag: String
+    let recipientPubkeys: [String]
+    let conversationId: String
+    let projectId: String
+    let onDelegationTap: ((String) -> Void)?
+
+    @State private var askLookupInfo: AskEventLookupInfo?
+
+    var body: some View {
+        Group {
+            if let askLookupInfo {
+                InlineAskView(
+                    askEvent: askLookupInfo.askEvent,
+                    askEventId: qTag,
+                    askAuthorPubkey: askLookupInfo.authorPubkey,
+                    conversationId: conversationId,
+                    projectId: projectId
+                )
+                .environmentObject(coreManager)
+            } else {
+                InlineDelegationCard(
+                    conversationId: qTag,
+                    recipientPubkeys: recipientPubkeys
+                ) {
+                    onDelegationTap?(qTag)
+                }
+                .environmentObject(coreManager)
+            }
+        }
+        .task(id: qTag) {
+            await resolveAskEvent()
+        }
+    }
+
+    private func resolveAskEvent() async {
+        askLookupInfo = await coreManager.safeCore.getAskEventById(eventId: qTag)
     }
 }
 

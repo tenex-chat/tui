@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 // MARK: - URL Detection Utilities (Shared)
 
@@ -76,7 +79,14 @@ struct MarkdownView: View, Equatable {
             return cached
         }
 
+        let parseStartedAt = CFAbsoluteTimeGetCurrent()
         let parsed = parseMarkdown()
+        let parseMs = (CFAbsoluteTimeGetCurrent() - parseStartedAt) * 1000
+        PerformanceProfiler.shared.logEvent(
+            "markdown parse cache-miss chars=\(content.count) lines=\(content.split(separator: "\n", omittingEmptySubsequences: false).count) elements=\(parsed.count) parseMs=\(String(format: "%.2f", parseMs))",
+            category: .swiftUI,
+            level: parseMs >= 25 ? .error : .debug
+        )
 
         // Evict oldest entries if cache is too large
         if Self.parseCache.count >= Self.maxCacheSize {
@@ -537,7 +547,7 @@ struct InlineImageView: View {
 /// A layout that wraps content horizontally like text
 ///
 /// ## Width Handling
-/// - Uses a reasonable default width (UIScreen width - padding) when parent doesn't specify
+/// - Uses a reasonable default width (active screen width - padding) when parent doesn't specify
 /// - Passes width constraints to text subviews so they can wrap properly
 /// - Only wraps to next line when a subview cannot fit
 struct FlowLayout: Layout {
@@ -545,13 +555,18 @@ struct FlowLayout: Layout {
 
     /// Default width to use when parent doesn't specify one
     /// This prevents infinite width scenarios
-    private static let defaultMaxWidth: CGFloat = {
+    private static var defaultMaxWidth: CGFloat {
         #if os(iOS)
-        return UIScreen.main.bounds.width - 32 // Account for typical padding
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        if let screenWidth = activeScene?.screen.bounds.width, screenWidth.isFinite, screenWidth > 0 {
+            return max(320, screenWidth - 32) // Account for typical horizontal padding.
+        }
+        return 360
         #else
         return 600 // Reasonable default for macOS
         #endif
-    }()
+    }
 
     init(spacing: CGFloat = 4) {
         self.spacing = spacing

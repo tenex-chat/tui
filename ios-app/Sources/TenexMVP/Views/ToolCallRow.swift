@@ -7,10 +7,21 @@ import SwiftUI
 struct ToolCallRow: View {
     let toolName: String?
     let toolArgs: String?
+    let contentFallback: String?
+
+    init(toolName: String?, toolArgs: String?, contentFallback: String? = nil) {
+        self.toolName = toolName
+        self.toolArgs = toolArgs
+        self.contentFallback = contentFallback
+    }
 
     /// Parsed display info for the tool call
-    private var displayInfo: ToolDisplayInfo {
-        parseToolCall()
+    private var displayInfo: ConversationRenderPolicy.ToolSummary {
+        ConversationRenderPolicy.toolSummary(
+            toolName: toolName,
+            toolArgs: toolArgs,
+            contentFallback: contentFallback
+        )
     }
 
     var body: some View {
@@ -32,94 +43,6 @@ struct ToolCallRow: View {
         .padding(.vertical, 6)
         .background(Color.systemGray6)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    // MARK: - Tool Parsing
-
-    private struct ToolDisplayInfo {
-        let icon: String
-        let text: String
-    }
-
-    private func parseToolCall() -> ToolDisplayInfo {
-        let name = (toolName ?? "").lowercased()
-
-        // Parse tool arguments JSON
-        var args: [String: Any] = [:]
-        if let argsJson = toolArgs,
-           let data = argsJson.data(using: .utf8),
-           let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            args = parsed
-        }
-
-        // Match tool patterns and extract relevant info
-        if name.contains("bash") {
-            let command = extractString(from: args, keys: ["command", "cmd"])
-            return ToolDisplayInfo(icon: "terminal", text: "$ \(command)")
-        }
-
-        if name.contains("read") {
-            let filePath = extractString(from: args, keys: ["file_path", "path", "file"])
-            return ToolDisplayInfo(icon: "doc.text", text: filePath)
-        }
-
-        // IMPORTANT: Check todo_write BEFORE generic write/edit check.
-        // mcp__tenex__todo_write contains "write" so would match the generic pattern otherwise.
-        if name.contains("todo_write") || name.contains("todowrite") {
-            return ToolDisplayInfo(icon: "checklist", text: "Updated todos")
-        }
-
-        if name.contains("write") || name.contains("edit") {
-            let filePath = extractString(from: args, keys: ["file_path", "path", "file"])
-            return ToolDisplayInfo(icon: "square.and.pencil", text: filePath)
-        }
-
-        if name.contains("glob") || name.contains("grep") || name.contains("search") {
-            let pattern = extractString(from: args, keys: ["pattern", "query", "glob"])
-            return ToolDisplayInfo(icon: "magnifyingglass", text: pattern)
-        }
-
-        if name.contains("task") || name.contains("agent") {
-            let description = extractString(from: args, keys: ["description", "prompt", "task"])
-            return ToolDisplayInfo(icon: "play.fill", text: description)
-        }
-
-        if name.contains("web") || name.contains("fetch") {
-            let url = extractString(from: args, keys: ["url", "uri"])
-            return ToolDisplayInfo(icon: "globe", text: url)
-        }
-
-        if name.contains("mcp") {
-            // Generic MCP tool fallback - show the extracted tool name
-            // NOTE: MCP tools with specific patterns (todo_write, write, task, etc.)
-            // are handled by earlier checks. This only catches truly unknown MCP tools.
-            let shortName = extractMcpToolName(from: toolName ?? "")
-            return ToolDisplayInfo(icon: "puzzlepiece", text: shortName)
-        }
-
-        // Default fallback
-        let shortName = toolName?.split(separator: "_").last.map(String.init) ?? "tool"
-        return ToolDisplayInfo(icon: "wrench", text: shortName)
-    }
-
-    /// Extract a string value from args dictionary, trying multiple keys
-    private func extractString(from args: [String: Any], keys: [String]) -> String {
-        for key in keys {
-            if let value = args[key] as? String, !value.isEmpty {
-                return value
-            }
-        }
-        return "..."
-    }
-
-    /// Extract a readable name from MCP tool name (e.g., "mcp__tenex__report_write" -> "report_write")
-    private func extractMcpToolName(from fullName: String) -> String {
-        let parts = fullName.split(separator: "_")
-        // Skip "mcp" and server name prefixes
-        if parts.count >= 4 {
-            return parts.suffix(from: 3).joined(separator: "_")
-        }
-        return fullName
     }
 }
 

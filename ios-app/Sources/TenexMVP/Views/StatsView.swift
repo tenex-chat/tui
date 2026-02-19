@@ -101,7 +101,7 @@ struct TabPillButton: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .foregroundStyle(isSelected ? .blue : .primary)
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
         }
         .adaptiveGlassButtonStyle()
         .clipShape(Capsule())

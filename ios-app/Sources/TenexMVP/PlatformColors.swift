@@ -79,6 +79,38 @@ extension Color {
     static let systemGray4 = Color(.separatorColor)
     static let systemGray5 = Color(.quaternaryLabelColor)
     static let systemGray6 = Color(.controlBackgroundColor)
+
+    // MARK: - macOS Conversation Workspace Surfaces
+    static let conversationWorkspaceBackdropMac = Color(
+        red: 17.0 / 255.0,
+        green: 20.0 / 255.0,
+        blue: 24.0 / 255.0
+    )
+    static let conversationWorkspaceSurfaceMac = Color(
+        red: 27.0 / 255.0,
+        green: 32.0 / 255.0,
+        blue: 38.0 / 255.0
+    )
+    static let conversationWorkspaceBorderMac = Color(
+        red: 56.0 / 255.0,
+        green: 63.0 / 255.0,
+        blue: 72.0 / 255.0
+    )
+    static let conversationComposerShellMac = Color(
+        red: 20.0 / 255.0,
+        green: 24.0 / 255.0,
+        blue: 29.0 / 255.0
+    )
+    static let conversationComposerFooterMac = Color(
+        red: 26.0 / 255.0,
+        green: 31.0 / 255.0,
+        blue: 37.0 / 255.0
+    )
+    static let conversationComposerStrokeMac = Color(
+        red: 46.0 / 255.0,
+        green: 54.0 / 255.0,
+        blue: 64.0 / 255.0
+    )
     #endif
 
     // MARK: - Conversation Status

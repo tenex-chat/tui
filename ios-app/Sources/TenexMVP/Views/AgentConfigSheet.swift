@@ -188,7 +188,7 @@ struct AgentConfigSheet: View {
         } label: {
             HStack {
                 Image(systemName: selectedTools.contains(tool) ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(selectedTools.contains(tool) ? .blue : .secondary)
+                    .foregroundStyle(selectedTools.contains(tool) ? Color.accentColor : .secondary)
 
                 Text(displayName(for: tool))
                     .foregroundStyle(.primary)

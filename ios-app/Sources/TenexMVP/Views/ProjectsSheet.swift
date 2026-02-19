@@ -49,7 +49,7 @@ struct ProjectsContentView: View {
             HStack(spacing: 12) {
                 Image(systemName: selectedProjectIds.isEmpty ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
-                    .foregroundStyle(selectedProjectIds.isEmpty ? Color.agentBrand : .secondary)
+                    .foregroundStyle(selectedProjectIds.isEmpty ? Color.accentColor : .secondary)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("All Projects")
@@ -127,7 +127,7 @@ private struct ProjectsSheetRow: View {
                 HStack(spacing: 12) {
                     Image(systemName: isFiltered ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
-                        .foregroundStyle(isFiltered ? Color.agentBrand : .secondary)
+                        .foregroundStyle(isFiltered ? Color.accentColor : .secondary)
 
                     projectIconView
 

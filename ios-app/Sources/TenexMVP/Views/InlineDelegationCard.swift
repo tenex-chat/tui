@@ -12,6 +12,7 @@ struct InlineDelegationCard: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var conversationInfo: ConversationFullInfo?
     @State private var isLoading = true
+    private let profiler = PerformanceProfiler.shared
 
     /// Avatar size for recipient
     private let avatarSize: CGFloat = 32
@@ -116,10 +117,17 @@ struct InlineDelegationCard: View {
 
     private func loadConversationInfo() async {
         isLoading = true
+        let startedAt = CFAbsoluteTimeGetCurrent()
         let infos = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
         await MainActor.run {
             conversationInfo = infos.first
             isLoading = false
+            let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+            profiler.logEvent(
+                "inline delegation load conversationId=\(conversationId) found=\(conversationInfo != nil) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+                category: .general,
+                level: elapsedMs >= 100 ? .error : .info
+            )
         }
     }
 }

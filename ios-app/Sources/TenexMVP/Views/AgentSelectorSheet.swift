@@ -350,7 +350,7 @@ struct OnlineAgentRowView: View {
             // Selection indicator
             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                 .font(.body)
-                .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
+                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
         }
     }
 
