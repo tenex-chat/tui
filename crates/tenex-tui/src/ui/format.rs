@@ -110,20 +110,3 @@ pub fn format_message_time(timestamp: u64) -> String {
             .unwrap_or_else(|| "unknown".to_string())
     }
 }
-
-/// Map status label to a Unicode symbol.
-pub fn status_label_to_symbol(label: &str) -> &'static str {
-    match label.to_lowercase().as_str() {
-        "in progress" | "in-progress" | "working" | "active" => "🔧",
-        "blocked" | "waiting" | "paused" => "🚧",
-        "done" | "complete" | "completed" | "finished" => "✅",
-        "reviewing" | "review" | "in review" => "👀",
-        "testing" | "in testing" => "🧪",
-        "planning" | "draft" | "design" => "📝",
-        "urgent" | "critical" | "high priority" => "🔥",
-        "bug" | "issue" | "error" => "🐛",
-        "enhancement" | "feature" | "new" => "✨",
-        "question" | "help needed" => "❓",
-        _ => "📌",
-    }
-}
