@@ -3,6 +3,7 @@
 //! This module exposes a minimal API for use from Swift/Kotlin via UniFFI.
 //! Keep this API as simple as possible - no async functions, only basic types.
 
+use crate::tlog;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
@@ -52,7 +53,7 @@ use crate::models::agent_definition::AgentDefinition;
 use crate::models::{
     ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Report, Thread,
 };
-use crate::nostr::{DataChange, NostrCommand, NostrWorker};
+use crate::nostr::{set_log_path, DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
 use crate::stats::{
     query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats,
@@ -465,6 +466,79 @@ fn extract_e_tag_ids(note: &Note) -> Vec<String> {
     ids
 }
 
+fn short_id(value: &str, max_chars: usize) -> String {
+    value.chars().take(max_chars).collect()
+}
+
+#[derive(Default)]
+struct DeltaSummary {
+    total: usize,
+    message_appended: usize,
+    conversation_upsert: usize,
+    project_upsert: usize,
+    inbox_upsert: usize,
+    report_upsert: usize,
+    project_status_changed: usize,
+    pending_backend_approval: usize,
+    active_conversations_changed: usize,
+    stream_chunk: usize,
+    mcp_tools_changed: usize,
+    stats_updated: usize,
+    diagnostics_updated: usize,
+    general: usize,
+}
+
+impl DeltaSummary {
+    fn add(&mut self, delta: &DataChangeType) {
+        self.total += 1;
+        match delta {
+            DataChangeType::MessageAppended { .. } => self.message_appended += 1,
+            DataChangeType::ConversationUpsert { .. } => self.conversation_upsert += 1,
+            DataChangeType::ProjectUpsert { .. } => self.project_upsert += 1,
+            DataChangeType::InboxUpsert { .. } => self.inbox_upsert += 1,
+            DataChangeType::ReportUpsert { .. } => self.report_upsert += 1,
+            DataChangeType::ProjectStatusChanged { .. } => self.project_status_changed += 1,
+            DataChangeType::PendingBackendApproval { .. } => self.pending_backend_approval += 1,
+            DataChangeType::ActiveConversationsChanged { .. } => {
+                self.active_conversations_changed += 1
+            }
+            DataChangeType::StreamChunk { .. } => self.stream_chunk += 1,
+            DataChangeType::McpToolsChanged => self.mcp_tools_changed += 1,
+            DataChangeType::StatsUpdated => self.stats_updated += 1,
+            DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
+            DataChangeType::General => self.general += 1,
+        }
+    }
+
+    fn compact(&self) -> String {
+        format!(
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} stats={} diag={} general={}",
+            self.total,
+            self.message_appended,
+            self.conversation_upsert,
+            self.project_upsert,
+            self.inbox_upsert,
+            self.report_upsert,
+            self.project_status_changed,
+            self.pending_backend_approval,
+            self.active_conversations_changed,
+            self.stream_chunk,
+            self.mcp_tools_changed,
+            self.stats_updated,
+            self.diagnostics_updated,
+            self.general
+        )
+    }
+}
+
+fn summarize_deltas(deltas: &[DataChangeType]) -> DeltaSummary {
+    let mut summary = DeltaSummary::default();
+    for delta in deltas {
+        summary.add(delta);
+    }
+    summary
+}
+
 /// Process nostrdb note keys, update store, and return deltas.
 fn process_note_keys_with_deltas(
     ndb: &Ndb,
@@ -473,6 +547,7 @@ fn process_note_keys_with_deltas(
     note_keys: &[NoteKey],
     archived_ids: &std::collections::HashSet<String>,
 ) -> Vec<DataChangeType> {
+    let started_at = Instant::now();
     let txn = match Transaction::new(ndb) {
         Ok(txn) => txn,
         Err(_) => return Vec::new(),
@@ -483,10 +558,24 @@ fn process_note_keys_with_deltas(
         std::collections::HashSet::new();
     let mut inbox_items_to_upsert: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    let mut notes_found = 0usize;
+    let mut kind_1 = 0usize;
+    let mut kind_513 = 0usize;
+    let mut kind_31933 = 0usize;
+    let mut kind_30023 = 0usize;
+    let mut other_kinds = 0usize;
 
     for &note_key in note_keys.iter() {
         if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
+            notes_found += 1;
             let kind = note.kind();
+            match kind {
+                1 => kind_1 += 1,
+                513 => kind_513 += 1,
+                31933 => kind_31933 += 1,
+                30023 => kind_30023 += 1,
+                _ => other_kinds += 1,
+            }
 
             // Update store first
             store.handle_event(kind, &note);
@@ -614,6 +703,7 @@ fn process_note_keys_with_deltas(
         }
     }
 
+    let conversation_upsert_count = conversations_to_upsert.len();
     for conversation_id in conversations_to_upsert {
         if let Some(thread) = store.get_thread_by_id(&conversation_id) {
             deltas.push(DataChangeType::ConversationUpsert {
@@ -622,6 +712,7 @@ fn process_note_keys_with_deltas(
         }
     }
 
+    let inbox_upsert_count = inbox_items_to_upsert.len();
     for inbox_id in inbox_items_to_upsert {
         if let Some(item) = store.inbox.get_items().iter().find(|i| i.id == inbox_id) {
             deltas.push(DataChangeType::InboxUpsert {
@@ -631,9 +722,29 @@ fn process_note_keys_with_deltas(
     }
 
     // Subscribe to messages for any newly discovered projects
+    let mut pending_project_subscriptions = 0usize;
     for project_a_tag in store.drain_pending_project_subscriptions() {
+        pending_project_subscriptions += 1;
         let _ = core_handle.send(NostrCommand::SubscribeToProjectMessages { project_a_tag });
     }
+
+    let delta_summary = summarize_deltas(&deltas);
+    tlog!(
+        "PERF",
+        "process_note_keys_with_deltas noteKeys={} notesFound={} kinds={{1:{} 513:{} 31933:{} 30023:{} other:{}}} convUpserts={} inboxUpserts={} pendingProjectSubs={} deltas=[{}] elapsedMs={}",
+        note_keys.len(),
+        notes_found,
+        kind_1,
+        kind_513,
+        kind_31933,
+        kind_30023,
+        other_kinds,
+        conversation_upsert_count,
+        inbox_upsert_count,
+        pending_project_subscriptions,
+        delta_summary.compact(),
+        started_at.elapsed().as_millis()
+    );
 
     deltas
 }
@@ -643,11 +754,16 @@ fn process_data_changes_with_deltas(
     store: &mut AppDataStore,
     data_changes: &[DataChange],
 ) -> Vec<DataChangeType> {
+    let started_at = Instant::now();
     let mut deltas: Vec<DataChangeType> = Vec::new();
+    let mut project_status_changes = 0usize;
+    let mut stream_chunks = 0usize;
+    let mut mcp_tools_changed = 0usize;
 
     for change in data_changes {
         match change {
             DataChange::ProjectStatus { json } => {
+                project_status_changes += 1;
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
                     let kind = event.get("kind").and_then(|k| k.as_u64()).unwrap_or(0);
 
@@ -721,6 +837,7 @@ fn process_data_changes_with_deltas(
                 text_delta,
                 ..
             } => {
+                stream_chunks += 1;
                 deltas.push(DataChangeType::StreamChunk {
                     agent_pubkey: agent_pubkey.clone(),
                     conversation_id: conversation_id.clone(),
@@ -728,10 +845,23 @@ fn process_data_changes_with_deltas(
                 });
             }
             DataChange::MCPToolsChanged => {
+                mcp_tools_changed += 1;
                 deltas.push(DataChangeType::McpToolsChanged);
             }
         }
     }
+
+    let delta_summary = summarize_deltas(&deltas);
+    tlog!(
+        "PERF",
+        "process_data_changes_with_deltas input={} projectStatus={} streamChunks={} mcpToolsChanged={} deltas=[{}] elapsedMs={}",
+        data_changes.len(),
+        project_status_changes,
+        stream_chunks,
+        mcp_tools_changed,
+        delta_summary.compact(),
+        started_at.elapsed().as_millis()
+    );
 
     deltas
 }
@@ -1852,29 +1982,48 @@ impl TenexCore {
     /// Note: This is lightweight and can be called from any thread.
     /// Heavy initialization (relay connection) happens during login.
     pub fn init(&self) -> bool {
+        let init_started_at = Instant::now();
         if self.initialized.load(Ordering::SeqCst) {
+            tlog!("PERF", "ffi.init already initialized");
             return true;
         }
 
         // Get the data directory for nostrdb
         let data_dir = get_data_dir();
+        let log_path = data_dir.join("tenex.log");
+        set_log_path(log_path.clone());
+        tlog!(
+            "PERF",
+            "ffi.init start dataDir={} logPath={}",
+            data_dir.display(),
+            log_path.display()
+        );
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
             eprintln!("Failed to create data directory: {}", e);
+            tlog!("ERROR", "ffi.init failed creating data dir: {}", e);
             return false;
         }
 
         // Initialize nostrdb with appropriate mapsize for iOS
         // Use 2GB to avoid MDB_MAP_FULL errors with larger datasets
         let config = nostrdb::Config::new().set_mapsize(2 * 1024 * 1024 * 1024);
+        let ndb_open_started_at = Instant::now();
         let ndb = match open_ndb_with_lock_recovery(&data_dir, &config) {
             Ok(ndb) => ndb,
             Err(e) => {
                 eprintln!("Failed to initialize nostrdb: {}", e);
+                tlog!("ERROR", "ffi.init failed opening ndb: {}", e);
                 return false;
             }
         };
+        tlog!(
+            "PERF",
+            "ffi.init ndb opened elapsedMs={}",
+            ndb_open_started_at.elapsed().as_millis()
+        );
 
         // Start Nostr worker (same core path as TUI/CLI)
+        let worker_started_at = Instant::now();
         let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
         let (data_tx, data_rx) = mpsc::channel::<DataChange>();
         let event_stats = SharedEventStats::new();
@@ -1896,8 +2045,14 @@ impl TenexCore {
         let worker_handle = std::thread::spawn(move || {
             worker.run();
         });
+        tlog!(
+            "PERF",
+            "ffi.init worker started elapsedMs={}",
+            worker_started_at.elapsed().as_millis()
+        );
 
         // Subscribe to relevant kinds in nostrdb (mirrors CoreRuntime)
+        let subscribe_started_at = Instant::now();
         let ndb_filter = FilterBuilder::new()
             .kinds([31933, 1, 0, 4199, 513, 4129, 4201, 30023])
             .build();
@@ -1905,10 +2060,16 @@ impl TenexCore {
             Ok(sub) => sub,
             Err(e) => {
                 eprintln!("Failed to subscribe to nostrdb: {}", e);
+                tlog!("ERROR", "ffi.init failed creating ndb subscription: {}", e);
                 return false;
             }
         };
         let ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);
+        tlog!(
+            "PERF",
+            "ffi.init ndb stream ready elapsedMs={}",
+            subscribe_started_at.elapsed().as_millis()
+        );
 
         // Store ndb
         {
@@ -1920,7 +2081,13 @@ impl TenexCore {
         }
 
         // Initialize AppDataStore
+        let store_init_started_at = Instant::now();
         let store = AppDataStore::new(ndb.clone());
+        tlog!(
+            "PERF",
+            "ffi.init AppDataStore::new elapsedMs={}",
+            store_init_started_at.elapsed().as_millis()
+        );
         {
             let mut store_guard = match self.store.write() {
                 Ok(g) => g,
@@ -1971,6 +2138,7 @@ impl TenexCore {
 
         // Apply persisted backend trust state to the runtime store.
         if self.sync_trusted_backends_from_preferences().is_err() {
+            tlog!("ERROR", "ffi.init failed syncing trusted backends");
             return false;
         }
 
@@ -1990,6 +2158,11 @@ impl TenexCore {
             *stats_guard = Some(negentropy_stats_clone);
         }
         self.initialized.store(true, Ordering::SeqCst);
+        tlog!(
+            "PERF",
+            "ffi.init complete totalMs={}",
+            init_started_at.elapsed().as_millis()
+        );
         true
     }
 
@@ -2009,10 +2182,21 @@ impl TenexCore {
     /// On success, stores the keys and triggers async relay connection.
     /// Login succeeds immediately even if relays are unreachable.
     pub fn login(&self, nsec: String) -> Result<LoginResult, TenexError> {
+        let login_started_at = Instant::now();
+        tlog!("PERF", "ffi.login start");
         // Parse the nsec into a SecretKey
-        let secret_key = SecretKey::parse(&nsec).map_err(|e| TenexError::InvalidNsec {
-            message: e.to_string(),
+        let parse_started_at = Instant::now();
+        let secret_key = SecretKey::parse(&nsec).map_err(|e| {
+            tlog!("ERROR", "ffi.login invalid nsec: {}", e);
+            TenexError::InvalidNsec {
+                message: e.to_string(),
+            }
         })?;
+        tlog!(
+            "PERF",
+            "ffi.login parsed secret key elapsedMs={}",
+            parse_started_at.elapsed().as_millis()
+        );
 
         // Create Keys from the secret key
         let keys = Keys::new(secret_key);
@@ -2027,37 +2211,46 @@ impl TenexCore {
             })?;
 
         // Store the keys immediately (authentication is local)
+        let store_keys_started_at = Instant::now();
         {
             let mut keys_guard = self.keys.write().map_err(|e| TenexError::Internal {
                 message: format!("Failed to acquire write lock: {}", e),
             })?;
             *keys_guard = Some(keys.clone());
         }
+        tlog!(
+            "PERF",
+            "ffi.login stored keys elapsedMs={}",
+            store_keys_started_at.elapsed().as_millis()
+        );
 
-        // Set user pubkey in the store
+        // Apply authenticated user context in one shared store path.
+        let apply_user_started_at = Instant::now();
         {
             let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
                 message: format!("Failed to acquire store lock: {}", e),
             })?;
             if let Some(store) = store_guard.as_mut() {
-                store.set_user_pubkey(pubkey.clone());
+                store.apply_authenticated_user(pubkey.clone());
             }
         }
-
-        // Rebuild the store with fresh data from nostrdb
-        {
-            let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
-                message: format!("Failed to acquire store lock: {}", e),
-            })?;
-            if let Some(store) = store_guard.as_mut() {
-                store.rebuild_from_ndb();
-            }
-        }
+        tlog!(
+            "PERF",
+            "ffi.login apply_authenticated_user elapsedMs={}",
+            apply_user_started_at.elapsed().as_millis()
+        );
 
         // Re-apply persisted backend trust after store rebuild/logout cycles.
+        let trust_sync_started_at = Instant::now();
         self.sync_trusted_backends_from_preferences()?;
+        tlog!(
+            "PERF",
+            "ffi.login sync_trusted_backends_from_preferences elapsedMs={}",
+            trust_sync_started_at.elapsed().as_millis()
+        );
 
         // Trigger async relay connection (non-blocking, fire-and-forget)
+        let core_handle_started_at = Instant::now();
         let core_handle = {
             let handle_guard = self.core_handle.read().map_err(|e| TenexError::Internal {
                 message: format!("Failed to acquire core handle lock: {}", e),
@@ -2069,13 +2262,29 @@ impl TenexCore {
                 })?
                 .clone()
         };
+        tlog!(
+            "PERF",
+            "ffi.login resolved core handle elapsedMs={}",
+            core_handle_started_at.elapsed().as_millis()
+        );
 
+        let send_connect_started_at = Instant::now();
         let _ = core_handle.send(NostrCommand::Connect {
             keys,
             user_pubkey: pubkey.clone(),
             response_tx: None, // Don't wait for response
         });
+        tlog!(
+            "PERF",
+            "ffi.login queued connect elapsedMs={}",
+            send_connect_started_at.elapsed().as_millis()
+        );
 
+        tlog!(
+            "PERF",
+            "ffi.login complete totalMs={}",
+            login_started_at.elapsed().as_millis()
+        );
         Ok(LoginResult {
             pubkey,
             npub,
@@ -2380,6 +2589,7 @@ impl TenexCore {
     /// Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
     /// Returns empty Vec if no descendants exist or if the conversation is not found.
     pub fn get_descendant_conversation_ids(&self, conversation_id: String) -> Vec<String> {
+        let started_at = Instant::now();
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -2390,7 +2600,15 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
-        store.runtime_hierarchy.get_descendants(&conversation_id)
+        let descendants = store.runtime_hierarchy.get_descendants(&conversation_id);
+        tlog!(
+            "PERF",
+            "ffi.get_descendant_conversation_ids conversation={} descendants={} elapsedMs={}",
+            short_id(&conversation_id, 12),
+            descendants.len(),
+            started_at.elapsed().as_millis()
+        );
+        descendants
     }
 
     /// Get conversations by their IDs.
@@ -2400,6 +2618,8 @@ impl TenexCore {
         &self,
         conversation_ids: Vec<String>,
     ) -> Vec<ConversationFullInfo> {
+        let started_at = Instant::now();
+        let requested = conversation_ids.len();
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -2427,11 +2647,20 @@ impl TenexCore {
             }
         }
 
+        tlog!(
+            "PERF",
+            "ffi.get_conversations_by_ids requested={} returned={} elapsedMs={}",
+            requested,
+            conversations.len(),
+            started_at.elapsed().as_millis()
+        );
+
         conversations
     }
 
     /// Get messages for a conversation.
     pub fn get_messages(&self, conversation_id: String) -> Vec<MessageInfo> {
+        let started_at = Instant::now();
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -2442,10 +2671,27 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
+        let fetch_started_at = Instant::now();
         // Get messages for the thread
         let messages = store.get_messages(&conversation_id);
+        let fetch_elapsed_ms = fetch_started_at.elapsed().as_millis();
 
-        messages.iter().map(|m| message_to_info(store, m)).collect()
+        let convert_started_at = Instant::now();
+        let converted: Vec<MessageInfo> =
+            messages.iter().map(|m| message_to_info(store, m)).collect();
+        let convert_elapsed_ms = convert_started_at.elapsed().as_millis();
+        let total_elapsed_ms = started_at.elapsed().as_millis();
+        tlog!(
+            "PERF",
+            "ffi.get_messages conversation={} count={} fetchMs={} convertMs={} totalMs={}",
+            short_id(&conversation_id, 12),
+            converted.len(),
+            fetch_elapsed_ms,
+            convert_elapsed_ms,
+            total_elapsed_ms
+        );
+
+        converted
     }
 
     /// Get reports for a project.
@@ -2636,6 +2882,7 @@ impl TenexCore {
         &self,
         filter: ConversationFilter,
     ) -> Result<Vec<ConversationFullInfo>, TenexError> {
+        let started_at = Instant::now();
         let store_guard = self.store.read().map_err(|_| TenexError::LockError {
             resource: "store".to_string(),
         })?;
@@ -2680,18 +2927,26 @@ impl TenexCore {
 
         // Pre-compute message counts for all threads to avoid N×M reads
         // Build a map of thread_id -> message_count
+        let precompute_started_at = Instant::now();
         let mut message_counts: std::collections::HashMap<String, u32> =
             std::collections::HashMap::new();
+        let mut total_threads_scanned = 0usize;
         for project_a_tag in &project_a_tags {
             let threads = store.get_threads(project_a_tag);
+            total_threads_scanned += threads.len();
             for thread in threads {
                 let count = store.get_messages(&thread.id).len() as u32;
                 message_counts.insert(thread.id.clone(), count);
             }
         }
+        let precompute_elapsed_ms = precompute_started_at.elapsed().as_millis();
 
         // Collect all threads from selected projects
+        let collect_started_at = Instant::now();
         let mut conversations: Vec<ConversationFullInfo> = Vec::new();
+        let mut skipped_scheduled = 0usize;
+        let mut skipped_archived = 0usize;
+        let mut skipped_time = 0usize;
 
         for project_a_tag in &project_a_tags {
             let threads = store.get_threads(project_a_tag);
@@ -2699,17 +2954,20 @@ impl TenexCore {
             for thread in threads {
                 // Filter: scheduled events
                 if filter.hide_scheduled && thread.is_scheduled {
+                    skipped_scheduled += 1;
                     continue;
                 }
 
                 // Filter: archived
                 let is_archived = archived_ids.contains(&thread.id);
                 if !filter.show_archived && is_archived {
+                    skipped_archived += 1;
                     continue;
                 }
 
                 // Filter: time
                 if time_cutoff > 0 && thread.effective_last_activity < time_cutoff {
+                    skipped_time += 1;
                     continue;
                 }
 
@@ -2746,13 +3004,32 @@ impl TenexCore {
                 });
             }
         }
+        let collect_elapsed_ms = collect_started_at.elapsed().as_millis();
 
         // Sort: active first (by effective_last_activity desc), then inactive by effective_last_activity desc
+        let sort_started_at = Instant::now();
         conversations.sort_by(|a, b| match (a.is_active, b.is_active) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => b.effective_last_activity.cmp(&a.effective_last_activity),
         });
+        let sort_elapsed_ms = sort_started_at.elapsed().as_millis();
+
+        tlog!(
+            "PERF",
+            "ffi.get_all_conversations projects={} requestedProjectIds={} scannedThreads={} returned={} skippedScheduled={} skippedArchived={} skippedTime={} precomputeMs={} collectMs={} sortMs={} totalMs={}",
+            project_a_tags.len(),
+            filter.project_ids.len(),
+            total_threads_scanned,
+            conversations.len(),
+            skipped_scheduled,
+            skipped_archived,
+            skipped_time,
+            precompute_elapsed_ms,
+            collect_elapsed_ms,
+            sort_elapsed_ms,
+            started_at.elapsed().as_millis()
+        );
 
         Ok(conversations)
     }
@@ -3230,21 +3507,47 @@ impl TenexCore {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        tags: Vec<String>,
     ) -> Result<(), TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
         let core_handle = get_core_handle(&self.core_handle)?;
 
-        // Send the update agent config command
         core_handle
             .send(NostrCommand::UpdateAgentConfig {
                 project_a_tag,
                 agent_pubkey,
                 model,
                 tools,
-                tags: Vec::new(),
+                tags,
             })
             .map_err(|e| TenexError::Internal {
                 message: format!("Failed to send update agent config command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Update an agent's configuration globally (all projects).
+    ///
+    /// Publishes a kind:24020 event without a project a-tag.
+    pub fn update_global_agent_config(
+        &self,
+        agent_pubkey: String,
+        model: Option<String>,
+        tools: Vec<String>,
+        tags: Vec<String>,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::UpdateGlobalAgentConfig {
+                agent_pubkey,
+                model,
+                tools,
+                tags,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send update global agent config command: {}", e),
             })?;
 
         Ok(())
@@ -4005,6 +4308,7 @@ impl TenexCore {
     /// refresh, returns immediately without doing work. This prevents excessive CPU/relay
     /// load from rapid successive calls (e.g., multiple views loading simultaneously).
     pub fn refresh(&self) -> bool {
+        let refresh_started_at = Instant::now();
         // Throttle check: skip if we refreshed too recently
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -4014,6 +4318,12 @@ impl TenexCore {
 
         if last_refresh > 0 && now_ms.saturating_sub(last_refresh) < REFRESH_THROTTLE_INTERVAL_MS {
             // Throttled: skip this refresh call
+            tlog!(
+                "PERF",
+                "ffi.refresh throttled deltaMs={} thresholdMs={}",
+                now_ms.saturating_sub(last_refresh),
+                REFRESH_THROTTLE_INTERVAL_MS
+            );
             return true;
         }
 
@@ -4059,6 +4369,7 @@ impl TenexCore {
                 }
             }
         }
+        let initial_data_change_count = data_changes.len();
 
         // Drain nostrdb subscription stream for new notes
         let mut note_batches: Vec<Vec<NoteKey>> = Vec::new();
@@ -4069,6 +4380,8 @@ impl TenexCore {
                 }
             }
         }
+        let initial_note_batch_count = note_batches.len();
+        let initial_note_key_count: usize = note_batches.iter().map(|batch| batch.len()).sum();
 
         let mut store_guard = match self.store.write() {
             Ok(g) => g,
@@ -4091,6 +4404,7 @@ impl TenexCore {
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
+        let initial_process_started_at = Instant::now();
         let mut deltas: Vec<DataChangeType> = Vec::new();
 
         if !data_changes.is_empty() {
@@ -4108,14 +4422,30 @@ impl TenexCore {
                 ));
             }
         }
+        let initial_process_elapsed_ms = initial_process_started_at.elapsed().as_millis();
 
         append_snapshot_update_deltas(&mut deltas);
+        let initial_delta_summary = summarize_deltas(&deltas);
 
+        let initial_callback_started_at = Instant::now();
+        let initial_callback_count = if callback.is_some() { deltas.len() } else { 0 };
         if let Some(ref cb) = callback {
             for delta in deltas {
                 cb.on_data_changed(delta);
             }
         }
+        let initial_callback_elapsed_ms = initial_callback_started_at.elapsed().as_millis();
+        tlog!(
+            "PERF",
+            "ffi.refresh pass=initial dataChanges={} noteBatches={} noteKeys={} processMs={} callbackCount={} callbackMs={} deltas=[{}]",
+            initial_data_change_count,
+            initial_note_batch_count,
+            initial_note_key_count,
+            initial_process_elapsed_ms,
+            initial_callback_count,
+            initial_callback_elapsed_ms,
+            initial_delta_summary.compact()
+        );
 
         let ok = true;
 
@@ -4132,11 +4462,14 @@ impl TenexCore {
         // Strategy: Poll until no new events arrive for REFRESH_QUIET_PERIOD_MS, or until
         // REFRESH_MAX_POLL_TIMEOUT_MS is reached. This is adaptive - if events keep arriving,
         // we keep polling. If nothing arrives, we exit quickly.
+        let poll_started_at = Instant::now();
         let max_deadline = Instant::now() + Duration::from_millis(REFRESH_MAX_POLL_TIMEOUT_MS);
         let mut additional_batches: Vec<Vec<NoteKey>> = Vec::new();
         let mut quiet_since = Instant::now();
+        let mut poll_iterations = 0u64;
 
         while Instant::now() < max_deadline {
+            poll_iterations += 1;
             let mut got_events = false;
 
             if let Ok(mut stream_guard) = self.ndb_stream.write() {
@@ -4163,6 +4496,10 @@ impl TenexCore {
                 std::thread::sleep(Duration::from_millis(REFRESH_POLL_INTERVAL_MS));
             }
         }
+        let poll_elapsed_ms = poll_started_at.elapsed().as_millis();
+        let additional_batch_count = additional_batches.len();
+        let additional_note_key_count: usize =
+            additional_batches.iter().map(|batch| batch.len()).sum();
 
         // Re-acquire store lock and process additional batches
         let mut store_guard = match self.store.write() {
@@ -4185,6 +4522,7 @@ impl TenexCore {
 
         let callback = self.event_callback.read().ok().and_then(|g| g.clone());
 
+        let additional_process_started_at = Instant::now();
         let mut deltas: Vec<DataChangeType> = Vec::new();
         for note_keys in additional_batches {
             if !note_keys.is_empty() {
@@ -4197,17 +4535,42 @@ impl TenexCore {
                 ));
             }
         }
+        let additional_process_elapsed_ms = additional_process_started_at.elapsed().as_millis();
 
         append_snapshot_update_deltas(&mut deltas);
+        let additional_delta_summary = summarize_deltas(&deltas);
 
+        let additional_callback_started_at = Instant::now();
+        let additional_callback_count = if callback.is_some() { deltas.len() } else { 0 };
         if let Some(ref cb) = callback {
             for delta in deltas {
                 cb.on_data_changed(delta);
             }
         }
+        let additional_callback_elapsed_ms = additional_callback_started_at.elapsed().as_millis();
+        tlog!(
+            "PERF",
+            "ffi.refresh pass=additional pollIterations={} pollMs={} noteBatches={} noteKeys={} processMs={} callbackCount={} callbackMs={} deltas=[{}]",
+            poll_iterations,
+            poll_elapsed_ms,
+            additional_batch_count,
+            additional_note_key_count,
+            additional_process_elapsed_ms,
+            additional_callback_count,
+            additional_callback_elapsed_ms,
+            additional_delta_summary.compact()
+        );
 
         // Preserve previous refresh semantics (full rebuild)
+        let rebuild_started_at = Instant::now();
         store.rebuild_from_ndb();
+        let rebuild_elapsed_ms = rebuild_started_at.elapsed().as_millis();
+        tlog!(
+            "PERF",
+            "ffi.refresh complete rebuildMs={} totalMs={}",
+            rebuild_elapsed_ms,
+            refresh_started_at.elapsed().as_millis()
+        );
         ok
     }
 
@@ -4334,6 +4697,7 @@ impl TenexCore {
     /// Calling this again will replace the previous callback.
     pub fn set_event_callback(&self, callback: Box<dyn EventCallback>) {
         let callback: Arc<dyn EventCallback> = Arc::from(callback);
+        tlog!("PERF", "ffi.set_event_callback called");
 
         // Store callback
         if let Ok(mut guard) = self.event_callback.write() {
@@ -4343,12 +4707,17 @@ impl TenexCore {
         // Start listener thread if not already running
         if !self.callback_listener_running.swap(true, Ordering::SeqCst) {
             self.start_callback_listener();
+            tlog!(
+                "PERF",
+                "ffi.set_event_callback started callback listener thread"
+            );
         }
     }
 
     /// Clear the event callback and stop the listener thread.
     /// Call this on logout to clean up resources.
     pub fn clear_event_callback(&self) {
+        let started_at = Instant::now();
         // Clear callback first to prevent new notifications
         if let Ok(mut guard) = self.event_callback.write() {
             *guard = None;
@@ -4361,6 +4730,11 @@ impl TenexCore {
                 let _ = handle.join();
             }
         }
+        tlog!(
+            "PERF",
+            "ffi.clear_event_callback complete elapsedMs={}",
+            started_at.elapsed().as_millis()
+        );
     }
 
     // ===== AI Audio Notification Methods =====
@@ -4950,7 +5324,9 @@ impl TenexCore {
         let callback_ref = self.event_callback.clone();
 
         let handle = std::thread::spawn(move || {
+            tlog!("PERF", "callback_listener thread started");
             while running.load(Ordering::Relaxed) {
+                let cycle_started_at = Instant::now();
                 let mut data_changes: Vec<DataChange> = Vec::new();
                 if let Ok(rx_guard) = data_rx.lock() {
                     if let Some(rx) = rx_guard.as_ref() {
@@ -4973,6 +5349,9 @@ impl TenexCore {
                     std::thread::sleep(Duration::from_millis(50));
                     continue;
                 }
+                let data_change_count = data_changes.len();
+                let note_batch_count = note_batches.len();
+                let note_key_count: usize = note_batches.iter().map(|batch| batch.len()).sum();
 
                 let _tx_guard = match txn_lock.lock() {
                     Ok(guard) => guard,
@@ -5009,6 +5388,7 @@ impl TenexCore {
                     .map(|p| p.prefs.archived_thread_ids.clone())
                     .unwrap_or_default();
 
+                let process_started_at = Instant::now();
                 let mut deltas: Vec<DataChangeType> = Vec::new();
 
                 if !data_changes.is_empty() {
@@ -5030,15 +5410,34 @@ impl TenexCore {
                 drop(store_guard);
 
                 append_snapshot_update_deltas(&mut deltas);
+                let delta_summary = summarize_deltas(&deltas);
+                let process_elapsed_ms = process_started_at.elapsed().as_millis();
+                let mut callback_count = 0usize;
+                let callback_started_at = Instant::now();
 
                 if let Ok(cb_guard) = callback_ref.read() {
                     if let Some(cb) = cb_guard.as_ref() {
+                        callback_count = deltas.len();
                         for delta in deltas {
                             cb.on_data_changed(delta);
                         }
                     }
                 }
+                let callback_elapsed_ms = callback_started_at.elapsed().as_millis();
+                tlog!(
+                    "PERF",
+                    "callback_listener cycle dataChanges={} noteBatches={} noteKeys={} processMs={} callbackCount={} callbackMs={} deltas=[{}] totalMs={}",
+                    data_change_count,
+                    note_batch_count,
+                    note_key_count,
+                    process_elapsed_ms,
+                    callback_count,
+                    callback_elapsed_ms,
+                    delta_summary.compact(),
+                    cycle_started_at.elapsed().as_millis()
+                );
             }
+            tlog!("PERF", "callback_listener thread stopped");
         });
 
         if let Ok(mut guard) = self.callback_listener_handle.write() {

@@ -22,14 +22,6 @@ use std::rc::Rc;
 
 use super::{actions, input, messages};
 
-/// Extra lines added to `agent_projects.len()` when computing the project-list panel height:
-/// one for the "Projects with this agent:" header, one for bottom padding.
-const PROJECT_LIST_HEIGHT_OVERHEAD: u16 = 2;
-
-/// Maximum height (in terminal rows) of the project-list panel shown while Shift is held.
-/// Caps the visible list at this value regardless of how many projects the agent belongs to.
-const PROJECT_LIST_MAX_HEIGHT: u16 = 6;
-
 pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Fill entire area with app background (pure black)
     let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
@@ -1023,33 +1015,6 @@ fn render_agent_config_modal(
             }
         }
 
-        // Bottom-row PM toggle
-        if cursor_pos >= scroll_offset && (y_offset as usize) < visible_height {
-            let is_cursor_on_pm = cursor_pos == settings.tools_cursor;
-            let is_checked = settings.is_pm;
-            let prefix = if is_checked { "[x] " } else { "[ ] " };
-            let style = if is_cursor_on_pm && state.focus == AgentConfigFocus::Tools {
-                Style::default()
-                    .fg(theme::ACCENT_PRIMARY)
-                    .add_modifier(Modifier::BOLD)
-            } else if is_checked {
-                Style::default()
-                    .fg(theme::ACCENT_WARNING)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::TEXT_MUTED)
-            };
-            let row = Rect::new(
-                tools_list_area.x,
-                tools_list_area.y + y_offset,
-                tools_list_area.width,
-                1,
-            );
-            f.render_widget(
-                Paragraph::new(format!("{}Set as PM", prefix)).style(style),
-                row,
-            );
-        }
     } else {
         f.render_widget(
             Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
@@ -1057,57 +1022,41 @@ fn render_agent_config_modal(
         );
     }
 
-    // When Shift is held, show a panel listing the projects that contain this agent.
-    if state.shift_held && !state.agent_projects.is_empty() {
-        let project_list_height = (state.agent_projects.len() as u16 + PROJECT_LIST_HEIGHT_OVERHEAD)
-            .min(PROJECT_LIST_MAX_HEIGHT);
-        let panel_y = popup_area
-            .y
-            .saturating_add(popup_area.height)
-            .saturating_sub(project_list_height + PROJECT_LIST_HEIGHT_OVERHEAD);
-        let panel_area = Rect::new(
-            popup_area.x + 1,
-            panel_y,
-            popup_area.width.saturating_sub(2),
-            project_list_height,
-        );
-
-        let header =
-            Line::from(vec![Span::styled(
-                "Projects with this agent:",
-                Style::default().fg(theme::ACCENT_PRIMARY),
-            )]);
-        let project_lines: Vec<Line> = std::iter::once(header)
-            .chain(state.agent_projects.iter().map(|proj| {
-                Line::from(vec![Span::styled(
-                    format!("  · {}", proj.name),
-                    Style::default().fg(theme::TEXT_MUTED),
-                )])
-            }))
-            .collect();
-
-        f.render_widget(
-            Paragraph::new(project_lines)
-                .style(Style::default().bg(theme::BG_SECONDARY)),
-            panel_area,
-        );
-    } else if state.shift_held {
-        // Agent has no known projects
-        let panel_area = Rect::new(
-            popup_area.x + 1,
-            popup_area
-                .y
-                .saturating_add(popup_area.height)
-                .saturating_sub(3),
-            popup_area.width.saturating_sub(2),
-            1,
-        );
-        f.render_widget(
-            Paragraph::new("No known projects for this agent")
-                .style(Style::default().fg(theme::TEXT_MUTED)),
-            panel_area,
-        );
-    }
+    // Footer toggles row (above hints)
+    let toggles_area = Rect::new(
+        popup_area.x + 1,
+        popup_area.y + popup_area.height.saturating_sub(3),
+        popup_area.width.saturating_sub(2),
+        1,
+    );
+    let pm_checked = state
+        .settings
+        .as_ref()
+        .map(|s| s.is_pm)
+        .unwrap_or(false);
+    let pm_prefix = if pm_checked { "[x] " } else { "[ ] " };
+    let pm_style = if pm_checked {
+        Style::default().fg(theme::ACCENT_WARNING)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    let global_prefix = if state.save_globally { "[x] " } else { "[ ] " };
+    let global_style = if state.save_globally {
+        Style::default().fg(theme::ACCENT_WARNING)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!("{}Set as PM", pm_prefix), pm_style),
+            Span::styled("  ", Style::default()),
+            Span::styled(
+                format!("{}Change all projects", global_prefix),
+                global_style,
+            ),
+        ])),
+        toggles_area,
+    );
 
     let hints_area = Rect::new(
         popup_area.x + 1,
@@ -1115,12 +1064,8 @@ fn render_agent_config_modal(
         popup_area.width.saturating_sub(2),
         1,
     );
-    let hints_text = if popup_area.width < 90 {
-        "←→/tab shift+tab · ↑↓ · space/a · shift+enter save global · enter select · esc"
-    } else {
-        "←→/tab/shift+tab switch · ↑↓ navigate · space toggle · a toggle all · shift+enter save global · enter select · esc cancel"
-    };
-    let hints = Paragraph::new(hints_text).style(Style::default().fg(theme::TEXT_MUTED));
+    let hints = Paragraph::new("space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc")
+        .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 
@@ -1195,19 +1140,19 @@ fn render_chat_search_bar(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the TTS control tab with shared chrome (tab bar, statusbar)
 fn render_tts_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
-    // Layout: Tab bar | Content | Statusbar
+    // Layout: Content | Tab bar | Statusbar
     let chunks = Layout::vertical([
-        Constraint::Length(layout::TAB_BAR_HEIGHT),
         Constraint::Min(0),
+        Constraint::Length(layout::TAB_BAR_HEIGHT),
         Constraint::Length(layout::STATUSBAR_HEIGHT),
     ])
     .split(area);
 
-    // Render tab bar
-    render_tab_bar(f, app, chunks[0]);
-
     // Render TTS control content
-    render_tts_control(f, app, chunks[1]);
+    render_tts_control(f, app, chunks[0]);
+
+    // Render tab bar
+    render_tab_bar(f, app, chunks[1]);
 
     // Render statusbar
     let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
@@ -1231,19 +1176,19 @@ fn render_tts_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
 
 /// Render the report tab with shared chrome (tab bar, statusbar)
 fn render_report_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
-    // Layout: Tab bar | Content | Statusbar
+    // Layout: Content | Tab bar | Statusbar
     let chunks = Layout::vertical([
-        Constraint::Length(layout::TAB_BAR_HEIGHT),
         Constraint::Min(0),
+        Constraint::Length(layout::TAB_BAR_HEIGHT),
         Constraint::Length(layout::STATUSBAR_HEIGHT),
     ])
     .split(area);
 
-    // Render tab bar
-    render_tab_bar(f, app, chunks[0]);
-
     // Render report tab content
-    render_report_tab(f, app, chunks[1]);
+    render_report_tab(f, app, chunks[0]);
+
+    // Render tab bar
+    render_tab_bar(f, app, chunks[1]);
 
     // Render statusbar
     let (cumulative_runtime_ms, has_active_agents, active_agent_count) =

@@ -40,7 +40,8 @@ protocol SafeTenexCoreProtocol: Actor {
     func getAllMcpTools() throws -> [McpToolInfo]
     func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo]
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String]) throws
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], tags: [String]) throws
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], tags: [String]) throws
     func createAgentDefinition(
         name: String,
         description: String,

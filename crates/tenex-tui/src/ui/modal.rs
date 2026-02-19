@@ -1462,13 +1462,7 @@ impl AgentSettingsState {
                 count += group.tools.len();
             }
         }
-        // PM toggle row at the bottom of tools column
-        count + 1
-    }
-
-    /// Cursor index of the PM toggle row.
-    pub fn pm_toggle_cursor_index(&self) -> usize {
-        self.visible_item_count().saturating_sub(1)
+        count
     }
 
     /// Get the item at a given cursor position
@@ -1495,11 +1489,6 @@ impl AgentSettingsState {
 
     /// Toggle expansion of group at cursor, or toggle tool selection
     pub fn toggle_at_cursor(&mut self) {
-        if self.tools_cursor == self.pm_toggle_cursor_index() {
-            self.is_pm = !self.is_pm;
-            return;
-        }
-
         if let Some((group_idx, tool_idx)) = self.item_at_cursor(self.tools_cursor) {
             match tool_idx {
                 None => {
@@ -1535,10 +1524,6 @@ impl AgentSettingsState {
 
     /// Toggle all tools in the group at cursor (bulk toggle)
     pub fn toggle_group_all(&mut self) {
-        if self.tools_cursor == self.pm_toggle_cursor_index() {
-            return;
-        }
-
         if let Some((group_idx, _)) = self.item_at_cursor(self.tools_cursor) {
             let group = &self.tool_groups[group_idx];
             let is_fully_selected = group.is_fully_selected(&self.selected_tools);
@@ -1592,15 +1577,6 @@ impl AgentSettingsState {
     }
 }
 
-/// A reference to a project that contains a particular agent.
-#[derive(Debug, Clone)]
-pub struct AgentProjectRef {
-    /// Human-readable project name.
-    pub name: String,
-    /// Nostr coordinate a-tag for the project (e.g. `"30078:<pubkey>:<d-tag>"`).
-    pub a_tag: String,
-}
-
 /// State for the unified agent selection + configuration modal.
 #[derive(Debug, Clone)]
 pub struct AgentConfigState {
@@ -1618,12 +1594,8 @@ pub struct AgentConfigState {
     pub original_tools: std::collections::HashSet<String>,
     /// Original PM marker for change detection
     pub original_is_pm: bool,
-    /// Whether Shift is currently held — shows global-save hint and project list
-    pub shift_held: bool,
-    /// Projects that contain this agent.
-    /// Populated when `shift_held` transitions from `false` to `true`; cleared when Shift is
-    /// released (i.e. when `shift_held` transitions back to `false`).
-    pub agent_projects: Vec<AgentProjectRef>,
+    /// When true, Enter saves config globally (no project a-tag).
+    pub save_globally: bool,
 }
 
 impl AgentConfigState {
@@ -1636,8 +1608,7 @@ impl AgentConfigState {
             original_model: None,
             original_tools: std::collections::HashSet::new(),
             original_is_pm: false,
-            shift_held: false,
-            agent_projects: Vec::new(),
+            save_globally: false,
         }
     }
 
