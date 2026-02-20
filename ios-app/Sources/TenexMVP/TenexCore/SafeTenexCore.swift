@@ -121,7 +121,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Get conversations for a project.
     /// Note: Internal `try!` in FFI - can crash on error.
-    func getConversations(projectId: String) -> [ConversationInfo] {
+    func getConversations(projectId: String) -> [ConversationFullInfo] {
         profiler.measureFFI("getConversations") {
             core.getConversations(projectId: projectId)
         }
