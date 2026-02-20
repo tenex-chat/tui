@@ -89,8 +89,6 @@ private struct AudioNotificationRow: View {
     let notification: AudioNotificationInfo
     let coreManager: TenexCoreManager
 
-    @State private var agentName: String?
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(notification.conversationTitle)
@@ -103,11 +101,9 @@ private struct AudioNotificationRow: View {
                 .lineLimit(1)
 
             HStack {
-                if let name = agentName {
-                    Text(name)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
+                Text(coreManager.displayName(for: notification.agentPubkey))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 Spacer()
                 Text(relativeTimestamp(notification.createdAt))
                     .font(.caption2)
@@ -115,10 +111,6 @@ private struct AudioNotificationRow: View {
             }
         }
         .padding(.vertical, 2)
-        .task {
-            let name = await coreManager.safeCore.getProfileName(pubkey: notification.agentPubkey)
-            await MainActor.run { agentName = name }
-        }
     }
 }
 
@@ -128,8 +120,6 @@ private struct AudioNotificationDetailView: View {
     let notification: AudioNotificationInfo
     @ObservedObject var player: AudioNotificationPlayer
     let coreManager: TenexCoreManager
-
-    @State private var agentName: String?
 
     var body: some View {
         List {
@@ -168,9 +158,7 @@ private struct AudioNotificationDetailView: View {
             Section("Details") {
                 LabeledContent("Conversation", value: notification.conversationTitle)
                 LabeledContent("Voice ID", value: notification.voiceId)
-                if let name = agentName {
-                    LabeledContent("Agent", value: name)
-                }
+                LabeledContent("Agent", value: coreManager.displayName(for: notification.agentPubkey))
                 LabeledContent("Agent Pubkey") {
                     Text(notification.agentPubkey)
                         .font(.caption2)
@@ -188,10 +176,6 @@ private struct AudioNotificationDetailView: View {
         }
         .navigationTitle("Notification Detail")
         .navigationBarTitleDisplayMode(.inline)
-        .task {
-            let name = await coreManager.safeCore.getProfileName(pubkey: notification.agentPubkey)
-            await MainActor.run { agentName = name }
-        }
     }
 }
 
