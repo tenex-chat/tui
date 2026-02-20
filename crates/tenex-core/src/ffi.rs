@@ -813,29 +813,6 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
     }
 }
 
-/// A conversation/thread in a project.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct ConversationInfo {
-    /// Unique identifier of the conversation (event ID)
-    pub id: String,
-    /// Title/subject of the conversation
-    pub title: String,
-    /// Agent or user who started the conversation (display name)
-    pub author: String,
-    /// Author's public key (hex) for profile lookups
-    pub author_pubkey: String,
-    /// Brief summary or first line of content
-    pub summary: Option<String>,
-    /// Number of messages in the thread
-    pub message_count: u32,
-    /// Unix timestamp of last activity
-    pub last_activity: u64,
-    /// Parent conversation ID (for nesting)
-    pub parent_id: Option<String>,
-    /// Status: active, completed, waiting
-    pub status: String,
-}
-
 /// Extended conversation info with all data needed for the Conversations tab.
 /// Includes activity tracking, archive status, and hierarchy data.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -1657,6 +1634,11 @@ pub struct TenexCore {
     /// This mutex ensures only one code path can create a Transaction at a time, preventing
     /// panics when refresh() and getDiagnosticsSnapshot() are called concurrently.
     ndb_transaction_lock: Arc<Mutex<()>>,
+    /// Lock-free cache of today's runtime (milliseconds).
+    /// Updated after refresh() and callback listener data processing.
+    /// Read by get_today_runtime_ms() without acquiring the store RwLock,
+    /// eliminating priority inversion when refresh() holds the write lock.
+    cached_today_runtime_ms: Arc<AtomicU64>,
 }
 
 #[uniffi::export]
@@ -1682,6 +1664,7 @@ impl TenexCore {
             callback_listener_running: Arc::new(AtomicBool::new(false)),
             callback_listener_handle: Arc::new(RwLock::new(None)),
             ndb_transaction_lock: Arc::new(Mutex::new(())),
+            cached_today_runtime_ms: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -2210,8 +2193,8 @@ impl TenexCore {
     /// Get conversations for a project.
     ///
     /// Returns conversations organized with parent/child relationships.
-    /// Use parent_id to build nested conversation trees.
-    pub fn get_conversations(&self, project_id: String) -> Vec<ConversationInfo> {
+    /// Use thread.parent_conversation_id to build nested conversation trees.
+    pub fn get_conversations(&self, project_id: String) -> Vec<ConversationFullInfo> {
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -2229,36 +2212,21 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
+        let prefs_guard = match self.preferences.read() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        let archived_ids = prefs_guard
+            .as_ref()
+            .map(|p| p.prefs.archived_thread_ids.clone())
+            .unwrap_or_default();
+
         // Get threads for this project
         let threads = store.get_threads(&project_a_tag);
 
         threads
             .iter()
-            .map(|t| {
-                // Get message count
-                let message_count = store.get_messages(&t.id).len() as u32;
-
-                // Get author display name
-                let author_name = store.get_profile_name(&t.pubkey);
-
-                // Determine status from thread's status_label
-                let status = t
-                    .status_label
-                    .clone()
-                    .unwrap_or_else(|| "active".to_string());
-
-                ConversationInfo {
-                    id: t.id.clone(),
-                    title: t.title.clone(),
-                    author: author_name,
-                    author_pubkey: t.pubkey.clone(),
-                    summary: t.summary.clone(),
-                    message_count,
-                    last_activity: t.last_activity,
-                    parent_id: t.parent_conversation_id.clone(),
-                    status,
-                }
-            })
+            .map(|t| thread_to_full_info(store, t, &archived_ids))
             .collect()
     }
 
@@ -2279,22 +2247,13 @@ impl TenexCore {
     }
 
     /// Get today's LLM runtime for statusbar display (in milliseconds).
-    /// Includes today's confirmed runtime + estimated runtime from active agents.
-    /// This matches exactly what the TUI statusbar shows.
-    /// Returns 0 if store is not initialized.
+    /// Reads from a lock-free AtomicU64 cache that is updated after refresh()
+    /// and callback listener data processing. This avoids acquiring the store
+    /// RwLock, which eliminates priority inversion when refresh() holds the
+    /// write lock for extended periods.
+    /// Returns 0 if no data has been processed yet.
     pub fn get_today_runtime_ms(&self) -> u64 {
-        let store_guard = match self.store.read() {
-            Ok(g) => g,
-            Err(_) => return 0,
-        };
-
-        let store = match store_guard.as_ref() {
-            Some(s) => s,
-            None => return 0,
-        };
-
-        let (runtime_ms, _, _) = store.get_statusbar_runtime_ms();
-        runtime_ms
+        self.cached_today_runtime_ms.load(Ordering::Acquire)
     }
 
     /// Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
@@ -4492,6 +4451,12 @@ impl TenexCore {
         let rebuild_started_at = Instant::now();
         store.rebuild_from_ndb();
         let rebuild_elapsed_ms = rebuild_started_at.elapsed().as_millis();
+
+        // Update lock-free runtime cache while we still hold the store write lock
+        let (runtime_ms, _, _) = store.get_statusbar_runtime_ms();
+        self.cached_today_runtime_ms
+            .store(runtime_ms, Ordering::Release);
+
         tlog!(
             "PERF",
             "ffi.refresh complete rebuildMs={} totalMs={}",
@@ -5249,6 +5214,7 @@ impl TenexCore {
         let core_handle = self.core_handle.clone();
         let txn_lock = self.ndb_transaction_lock.clone();
         let callback_ref = self.event_callback.clone();
+        let cached_runtime = self.cached_today_runtime_ms.clone();
 
         let handle = std::thread::spawn(move || {
             tlog!("PERF", "callback_listener thread started");
@@ -5333,6 +5299,10 @@ impl TenexCore {
                         ));
                     }
                 }
+
+                // Update lock-free runtime cache while we still hold the store write lock
+                let (runtime_ms, _, _) = store_ref.get_statusbar_runtime_ms();
+                cached_runtime.store(runtime_ms, Ordering::Release);
 
                 drop(store_guard);
 
