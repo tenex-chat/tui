@@ -299,17 +299,7 @@ struct SlackMessageRow: View, Equatable {
     // MARK: - Helpers
 
     private func recipientDisplayName(for recipientPubkey: String) -> String {
-        for agents in coreManager.onlineAgents.values {
-            if let agent = agents.first(where: { $0.pubkey == recipientPubkey }) {
-                return AgentNameFormatter.format(agent.name)
-            }
-        }
-
-        if let npub = Bech32.hexToNpub(recipientPubkey) {
-            return String(npub.prefix(12))
-        }
-
-        return String(recipientPubkey.prefix(8))
+        AgentNameFormatter.format(coreManager.displayName(for: recipientPubkey))
     }
 
     #if os(macOS)
