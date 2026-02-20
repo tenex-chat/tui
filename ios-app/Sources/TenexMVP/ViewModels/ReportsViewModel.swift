@@ -8,7 +8,7 @@ final class ReportsViewModel: ObservableObject {
     // MARK: - Published Properties
 
     /// All reports from all projects, sorted by created date (newest first)
-    @Published private(set) var reports: [Report] = []
+    @Published var reports: [Report] = []
 
     /// Whether reports are currently being loaded
     @Published private(set) var isLoading = false
