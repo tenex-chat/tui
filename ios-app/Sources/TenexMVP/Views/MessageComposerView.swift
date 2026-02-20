@@ -85,6 +85,9 @@ struct MessageComposerView: View {
     @State var saveFailedError: String?
     @State var dictationManager = DictationManager()
     @State var showDictationOverlay = false
+    @State var showDraftBrowser = false
+    @State var draftSavedConfirmation = false
+    @State var messageHistory = MessageHistory()
 
     // Image attachment state
     @State var showImagePicker = false
@@ -408,6 +411,18 @@ struct MessageComposerView: View {
                     persistSelectedSkillIds()
                 }
             )
+        }
+        .sheet(isPresented: $showDraftBrowser) {
+            DraftBrowserSheet(projectId: selectedProject?.id ?? "") { draft in
+                isProgrammaticUpdate = true
+                localText = draft.text
+                isDirty = true
+                if let projectId = selectedProject?.id {
+                    Task {
+                        await draftManager.updateContent(draft.text, conversationId: conversationId, projectId: projectId)
+                    }
+                }
+            }
         }
         #if os(iOS)
         .sheet(isPresented: $showImagePicker) {

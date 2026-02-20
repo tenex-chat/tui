@@ -152,6 +152,9 @@ extension MessageComposerView {
                 )
 
                 isSending = false
+                messageHistory.add(contentToSend)
+                messageHistory.reset()
+
                 if let convId = conversationId {
                     coreManager.recordUserActivity(conversationId: convId)
                 }
