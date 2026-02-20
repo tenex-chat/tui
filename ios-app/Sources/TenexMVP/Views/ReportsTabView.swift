@@ -489,22 +489,12 @@ struct ReportsTabDetailView: View {
 
 // MARK: - Report Author Name Helper
 
-/// Resolves a hex pubkey to a display name via SafeTenexCore profile lookup.
 private struct ReportAuthorName: View {
     let pubkey: String
     @EnvironmentObject private var coreManager: TenexCoreManager
-    @State private var displayName: String?
 
     var body: some View {
-        Text(displayName ?? String(pubkey.prefix(12)) + "...")
-            .task(id: pubkey) {
-                let name = coreManager.safeCore.getProfileName(pubkey: pubkey)
-                if !name.isEmpty, name != pubkey {
-                    displayName = name
-                } else {
-                    displayName = String(pubkey.prefix(12)) + "..."
-                }
-            }
+        Text(coreManager.displayName(for: pubkey))
     }
 }
 

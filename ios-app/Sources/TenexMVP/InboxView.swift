@@ -754,7 +754,7 @@ struct InboxConversationView: View {
         .navigationTitle("Conversation")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            userPubkey = coreManager.safeCore.getCurrentUser()?.pubkey ?? ""
+            userPubkey = (await coreManager.safeCore.getCurrentUser())?.pubkey ?? ""
             await loadMessages()
         }
         .onReceive(coreManager.$messagesByConversation) { cache in
