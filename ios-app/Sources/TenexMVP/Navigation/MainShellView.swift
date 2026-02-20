@@ -13,13 +13,13 @@ struct MainShellView: View {
     @State private var selectedSection: AppSection? = .chats
     @State private var selectedConversation: ConversationFullInfo?
     @State private var selectedProjectId: String?
-    @State private var selectedReport: ReportInfo?
+    @State private var selectedReport: Report?
     @State private var selectedInboxFilter: InboxFilter = .all
     @State private var selectedInboxItemId: String?
     @State private var activeInboxConversationId: String?
     @State private var selectedSearchConversation: ConversationFullInfo?
     @State private var selectedTeam: TeamInfo?
-    @State private var selectedAgentDefinition: AgentInfo?
+    @State private var selectedAgentDefinition: AgentDefinition?
     @State private var newConversationProjectId: String?
     @State private var currentUserPubkey: String?
     @State private var currentUserDisplayName: String = "You"

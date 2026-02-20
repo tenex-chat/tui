@@ -8,7 +8,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func forceReconnect() throws
 
     // MARK: - Projects
-    func getProjects() -> [ProjectInfo]
+    func getProjects() -> [Project]
     func getProjectFilters() throws -> [ProjectFilterInfo]
 
     // MARK: - Conversations
@@ -23,7 +23,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func toggleConversationArchived(conversationId: String) -> Bool
 
     // MARK: - Messages
-    func getMessages(conversationId: String) -> [MessageInfo]
+    func getMessages(conversationId: String) -> [Message]
     func getAskEventById(eventId: String) -> AskEventLookupInfo?
     func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult
@@ -36,10 +36,10 @@ protocol SafeTenexCoreProtocol: Actor {
     func search(query: String, limit: Int32) -> [SearchResult]
 
     // MARK: - Agents
-    func getAgents(projectId: String) throws -> [AgentInfo]
-    func getAllAgents() throws -> [AgentInfo]
-    func getAllMcpTools() throws -> [McpToolInfo]
-    func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo]
+    func getAgents(projectId: String) throws -> [AgentDefinition]
+    func getAllAgents() throws -> [AgentDefinition]
+    func getAllMcpTools() throws -> [McpTool]
+    func getOnlineAgents(projectId: String) throws -> [ProjectAgent]
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], tags: [String]) throws
     func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], tags: [String]) throws
@@ -59,7 +59,7 @@ protocol SafeTenexCoreProtocol: Actor {
         description: String,
         repoUrl: String?,
         pictureUrl: String?,
-        agentIds: [String],
+        agentDefinitionIds: [String],
         mcpToolIds: [String]
     ) throws
     func deleteProject(projectId: String) throws
@@ -82,8 +82,8 @@ protocol SafeTenexCoreProtocol: Actor {
     func bootProject(projectId: String) throws
 
     // MARK: - Nudges
-    func getNudges() throws -> [NudgeInfo]
-    func getSkills() throws -> [SkillInfo]
+    func getNudges() throws -> [Nudge]
+    func getSkills() throws -> [Skill]
 
 
     // MARK: - Backend Trust
@@ -120,7 +120,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func setVisibleProjects(projectATags: [String])
 
     // MARK: - Reports
-    func getReports(projectId: String) -> [ReportInfo]
+    func getReports(projectId: String) -> [Report]
 
     // MARK: - AI Audio Settings
     func getAiAudioSettings() throws -> AiAudioSettings

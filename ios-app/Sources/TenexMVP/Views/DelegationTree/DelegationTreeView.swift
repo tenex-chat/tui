@@ -29,7 +29,7 @@ struct DelegationTreeView: View {
             viewModel.safeCore = coreManager.safeCore
             await viewModel.loadTree(rootConversationId: rootConversationId)
         }
-        .navigationTitle(viewModel.rootNode?.conversation.title ?? "Delegation Tree")
+        .navigationTitle(viewModel.rootNode?.conversation.thread.title ?? "Delegation Tree")
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 if !viewModel.isLoading {
@@ -226,7 +226,7 @@ private struct DelegationNodeCard: View {
     private var conversation: ConversationFullInfo { node.conversation }
 
     private var statusColor: Color {
-        Color.conversationStatus(for: conversation.status, isActive: conversation.isActive)
+        Color.conversationStatus(for: conversation.thread.statusLabel, isActive: conversation.isActive)
     }
 
     var body: some View {
@@ -235,7 +235,7 @@ private struct DelegationNodeCard: View {
             HStack(spacing: 8) {
                 AgentAvatarView(
                     agentName: conversation.author,
-                    pubkey: conversation.authorPubkey,
+                    pubkey: conversation.thread.pubkey,
                     size: 28
                 )
                 .environmentObject(coreManager)
@@ -255,7 +255,7 @@ private struct DelegationNodeCard: View {
                         }
                     }
 
-                    if let status = conversation.status {
+                    if let status = conversation.thread.statusLabel {
                         Text(status)
                             .font(.caption2)
                             .padding(.horizontal, 5)
@@ -268,19 +268,19 @@ private struct DelegationNodeCard: View {
 
                 Spacer()
 
-                Text(ConversationFormatters.formatRelativeTime(conversation.effectiveLastActivity))
+                Text(ConversationFormatters.formatRelativeTime(conversation.thread.effectiveLastActivity))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
 
             // Title
-            Text(conversation.title)
+            Text(conversation.thread.title)
                 .font(.caption)
                 .fontWeight(.medium)
                 .lineLimit(2)
 
             // Summary preview
-            if let summary = conversation.summary {
+            if let summary = conversation.thread.summary {
                 Text(summary)
                     .font(.caption2)
                     .foregroundStyle(.secondary)

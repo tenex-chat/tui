@@ -19,8 +19,8 @@ enum NudgeSkillSelectorMode: String, CaseIterable, Identifiable {
 
 /// Unified sheet for selecting both nudges and skills.
 struct NudgeSkillSelectorSheet: View {
-    let nudges: [NudgeInfo]
-    let skills: [SkillInfo]
+    let nudges: [Nudge]
+    let skills: [Skill]
     @Binding var selectedNudgeIds: Set<String>
     @Binding var selectedSkillIds: Set<String>
     var initialMode: NudgeSkillSelectorMode = .all
@@ -35,8 +35,8 @@ struct NudgeSkillSelectorSheet: View {
     @State private var mode: NudgeSkillSelectorMode = .all
 
     fileprivate enum SelectorItem: Identifiable {
-        case nudge(NudgeInfo)
-        case skill(SkillInfo)
+        case nudge(Nudge)
+        case skill(Skill)
 
         var id: String {
             switch self {
@@ -101,13 +101,13 @@ struct NudgeSkillSelectorSheet: View {
         }
     }
 
-    private var selectedNudges: [NudgeInfo] {
+    private var selectedNudges: [Nudge] {
         nudges
             .filter { localSelectedNudgeIds.contains($0.id) }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
     }
 
-    private var selectedSkills: [SkillInfo] {
+    private var selectedSkills: [Skill] {
         skills
             .filter { localSelectedSkillIds.contains($0.id) }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }

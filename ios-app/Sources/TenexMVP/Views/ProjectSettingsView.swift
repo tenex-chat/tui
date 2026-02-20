@@ -21,8 +21,8 @@ struct ProjectSettingsView: View {
     @State private var pendingToolIds: [String] = []
     @State private var baselineToolIds: [String] = []
 
-    @State private var allAgents: [AgentInfo] = []
-    @State private var allMcpTools: [McpToolInfo] = []
+    @State private var allAgents: [AgentDefinition] = []
+    @State private var allMcpTools: [McpTool] = []
     @State private var hasLoadedSelectionData = false
 
     @State private var showAddAgentSheet = false
@@ -41,7 +41,7 @@ struct ProjectSettingsView: View {
     @State private var errorMessage: String?
     @State private var showErrorAlert = false
 
-    private var project: ProjectInfo? {
+    private var project: Project? {
         coreManager.projects.first { $0.id == projectId }
     }
 
@@ -65,7 +65,7 @@ struct ProjectSettingsView: View {
         coreManager.onlineAgents[projectId]?.count ?? 0
     }
 
-    private var filteredAvailableAgents: [AgentInfo] {
+    private var filteredAvailableAgents: [AgentDefinition] {
         let remaining = allAgents.filter { !pendingAgentIds.contains($0.id) }
         guard !agentSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return remaining
@@ -79,7 +79,7 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private var filteredAvailableTools: [McpToolInfo] {
+    private var filteredAvailableTools: [McpTool] {
         let remaining = allMcpTools.filter { !pendingToolIds.contains($0.id) }
         guard !toolSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return remaining
@@ -147,7 +147,7 @@ struct ProjectSettingsView: View {
     }
 
     @ViewBuilder
-    private func headerSection(project: ProjectInfo) -> some View {
+    private func headerSection(project: Project) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 12) {
@@ -200,7 +200,7 @@ struct ProjectSettingsView: View {
     }
 
     @ViewBuilder
-    private func generalSection(project: ProjectInfo) -> some View {
+    private func generalSection(project: Project) -> some View {
         Section("General") {
             TextField("Title", text: $generalDraft.title)
 #if os(iOS)
@@ -284,7 +284,7 @@ struct ProjectSettingsView: View {
     }
 
     @ViewBuilder
-    private func agentsSection(project: ProjectInfo) -> some View {
+    private func agentsSection(project: Project) -> some View {
         Section {
             if pendingAgentIds.isEmpty {
                 ContentUnavailableView(
@@ -373,7 +373,7 @@ struct ProjectSettingsView: View {
     }
 
     @ViewBuilder
-    private func toolsSection(project: ProjectInfo) -> some View {
+    private func toolsSection(project: Project) -> some View {
         Section("Tools") {
             if pendingToolIds.isEmpty {
                 ContentUnavailableView(
@@ -444,7 +444,7 @@ struct ProjectSettingsView: View {
     }
 
     @ViewBuilder
-    private func dangerSection(project: ProjectInfo) -> some View {
+    private func dangerSection(project: Project) -> some View {
         Section("Danger Zone") {
             Button(role: .destructive) {
                 showDeleteDialog = true
@@ -555,8 +555,8 @@ struct ProjectSettingsView: View {
         generalDraft = syncedGeneral
         baselineGeneralDraft = syncedGeneral
 
-        pendingAgentIds = project.agentIds
-        baselineAgentIds = project.agentIds
+        pendingAgentIds = project.agentDefinitionIds
+        baselineAgentIds = project.agentDefinitionIds
 
         pendingToolIds = project.mcpToolIds
         baselineToolIds = project.mcpToolIds
@@ -592,7 +592,7 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func saveGeneral(project: ProjectInfo) async {
+    private func saveGeneral(project: Project) async {
         isSavingGeneral = true
         defer { isSavingGeneral = false }
 
@@ -603,7 +603,7 @@ struct ProjectSettingsView: View {
                 description: generalDraft.description,
                 repoUrl: normalizedOptional(generalDraft.repoUrl),
                 pictureUrl: normalizedOptional(generalDraft.pictureUrl),
-                agentIds: project.agentIds,
+                agentDefinitionIds: project.agentDefinitionIds,
                 mcpToolIds: project.mcpToolIds
             )
             baselineGeneralDraft = generalDraft
@@ -612,7 +612,7 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func saveAgents(project: ProjectInfo) async {
+    private func saveAgents(project: Project) async {
         isSavingAgents = true
         defer { isSavingAgents = false }
 
@@ -623,7 +623,7 @@ struct ProjectSettingsView: View {
                 description: project.description ?? "",
                 repoUrl: project.repoUrl,
                 pictureUrl: project.pictureUrl,
-                agentIds: pendingAgentIds,
+                agentDefinitionIds: pendingAgentIds,
                 mcpToolIds: project.mcpToolIds
             )
             baselineAgentIds = pendingAgentIds
@@ -632,7 +632,7 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func saveTools(project: ProjectInfo) async {
+    private func saveTools(project: Project) async {
         isSavingTools = true
         defer { isSavingTools = false }
 
@@ -643,7 +643,7 @@ struct ProjectSettingsView: View {
                 description: project.description ?? "",
                 repoUrl: project.repoUrl,
                 pictureUrl: project.pictureUrl,
-                agentIds: project.agentIds,
+                agentDefinitionIds: project.agentDefinitionIds,
                 mcpToolIds: pendingToolIds
             )
             baselineToolIds = pendingToolIds

@@ -39,19 +39,19 @@ final class DelegationTreeViewModel: ObservableObject {
         let allIds = [rootConversationId] + descendantIds
         let allConversations = await safeCore.getConversationsByIds(conversationIds: allIds)
 
-        guard let rootConversation = allConversations.first(where: { $0.id == rootConversationId }) else {
+        guard let rootConversation = allConversations.first(where: { $0.thread.id == rootConversationId }) else {
             loadError = "Root conversation not found"
             isLoading = false
             return
         }
 
         // Step 3: Load messages for all conversations concurrently
-        var messagesByConversation: [String: [MessageInfo]] = [:]
-        await withTaskGroup(of: (String, [MessageInfo]).self) { group in
+        var messagesByConversation: [String: [Message]] = [:]
+        await withTaskGroup(of: (String, [Message]).self) { group in
             for conversation in allConversations {
                 group.addTask { [safeCore] in
-                    let messages = await safeCore.getMessages(conversationId: conversation.id)
-                    return (conversation.id, messages)
+                    let messages = await safeCore.getMessages(conversationId: conversation.thread.id)
+                    return (conversation.thread.id, messages)
                 }
             }
             for await (convId, messages) in group {
@@ -60,7 +60,7 @@ final class DelegationTreeViewModel: ObservableObject {
         }
 
         // Step 4: Build conversation lookup map
-        let conversationById = Dictionary(uniqueKeysWithValues: allConversations.map { ($0.id, $0) })
+        let conversationById = Dictionary(uniqueKeysWithValues: allConversations.map { ($0.thread.id, $0) })
 
         // Step 5: Build tree recursively
         var root = buildNode(
@@ -86,27 +86,27 @@ final class DelegationTreeViewModel: ObservableObject {
 
     private func buildNode(
         conversation: ConversationFullInfo,
-        delegationMessage: MessageInfo?,
-        returnMessage: MessageInfo?,
+        delegationMessage: Message?,
+        returnMessage: Message?,
         parentConversation: ConversationFullInfo?,
         conversationById: [String: ConversationFullInfo],
-        messagesByConversation: [String: [MessageInfo]],
+        messagesByConversation: [String: [Message]],
         depth: Int
     ) -> DelegationTreeNode {
         // Find children: conversations whose parentId == this conversation's id
-        let childConversations = conversationById.values.filter { $0.parentId == conversation.id }
+        let childConversations = conversationById.values.filter { $0.thread.parentConversationId == conversation.thread.id }
 
         var children: [DelegationTreeNode] = []
-        for childConv in childConversations.sorted(by: { $0.lastActivity < $1.lastActivity }) {
-            let childMessages = messagesByConversation[childConv.id] ?? []
+        for childConv in childConversations.sorted(by: { $0.thread.lastActivity < $1.thread.lastActivity }) {
+            let childMessages = messagesByConversation[childConv.thread.id] ?? []
 
             // Outgoing arrow: OP of the child conversation (first message = delegation brief)
             let delegMsg = childMessages.first
 
-            // Return arrow: last assistant message in child (completion)
-            // (All messages p-tag the parent, so we filter by role to find the actual return)
+            // Return arrow: last message from the child's agent (completion)
+            // The child conversation's thread pubkey identifies the delegated agent.
             let childReturnMsg = childMessages.last { msg in
-                msg.role == "assistant"
+                msg.pubkey == childConv.thread.pubkey && msg.toolName == nil
             }
 
             let childNode = buildNode(
@@ -187,8 +187,8 @@ final class DelegationTreeViewModel: ObservableObject {
     struct Edge {
         let parentId: String
         let childId: String
-        let delegationMessage: MessageInfo?
-        let returnMessage: MessageInfo?
+        let delegationMessage: Message?
+        let returnMessage: Message?
         let childStatus: String?
         let childIsActive: Bool
     }
@@ -207,7 +207,7 @@ final class DelegationTreeViewModel: ObservableObject {
                 childId: child.id,
                 delegationMessage: child.delegationMessage,
                 returnMessage: child.returnMessage,
-                childStatus: child.conversation.status,
+                childStatus: child.conversation.thread.statusLabel,
                 childIsActive: child.conversation.isActive
             ))
             collectEdges(node: child, into: &result)

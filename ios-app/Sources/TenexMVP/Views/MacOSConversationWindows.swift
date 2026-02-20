@@ -33,7 +33,7 @@ struct ConversationSummaryWindow: View {
             await resolveConversation()
         }
         .onReceive(coreManager.$conversations) { conversations in
-            if let updated = conversations.first(where: { $0.id == conversationId }) {
+            if let updated = conversations.first(where: { $0.thread.id == conversationId }) {
                 conversation = updated
             }
         }
@@ -41,7 +41,7 @@ struct ConversationSummaryWindow: View {
 
     private func resolveConversation() async {
         // Try local cache first
-        if let cached = coreManager.conversations.first(where: { $0.id == conversationId }) {
+        if let cached = coreManager.conversations.first(where: { $0.thread.id == conversationId }) {
             conversation = cached
             isLoading = false
             return
@@ -63,7 +63,7 @@ struct FullConversationWindow: View {
     @EnvironmentObject var coreManager: TenexCoreManager
 
     @State private var conversation: ConversationFullInfo?
-    @State private var messages: [MessageInfo] = []
+    @State private var messages: [Message] = []
     @State private var isLoading = true
 
     var body: some View {
@@ -90,7 +90,7 @@ struct FullConversationWindow: View {
             messages = coreManager.messagesByConversation[conversationId] ?? []
         }
         .onReceive(coreManager.$conversations) { conversations in
-            if let updated = conversations.first(where: { $0.id == conversationId }) {
+            if let updated = conversations.first(where: { $0.thread.id == conversationId }) {
                 conversation = updated
             }
         }
@@ -102,7 +102,7 @@ struct FullConversationWindow: View {
     }
 
     private func resolveConversation() async {
-        if let cached = coreManager.conversations.first(where: { $0.id == conversationId }) {
+        if let cached = coreManager.conversations.first(where: { $0.thread.id == conversationId }) {
             conversation = cached
             isLoading = false
             return

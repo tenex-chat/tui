@@ -277,14 +277,14 @@ struct FullConversationSheet: View {
     }
 
     let conversation: ConversationFullInfo
-    let messages: [MessageInfo]
+    let messages: [Message]
     let presentationStyle: PresentationStyle
     @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedDelegation: String?
     @State private var showComposer = false
-    @State private var availableAgents: [OnlineAgentInfo] = []
+    @State private var availableAgents: [ProjectAgent] = []
     @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var visibleMessageLimit = 240
 
@@ -294,7 +294,7 @@ struct FullConversationSheet: View {
 
     init(
         conversation: ConversationFullInfo,
-        messages: [MessageInfo],
+        messages: [Message],
         presentationStyle: PresentationStyle = .sheet
     ) {
         self.conversation = conversation
@@ -306,7 +306,7 @@ struct FullConversationSheet: View {
         presentationStyle == .embedded
     }
 
-    /// Keep row iteration lightweight by avoiding tuple arrays with full MessageInfo copies.
+    /// Keep row iteration lightweight by avoiding tuple arrays with full Message copies.
     private var messageStartIndex: Int {
         guard usesMessageWindowing else {
             return 0
@@ -314,7 +314,7 @@ struct FullConversationSheet: View {
         return max(messages.count - visibleMessageLimit, 0)
     }
 
-    /// Keep row iteration lightweight by avoiding tuple arrays with full MessageInfo copies.
+    /// Keep row iteration lightweight by avoiding tuple arrays with full Message copies.
     private var messageIndices: Range<Int> {
         messageStartIndex..<messages.count
     }
@@ -332,7 +332,7 @@ struct FullConversationSheet: View {
     }
 
     /// Find the project for this conversation
-    private var project: ProjectInfo? {
+    private var project: Project? {
         coreManager.projects.first { $0.id == conversation.extractedProjectId }
     }
 
@@ -341,8 +341,7 @@ struct FullConversationSheet: View {
     private var lastAgentPubkey: String? {
         LastAgentFinder.findLastAgentPubkey(
             messages: messages,
-            availableAgents: availableAgents,
-            npubToHex: { Bech32.npubToHex($0) }
+            availableAgents: availableAgents
         )
     }
 
@@ -380,8 +379,8 @@ struct FullConversationSheet: View {
         .sheet(isPresented: $showComposer) {
             MessageComposerView(
                 project: project,
-                conversationId: conversation.id,
-                conversationTitle: conversation.title,
+                conversationId: conversation.thread.id,
+                conversationTitle: conversation.thread.title,
                 initialAgentPubkey: lastAgentPubkey
             )
             .environmentObject(coreManager)
@@ -415,8 +414,8 @@ struct FullConversationSheet: View {
                             let message = messages[index]
                             SlackMessageRow(
                                 message: message,
-                                isConsecutive: index > 0 && messages[index - 1].authorNpub == message.authorNpub,
-                                conversationId: conversation.id,
+                                isConsecutive: index > 0 && messages[index - 1].pubkey == message.pubkey,
+                                conversationId: conversation.thread.id,
                                 projectId: conversation.extractedProjectId,
                                 onDelegationTap: { delegationId in
                                     selectedDelegation = delegationId
@@ -427,10 +426,10 @@ struct FullConversationSheet: View {
                             .id(message.id)
                         }
 
-                        if let buffer = coreManager.streamingBuffers[conversation.id] {
+                        if let buffer = coreManager.streamingBuffers[conversation.thread.id] {
                             StreamingMessageRow(
                                 buffer: buffer,
-                                isConsecutive: messages.last?.authorNpub == buffer.agentPubkey
+                                isConsecutive: messages.last?.pubkey == buffer.agentPubkey
                             )
                             .environmentObject(coreManager)
                             .id("streaming-row")
@@ -449,7 +448,7 @@ struct FullConversationSheet: View {
                     }
 
                     PerformanceProfiler.shared.logEvent(
-                        "fullConversation appear conversationId=\(conversation.id) totalMessages=\(messages.count) visibleMessages=\(messageIndices.count) hiddenMessages=\(hiddenMessageCount)",
+                        "fullConversation appear conversationId=\(conversation.thread.id) totalMessages=\(messages.count) visibleMessages=\(messageIndices.count) hiddenMessages=\(hiddenMessageCount)",
                         category: .swiftUI,
                         level: messages.count >= 400 ? .error : .info
                     )
@@ -472,7 +471,7 @@ struct FullConversationSheet: View {
                         }
                     }
                 }
-                .onChange(of: coreManager.streamingBuffers[conversation.id]?.text.count) { _, _ in
+                .onChange(of: coreManager.streamingBuffers[conversation.thread.id]?.text.count) { _, _ in
                     DispatchQueue.main.async {
                         maybeScrollToStreamingRow(with: proxy)
                     }
@@ -539,7 +538,7 @@ struct FullConversationSheet: View {
         guard nextLimit != visibleMessageLimit else { return }
         visibleMessageLimit = nextLimit
         PerformanceProfiler.shared.logEvent(
-            "fullConversation loadOlder conversationId=\(conversation.id) visibleMessages=\(messageIndices.count) hiddenMessages=\(hiddenMessageCount)",
+            "fullConversation loadOlder conversationId=\(conversation.thread.id) visibleMessages=\(messageIndices.count) hiddenMessages=\(hiddenMessageCount)",
             category: .swiftUI,
             level: .info
         )
@@ -550,25 +549,26 @@ struct FullConversationSheet: View {
         VStack(spacing: 0) {
             MessageComposerView(
                 project: project,
-                conversationId: conversation.id,
-                conversationTitle: conversation.title,
+                conversationId: conversation.thread.id,
+                conversationTitle: conversation.thread.title,
                 initialAgentPubkey: lastAgentPubkey,
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace
             )
             .environmentObject(coreManager)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Color.conversationComposerShellMac)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
                             .stroke(Color.conversationComposerStrokeMac, lineWidth: 1)
                     )
             )
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: .black.opacity(0.24), radius: 12, x: 0, y: 4)
             .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
         }
         .background(transcriptBackdropColor)
     }
@@ -636,7 +636,9 @@ extension String: @retroactive Identifiable {
 
 // MARK: - ConversationFullInfo Extensions
 
-extension ConversationFullInfo: Identifiable {}
+extension ConversationFullInfo: Identifiable {
+    public var id: String { thread.id }
+}
 
 extension ConversationFullInfo {
     /// Extracts the project ID (d-tag) from the projectATag.
@@ -657,23 +659,27 @@ extension ConversationFullInfo {
 
 #Preview {
     ConversationDetailView(conversation: ConversationFullInfo(
-        id: "test-123",
-        title: "Implement User Authentication",
+        thread: Thread(
+            id: "test-123",
+            title: "Implement User Authentication",
+            content: "",
+            pubkey: "abc123def456",
+            lastActivity: UInt64(Date().timeIntervalSince1970) - 3600,
+            effectiveLastActivity: UInt64(Date().timeIntervalSince1970) - 60,
+            statusLabel: "In Progress",
+            statusCurrentActivity: "Reviewing security requirements",
+            summary: "Add OAuth2 authentication flow with Google and GitHub providers",
+            parentConversationId: nil,
+            pTags: [],
+            askEvent: nil,
+            isScheduled: false
+        ),
         author: "architect-orchestrator",
-        authorPubkey: "abc123def456",
-        summary: "Add OAuth2 authentication flow with Google and GitHub providers",
         messageCount: 15,
-        lastActivity: UInt64(Date().timeIntervalSince1970) - 3600,
-        effectiveLastActivity: UInt64(Date().timeIntervalSince1970) - 60,
-        parentId: nil,
-        status: "In Progress",
-        currentActivity: "Reviewing security requirements",
         isActive: true,
         isArchived: false,
         hasChildren: true,
-        projectATag: "project-123",
-        isScheduled: false,
-        pTags: []
+        projectATag: "project-123"
     ))
     .environmentObject(TenexCoreManager())
 }

@@ -19,7 +19,7 @@ struct ConversationsTabView: View {
     @State private var newConversationProjectIdState: String?
     @State private var runtimeText: String = "0m"
     @State private var projectForNewConversation: SelectedProjectForComposer?
-    @State private var selectedProjectForNewConversation: ProjectInfo?
+    @State private var selectedProjectForNewConversation: Project?
     @State private var showProjectSelector = false
     @State private var pendingCreatedConversationId: String?
     @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
@@ -99,8 +99,8 @@ struct ConversationsTabView: View {
             return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
         }
 
-        var booted: [ProjectInfo] = []
-        var unbooted: [ProjectInfo] = []
+        var booted: [Project] = []
+        var unbooted: [Project] = []
         booted.reserveCapacity(sorted.count)
         unbooted.reserveCapacity(sorted.count)
 
@@ -125,7 +125,7 @@ struct ConversationsTabView: View {
         }
 
         if hideScheduled {
-            conversations = conversations.filter { !$0.isScheduled }
+            conversations = conversations.filter { !$0.thread.isScheduled }
         }
 
         return conversations
@@ -159,7 +159,7 @@ struct ConversationsTabView: View {
         }
         .onChange(of: coreManager.conversations) { _, _ in
             if let pendingId = pendingCreatedConversationId,
-               let conversation = coreManager.conversations.first(where: { $0.id == pendingId }) {
+               let conversation = coreManager.conversations.first(where: { $0.thread.id == pendingId }) {
                 selectCreatedConversation(conversation)
             }
             rebuildHierarchy()
@@ -183,15 +183,15 @@ struct ConversationsTabView: View {
                 await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
             }
         }
-        .onChange(of: filteredConversations.map(\.id)) { _, visibleIds in
-            if let selectedId = selectedConversationBinding.wrappedValue?.id,
+        .onChange(of: filteredConversations.map(\.thread.id)) { _, visibleIds in
+            if let selectedId = selectedConversationBinding.wrappedValue?.thread.id,
                !visibleIds.contains(selectedId) {
                 selectedConversationBinding.wrappedValue = nil
                 newConversationProjectIdBinding.wrappedValue = nil
                 pendingCreatedConversationId = nil
             }
         }
-        .onChange(of: selectedConversationBinding.wrappedValue?.id) { _, newId in
+        .onChange(of: selectedConversationBinding.wrappedValue?.thread.id) { _, newId in
             guard newId != nil else { return }
             newConversationProjectIdBinding.wrappedValue = nil
             pendingCreatedConversationId = nil
@@ -240,7 +240,7 @@ struct ConversationsTabView: View {
                 MessageComposerView(
                     project: project,
                     initialContent: ConversationFormatters.generateContextMessage(conversation: conversation),
-                    referenceConversationId: conversation.id
+                    referenceConversationId: conversation.thread.id
                 )
                 .environmentObject(coreManager)
                 .tenexModalPresentation(detents: [.large])
@@ -290,7 +290,7 @@ struct ConversationsTabView: View {
         if let conversation = selectedConversationBinding.wrappedValue {
             ConversationAdaptiveDetailView(conversation: conversation)
                 .environmentObject(coreManager)
-            .id(conversation.id)
+            .id(conversation.thread.id)
         } else if let newProjectId = newConversationProjectIdBinding.wrappedValue,
                   let project = coreManager.projects.first(where: { $0.id == newProjectId }) {
             ConversationWorkspaceView(
@@ -400,11 +400,11 @@ struct ConversationsTabView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         } else {
-            ForEach(cachedHierarchy.sortedRootConversations, id: \.id) { conversation in
-                let hierarchy = coreManager.hierarchyCache.getHierarchy(for: conversation.id)
+            ForEach(cachedHierarchy.sortedRootConversations, id: \.thread.id) { conversation in
+                let hierarchy = coreManager.hierarchyCache.getHierarchy(for: conversation.thread.id)
                 let pTaggedRecipientInfo = hierarchy?.pTaggedRecipientInfo
                 let delegationAgentInfos = hierarchy?.delegationAgentInfos ?? []
-                let isPlayingAudio = audioPlayer.playbackState != .idle && audioPlayer.currentConversationId == conversation.id
+                let isPlayingAudio = audioPlayer.playbackState != .idle && audioPlayer.currentConversationId == conversation.thread.id
                 #if os(iOS)
                 if isSplitInteraction {
                     ConversationRowFull(
@@ -587,7 +587,7 @@ struct ConversationsTabView: View {
         }
     }
 
-    private func startNewConversation(in project: ProjectInfo) {
+    private func startNewConversation(in project: Project) {
         // Defer presentation one turn so the menu can fully dismiss first.
         DispatchQueue.main.async {
             #if os(macOS)
@@ -602,7 +602,7 @@ struct ConversationsTabView: View {
     private func handleThreadCreated(_ eventId: String) {
         pendingCreatedConversationId = eventId
 
-        if let conversation = coreManager.conversations.first(where: { $0.id == eventId }) {
+        if let conversation = coreManager.conversations.first(where: { $0.thread.id == eventId }) {
             selectCreatedConversation(conversation)
             return
         }
@@ -618,7 +618,7 @@ struct ConversationsTabView: View {
     }
 
     private func selectCreatedConversation(_ conversation: ConversationFullInfo) {
-        let canonical = coreManager.conversations.first(where: { $0.id == conversation.id }) ?? conversation
+        let canonical = coreManager.conversations.first(where: { $0.thread.id == conversation.thread.id }) ?? conversation
         selectedConversationBinding.wrappedValue = canonical
         newConversationProjectIdBinding.wrappedValue = nil
         pendingCreatedConversationId = nil
@@ -631,13 +631,13 @@ struct ConversationsTabView: View {
 }
 
 private struct SelectedProjectForComposer: Identifiable {
-    let project: ProjectInfo
+    let project: Project
     var id: String { project.id }
 }
 
 private struct ProjectMenuState {
-    var booted: [ProjectInfo] = []
-    var unbooted: [ProjectInfo] = []
+    var booted: [Project] = []
+    var unbooted: [Project] = []
 }
 
 private struct ShellConversationListStyle: ViewModifier {
@@ -694,7 +694,7 @@ private struct ConversationRowFull: View, Equatable {
     #endif
 
     private var statusColor: Color {
-        Color.conversationStatus(for: conversation.status, isActive: isHierarchicallyActive)
+        Color.conversationStatus(for: conversation.thread.statusLabel, isActive: isHierarchicallyActive)
     }
 
     private var rowContent: some View {
@@ -715,7 +715,7 @@ private struct ConversationRowFull: View, Equatable {
             VStack(alignment: .leading, spacing: 6) {
                 // Row 1: Title and effective last active time
                 HStack(alignment: .top) {
-                    Text(conversation.title)
+                    Text(conversation.thread.title)
                         .font(.headline)
                         .lineLimit(2)
 
@@ -728,7 +728,7 @@ private struct ConversationRowFull: View, Equatable {
 
                     Spacer()
 
-                    Text(ConversationFormatters.formatRelativeTime(conversation.effectiveLastActivity))
+                    Text(ConversationFormatters.formatRelativeTime(conversation.thread.effectiveLastActivity))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -736,7 +736,7 @@ private struct ConversationRowFull: View, Equatable {
                 // Row 2: Summary or current activity
                 HStack(alignment: .top) {
                     // Show current activity if directly active (not hierarchically via descendants)
-                    if let activity = conversation.currentActivity, conversation.isActive {
+                    if let activity = conversation.thread.statusCurrentActivity, conversation.isActive {
                         HStack(spacing: 4) {
                             Image(systemName: "bolt.fill")
                                 .font(.caption2)
@@ -757,7 +757,7 @@ private struct ConversationRowFull: View, Equatable {
                                 .foregroundStyle(Color.presenceOnline)
                                 .lineLimit(1)
                         }
-                    } else if let summary = conversation.summary {
+                    } else if let summary = conversation.thread.summary {
                         Text(summary)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -786,7 +786,7 @@ private struct ConversationRowFull: View, Equatable {
                 // Row 3: Avatars (author + p-tagged overlapping, then delegation agents) + badges
                 HStack(spacing: 0) {
                     ConversationAvatarGroup(
-                        authorInfo: AgentAvatarInfo(name: conversation.author, pubkey: conversation.authorPubkey),
+                        authorInfo: AgentAvatarInfo(name: conversation.author, pubkey: conversation.thread.pubkey),
                         pTaggedRecipientInfo: pTaggedRecipientInfo,
                         otherParticipants: delegationAgentInfos,
                         maxVisibleAvatars: maxVisibleAvatars
@@ -795,7 +795,7 @@ private struct ConversationRowFull: View, Equatable {
                     Spacer()
 
                     // Scheduled badge (shows when conversation has scheduled-task-id tag)
-                    if conversation.isScheduled {
+                    if conversation.thread.isScheduled {
                         HStack(spacing: 2) {
                             Image(systemName: "clock")
                                 .font(.caption2)
@@ -830,7 +830,7 @@ private struct ConversationRowFull: View, Equatable {
                     }
 
                     // Status badge
-                    if let status = conversation.status {
+                    if let status = conversation.thread.statusLabel {
                         Text(status)
                             .font(.caption2)
                             .padding(.horizontal, 6)
@@ -855,7 +855,7 @@ private struct ConversationRowFull: View, Equatable {
                     #if os(macOS)
                     if conversation.hasChildren {
                         Button {
-                            openWindow(id: "delegation-tree", value: conversation.id)
+                            openWindow(id: "delegation-tree", value: conversation.thread.id)
                         } label: {
                             Image(systemName: "arrow.triangle.branch")
                                 .font(.system(size: 13))
@@ -909,7 +909,7 @@ private struct ConversationRowFull: View, Equatable {
         #else
         .fullScreenCover(isPresented: $showDelegationTree) {
             NavigationStack {
-                DelegationTreeView(rootConversationId: conversation.id)
+                DelegationTreeView(rootConversationId: conversation.thread.id)
                     .environmentObject(coreManager)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {

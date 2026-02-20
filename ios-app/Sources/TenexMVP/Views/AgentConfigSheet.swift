@@ -4,7 +4,7 @@ import SwiftUI
 struct AgentConfigSheet: View {
     // MARK: - Properties
 
-    let agent: OnlineAgentInfo
+    let agent: ProjectAgent
     let projectId: String
 
     // MARK: - Environment
@@ -312,7 +312,7 @@ struct AgentConfigSheet: View {
 
 #Preview {
     AgentConfigSheet(
-        agent: OnlineAgentInfo(
+        agent: ProjectAgent(
             pubkey: "abc123",
             name: "claude-code",
             isPm: true,

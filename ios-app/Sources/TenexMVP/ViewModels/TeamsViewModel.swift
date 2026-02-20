@@ -169,6 +169,27 @@ final class TeamsViewModel: ObservableObject {
         return buildThread(rows: rows)
     }
 
+    func loadAgentDefinitions(for team: TeamInfo) async throws -> [AgentDefinitionListItem] {
+        guard let coreManager else { return [] }
+        guard !team.agentDefinitionIds.isEmpty else { return [] }
+
+        let allAgents = try await coreManager.safeCore.getAllAgents()
+        let matchingIds = Set(team.agentDefinitionIds)
+        let matching = allAgents.filter { matchingIds.contains($0.id) }
+
+        for agent in matching {
+            await resolveAuthor(pubkey: agent.pubkey, coreManager: coreManager)
+        }
+
+        return matching.map { agent in
+            AgentDefinitionListItem(
+                agent: agent,
+                authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey),
+                authorPictureURL: authorPictureCache[agent.pubkey]
+            )
+        }
+    }
+
     @discardableResult
     func postComment(
         team: TeamInfo,
@@ -207,7 +228,7 @@ final class TeamsViewModel: ObservableObject {
         }
     }
 
-    func hireTeam(_ team: TeamInfo, into project: ProjectInfo) async -> TeamHireResult {
+    func hireTeam(_ team: TeamInfo, into project: Project) async -> TeamHireResult {
         guard let coreManager else {
             return TeamHireResult(
                 title: "Unable to Hire",
@@ -215,23 +236,23 @@ final class TeamsViewModel: ObservableObject {
             )
         }
 
-        var mergedAgentIds = project.agentIds
-        var existing = Set(project.agentIds)
+        var mergedAgentIds = project.agentDefinitionIds
+        var existing = Set(project.agentDefinitionIds)
         var newlyAdded = 0
 
-        for agentId in team.agentIds {
+        for agentId in team.agentDefinitionIds {
             if existing.insert(agentId).inserted {
                 mergedAgentIds.append(agentId)
                 newlyAdded += 1
             }
         }
 
-        let alreadyPresent = max(0, team.agentIds.count - newlyAdded)
+        let alreadyPresent = max(0, team.agentDefinitionIds.count - newlyAdded)
 
         if newlyAdded == 0 {
             return TeamHireResult(
                 title: "Already Hired",
-                message: "All \(team.agentIds.count) team agent\(team.agentIds.count == 1 ? " is" : "s are") already in \(project.title)."
+                message: "All \(team.agentDefinitionIds.count) agent definition\(team.agentDefinitionIds.count == 1 ? " is" : "s are") already in \(project.title)."
             )
         }
 
@@ -242,7 +263,7 @@ final class TeamsViewModel: ObservableObject {
                 description: project.description ?? "",
                 repoUrl: project.repoUrl,
                 pictureUrl: project.pictureUrl,
-                agentIds: mergedAgentIds,
+                agentDefinitionIds: mergedAgentIds,
                 mcpToolIds: project.mcpToolIds
             )
 

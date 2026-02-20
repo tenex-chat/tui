@@ -1,43 +1,6 @@
 import SwiftUI
 
-// MARK: - Type-Safe Enums
-
-/// Maps to FFI event_type field: "ask" or "mention"
-enum InboxEventType: String {
-    case ask
-    case mention
-    case unknown
-
-    init(from string: String) {
-        self = InboxEventType(rawValue: string) ?? .unknown
-    }
-
-    var info: InboxEventTypeInfo {
-        switch self {
-        case .ask:
-            return InboxEventTypeInfo(icon: "questionmark.circle", label: "Question", shortLabel: "asked you", color: .orange)
-        case .mention:
-            return InboxEventTypeInfo(icon: "at", label: "Mention", shortLabel: "mentioned you", color: .blue)
-        case .unknown:
-            return InboxEventTypeInfo(icon: "bell", label: "Notification", shortLabel: "notification", color: .secondary)
-        }
-    }
-}
-
-/// Maps to FFI status field which encodes read state
-enum InboxStatus: String {
-    case waiting        // Unread in TUI
-    case acknowledged   // Read in TUI
-    case unknown        // Fallback
-
-    init(from string: String) {
-        self = InboxStatus(rawValue: string) ?? .unknown
-    }
-
-    var isUnread: Bool {
-        self == .waiting
-    }
-}
+// MARK: - InboxEventType Display Info
 
 /// Single source of truth for event type display info
 struct InboxEventTypeInfo {
@@ -47,27 +10,48 @@ struct InboxEventTypeInfo {
     let color: Color
 }
 
+extension InboxEventType {
+    var info: InboxEventTypeInfo {
+        switch self {
+        case .ask:
+            return InboxEventTypeInfo(icon: "questionmark.circle", label: "Question", shortLabel: "asked you", color: .orange)
+        case .mention:
+            return InboxEventTypeInfo(icon: "at", label: "Mention", shortLabel: "mentioned you", color: .blue)
+        }
+    }
+}
+
 // MARK: - InboxItem Extensions (domain logic)
 
 extension InboxItem {
-    var eventTypeEnum: InboxEventType {
-        InboxEventType(from: eventType)
-    }
-
-    var status_enum: InboxStatus {
-        InboxStatus(from: status)
-    }
-
     var isUnread: Bool {
-        status_enum.isUnread
+        !isRead
     }
 
     var eventTypeInfo: InboxEventTypeInfo {
-        eventTypeEnum.info
+        eventType.info
     }
 
     func matches(filter: InboxFilter) -> Bool {
-        filter.matches(eventTypeEnum)
+        filter.matches(eventType)
+    }
+
+    /// Extract project ID from the `projectATag` field.
+    /// Returns nil if the aTag doesn't contain a valid project ID.
+    var resolvedProjectId: String? {
+        let parts = projectATag.split(separator: ":")
+        guard parts.count >= 3 else { return nil }
+        let id = parts.dropFirst(2).joined(separator: ":")
+        return id.isEmpty ? nil : id
+    }
+
+    /// Truncated author pubkey for display (first 8 + last 4 chars)
+    var authorDisplayName: String {
+        let pk = authorPubkey
+        if pk.count > 12 {
+            return "\(pk.prefix(8))...\(pk.suffix(4))"
+        }
+        return pk
     }
 }
 
@@ -503,7 +487,7 @@ struct InboxItemRow: View {
 
                 // Event type label (using short label from domain extension)
                 HStack(spacing: 4) {
-                    Text(item.fromAgent)
+                    Text(item.authorDisplayName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -516,7 +500,7 @@ struct InboxItemRow: View {
                 }
 
                 // Project info if available
-                if let projectId = item.projectId {
+                if let projectId = item.resolvedProjectId {
                     HStack(spacing: 4) {
                         Image(systemName: "folder")
                             .font(.caption2)
@@ -581,7 +565,7 @@ struct InboxDetailView: View {
                 contentSection
 
                 // Related info with navigation
-                if item.projectId != nil || item.conversationId != nil {
+                if item.resolvedProjectId != nil || item.threadId != nil {
                     Divider()
                     relatedSection
                 }
@@ -639,7 +623,7 @@ struct InboxDetailView: View {
             HStack(spacing: 16) {
                 HStack(spacing: 6) {
                     Image(systemName: "person.circle.fill")
-                    Text(item.fromAgent)
+                    Text(item.authorDisplayName)
                 }
                 .foregroundStyle(.secondary)
 
@@ -658,8 +642,8 @@ struct InboxDetailView: View {
     @ViewBuilder
     private var contentSection: some View {
         if let askEvent = item.askEvent,
-           let conversationId = item.conversationId,
-           let projectId = item.projectId {
+           let conversationId = item.threadId,
+           let projectId = item.resolvedProjectId {
             // Interactive ask answering view
             AskAnswerView(
                 askEvent: askEvent,
@@ -686,7 +670,7 @@ struct InboxDetailView: View {
             Text("Related")
                 .font(.headline)
 
-            if let projectId = item.projectId {
+            if let projectId = item.resolvedProjectId {
                 HStack {
                     Image(systemName: "folder.fill")
                         .foregroundStyle(Color.agentBrand)
@@ -701,7 +685,7 @@ struct InboxDetailView: View {
             }
 
             // Conversation navigation button
-            if let convId = item.conversationId {
+            if let convId = item.threadId {
                 Button(action: {
                     onNavigateToConversation(convId)
                 }) {
@@ -735,12 +719,11 @@ struct ConversationNavigationData: Identifiable, Hashable {
 
 struct InboxConversationView: View {
     let conversationId: String
-    // Note: projectId removed - conversation IDs are globally unique Nostr event IDs
-    // and getMessages(conversationId:) doesn't accept projectId parameter
     @EnvironmentObject var coreManager: TenexCoreManager
-    @State private var messages: [MessageInfo] = []
+    @State private var messages: [Message] = []
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>?
+    @State private var userPubkey: String = ""
 
     var body: some View {
         Group {
@@ -761,7 +744,7 @@ struct InboxConversationView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(messages, id: \.id) { message in
-                            InboxMessageBubble(message: message)
+                            InboxMessageBubble(message: message, userPubkey: userPubkey)
                         }
                     }
                     .padding()
@@ -771,6 +754,7 @@ struct InboxConversationView: View {
         .navigationTitle("Conversation")
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            userPubkey = coreManager.safeCore.getCurrentUser()?.pubkey ?? ""
             await loadMessages()
         }
         .onReceive(coreManager.$messagesByConversation) { cache in
@@ -803,10 +787,19 @@ struct InboxConversationView: View {
 // MARK: - Inbox Message Bubble (Simplified from ConversationsView)
 
 struct InboxMessageBubble: View {
-    let message: MessageInfo
+    let message: Message
+    let userPubkey: String
 
     private var isUser: Bool {
-        message.role == "user"
+        !userPubkey.isEmpty && message.pubkey == userPubkey
+    }
+
+    private var displayName: String {
+        let pk = message.pubkey
+        if pk.count > 12 {
+            return "\(pk.prefix(8))...\(pk.suffix(4))"
+        }
+        return pk
     }
 
     var body: some View {
@@ -827,7 +820,7 @@ struct InboxMessageBubble: View {
                             }
                     }
 
-                    Text(message.author)
+                    Text(isUser ? "You" : displayName)
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)

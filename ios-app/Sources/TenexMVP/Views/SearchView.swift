@@ -276,7 +276,7 @@ struct SearchView: View {
             // Fetch conversation info for titles
             let conversationIds = Array(grouped.keys)
             let conversations = await coreManager.safeCore.getConversationsByIds(conversationIds: conversationIds)
-            let conversationMap = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
+            let conversationMap = Dictionary(uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) })
 
             // Get projects for project name lookup
             let projects = await coreManager.safeCore.getProjects()
@@ -298,7 +298,7 @@ struct SearchView: View {
 
                 return ConversationSearchGroup(
                     id: threadId,
-                    title: conv?.title ?? "Unknown Conversation",
+                    title: conv?.thread.title ?? "Unknown Conversation",
                     projectName: projectName,
                     projectId: projectId,
                     matches: matches.sorted { $0.createdAt > $1.createdAt }

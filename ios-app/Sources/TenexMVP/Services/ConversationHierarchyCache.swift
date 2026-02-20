@@ -98,10 +98,10 @@ final class ConversationHierarchyCache: ObservableObject {
         let startedAt = CFAbsoluteTimeGetCurrent()
 
         // Check if we need to load anything
-        let newConversationIds = Set(conversations.map(\.id))
+        let newConversationIds = Set(conversations.map(\.thread.id))
         let needsLoading = newConversationIds.subtracting(loadedForConversationIds)
         guard !needsLoading.isEmpty else { return }
-        let pendingConversations = conversations.filter { needsLoading.contains($0.id) }
+        let pendingConversations = conversations.filter { needsLoading.contains($0.thread.id) }
         let batch = Array(pendingConversations.prefix(Self.preloadBatchSize))
         profiler.logEvent(
             "hierarchy preload start roots=\(conversations.count) new=\(needsLoading.count) batch=\(batch.count) cached=\(loadedForConversationIds.count)",
@@ -123,7 +123,7 @@ final class ConversationHierarchyCache: ObservableObject {
                         for: conversation,
                         using: coreManager
                     )
-                    return (conversation.id, hierarchy)
+                    return (conversation.thread.id, hierarchy)
                 }
             }
 
@@ -162,14 +162,14 @@ final class ConversationHierarchyCache: ObservableObject {
             let startedAt = CFAbsoluteTimeGetCurrent()
             // Load p-tagged recipient
             var pTaggedRecipientInfo: AgentAvatarInfo?
-            if let pTaggedPubkey = conversation.pTags.first {
+            if let pTaggedPubkey = conversation.thread.pTags.first {
                 let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
                 pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
             }
 
             // Get all descendants
             let descendantIds = await coreManager.safeCore.getDescendantConversationIds(
-                conversationId: conversation.id
+                conversationId: conversation.thread.id
             )
             let descendants = await coreManager.safeCore.getConversationsByIds(
                 conversationIds: descendantIds
@@ -177,18 +177,18 @@ final class ConversationHierarchyCache: ObservableObject {
 
             // Direct children
             let directChildIds = descendants
-                .filter { $0.parentId == conversation.id }
-                .map(\.id)
+                .filter { $0.thread.parentConversationId == conversation.thread.id }
+                .map(\.thread.id)
 
             // Collect unique agents from descendants
-            let pTaggedPubkey = conversation.pTags.first
+            let pTaggedPubkey = conversation.thread.pTags.first
             var agentsByPubkey: [String: AgentAvatarInfo] = [:]
             for descendant in descendants {
-                if descendant.authorPubkey != conversation.authorPubkey &&
-                    descendant.authorPubkey != pTaggedPubkey {
-                    agentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
+                if descendant.thread.pubkey != conversation.thread.pubkey &&
+                    descendant.thread.pubkey != pTaggedPubkey {
+                    agentsByPubkey[descendant.thread.pubkey] = AgentAvatarInfo(
                         name: descendant.author,
-                        pubkey: descendant.authorPubkey
+                        pubkey: descendant.thread.pubkey
                     )
                 }
             }
@@ -197,7 +197,7 @@ final class ConversationHierarchyCache: ObservableObject {
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
             if elapsedMs >= 20 || !descendantIds.isEmpty || !delegationAgentInfos.isEmpty {
                 PerformanceProfiler.shared.logEvent(
-                    "hierarchy load root=\(conversation.id) descendants=\(descendantIds.count) directChildren=\(directChildIds.count) delegationAgents=\(delegationAgentInfos.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+                    "hierarchy load root=\(conversation.thread.id) descendants=\(descendantIds.count) directChildren=\(directChildIds.count) delegationAgents=\(delegationAgentInfos.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
                     category: .general,
                     level: elapsedMs >= 120 ? .error : .info
                 )

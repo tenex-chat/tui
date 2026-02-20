@@ -1,8 +1,9 @@
 import Foundation
 
 struct AgentDefinitionListItem: Identifiable, Hashable {
-    let agent: AgentInfo
+    let agent: AgentDefinition
     let authorDisplayName: String
+    let authorPictureURL: String?
 
     var id: String { agent.id }
 }
@@ -48,7 +49,8 @@ final class AgentDefinitionsViewModel: ObservableObject {
             let items = dedupedAgents.map { agent in
                 AgentDefinitionListItem(
                     agent: agent,
-                    authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey)
+                    authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey),
+                    authorPictureURL: nil
                 )
             }
 
@@ -78,7 +80,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
         filterRows(community)
     }
 
-    func listItem(for agent: AgentInfo) -> AgentDefinitionListItem? {
+    func listItem(for agent: AgentDefinition) -> AgentDefinitionListItem? {
         let allItems = mine + community
         if let exact = allItems.first(where: { $0.agent.id == agent.id }) {
             return exact
@@ -86,7 +88,8 @@ final class AgentDefinitionsViewModel: ObservableObject {
 
         return AgentDefinitionListItem(
             agent: agent,
-            authorDisplayName: fallbackAuthorDisplay(pubkey: agent.pubkey)
+            authorDisplayName: fallbackAuthorDisplay(pubkey: agent.pubkey),
+            authorPictureURL: nil
         )
     }
 
@@ -143,8 +146,8 @@ final class AgentDefinitionsViewModel: ObservableObject {
         }
     }
 
-    private func deduplicateLatest(_ agents: [AgentInfo]) -> [AgentInfo] {
-        var latestByKey: [String: AgentInfo] = [:]
+    private func deduplicateLatest(_ agents: [AgentDefinition]) -> [AgentDefinition] {
+        var latestByKey: [String: AgentDefinition] = [:]
 
         for agent in agents {
             let identifier = canonicalIdentifier(for: agent)
@@ -171,7 +174,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
         }
     }
 
-    private func shouldReplace(existing: AgentInfo, with candidate: AgentInfo) -> Bool {
+    private func shouldReplace(existing: AgentDefinition, with candidate: AgentDefinition) -> Bool {
         if candidate.createdAt != existing.createdAt {
             return candidate.createdAt > existing.createdAt
         }
@@ -185,7 +188,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
         return candidate.id > existing.id
     }
 
-    private func canonicalIdentifier(for agent: AgentInfo) -> String {
+    private func canonicalIdentifier(for agent: AgentDefinition) -> String {
         if !agent.dTag.isEmpty {
             return agent.dTag
         }
@@ -195,7 +198,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
         return agent.id
     }
 
-    private func resolveAuthors(for agents: [AgentInfo], coreManager: TenexCoreManager) async {
+    private func resolveAuthors(for agents: [AgentDefinition], coreManager: TenexCoreManager) async {
         let missingPubkeys = Set(agents.map(\.pubkey)).filter { authorNameCache[$0] == nil }
 
         for pubkey in missingPubkeys {

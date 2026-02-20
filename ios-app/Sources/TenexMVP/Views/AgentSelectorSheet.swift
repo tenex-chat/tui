@@ -1,13 +1,13 @@
 import SwiftUI
 
 /// A sheet for selecting an agent to p-tag in a message.
-/// Uses OnlineAgentInfo from project status (kind:24010) which contains
+/// Uses ProjectAgent from project status (kind:24010) which contains
 /// actual agent instance pubkeys for proper profile picture lookup.
 struct AgentSelectorSheet: View {
     // MARK: - Properties
 
     /// Available agents to choose from (from project status)
-    let agents: [OnlineAgentInfo]
+    let agents: [ProjectAgent]
 
     /// Project ID for agent configuration
     let projectId: String
@@ -31,12 +31,12 @@ struct AgentSelectorSheet: View {
     /// Local copy of selection - only committed on Done, discarded on Cancel
     @State private var localSelectedPubkey: String?
     @State private var searchText = ""
-    @State private var agentToConfig: OnlineAgentInfo?
+    @State private var agentToConfig: ProjectAgent?
 
     // MARK: - Computed
 
-    private var filteredAgents: [OnlineAgentInfo] {
-        let filtered: [OnlineAgentInfo]
+    private var filteredAgents: [ProjectAgent] {
+        let filtered: [ProjectAgent]
         if searchText.isEmpty {
             filtered = agents
         } else {
@@ -60,7 +60,7 @@ struct AgentSelectorSheet: View {
         }
     }
 
-    private var selectedAgent: OnlineAgentInfo? {
+    private var selectedAgent: ProjectAgent? {
         agents.first { $0.pubkey == localSelectedPubkey }
     }
 
@@ -172,7 +172,7 @@ struct AgentSelectorSheet: View {
         #endif
     }
 
-    private func selectedAgentBar(_ agent: OnlineAgentInfo) -> some View {
+    private func selectedAgentBar(_ agent: ProjectAgent) -> some View {
         HStack(spacing: 8) {
             Text("@\(agent.name)")
                 .font(.subheadline)
@@ -221,7 +221,7 @@ struct AgentSelectorSheet: View {
 
     // MARK: - Actions
 
-    private func selectAgent(_ agent: OnlineAgentInfo) {
+    private func selectAgent(_ agent: ProjectAgent) {
         // Toggle selection (single-select)
         if localSelectedPubkey == agent.pubkey {
             localSelectedPubkey = nil
@@ -285,9 +285,9 @@ struct AgentSelectorSheet: View {
     }
 }
 
-// MARK: - OnlineAgentInfo Identifiable
+// MARK: - ProjectAgent Identifiable
 
-extension OnlineAgentInfo: Identifiable {
+extension ProjectAgent: Identifiable {
     public var id: String { pubkey }
 }
 
@@ -295,7 +295,7 @@ extension OnlineAgentInfo: Identifiable {
 
 struct OnlineAgentRowView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
-    let agent: OnlineAgentInfo
+    let agent: ProjectAgent
     let isSelected: Bool
     var onTap: (() -> Void)?
     var onConfig: (() -> Void)?
@@ -386,21 +386,21 @@ struct OnlineAgentRowView: View {
 #Preview {
     AgentSelectorSheet(
         agents: [
-            OnlineAgentInfo(
+            ProjectAgent(
                 pubkey: "abc123def456",
                 name: "claude-code",
                 isPm: true,
                 model: "claude-3-opus",
                 tools: ["Read", "Write", "Bash"]
             ),
-            OnlineAgentInfo(
+            ProjectAgent(
                 pubkey: "def456ghi789",
                 name: "architect",
                 isPm: false,
                 model: "claude-3-sonnet",
                 tools: ["Read", "Edit"]
             ),
-            OnlineAgentInfo(
+            ProjectAgent(
                 pubkey: "ghi789jkl012",
                 name: "test-writer",
                 isPm: false,

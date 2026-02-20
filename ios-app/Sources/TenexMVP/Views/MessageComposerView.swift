@@ -20,7 +20,7 @@ struct MessageComposerView: View {
     // MARK: - Properties
 
     /// The project this message belongs to (nil for new conversations with project selection)
-    let initialProject: ProjectInfo?
+    let initialProject: Project?
 
     /// The conversation ID if replying to an existing thread (nil for new thread)
     let conversationId: String?
@@ -62,15 +62,15 @@ struct MessageComposerView: View {
 
     // MARK: - State
 
-    @State var selectedProject: ProjectInfo?
+    @State var selectedProject: Project?
     @State var showProjectSelector = false
     @State var draft: Draft
-    @State var availableAgents: [OnlineAgentInfo] = []
+    @State var availableAgents: [ProjectAgent] = []
     @State var agentsLoadError: String?
     @State var showAgentSelector = false
     @State var replyTargetAgentName: String?  // Agent name for reply target (resolved from initialAgentPubkey)
-    @State var availableNudges: [NudgeInfo] = []
-    @State var availableSkills: [SkillInfo] = []
+    @State var availableNudges: [Nudge] = []
+    @State var availableSkills: [Skill] = []
     @State var showNudgeSkillSelector = false
     @State var nudgeSkillSelectorInitialMode: NudgeSkillSelectorMode = .all
     @State var nudgeSkillSelectorInitialQuery: String = ""
@@ -105,12 +105,11 @@ struct MessageComposerView: View {
     @State var triggerDetectionTask: Task<Void, Never>?
 
     // Workspace inline layout metrics
-    @ScaledMetric(relativeTo: .body) var workspaceContextRowHeight: CGFloat = 40
-    @ScaledMetric(relativeTo: .body) var workspaceBottomRowHeight: CGFloat = 48
-    @ScaledMetric(relativeTo: .body) var workspaceIconBoxSize: CGFloat = 18
+    @ScaledMetric(relativeTo: .body) var workspaceContextRowHeight: CGFloat = 34
+    @ScaledMetric(relativeTo: .body) var workspaceBottomRowHeight: CGFloat = 52
     @ScaledMetric(relativeTo: .body) var workspaceIconSize: CGFloat = 14
-    @ScaledMetric(relativeTo: .body) var workspaceSendButtonSize: CGFloat = 36
-    @ScaledMetric(relativeTo: .body) var workspaceAccessoryButtonSize: CGFloat = 28
+    @ScaledMetric(relativeTo: .body) var workspaceSendButtonSize: CGFloat = 38
+    @ScaledMetric(relativeTo: .body) var workspaceAccessoryButtonSize: CGFloat = 24
 
     // MARK: - Computed
 
@@ -163,16 +162,16 @@ struct MessageComposerView: View {
         return (hasTextContent || hasImageContent) && !isSending && !isUploadingImage
     }
 
-    var selectedAgent: OnlineAgentInfo? {
+    var selectedAgent: ProjectAgent? {
         guard let pubkey = draft.agentPubkey else { return nil }
         return availableAgents.first { $0.pubkey == pubkey }
     }
 
-    var selectedNudges: [NudgeInfo] {
+    var selectedNudges: [Nudge] {
         availableNudges.filter { draft.selectedNudgeIds.contains($0.id) }
     }
 
-    var selectedSkills: [SkillInfo] {
+    var selectedSkills: [Skill] {
         availableSkills.filter { draft.selectedSkillIds.contains($0.id) }
     }
 
@@ -213,14 +212,14 @@ struct MessageComposerView: View {
 
     /// Find the project with the most recent conversation activity
     /// Respects hideScheduled preference to match prior behavior
-    func projectWithMostRecentActivity() -> ProjectInfo? {
+    func projectWithMostRecentActivity() -> Project? {
         composerViewModel.projectWithMostRecentActivity(hideScheduled: hideScheduled)
     }
 
     // MARK: - Initialization
 
     init(
-        project: ProjectInfo? = nil,
+        project: Project? = nil,
         conversationId: String? = nil,
         conversationTitle: String? = nil,
         initialAgentPubkey: String? = nil,

@@ -1,7 +1,7 @@
 import SwiftUI
 
 extension MessageComposerView {
-    func projectChipView(_ project: ProjectInfo) -> some View {
+    func projectChipView(_ project: Project) -> some View {
         HStack(spacing: 8) {
             ProjectChipView(project: project) {
                 showProjectSelector = true
@@ -93,7 +93,7 @@ extension MessageComposerView {
         .buttonStyle(.borderless)
     }
 
-    func agentChipView(_ agent: OnlineAgentInfo) -> some View {
+    func agentChipView(_ agent: ProjectAgent) -> some View {
         HStack(spacing: 8) {
             OnlineAgentChipView(agent: agent) {
                 openAgentSelector()
@@ -208,34 +208,34 @@ extension MessageComposerView {
     }
 
     var workspaceInlineControlRow: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             workspaceAccessoryButton
 
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                HStack(spacing: 16) {
                     if let project = selectedProject {
-                        inlineContextToken(icon: "folder.fill", text: project.title) {
+                        inlineContextToken(text: workspaceProjectLabel(project.title)) {
                             if isNewConversation {
                                 showProjectSelector = true
                             }
                         }
                     } else if isNewConversation {
-                        inlineContextToken(icon: "folder.badge.questionmark", text: "Select project") {
+                        inlineContextToken(text: "Select project") {
                             showProjectSelector = true
                         }
                     }
 
                     if let agent = selectedAgent {
-                        inlineContextToken(icon: "person.crop.circle", text: agentContextSummary(agent: agent)) {
+                        inlineContextToken(text: workspaceAgentLabel(agentContextSummary(agent: agent))) {
                             openAgentSelector()
                         }
                     } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
-                        inlineContextToken(icon: "person.crop.circle", text: targetName) {
+                        inlineContextToken(text: workspaceAgentLabel(targetName)) {
                             draft.setAgent(targetPubkey)
                             openAgentSelector()
                         }
                     } else if selectedProject != nil {
-                        inlineContextToken(icon: "person.crop.circle.badge.questionmark", text: "Agent") {
+                        inlineContextToken(text: "Agent") {
                             openAgentSelector()
                         }
                     }
@@ -247,6 +247,8 @@ extension MessageComposerView {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            workspaceMicGlyph
+
             Button(action: sendMessage) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: workspaceIconSize, weight: .semibold))
@@ -254,7 +256,7 @@ extension MessageComposerView {
                     .frame(width: workspaceSendButtonSize, height: workspaceSendButtonSize)
                     .background(
                         Circle()
-                            .fill(canSend ? Color.white.opacity(0.66) : Color.white.opacity(0.14))
+                            .fill(canSend ? Color.white.opacity(0.78) : Color.white.opacity(0.14))
                     )
             }
             .buttonStyle(.borderless)
@@ -265,7 +267,7 @@ extension MessageComposerView {
             .help("Send")
         }
         .frame(height: max(workspaceContextRowHeight, workspaceBottomRowHeight))
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 18)
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(workspaceComposerStrokeColor.opacity(0.72))
@@ -286,10 +288,6 @@ extension MessageComposerView {
                 .font(.system(size: workspaceIconSize, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
-                .background(
-                    Circle()
-                        .fill(workspaceComposerStrokeColor.opacity(0.32))
-                )
         }
         .buttonStyle(.borderless)
         #if os(iOS)
@@ -299,33 +297,50 @@ extension MessageComposerView {
         #endif
     }
 
-    func inlineContextToken(icon: String? = nil, text: String, action: @escaping () -> Void) -> some View {
+    var workspaceMicGlyph: some View {
+        Image(systemName: "mic")
+            .font(.system(size: workspaceIconSize, weight: .medium))
+            .foregroundStyle(.secondary.opacity(0.88))
+            .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+    }
+
+    func inlineContextToken(text: String, showChevron: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: workspaceIconSize, weight: .medium))
-                        .frame(width: workspaceIconBoxSize, height: workspaceIconBoxSize)
-                        .foregroundStyle(.secondary)
-                }
+            HStack(spacing: 4) {
                 Text(text)
-                    .font(.subheadline.weight(.medium))
+                    .font(.subheadline)
                     .lineLimit(1)
-                    .foregroundStyle(.secondary)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: max(9, workspaceIconSize - 4), weight: .semibold))
-                    .foregroundStyle(.secondary.opacity(0.88))
+                    .foregroundStyle(.secondary.opacity(0.95))
+                if showChevron {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: max(9, workspaceIconSize - 4), weight: .semibold))
+                        .foregroundStyle(.secondary.opacity(0.88))
+                }
             }
             .padding(.horizontal, 2)
-            .padding(.vertical, 3)
+            .padding(.vertical, 2)
             .frame(height: workspaceContextRowHeight)
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
     }
 
-    func agentContextSummary(agent: OnlineAgentInfo) -> String {
-        if let model = agent.model, !model.isEmpty {
+    func workspaceProjectLabel(_ name: String) -> String {
+        truncatedWorkspaceToken(name)
+    }
+
+    func workspaceAgentLabel(_ name: String) -> String {
+        truncatedWorkspaceToken(name)
+    }
+
+    func truncatedWorkspaceToken(_ value: String, limit: Int = 24) -> String {
+        guard value.count > limit else { return value }
+        let end = value.index(value.startIndex, offsetBy: limit)
+        return "\(value[..<end])..."
+    }
+
+    func agentContextSummary(agent: ProjectAgent) -> String {
+        if !usesWorkspaceInlineLayout, let model = agent.model, !model.isEmpty {
             return "\(agent.name) (\(model))"
         }
         return agent.name
@@ -339,7 +354,7 @@ extension MessageComposerView {
 }
 
 struct ProjectChipView: View {
-    let project: ProjectInfo
+    let project: Project
     let onChange: () -> Void
 
     var body: some View {
@@ -378,7 +393,7 @@ struct ProjectChipView: View {
 
 struct OnlineAgentChipView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
-    let agent: OnlineAgentInfo
+    let agent: ProjectAgent
     let onChange: () -> Void
 
     var body: some View {

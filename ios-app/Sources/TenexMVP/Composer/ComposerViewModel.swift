@@ -20,7 +20,7 @@ struct ComposerDraftLoadResult {
 }
 
 struct ComposerAgentLoadResult {
-    let availableAgents: [OnlineAgentInfo]
+    let availableAgents: [ProjectAgent]
     let selectedAgentPubkey: String?
     let replyTargetAgentName: String?
 }
@@ -34,13 +34,13 @@ final class ComposerViewModel {
         self.dependencies = dependencies
     }
 
-    func projectWithMostRecentActivity(hideScheduled: Bool) -> ProjectInfo? {
+    func projectWithMostRecentActivity(hideScheduled: Bool) -> Project? {
         var candidates = dependencies.core.conversations
         if hideScheduled {
-            candidates = candidates.filter { !$0.isScheduled }
+            candidates = candidates.filter { !$0.thread.isScheduled }
         }
 
-        guard let mostRecent = candidates.max(by: { $0.effectiveLastActivity < $1.effectiveLastActivity }) else {
+        guard let mostRecent = candidates.max(by: { $0.thread.effectiveLastActivity < $1.thread.effectiveLastActivity }) else {
             return nil
         }
 
@@ -167,11 +167,11 @@ final class ComposerViewModel {
         )
     }
 
-    func loadNudges() async -> [NudgeInfo] {
+    func loadNudges() async -> [Nudge] {
         (try? await dependencies.core.getNudges()) ?? []
     }
 
-    func loadSkills() async -> [SkillInfo] {
+    func loadSkills() async -> [Skill] {
         (try? await dependencies.core.getSkills()) ?? []
     }
 
@@ -179,7 +179,7 @@ final class ComposerViewModel {
         candidate: String?,
         initialAgentPubkey: String?,
         agentsLoadError: String?,
-        availableAgents: [OnlineAgentInfo],
+        availableAgents: [ProjectAgent],
         conversationId: String?,
         projectId: String
     ) async -> String? {

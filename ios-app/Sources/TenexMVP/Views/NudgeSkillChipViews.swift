@@ -1,12 +1,12 @@
 import SwiftUI
 
-extension NudgeInfo: Identifiable {}
-extension SkillInfo: Identifiable {}
+extension Nudge: Identifiable {}
+extension Skill: Identifiable {}
 
 // MARK: - Nudge Chip View (for display in composer)
 
 struct NudgeChipView: View {
-    let nudge: NudgeInfo
+    let nudge: Nudge
     let onRemove: () -> Void
 
     var body: some View {
@@ -44,7 +44,7 @@ struct NudgeChipView: View {
 // MARK: - Skill Chip View (for display in composer)
 
 struct SkillChipView: View {
-    let skill: SkillInfo
+    let skill: Skill
     let onRemove: () -> Void
 
     /// Check if skill has file attachments

@@ -5,7 +5,7 @@ import SwiftUI
 /// Wrapper for inline ask event UI within a conversation.
 /// Shows interactive AskAnswerView when unanswered, collapses to summary when answered.
 struct InlineAskView: View {
-    let askEvent: AskEventInfo
+    let askEvent: AskEvent
     let askEventId: String
     let askAuthorPubkey: String
     let conversationId: String
@@ -108,7 +108,7 @@ struct InlineAskView: View {
     VStack(spacing: 20) {
         // Unanswered state
         InlineAskView(
-            askEvent: AskEventInfo(
+            askEvent: AskEvent(
                 title: "Project Setup",
                 context: "Please answer the following questions.",
                 questions: [

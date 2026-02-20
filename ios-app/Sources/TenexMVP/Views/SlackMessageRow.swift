@@ -13,7 +13,7 @@ import SwiftUI
 struct SlackMessageRow: View, Equatable {
     @EnvironmentObject var coreManager: TenexCoreManager
 
-    let message: MessageInfo
+    let message: Message
     let isConsecutive: Bool
     let conversationId: String
     let projectId: String
@@ -48,7 +48,7 @@ struct SlackMessageRow: View, Equatable {
 
     /// Get author color using deterministic hash
     private var authorColor: Color {
-        deterministicColor(for: message.authorNpub)
+        deterministicColor(for: message.pubkey)
     }
 
     /// Match TUI semantics: q-tag presence should also classify as tool use.
@@ -96,6 +96,10 @@ struct SlackMessageRow: View, Equatable {
         #endif
     }
 
+    private var authorDisplayName: String {
+        coreManager.displayName(for: message.pubkey)
+    }
+
     var body: some View {
         Group {
             VStack(alignment: .leading, spacing: 2) {
@@ -103,8 +107,8 @@ struct SlackMessageRow: View, Equatable {
                 if shouldShowHeader {
                     HStack(spacing: 6) {
                         AgentAvatarView(
-                            agentName: message.author,
-                            pubkey: message.authorNpub.isEmpty ? nil : npubToHex(message.authorNpub),
+                            agentName: authorDisplayName,
+                            pubkey: message.pubkey,
                             size: avatarSize,
                             fontSize: avatarFontSize,
                             showBorder: false
@@ -112,7 +116,7 @@ struct SlackMessageRow: View, Equatable {
                         .environmentObject(coreManager)
 
                         if hasPTags {
-                            Text(AgentNameFormatter.format(message.author))
+                            Text(AgentNameFormatter.format(authorDisplayName))
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(authorColor)
@@ -124,7 +128,7 @@ struct SlackMessageRow: View, Equatable {
                                 .fontWeight(.medium)
                                 .foregroundStyle(Color.agentBrand)
                         } else {
-                            Text(AgentNameFormatter.format(message.author))
+                            Text(AgentNameFormatter.format(authorDisplayName))
                                 .font(.subheadline)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(authorColor)
@@ -151,11 +155,11 @@ struct SlackMessageRow: View, Equatable {
                 }
 
                 // Inline ask event on the message itself (root ask message).
-                if let askEvent = message.askEvent, let hexPubkey = npubToHex(message.authorNpub) {
+                if let askEvent = message.askEvent, !message.pubkey.isEmpty {
                     InlineAskView(
                         askEvent: askEvent,
                         askEventId: message.id,
-                        askAuthorPubkey: hexPubkey,
+                        askAuthorPubkey: message.pubkey,
                         conversationId: conversationId,
                         projectId: projectId
                     )
@@ -294,12 +298,6 @@ struct SlackMessageRow: View, Equatable {
 
     // MARK: - Helpers
 
-    /// Convert npub (bech32) to hex pubkey format for use with AgentAvatarView and other components
-    private func npubToHex(_ npub: String) -> String? {
-        guard !npub.isEmpty else { return nil }
-        return Bech32.npubToHex(npub)
-    }
-
     private func recipientDisplayName(for recipientPubkey: String) -> String {
         for agents in coreManager.onlineAgents.values {
             if let agent = agents.first(where: { $0.pubkey == recipientPubkey }) {
@@ -317,8 +315,8 @@ struct SlackMessageRow: View, Equatable {
     #if os(macOS)
     private var accessibilitySummary: String {
         var parts: [String] = []
-        if !message.author.isEmpty {
-            parts.append("From \(AgentNameFormatter.format(message.author))")
+        if !message.pubkey.isEmpty {
+            parts.append("From \(AgentNameFormatter.format(authorDisplayName))")
         }
 
         let normalizedContent = message.content
@@ -391,20 +389,23 @@ private struct QTagReferenceRow: View {
 #Preview {
     VStack(spacing: 0) {
         SlackMessageRow(
-            message: MessageInfo(
+            message: Message(
                 id: "1",
                 content: "Hello, this is a test message with some content.",
-                author: "claude-code",
-                authorNpub: "abc123def456",
+                pubkey: "abc123def456",
+                threadId: "test",
                 createdAt: UInt64(Date().timeIntervalSince1970) - 300,
-                isToolCall: false,
-                role: "assistant",
+                replyTo: nil,
+                isReasoning: false,
+                askEvent: nil,
                 qTags: [],
                 aTags: [],
                 pTags: [],
-                askEvent: nil,
                 toolName: nil,
-                toolArgs: nil
+                toolArgs: nil,
+                llmMetadata: [:],
+                delegationTag: nil,
+                branch: nil
             ),
             isConsecutive: false,
             conversationId: "test",
@@ -412,20 +413,23 @@ private struct QTagReferenceRow: View {
         )
 
         SlackMessageRow(
-            message: MessageInfo(
+            message: Message(
                 id: "2",
                 content: "This is a consecutive message from the same author.",
-                author: "claude-code",
-                authorNpub: "abc123def456",
+                pubkey: "abc123def456",
+                threadId: "test",
                 createdAt: UInt64(Date().timeIntervalSince1970) - 60,
-                isToolCall: false,
-                role: "assistant",
+                replyTo: nil,
+                isReasoning: false,
+                askEvent: nil,
                 qTags: [],
                 aTags: [],
                 pTags: [],
-                askEvent: nil,
                 toolName: nil,
-                toolArgs: nil
+                toolArgs: nil,
+                llmMetadata: [:],
+                delegationTag: nil,
+                branch: nil
             ),
             isConsecutive: true,
             conversationId: "test",

@@ -76,7 +76,7 @@ struct AggregateTodoStats {
 /// Parses todo_write tool calls from messages
 enum TodoParser {
     /// Parse todos from a list of messages
-    static func parse(messages: [MessageInfo]) -> TodoState {
+    static func parse(messages: [Message]) -> TodoState {
         var items: [TodoItem] = []
         var idCounter = 0
 

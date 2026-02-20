@@ -56,24 +56,29 @@ final class ConversationActivityMetricsTests: XCTestCase {
         parentId: String?,
         isActive: Bool
     ) -> ConversationFullInfo {
-        ConversationFullInfo(
+        let thread = Thread(
             id: id,
             title: id,
-            author: "author",
-            authorPubkey: "author-pubkey",
-            summary: nil,
-            messageCount: 1,
+            content: "",
+            pubkey: "author-pubkey",
             lastActivity: 100,
             effectiveLastActivity: 100,
-            parentId: parentId,
-            status: nil,
-            currentActivity: nil,
+            statusLabel: nil,
+            statusCurrentActivity: nil,
+            summary: nil,
+            parentConversationId: parentId,
+            pTags: [],
+            askEvent: nil,
+            isScheduled: false
+        )
+        return ConversationFullInfo(
+            thread: thread,
+            author: "author",
+            messageCount: 1,
             isActive: isActive,
             isArchived: false,
             hasChildren: false,
-            projectATag: "31922:owner:project-1",
-            isScheduled: false,
-            pTags: []
+            projectATag: "31922:owner:project-1"
         )
     }
 }

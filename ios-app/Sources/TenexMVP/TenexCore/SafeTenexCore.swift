@@ -81,7 +81,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Get all projects.
     /// Note: Internal `try!` in FFI - can crash on error.
-    func getProjects() -> [ProjectInfo] {
+    func getProjects() -> [Project] {
         profiler.measureFFI("getProjects") {
             core.getProjects()
         }
@@ -182,7 +182,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Get messages for a conversation.
     /// Note: Internal `try!` in FFI - can crash on error.
-    func getMessages(conversationId: String) -> [MessageInfo] {
+    func getMessages(conversationId: String) -> [Message] {
         profiler.measureFFI("getMessages") {
             core.getMessages(conversationId: conversationId)
         }
@@ -252,7 +252,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     // MARK: - Agents
 
     /// Get agents for a project.
-    func getAgents(projectId: String) throws -> [AgentInfo] {
+    func getAgents(projectId: String) throws -> [AgentDefinition] {
         try profiler.measureFFI("getAgents") {
             do {
                 return try core.getAgents(projectId: projectId)
@@ -263,7 +263,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Get all agents.
-    func getAllAgents() throws -> [AgentInfo] {
+    func getAllAgents() throws -> [AgentDefinition] {
         try profiler.measureFFI("getAllAgents") {
             do {
                 return try core.getAllAgents()
@@ -274,7 +274,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Get all MCP tool definitions (kind:4200 events).
-    func getAllMcpTools() throws -> [McpToolInfo] {
+    func getAllMcpTools() throws -> [McpTool] {
         try profiler.measureFFI("getAllMcpTools") {
             do {
                 return try core.getAllMcpTools()
@@ -286,7 +286,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Get online agents from project status (kind:24010).
     /// These are actual agent instances with their own Nostr keypairs.
-    func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo] {
+    func getOnlineAgents(projectId: String) throws -> [ProjectAgent] {
         try profiler.measureFFI("getOnlineAgents") {
             do {
                 return try core.getOnlineAgents(projectId: projectId)
@@ -298,7 +298,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Get all nudges (kind:24020 events).
     /// Returns nudges sorted by created_at descending (most recent first).
-    func getNudges() throws -> [NudgeInfo] {
+    func getNudges() throws -> [Nudge] {
         try profiler.measureFFI("getNudges") {
             do {
                 return try core.getNudges()
@@ -310,7 +310,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Get all skills (kind:4202 events).
     /// Returns skills sorted by created_at descending (most recent first).
-    func getSkills() throws -> [SkillInfo] {
+    func getSkills() throws -> [Skill] {
         try profiler.measureFFI("getSkills") {
             do {
                 return try core.getSkills()
@@ -400,7 +400,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         description: String,
         repoUrl: String?,
         pictureUrl: String?,
-        agentIds: [String],
+        agentDefinitionIds: [String],
         mcpToolIds: [String]
     ) throws {
         try profiler.measureFFI("updateProject") {
@@ -411,7 +411,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     description: description,
                     repoUrl: repoUrl,
                     pictureUrl: pictureUrl,
-                    agentIds: agentIds,
+                    agentDefinitionIds: agentDefinitionIds,
                     mcpToolIds: mcpToolIds
                 )
             } catch let error as TenexError {
@@ -738,7 +738,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Get reports for a project.
     /// Note: Internal `try!` in FFI - can crash on error.
-    func getReports(projectId: String) -> [ReportInfo] {
+    func getReports(projectId: String) -> [Report] {
         profiler.measureFFI("getReports") {
             core.getReports(projectId: projectId)
         }

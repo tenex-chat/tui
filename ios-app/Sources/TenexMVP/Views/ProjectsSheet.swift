@@ -69,7 +69,7 @@ struct ProjectsContentView: View {
         .accessibilityHint("Clears project filters")
     }
 
-    private var sortedProjects: [ProjectInfo] {
+    private var sortedProjects: [Project] {
         coreManager.projects.sorted { a, b in
             let aOnline = coreManager.projectOnlineStatus[a.id] ?? false
             let bOnline = coreManager.projectOnlineStatus[b.id] ?? false
@@ -111,7 +111,7 @@ struct ProjectsSheet: View {
 private struct ProjectsSheetRow: View {
     @EnvironmentObject var coreManager: TenexCoreManager
 
-    let project: ProjectInfo
+    let project: Project
     let isFiltered: Bool
     let isOnline: Bool
     let onlineAgentCount: Int

@@ -588,7 +588,7 @@ enum ConversationFormatters {
     ///   - conversationId: The full conversation ID to reference
     ///   - messages: The messages in the conversation (for token count estimation)
     /// - Returns: A formatted context message string
-    static func generateContextMessage(conversationId: String, messages: [MessageInfo]) -> String {
+    static func generateContextMessage(conversationId: String, messages: [Message]) -> String {
         let shortConversationId = shortId(conversationId)
 
         // Calculate approximate token count: total characters / 4
@@ -608,13 +608,13 @@ enum ConversationFormatters {
     ///   - estimatedTokensPerMessage: Average tokens per message (default: 200)
     /// - Returns: A formatted context message string
     static func generateContextMessage(conversation: ConversationFullInfo, estimatedTokensPerMessage: Int = 200) -> String {
-        let shortConversationId = shortId(conversation.id)
+        let shortConversationId = shortId(conversation.thread.id)
 
         // Estimate tokens based on message count when actual content isn't available
         let tokenCount = Int(conversation.messageCount) * estimatedTokensPerMessage
 
         return """
-        This message is in the context of conversation id \(shortConversationId) (full: \(conversation.id)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
+        This message is in the context of conversation id \(shortConversationId) (full: \(conversation.thread.id)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
         """
     }
 
@@ -626,12 +626,12 @@ enum ConversationFormatters {
     /// - Parameters:
     ///   - report: The report being referenced
     /// - Returns: A formatted context message string
-    static func generateReportContextMessage(report: ReportInfo) -> String {
+    static func generateReportContextMessage(report: Report) -> String {
         // Estimate tokens based on content length (approx 4 chars per token)
         let tokenCount = report.content.count / 4
 
         return """
-        I'd like to discuss the report "\(report.title)" (slug: \(report.id)). The report is approximately \(tokenCount) tokens and is already in your context via the report_read tool or your memorized knowledge. Let me know if you need me to share any specific parts.
+        I'd like to discuss the report "\(report.title)" (slug: \(report.slug)). The report is approximately \(tokenCount) tokens and is already in your context via the report_read tool or your memorized knowledge. Let me know if you need me to share any specific parts.
         """
     }
 }

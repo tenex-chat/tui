@@ -14,9 +14,9 @@ enum ReportsLayoutMode {
 struct ReportsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     let layoutMode: ReportsLayoutMode
-    private let selectedReportBindingOverride: Binding<ReportInfo?>?
+    private let selectedReportBindingOverride: Binding<Report?>?
     @StateObject private var viewModel = ReportsViewModel()
-    @State private var selectedReportState: ReportInfo?
+    @State private var selectedReportState: Report?
     @State private var hasConfiguredViewModel = false
 
     #if os(iOS)
@@ -25,13 +25,13 @@ struct ReportsTabView: View {
 
     init(
         layoutMode: ReportsLayoutMode = .adaptive,
-        selectedReport: Binding<ReportInfo?>? = nil
+        selectedReport: Binding<Report?>? = nil
     ) {
         self.layoutMode = layoutMode
         self.selectedReportBindingOverride = selectedReport
     }
 
-    private var selectedReportBinding: Binding<ReportInfo?> {
+    private var selectedReportBinding: Binding<Report?> {
         selectedReportBindingOverride ?? $selectedReportState
     }
 
@@ -125,7 +125,7 @@ struct ReportsTabView: View {
         NavigationStack {
             reportsListView
                 .navigationTitle("Reports")
-                .navigationDestination(for: ReportInfo.self) { report in
+                .navigationDestination(for: Report.self) { report in
                     ReportsTabDetailView(report: report, project: projectFor(report: report))
                 }
         }
@@ -192,15 +192,16 @@ struct ReportsTabView: View {
         }
     }
 
-    private func projectFor(report: ReportInfo) -> ProjectInfo? {
+    private func projectFor(report: Report) -> Project? {
         if let configured = viewModel.projectFor(report: report) {
             return configured
         }
-        return coreManager.projects.first { $0.id == report.projectId }
+        let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
+        return coreManager.projects.first { $0.id == projectId }
     }
 
-    private func reportIdentity(_ report: ReportInfo) -> String {
-        "\(report.projectId)::\(report.id)"
+    private func reportIdentity(_ report: Report) -> String {
+        "\(report.projectATag)::\(report.slug)"
     }
 
     // MARK: - Empty State
@@ -274,7 +275,7 @@ struct ReportsTabView: View {
 
 /// Row view for displaying a report in the list
 struct ReportsTabRowView: View {
-    let report: ReportInfo
+    let report: Report
     let projectTitle: String?
     var showsChevron: Bool = true
 
@@ -294,8 +295,8 @@ struct ReportsTabRowView: View {
                     .lineLimit(1)
 
                 // Summary
-                if let summary = report.summary {
-                    Text(summary)
+                if !report.summary.isEmpty {
+                    Text(report.summary)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -304,7 +305,7 @@ struct ReportsTabRowView: View {
                 // Metadata row
                 HStack(spacing: 8) {
                     // Author
-                    Text(report.author)
+                    ReportAuthorName(pubkey: report.author)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
 
@@ -312,7 +313,7 @@ struct ReportsTabRowView: View {
                         .foregroundStyle(.tertiary)
 
                     // Date
-                    Text(formatDate(report.updatedAt))
+                    Text(formatDate(report.createdAt))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
 
@@ -351,8 +352,8 @@ struct ReportsTabRowView: View {
 
 /// Detail view for displaying a single report's content
 struct ReportsTabDetailView: View {
-    let report: ReportInfo
-    let project: ProjectInfo?
+    let report: Report
+    let project: Project?
 
     @EnvironmentObject private var coreManager: TenexCoreManager
     @State private var showChatWithAuthor = false
@@ -364,25 +365,14 @@ struct ReportsTabDetailView: View {
         return formatter
     }()
 
-    /// Convert the report author's npub to hex pubkey for MessageComposerView
-    private var authorHexPubkey: String? {
-        Bech32.npubToHex(report.authorNpub)
-    }
-
-    /// Generate the report's a-tag for reference (format: 30023:pubkey:slug)
-    /// Returns nil if the author's npub cannot be converted to hex (invalid npub)
-    private var reportATag: String? {
-        guard let authorHex = authorHexPubkey else {
-            // Invalid npub - cannot generate valid a-tag
-            return nil
-        }
-        return "30023:\(authorHex):\(report.id)"
+    /// The report's a-tag for reference (format: 30023:pubkey:slug)
+    private var reportATag: String {
+        "30023:\(report.author):\(report.slug)"
     }
 
     /// Whether the "Chat with Author" button should be enabled
-    /// Requires both a valid project and a valid author hex pubkey
     private var canChatWithAuthor: Bool {
-        project != nil && authorHexPubkey != nil
+        project != nil && !report.author.isEmpty
     }
 
     var body: some View {
@@ -413,10 +403,10 @@ struct ReportsTabDetailView: View {
             }
         }
         .sheet(isPresented: $showChatWithAuthor) {
-            if let project = project, let authorPubkey = authorHexPubkey {
+            if let project = project {
                 MessageComposerView(
                     project: project,
-                    initialAgentPubkey: authorPubkey,
+                    initialAgentPubkey: report.author,
                     initialContent: ConversationFormatters.generateReportContextMessage(report: report),
                     referenceReportATag: reportATag
                 )
@@ -429,10 +419,10 @@ struct ReportsTabDetailView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Tags
-            if !report.tags.isEmpty {
+            if !report.hashtags.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(report.tags, id: \.self) { tag in
+                        ForEach(report.hashtags, id: \.self) { tag in
                             Text("#\(tag)")
                                 .font(.caption)
                                 .padding(.horizontal, 10)
@@ -451,8 +441,8 @@ struct ReportsTabDetailView: View {
                 .fontWeight(.bold)
 
             // Summary
-            if let summary = report.summary {
-                Text(summary)
+            if !report.summary.isEmpty {
+                Text(report.summary)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -461,7 +451,7 @@ struct ReportsTabDetailView: View {
             HStack(spacing: 12) {
                 HStack(spacing: 4) {
                     Image(systemName: "person.circle")
-                    Text(report.author)
+                    ReportAuthorName(pubkey: report.author)
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -471,7 +461,7 @@ struct ReportsTabDetailView: View {
 
                 HStack(spacing: 4) {
                     Image(systemName: "clock")
-                    Text(formatDate(report.updatedAt))
+                    Text(formatDate(report.createdAt))
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -494,6 +484,27 @@ struct ReportsTabDetailView: View {
     private func formatDate(_ timestamp: UInt64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         return Self.dateFormatter.string(from: date)
+    }
+}
+
+// MARK: - Report Author Name Helper
+
+/// Resolves a hex pubkey to a display name via SafeTenexCore profile lookup.
+private struct ReportAuthorName: View {
+    let pubkey: String
+    @EnvironmentObject private var coreManager: TenexCoreManager
+    @State private var displayName: String?
+
+    var body: some View {
+        Text(displayName ?? String(pubkey.prefix(12)) + "...")
+            .task(id: pubkey) {
+                let name = coreManager.safeCore.getProfileName(pubkey: pubkey)
+                if !name.isEmpty, name != pubkey {
+                    displayName = name
+                } else {
+                    displayName = String(pubkey.prefix(12)) + "..."
+                }
+            }
     }
 }
 

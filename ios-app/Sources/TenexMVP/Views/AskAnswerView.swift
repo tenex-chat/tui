@@ -5,7 +5,7 @@ import SwiftUI
 /// Interactive view for answering an ask event.
 /// Allows users to select answers for each question and submit them.
 struct AskAnswerView: View {
-    let askEvent: AskEventInfo
+    let askEvent: AskEvent
     let askEventId: String
     let askAuthorPubkey: String
     let conversationId: String
@@ -24,7 +24,7 @@ struct AskAnswerView: View {
         answers.count == askEvent.questions.count
     }
 
-    private var currentQuestion: AskQuestionInfo? {
+    private var currentQuestion: AskQuestion? {
         guard currentQuestionIndex < askEvent.questions.count else { return nil }
         return askEvent.questions[currentQuestionIndex]
     }
@@ -116,7 +116,7 @@ struct AskAnswerView: View {
     // MARK: - Question Section
 
     @ViewBuilder
-    private func questionSection(_ question: AskQuestionInfo) -> some View {
+    private func questionSection(_ question: AskQuestion) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             // Question title
             Text(getTitle(question))
@@ -219,28 +219,28 @@ struct AskAnswerView: View {
 
     // MARK: - Helper Methods
 
-    private func getTitle(_ question: AskQuestionInfo) -> String {
+    private func getTitle(_ question: AskQuestion) -> String {
         switch question {
         case .singleSelect(let title, _, _): return title
         case .multiSelect(let title, _, _): return title
         }
     }
 
-    private func getQuestionText(_ question: AskQuestionInfo) -> String {
+    private func getQuestionText(_ question: AskQuestion) -> String {
         switch question {
         case .singleSelect(_, let q, _): return q
         case .multiSelect(_, let q, _): return q
         }
     }
 
-    private func getChoices(_ question: AskQuestionInfo) -> [String] {
+    private func getChoices(_ question: AskQuestion) -> [String] {
         switch question {
         case .singleSelect(_, _, let suggestions): return suggestions
         case .multiSelect(_, _, let options): return options
         }
     }
 
-    private func isMultiSelect(_ question: AskQuestionInfo) -> Bool {
+    private func isMultiSelect(_ question: AskQuestion) -> Bool {
         switch question {
         case .singleSelect: return false
         case .multiSelect: return true
@@ -410,7 +410,7 @@ private struct SelectableChoiceRow: View {
 
 #Preview {
     AskAnswerView(
-        askEvent: AskEventInfo(
+        askEvent: AskEvent(
             title: "Project Setup",
             context: "Please answer the following questions to help us set up your project.",
             questions: [
