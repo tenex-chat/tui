@@ -17,24 +17,27 @@ extension MessageComposerView {
     var contentEditorView: some View {
         ZStack(alignment: .topLeading) {
             if usesWorkspaceInlineLayout {
-                TextField(
-                    "",
-                    text: $localText,
-                    prompt: Text(composerPlaceholderText).foregroundStyle(.secondary.opacity(0.6)),
-                    axis: .vertical
-                )
-                .textFieldStyle(.plain)
-                .font(.title3)
-                .foregroundStyle(.primary.opacity(0.94))
-                .lineLimit(1...8)
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 14)
-                .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
-                .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
-                .onChange(of: localText) { oldValue, newValue in
-                    scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
-                    scheduleContentSync(newValue)
+                TextEditor(text: $localText)
+                    .font(.title3)
+                    .foregroundStyle(.primary.opacity(0.94))
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+                    .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
+                    .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
+                    .onChange(of: localText) { oldValue, newValue in
+                        scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
+                        scheduleContentSync(newValue)
+                    }
+
+                if localText.isEmpty {
+                    Text(composerPlaceholderText)
+                        .font(.title3)
+                        .foregroundStyle(.secondary.opacity(0.6))
+                        .padding(.horizontal, 21)
+                        .padding(.top, 24)
+                        .allowsHitTesting(false)
                 }
             } else {
                 TextEditor(text: $localText)
