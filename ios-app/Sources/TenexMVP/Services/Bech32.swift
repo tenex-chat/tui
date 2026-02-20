@@ -13,14 +13,14 @@ enum Bech32 {
         return map
     }()
 
-    /// Convert an npub (bech32-encoded) to a hex pubkey string.
-    /// Returns nil if the input is not a valid npub.
-    static func npubToHex(_ npub: String) -> String? {
-        guard npub.lowercased().hasPrefix("npub1") else {
+    /// Convert a bech32-encoded nostr key to hex.
+    /// Works for both npub and nsec prefixes.
+    private static func bech32ToHex(_ input: String, expectedPrefix: String) -> String? {
+        guard input.lowercased().hasPrefix(expectedPrefix) else {
             return nil
         }
 
-        let data = npub.lowercased()
+        let data = input.lowercased()
         guard let sepIndex = data.lastIndex(of: "1") else {
             return nil
         }
@@ -50,6 +50,18 @@ enum Bech32 {
 
         // Convert bytes to hex string
         return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Convert an npub (bech32-encoded) to a hex pubkey string.
+    /// Returns nil if the input is not a valid npub.
+    static func npubToHex(_ npub: String) -> String? {
+        bech32ToHex(npub, expectedPrefix: "npub1")
+    }
+
+    /// Convert an nsec (bech32-encoded) to a hex private key string.
+    /// Returns nil if the input is not a valid nsec.
+    static func nsecToHex(_ nsec: String) -> String? {
+        bech32ToHex(nsec, expectedPrefix: "nsec1")
     }
 
     /// Convert hex pubkey to npub (bech32-encoded).
