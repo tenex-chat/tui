@@ -48,7 +48,6 @@ final class TeamsViewModel: ObservableObject {
     private var hasLoaded = false
     private var isRefreshInFlight = false
     private var refreshRequestedWhileInFlight = false
-    private var authorNameCache: [String: String] = [:]
     private var authorPictureCache: [String: String] = [:]
     private var resolvedAuthorPictures: Set<String> = []
 
@@ -80,7 +79,7 @@ final class TeamsViewModel: ObservableObject {
 
             do {
                 let teams = try await coreManager.safeCore.getAllTeams()
-                await resolveAuthors(for: teams, coreManager: coreManager)
+                await resolveAuthorPictures(pubkeys: Set(teams.map(\.pubkey)), coreManager: coreManager)
 
                 let sortedTeams = teams.sorted { lhs, rhs in
                     if lhs.createdAt != rhs.createdAt {
@@ -92,7 +91,7 @@ final class TeamsViewModel: ObservableObject {
                 let items = sortedTeams.map { team in
                     TeamListItem(
                         team: team,
-                        authorDisplayName: authorNameCache[team.pubkey] ?? fallbackAuthorDisplay(pubkey: team.pubkey),
+                        authorDisplayName: coreManager.displayName(for: team.pubkey),
                         authorPictureURL: authorPictureCache[team.pubkey]
                     )
                 }
@@ -156,7 +155,7 @@ final class TeamsViewModel: ObservableObject {
             teamEventId: team.id
         )
 
-        await resolveCommentAuthors(for: comments, coreManager: coreManager)
+        await resolveAuthorPictures(pubkeys: Set(comments.map(\.pubkey)), coreManager: coreManager)
 
         let rows = comments.map { comment in
             TeamCommentRow(
@@ -177,14 +176,12 @@ final class TeamsViewModel: ObservableObject {
         let matchingIds = Set(team.agentDefinitionIds)
         let matching = allAgents.filter { matchingIds.contains($0.id) }
 
-        for agent in matching {
-            await resolveAuthor(pubkey: agent.pubkey, coreManager: coreManager)
-        }
+        await resolveAuthorPictures(pubkeys: Set(matching.map(\.pubkey)), coreManager: coreManager)
 
         return matching.map { agent in
             AgentDefinitionListItem(
                 agent: agent,
-                authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey),
+                authorDisplayName: coreManager.displayName(for: agent.pubkey),
                 authorPictureURL: authorPictureCache[agent.pubkey]
             )
         }
@@ -395,41 +392,15 @@ final class TeamsViewModel: ObservableObject {
         return lhs.comment.id < rhs.comment.id
     }
 
-    private func resolveCommentAuthors(
-        for comments: [TeamCommentInfo],
-        coreManager: TenexCoreManager
-    ) async {
-        let pubkeys = Set(comments.map(\.pubkey))
+    private func resolveAuthorPictures(pubkeys: Set<String>, coreManager: TenexCoreManager) async {
         for pubkey in pubkeys {
-            await resolveAuthor(pubkey: pubkey, coreManager: coreManager)
-        }
-    }
-
-    private func resolveAuthors(for teams: [TeamInfo], coreManager: TenexCoreManager) async {
-        let pubkeys = Set(teams.map(\.pubkey))
-        for pubkey in pubkeys {
-            await resolveAuthor(pubkey: pubkey, coreManager: coreManager)
-        }
-    }
-
-    private func resolveAuthor(pubkey: String, coreManager: TenexCoreManager) async {
-        if authorNameCache[pubkey] == nil {
-            let profileName = await coreManager.safeCore.getProfileName(pubkey: pubkey)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if !profileName.isEmpty, profileName != pubkey {
-                authorNameCache[pubkey] = profileName
-            } else {
-                authorNameCache[pubkey] = fallbackAuthorDisplay(pubkey: pubkey)
+            if !resolvedAuthorPictures.contains(pubkey) {
+                if let picture = try? await coreManager.safeCore.getProfilePicture(pubkey: pubkey),
+                   !picture.isEmpty {
+                    authorPictureCache[pubkey] = picture
+                }
+                resolvedAuthorPictures.insert(pubkey)
             }
-        }
-
-        if !resolvedAuthorPictures.contains(pubkey) {
-            if let picture = try? await coreManager.safeCore.getProfilePicture(pubkey: pubkey),
-               !picture.isEmpty {
-                authorPictureCache[pubkey] = picture
-            }
-            resolvedAuthorPictures.insert(pubkey)
         }
     }
 
@@ -438,19 +409,6 @@ final class TeamsViewModel: ObservableObject {
         if !profile.isEmpty, profile != comment.pubkey {
             return profile
         }
-
-        return authorNameCache[comment.pubkey] ?? fallbackAuthorDisplay(pubkey: comment.pubkey)
-    }
-
-    private func fallbackAuthorDisplay(pubkey: String) -> String {
-        if let npub = Bech32.hexToNpub(pubkey) {
-            return npub
-        }
-
-        if pubkey.count > 16 {
-            return "\(pubkey.prefix(8))...\(pubkey.suffix(8))"
-        }
-
-        return pubkey
+        return coreManager?.displayName(for: comment.pubkey) ?? comment.pubkey
     }
 }

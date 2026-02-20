@@ -18,7 +18,6 @@ final class AgentDefinitionsViewModel: ObservableObject {
 
     private weak var coreManager: TenexCoreManager?
     private var hasLoaded = false
-    private var authorNameCache: [String: String] = [:]
     private var authorPictureCache: [String: String] = [:]
     private var resolvedAuthorPictures: Set<String> = []
     private var currentUserPubkey: String?
@@ -46,12 +45,12 @@ final class AgentDefinitionsViewModel: ObservableObject {
             currentUserPubkey = user?.pubkey
 
             let dedupedAgents = deduplicateLatest(agents)
-            await resolveAuthors(for: dedupedAgents, coreManager: coreManager)
+            await resolveAuthorPictures(for: dedupedAgents, coreManager: coreManager)
 
             let items = dedupedAgents.map { agent in
                 AgentDefinitionListItem(
                     agent: agent,
-                    authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey),
+                    authorDisplayName: coreManager.displayName(for: agent.pubkey),
                     authorPictureURL: authorPictureCache[agent.pubkey]
                 )
             }
@@ -90,7 +89,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
 
         return AgentDefinitionListItem(
             agent: agent,
-            authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey),
+            authorDisplayName: coreManager?.displayName(for: agent.pubkey) ?? agent.pubkey,
             authorPictureURL: authorPictureCache[agent.pubkey]
         )
     }
@@ -200,21 +199,10 @@ final class AgentDefinitionsViewModel: ObservableObject {
         return agent.id
     }
 
-    private func resolveAuthors(for agents: [AgentDefinition], coreManager: TenexCoreManager) async {
+    private func resolveAuthorPictures(for agents: [AgentDefinition], coreManager: TenexCoreManager) async {
         let uniquePubkeys = Set(agents.map(\.pubkey))
 
         for pubkey in uniquePubkeys {
-            if authorNameCache[pubkey] == nil {
-                let profileName = await coreManager.safeCore.getProfileName(pubkey: pubkey)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if !profileName.isEmpty, profileName != pubkey {
-                    authorNameCache[pubkey] = profileName
-                } else {
-                    authorNameCache[pubkey] = fallbackAuthorDisplay(pubkey: pubkey)
-                }
-            }
-
             if !resolvedAuthorPictures.contains(pubkey) {
                 if let picture = try? await coreManager.safeCore.getProfilePicture(pubkey: pubkey),
                    !picture.isEmpty {
@@ -223,15 +211,5 @@ final class AgentDefinitionsViewModel: ObservableObject {
                 resolvedAuthorPictures.insert(pubkey)
             }
         }
-    }
-
-    private func fallbackAuthorDisplay(pubkey: String) -> String {
-        if let npub = Bech32.hexToNpub(pubkey) {
-            return npub
-        }
-        if pubkey.count > 16 {
-            return "\(pubkey.prefix(8))...\(pubkey.suffix(8))"
-        }
-        return pubkey
     }
 }
