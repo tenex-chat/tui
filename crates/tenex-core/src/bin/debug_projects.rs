@@ -23,7 +23,7 @@ fn main() -> Result<()> {
             project_count += 1;
             // Get name and agent tags
             let mut name = String::from("<unnamed>");
-            let mut agent_ids: Vec<String> = Vec::new();
+            let mut agent_definition_ids: Vec<String> = Vec::new();
             for tag in note.tags() {
                 if tag.count() >= 2 {
                     if let Some(first) = tag.get(0).and_then(|s| s.variant().str()) {
@@ -38,24 +38,24 @@ fn main() -> Result<()> {
                             if let Some(elem) = tag.get(1) {
                                 // nostrdb stores event IDs as binary Id variant
                                 if let Some(id_bytes) = elem.variant().id() {
-                                    agent_ids.push(hex::encode(id_bytes));
+                                    agent_definition_ids.push(hex::encode(id_bytes));
                                 } else if let Some(s) = elem.variant().str() {
-                                    agent_ids.push(s.to_string());
+                                    agent_definition_ids.push(s.to_string());
                                 }
                             }
                         }
                     }
                 }
             }
-            if !agent_ids.is_empty() {
+            if !agent_definition_ids.is_empty() {
                 projects_with_agents += 1;
                 if projects_with_agents <= 10 {
                     println!(
                         "  {}. {} - {} agent(s): {:?}",
                         project_count,
                         name,
-                        agent_ids.len(),
-                        agent_ids
+                        agent_definition_ids.len(),
+                        agent_definition_ids
                     );
                 }
             }

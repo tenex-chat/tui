@@ -44,7 +44,7 @@ fn render_project_selector_modal_inner(
                     .map(|s| s.agents.len())
                     .unwrap_or(0);
 
-                ModalItem::new(&project.name)
+                ModalItem::new(&project.title)
                     .with_shortcut(format!("{} agents · {}", agent_count, owner_name))
                     .selected(is_selected)
             })
@@ -66,7 +66,7 @@ fn render_project_selector_modal_inner(
                 let is_selected = offset + idx == selected_index;
                 let owner_name = data_store.get_profile_name(&project.pubkey);
 
-                ModalItem::new(&project.name)
+                ModalItem::new(&project.title)
                     .with_shortcut(owner_name)
                     .selected(is_selected)
             })

@@ -55,7 +55,7 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
                     let project_name = app
                         .selected_project
                         .as_ref()
-                        .map(|p| p.name.clone())
+                        .map(|p| p.title.clone())
                         .unwrap_or_else(|| "New".to_string());
                     let tab_idx = app.open_draft_tab(&a_tag, &project_name);
                     app.switch_to_tab(tab_idx);
@@ -73,7 +73,7 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
                             let project_name = app
                                 .selected_project
                                 .as_ref()
-                                .map(|p| p.name.clone())
+                                .map(|p| p.title.clone())
                                 .unwrap_or_else(|| "New".to_string());
 
                             tab.project_a_tag = a_tag.clone();
@@ -125,7 +125,7 @@ pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent)
         }) {
             SelectorAction::Selected(project) => {
                 let a_tag = project.a_tag();
-                let project_name = project.name.clone();
+                let project_name = project.title.clone();
 
                 // Check if a draft tab already exists for the target project
                 // If so, switch to it instead of creating a duplicate

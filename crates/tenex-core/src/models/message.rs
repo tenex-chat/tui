@@ -1,6 +1,7 @@
 use nostrdb::Note;
+use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum AskQuestion {
     SingleSelect {
         title: String,
@@ -14,14 +15,14 @@ pub enum AskQuestion {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct AskEvent {
     pub title: Option<String>,
     pub context: String,
     pub questions: Vec<AskQuestion>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Message {
     pub id: String,
     pub content: String,
@@ -56,7 +57,7 @@ pub struct Message {
     pub tool_args: Option<String>,
     /// LLM metadata tags (llm-prompt-tokens, llm-completion-tokens, llm-model, etc.)
     /// Key is the tag name without "llm-" prefix, value is the tag value
-    pub llm_metadata: Vec<(String, String)>,
+    pub llm_metadata: HashMap<String, String>,
     /// Delegation tag value - parent conversation ID if this message has a delegation tag
     /// Format: ["delegation", "<parent-conversation-id>"]
     pub delegation_tag: Option<String>,
@@ -90,7 +91,7 @@ impl Message {
         let mut p_tags: Vec<String> = Vec::new();
         let mut tool_name: Option<String> = None;
         let mut tool_args: Option<String> = None;
-        let mut llm_metadata: Vec<(String, String)> = Vec::new();
+        let mut llm_metadata: HashMap<String, String> = HashMap::new();
         let mut delegation_tag: Option<String> = None;
         let mut branch: Option<String> = None;
 
@@ -103,7 +104,7 @@ impl Message {
                 if name.starts_with("llm-") {
                     if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
                         let key = name.strip_prefix("llm-").unwrap().to_string();
-                        llm_metadata.push((key, value.to_string()));
+                        llm_metadata.insert(key, value.to_string());
                     }
                     continue;
                 }
@@ -264,7 +265,7 @@ impl Message {
         let mut p_tags: Vec<String> = Vec::new();
         let mut tool_name: Option<String> = None;
         let mut tool_args: Option<String> = None;
-        let mut llm_metadata: Vec<(String, String)> = Vec::new();
+        let mut llm_metadata: HashMap<String, String> = HashMap::new();
         let mut branch: Option<String> = None;
 
         for tag in note.tags() {
@@ -275,7 +276,7 @@ impl Message {
                 if name.starts_with("llm-") {
                     if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
                         let key = name.strip_prefix("llm-").unwrap().to_string();
-                        llm_metadata.push((key, value.to_string()));
+                        llm_metadata.insert(key, value.to_string());
                     }
                     continue;
                 }
@@ -704,7 +705,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
@@ -724,7 +725,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
@@ -747,7 +748,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
@@ -773,7 +774,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
@@ -800,7 +801,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
@@ -824,7 +825,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };

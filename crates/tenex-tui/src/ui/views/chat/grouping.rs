@@ -150,6 +150,7 @@ pub fn group_messages<'a>(messages: &[&'a Message]) -> Vec<DisplayItem<'a>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     // ==========================================================================
     // Tests for should_render_q_tags (denylist approach)
@@ -225,7 +226,7 @@ mod tests {
             p_tags: vec![],
             tool_name: Some("mcp__tenex__report_write".to_string()),  // report_write tool (denylisted)
             tool_args: Some(r#"{"server":"tenex","tool":"report_write"}"#.to_string()),
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
@@ -274,7 +275,7 @@ mod tests {
             p_tags: vec![],
             tool_name: Some("mcp__tenex__delegate".to_string()), // delegation tool (not in denylist)
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: Some("feature-branch".to_string()),
         };
@@ -329,7 +330,7 @@ mod tests {
             p_tags: vec![],
             tool_name: Some("mcp__tenex__ask".to_string()), // ask tool (not in denylist)
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
@@ -371,7 +372,7 @@ mod tests {
             p_tags: vec![],
             tool_name: Some("ask".to_string()), // short-form ask tool (not in denylist)
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };

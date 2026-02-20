@@ -1551,7 +1551,7 @@ mod conversation_state_tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };

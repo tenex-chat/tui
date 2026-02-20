@@ -240,7 +240,7 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
             .take(visible_height)
             .map(|(i, agent)| {
                 let is_cursor = i == selected_index;
-                let is_selected = state.agent_ids.contains(&agent.id);
+                let is_selected = state.agent_definition_ids.contains(&agent.id);
 
                 let mut spans = vec![];
 
@@ -303,7 +303,7 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
         remaining.width,
         1,
     );
-    let count_text = format!("{} agent(s) selected", state.agent_ids.len());
+    let count_text = format!("{} agent(s) selected", state.agent_definition_ids.len());
     let count = Paragraph::new(count_text).style(Style::default().fg(theme::TEXT_DIM));
     f.render_widget(count, count_area);
 }

@@ -80,19 +80,19 @@ fn execute_project_action(
             app.modal_state = ModalState::None;
         }
         ProjectAction::Settings => {
-            let (agent_ids, mcp_tool_ids) = {
+            let (agent_definition_ids, mcp_tool_ids) = {
                 let store = app.data_store.borrow();
                 store
                     .get_projects()
                     .iter()
                     .find(|p| p.a_tag() == state.project_a_tag)
-                    .map(|p| (p.agent_ids.clone(), p.mcp_tool_ids.clone()))
+                    .map(|p| (p.agent_definition_ids.clone(), p.mcp_tool_ids.clone()))
                     .unwrap_or_default()
             };
             app.modal_state = ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
                 state.project_a_tag.clone(),
                 state.project_name.clone(),
-                agent_ids,
+                agent_definition_ids,
                 mcp_tool_ids,
             ));
         }
@@ -292,7 +292,7 @@ fn execute_chat_action(
                 .get_projects()
                 .iter()
                 .find(|p| p.a_tag() == project_a_tag)
-                .map(|p| p.name.clone())
+                .map(|p| p.title.clone())
                 .unwrap_or_else(|| "New".to_string());
 
             app.modal_state = ModalState::None;

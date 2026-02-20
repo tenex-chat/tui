@@ -51,8 +51,8 @@ use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction
 
 use crate::models::agent_definition::AgentDefinition;
 use crate::models::{
-    ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Report, TeamPack,
-    Thread,
+    AskEvent, ConversationMetadata, InboxItem, MCPTool, Message, Nudge, OperationsStatus, Project,
+    ProjectAgent, ProjectStatus, Report, Skill, TeamPack, Thread,
 };
 use crate::nostr::{set_log_path, DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
@@ -235,127 +235,6 @@ fn acquire_store_read<'a>(
     store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)
 }
 
-/// Convert an AgentDefinition to AgentInfo (shared helper to eliminate DRY violation)
-fn agent_to_info(agent: &AgentDefinition) -> AgentInfo {
-    AgentInfo {
-        id: agent.id.clone(),
-        pubkey: agent.pubkey.clone(),
-        d_tag: agent.d_tag.clone(),
-        name: agent.name.clone(),
-        description: agent.description.clone(),
-        role: agent.role.clone(),
-        instructions: agent.instructions.clone(),
-        picture: agent.picture.clone(),
-        version: agent.version.clone(),
-        model: agent.model.clone(),
-        tools: agent.tools.clone(),
-        mcp_servers: agent.mcp_servers.clone(),
-        use_criteria: agent.use_criteria.clone(),
-        file_ids: agent.file_ids.clone(),
-        created_at: agent.created_at,
-    }
-}
-
-/// Convert a project to ProjectInfo (shared helper).
-fn project_to_info(project: &Project) -> ProjectInfo {
-    ProjectInfo {
-        id: project.id.clone(),
-        title: project.name.clone(),
-        description: project.description.clone(),
-        repo_url: project.repo_url.clone(),
-        picture_url: project.picture_url.clone(),
-        created_at: project.created_at,
-        agent_ids: project.agent_ids.clone(),
-        mcp_tool_ids: project.mcp_tool_ids.clone(),
-        is_deleted: project.is_deleted,
-    }
-}
-
-fn mcp_tool_to_info(tool: &crate::models::MCPTool) -> McpToolInfo {
-    McpToolInfo {
-        id: tool.id.clone(),
-        name: tool.name.clone(),
-        description: tool.description.clone(),
-        command: tool.command.clone(),
-    }
-}
-
-/// Convert an AskEvent to AskEventInfo (shared helper).
-fn ask_event_to_info(event: &crate::models::message::AskEvent) -> AskEventInfo {
-    let questions = event
-        .questions
-        .iter()
-        .map(|q| match q {
-            crate::models::message::AskQuestion::SingleSelect {
-                title,
-                question,
-                suggestions,
-            } => AskQuestionInfo::SingleSelect {
-                title: title.clone(),
-                question: question.clone(),
-                suggestions: suggestions.clone(),
-            },
-            crate::models::message::AskQuestion::MultiSelect {
-                title,
-                question,
-                options,
-            } => AskQuestionInfo::MultiSelect {
-                title: title.clone(),
-                question: question.clone(),
-                options: options.clone(),
-            },
-        })
-        .collect();
-
-    AskEventInfo {
-        title: event.title.clone(),
-        context: event.context.clone(),
-        questions,
-    }
-}
-
-/// Convert a Message to MessageInfo (shared helper).
-fn message_to_info(store: &AppDataStore, message: &crate::models::Message) -> MessageInfo {
-    let author_name = store.get_profile_name(&message.pubkey);
-
-    let author_npub = hex::decode(&message.pubkey)
-        .ok()
-        .and_then(|bytes| {
-            if bytes.len() == 32 {
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                nostr_sdk::PublicKey::from_slice(&arr).ok()
-            } else {
-                None
-            }
-        })
-        .and_then(|pk| pk.to_bech32().ok())
-        .unwrap_or_else(|| format!("{}...", &message.pubkey[..16.min(message.pubkey.len())]));
-
-    let role = match store.user_pubkey.as_deref() {
-        Some(user_pubkey) if user_pubkey == message.pubkey => "user".to_string(),
-        _ => "assistant".to_string(),
-    };
-
-    let ask_event = message.ask_event.as_ref().map(ask_event_to_info);
-
-    MessageInfo {
-        id: message.id.clone(),
-        content: message.content.clone(),
-        author: author_name,
-        author_npub,
-        created_at: message.created_at,
-        is_tool_call: message.tool_name.is_some(),
-        role,
-        q_tags: message.q_tags.clone(),
-        a_tags: message.a_tags.clone(),
-        p_tags: message.p_tags.clone(),
-        ask_event,
-        tool_name: message.tool_name.clone(),
-        tool_args: message.tool_args.clone(),
-    }
-}
-
 /// Convert a Thread to ConversationFullInfo (shared helper).
 fn thread_to_full_info(
     store: &AppDataStore,
@@ -363,7 +242,7 @@ fn thread_to_full_info(
     archived_ids: &std::collections::HashSet<String>,
 ) -> ConversationFullInfo {
     let message_count = store.get_messages(&thread.id).len() as u32;
-    let author_name = store.get_profile_name(&thread.pubkey);
+    let author = store.get_profile_name(&thread.pubkey);
     let has_children = store.runtime_hierarchy.has_children(&thread.id);
     let is_active = store.operations.is_event_busy(&thread.id);
     let is_archived = archived_ids.contains(&thread.id);
@@ -372,72 +251,13 @@ fn thread_to_full_info(
         .unwrap_or_default();
 
     ConversationFullInfo {
-        id: thread.id.clone(),
-        title: thread.title.clone(),
-        author: author_name,
-        author_pubkey: thread.pubkey.clone(),
-        summary: thread.summary.clone(),
+        thread: thread.clone(),
+        author,
         message_count,
-        last_activity: thread.last_activity,
-        effective_last_activity: thread.effective_last_activity,
-        parent_id: thread.parent_conversation_id.clone(),
-        status: thread.status_label.clone(),
-        current_activity: thread.status_current_activity.clone(),
         is_active,
         is_archived,
         has_children,
         project_a_tag,
-        is_scheduled: thread.is_scheduled,
-        p_tags: thread.p_tags.clone(),
-    }
-}
-
-/// Convert an internal InboxItem to FFI InboxItem (shared helper).
-fn inbox_item_to_info(store: &AppDataStore, item: &crate::models::InboxItem) -> InboxItem {
-    let from_agent = store.get_profile_name(&item.author_pubkey);
-
-    let project_id = if item.project_a_tag.is_empty() {
-        None
-    } else {
-        item.project_a_tag.split(':').nth(2).map(String::from)
-    };
-
-    let event_type = match item.event_type {
-        crate::models::InboxEventType::Ask => "ask".to_string(),
-        crate::models::InboxEventType::Mention => "mention".to_string(),
-    };
-
-    let status = if item.is_read {
-        "acknowledged".to_string()
-    } else {
-        "waiting".to_string()
-    };
-
-    let ask_event = item.ask_event.as_ref().map(ask_event_to_info);
-
-    InboxItem {
-        id: item.id.clone(),
-        title: item.title.clone(),
-        content: item.content.clone(),
-        from_agent,
-        author_pubkey: item.author_pubkey.clone(),
-        event_type,
-        status,
-        created_at: item.created_at,
-        project_id,
-        conversation_id: item.thread_id.clone(),
-        ask_event,
-    }
-}
-
-/// Convert a ProjectAgent to OnlineAgentInfo (shared helper).
-fn project_agent_to_online_info(agent: &crate::models::ProjectAgent) -> OnlineAgentInfo {
-    OnlineAgentInfo {
-        pubkey: agent.pubkey.clone(),
-        name: agent.name.clone(),
-        is_pm: agent.is_pm,
-        model: agent.model.clone(),
-        tools: agent.tools.clone(),
     }
 }
 
@@ -686,7 +506,7 @@ fn process_note_keys_with_deltas(
                 31933 => {
                     if let Some(project) = Project::from_note(&note) {
                         deltas.push(DataChangeType::ProjectUpsert {
-                            project: project_to_info(&project),
+                            project: project.clone(),
                         });
                     }
                 }
@@ -695,7 +515,7 @@ fn process_note_keys_with_deltas(
                     if let Some(message) = Message::from_note(&note) {
                         deltas.push(DataChangeType::MessageAppended {
                             conversation_id: message.thread_id.clone(),
-                            message: message_to_info(store, &message),
+                            message: message.clone(),
                         });
 
                         // Conversation + ancestors (effective_last_activity updates)
@@ -733,7 +553,7 @@ fn process_note_keys_with_deltas(
                         if let Some(root_message) = Message::from_thread_note(&note) {
                             deltas.push(DataChangeType::MessageAppended {
                                 conversation_id: root_message.thread_id.clone(),
-                                message: message_to_info(store, &root_message),
+                                message: root_message.clone(),
                             });
 
                             // Inbox additions for thread roots (ask events / mentions)
@@ -759,43 +579,13 @@ fn process_note_keys_with_deltas(
                 30023 => {
                     // Report/article event
                     if let Some(report) = Report::from_note(&note) {
-                        // Find the project ID for this report
-                        if let Some(project) = store
+                        if store
                             .get_projects()
                             .iter()
-                            .find(|p| p.a_tag() == report.project_a_tag)
+                            .any(|p| p.a_tag() == report.project_a_tag)
                         {
-                            let project_id = project.id.clone();
-                            let author_name = store.get_profile_name(&report.author);
-                            let author_npub = hex::decode(&report.author)
-                                .ok()
-                                .and_then(|bytes| {
-                                    if bytes.len() == 32 {
-                                        let mut arr = [0u8; 32];
-                                        arr.copy_from_slice(&bytes);
-                                        nostr_sdk::PublicKey::from_slice(&arr).ok()
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .and_then(|pk| pk.to_bech32().ok())
-                                .unwrap_or_else(|| {
-                                    format!("{}...", &report.author[..16.min(report.author.len())])
-                                });
-
                             deltas.push(DataChangeType::ReportUpsert {
-                                report: ReportInfo {
-                                    id: report.slug.clone(),
-                                    project_id,
-                                    title: report.title.clone(),
-                                    summary: Some(report.summary.clone()),
-                                    content: report.content.clone(),
-                                    author: author_name,
-                                    author_npub,
-                                    created_at: report.created_at,
-                                    updated_at: report.created_at,
-                                    tags: report.hashtags.clone(),
-                                },
+                                report: report.clone(),
                             });
                         }
                     }
@@ -822,7 +612,7 @@ fn process_note_keys_with_deltas(
     for inbox_id in inbox_items_to_upsert {
         if let Some(item) = store.inbox.get_items().iter().find(|i| i.id == inbox_id) {
             deltas.push(DataChangeType::InboxUpsert {
-                item: inbox_item_to_info(store, item),
+                item: item.clone(),
             });
         }
     }
@@ -902,7 +692,7 @@ fn process_data_changes_with_deltas(
                                         .map(|agents| {
                                             agents
                                                 .iter()
-                                                .map(project_agent_to_online_info)
+                                                .cloned()
                                                 .collect()
                                         })
                                         .unwrap_or_default();
@@ -1023,43 +813,6 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
     }
 }
 
-/// A simplified project info struct for FFI export.
-/// This is a subset of the full Project model, safe for cross-language use.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct ProjectInfo {
-    /// Unique identifier (d-tag) of the project
-    pub id: String,
-    /// Display name/title of the project
-    pub title: String,
-    /// Project description (from content field), if any
-    pub description: Option<String>,
-    /// Repository URL from ["repo", ...], if present
-    pub repo_url: Option<String>,
-    /// Picture URL from ["picture", ...] or ["image", ...], if present
-    pub picture_url: Option<String>,
-    /// Created timestamp of the latest replaceable event
-    pub created_at: u64,
-    /// Agent definition event IDs from "agent" tags
-    pub agent_ids: Vec<String>,
-    /// MCP tool event IDs from "mcp" tags
-    pub mcp_tool_ids: Vec<String>,
-    /// Whether the project is tombstoned via ["deleted"] tag
-    pub is_deleted: bool,
-}
-
-/// MCP tool info for project tool selection UI.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct McpToolInfo {
-    /// Event ID of the MCP tool definition (kind:4200)
-    pub id: String,
-    /// Display name
-    pub name: String,
-    /// Description/content
-    pub description: String,
-    /// Command tag value
-    pub command: String,
-}
-
 /// A conversation/thread in a project.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ConversationInfo {
@@ -1087,28 +840,12 @@ pub struct ConversationInfo {
 /// Includes activity tracking, archive status, and hierarchy data.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ConversationFullInfo {
-    /// Unique identifier of the conversation (event ID)
-    pub id: String,
-    /// Title/subject of the conversation
-    pub title: String,
-    /// Agent or user who started the conversation
+    /// The underlying thread data
+    pub thread: Thread,
+    /// Author display name (resolved from profile)
     pub author: String,
-    /// Author's public key (hex) for profile lookups
-    pub author_pubkey: String,
-    /// Brief summary or first line of content
-    pub summary: Option<String>,
     /// Number of messages in the thread
     pub message_count: u32,
-    /// Unix timestamp of last activity (thread's own last activity)
-    pub last_activity: u64,
-    /// Effective last activity (max of own and all descendants)
-    pub effective_last_activity: u64,
-    /// Parent conversation ID (for nesting)
-    pub parent_id: Option<String>,
-    /// Status label from metadata: "In Progress", "Blocked", "Done", etc.
-    pub status: Option<String>,
-    /// Current activity description (e.g., "Writing tests...")
-    pub current_activity: Option<String>,
     /// Whether this conversation has an agent actively working on it
     pub is_active: bool,
     /// Whether this conversation is archived
@@ -1117,10 +854,6 @@ pub struct ConversationFullInfo {
     pub has_children: bool,
     /// Project a_tag this conversation belongs to
     pub project_a_tag: String,
-    /// Whether this is a scheduled event
-    pub is_scheduled: bool,
-    /// P-tags (pubkeys mentioned in the conversation's root event)
-    pub p_tags: Vec<String>,
 }
 
 /// Time filter options for conversations
@@ -1166,39 +899,11 @@ pub struct ProjectFilterInfo {
     pub total_count: u32,
 }
 
-/// A single question in an ask event.
-#[derive(Debug, Clone, uniffi::Enum)]
-pub enum AskQuestionInfo {
-    /// Single-select question (user picks one option)
-    SingleSelect {
-        title: String,
-        question: String,
-        suggestions: Vec<String>,
-    },
-    /// Multi-select question (user can pick multiple options)
-    MultiSelect {
-        title: String,
-        question: String,
-        options: Vec<String>,
-    },
-}
-
-/// An ask event containing questions for user interaction.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct AskEventInfo {
-    /// Title of the ask event
-    pub title: Option<String>,
-    /// Context/description for the questions
-    pub context: String,
-    /// List of questions to display
-    pub questions: Vec<AskQuestionInfo>,
-}
-
 /// Ask-event lookup result for q-tag resolution.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct AskEventLookupInfo {
     /// Ask payload resolved from the referenced event.
-    pub ask_event: AskEventInfo,
+    pub ask_event: AskEvent,
     /// Author pubkey (hex) of the ask event.
     pub author_pubkey: String,
 }
@@ -1221,89 +926,6 @@ pub enum AskAnswerType {
     MultiSelect { values: Vec<String> },
     /// Custom text input (for "Other" option)
     CustomText { value: String },
-}
-
-/// A message within a conversation.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct MessageInfo {
-    /// Unique identifier of the message (event ID)
-    pub id: String,
-    /// Content of the message (can be markdown)
-    pub content: String,
-    /// Author name/identifier
-    pub author: String,
-    /// Author's npub
-    pub author_npub: String,
-    /// Unix timestamp when message was created
-    pub created_at: u64,
-    /// Whether this is a tool call
-    pub is_tool_call: bool,
-    /// Role: user, assistant, system
-    pub role: String,
-    /// Q-tags pointing to referenced events (delegation targets, ask events, etc.)
-    pub q_tags: Vec<String>,
-    /// A-tags (addressable references) - NIP-33 coordinates for kind:30023 reports
-    pub a_tags: Vec<String>,
-    /// P-tags (mentions) - pubkeys this message mentions/delegates to
-    pub p_tags: Vec<String>,
-    /// Ask event data if this message contains an ask (inline ask)
-    pub ask_event: Option<AskEventInfo>,
-    /// Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
-    pub tool_name: Option<String>,
-    /// Tool arguments as JSON string (for parsing todo_write and other tool calls)
-    pub tool_args: Option<String>,
-}
-
-/// A report/article in a project (kind 30023 NIP-23 long-form content).
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct ReportInfo {
-    /// Unique identifier (d-tag/slug)
-    pub id: String,
-    /// Project ID this report belongs to
-    pub project_id: String,
-    /// Title of the report
-    pub title: String,
-    /// Summary/excerpt
-    pub summary: Option<String>,
-    /// Full markdown content
-    pub content: String,
-    /// Author name
-    pub author: String,
-    /// Author npub
-    pub author_npub: String,
-    /// Unix timestamp of creation
-    pub created_at: u64,
-    /// Unix timestamp of last update
-    pub updated_at: u64,
-    /// Tags/hashtags
-    pub tags: Vec<String>,
-}
-
-/// An inbox item (task/notification waiting for attention).
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct InboxItem {
-    /// Unique identifier
-    pub id: String,
-    /// Title/summary of the item
-    pub title: String,
-    /// Detailed content
-    pub content: String,
-    /// Who it's from
-    pub from_agent: String,
-    /// Author pubkey (hex) for reply tagging
-    pub author_pubkey: String,
-    /// Event type: ask, mention
-    pub event_type: String,
-    /// Status: waiting, acknowledged, resolved
-    pub status: String,
-    /// Unix timestamp
-    pub created_at: u64,
-    /// Related project ID
-    pub project_id: Option<String>,
-    /// Related conversation ID
-    pub conversation_id: Option<String>,
-    /// Ask event data if this inbox item is an ask
-    pub ask_event: Option<AskEventInfo>,
 }
 
 /// A search result from full-text search.
@@ -1363,7 +985,7 @@ pub struct TeamInfo {
     /// Optional image URL from `image`/`picture` tags.
     pub image: Option<String>,
     /// Agent definition event IDs from repeated `e` tags.
-    pub agent_ids: Vec<String>,
+    pub agent_definition_ids: Vec<String>,
     /// Categories from repeated `c` tags.
     pub categories: Vec<String>,
     /// Hashtags from repeated `t` tags.
@@ -1395,60 +1017,6 @@ pub struct TeamCommentInfo {
     pub parent_comment_id: Option<String>,
 }
 
-/// An agent definition for FFI export (from kind:4199 events).
-/// Note: The pubkey here is the AUTHOR of the agent definition, not the agent instance.
-/// For agent instances with their own pubkeys, use OnlineAgentInfo from get_online_agents().
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct AgentInfo {
-    /// Unique identifier of the agent (event ID)
-    pub id: String,
-    /// Agent definition author's public key (hex) - NOT the agent instance pubkey
-    pub pubkey: String,
-    /// Agent's d-tag (slug)
-    pub d_tag: String,
-    /// Display name of the agent
-    pub name: String,
-    /// Description of the agent's purpose
-    pub description: String,
-    /// Role of the agent (e.g., "Developer", "PM")
-    pub role: String,
-    /// Full instruction prompt for the agent definition
-    pub instructions: String,
-    /// Profile picture URL, if any
-    pub picture: Option<String>,
-    /// Version string (supports both `ver` and legacy `version` tags)
-    pub version: Option<String>,
-    /// Model used by the agent (e.g., "claude-3-opus")
-    pub model: Option<String>,
-    /// Tool names declared on the definition
-    pub tools: Vec<String>,
-    /// Referenced MCP server event IDs
-    pub mcp_servers: Vec<String>,
-    /// Usage criteria tags
-    pub use_criteria: Vec<String>,
-    /// Referenced file metadata event IDs (NIP-94 kind:1063) from `e` tags
-    pub file_ids: Vec<String>,
-    /// Creation timestamp (unix seconds)
-    pub created_at: u64,
-}
-
-/// An online agent from project status (kind:24010 events).
-/// These are actual agent instances with their own Nostr keypairs.
-/// Use get_online_agents() to fetch these for agent selection.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct OnlineAgentInfo {
-    /// Agent's actual public key (hex) - use this for profile lookups and p-tags
-    pub pubkey: String,
-    /// Display name of the agent (e.g., "claude-code", "architect")
-    pub name: String,
-    /// Whether this is the PM (project manager) agent
-    pub is_pm: bool,
-    /// Model used by the agent (e.g., "claude-3-opus"), if known
-    pub model: Option<String>,
-    /// Tools assigned to this agent
-    pub tools: Vec<String>,
-}
-
 /// Available configuration options for a project.
 /// Used by iOS to populate the agent config modal.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -1457,36 +1025,6 @@ pub struct ProjectConfigOptions {
     pub all_models: Vec<String>,
     /// All available tools for the project
     pub all_tools: Vec<String>,
-}
-
-/// A nudge (kind:4201 event) for agent configuration.
-/// Used by iOS for nudge selection in new conversations.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct NudgeInfo {
-    /// Event ID of the nudge
-    pub id: String,
-    /// Public key of the nudge author
-    pub pubkey: String,
-    /// Title of the nudge (displayed with / prefix like TUI)
-    pub title: String,
-    /// Description of the nudge
-    pub description: String,
-}
-
-/// A skill (kind:4202 event) for agent instruction sets.
-/// Used by iOS/CLI for skill selection in new conversations.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct SkillInfo {
-    /// Event ID of the skill
-    pub id: String,
-    /// Public key of the skill author
-    pub pubkey: String,
-    /// Title of the skill
-    pub title: String,
-    /// Description of the skill
-    pub description: String,
-    /// Full content of the skill
-    pub content: String,
 }
 
 /// Information about the current logged-in user.
@@ -2015,22 +1553,22 @@ pub enum DataChangeType {
     /// A new message was appended to a conversation
     MessageAppended {
         conversation_id: String,
-        message: MessageInfo,
+        message: Message,
     },
     /// A conversation was created or updated
     ConversationUpsert { conversation: ConversationFullInfo },
     /// A project was created or updated
-    ProjectUpsert { project: ProjectInfo },
+    ProjectUpsert { project: Project },
     /// An inbox item was created or updated
     InboxUpsert { item: InboxItem },
     /// A report was created or updated (kind:30023)
-    ReportUpsert { report: ReportInfo },
+    ReportUpsert { report: Report },
     /// Project online status updated (kind:24010)
     ProjectStatusChanged {
         project_id: String,
         project_a_tag: String,
         is_online: bool,
-        online_agents: Vec<OnlineAgentInfo>,
+        online_agents: Vec<ProjectAgent>,
     },
     /// Backend approval required for a project status event
     PendingBackendApproval {
@@ -2654,8 +2192,8 @@ impl TenexCore {
 
     /// Get a list of projects.
     ///
-    /// Queries nostrdb for kind 31933 events and returns them as ProjectInfo.
-    pub fn get_projects(&self) -> Vec<ProjectInfo> {
+    /// Queries nostrdb for kind 31933 events and returns them as Project.
+    pub fn get_projects(&self) -> Vec<Project> {
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -2666,7 +2204,7 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
-        store.get_projects().iter().map(project_to_info).collect()
+        store.get_projects().to_vec()
     }
 
     /// Get conversations for a project.
@@ -2832,7 +2370,7 @@ impl TenexCore {
     }
 
     /// Get messages for a conversation.
-    pub fn get_messages(&self, conversation_id: String) -> Vec<MessageInfo> {
+    pub fn get_messages(&self, conversation_id: String) -> Vec<Message> {
         let started_at = Instant::now();
         let store_guard = match self.store.read() {
             Ok(g) => g,
@@ -2844,27 +2382,17 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
-        let fetch_started_at = Instant::now();
-        // Get messages for the thread
-        let messages = store.get_messages(&conversation_id);
-        let fetch_elapsed_ms = fetch_started_at.elapsed().as_millis();
-
-        let convert_started_at = Instant::now();
-        let converted: Vec<MessageInfo> =
-            messages.iter().map(|m| message_to_info(store, m)).collect();
-        let convert_elapsed_ms = convert_started_at.elapsed().as_millis();
+        let messages: Vec<Message> = store.get_messages(&conversation_id).to_vec();
         let total_elapsed_ms = started_at.elapsed().as_millis();
         tlog!(
             "PERF",
-            "ffi.get_messages conversation={} count={} fetchMs={} convertMs={} totalMs={}",
+            "ffi.get_messages conversation={} count={} totalMs={}",
             short_id(&conversation_id, 12),
-            converted.len(),
-            fetch_elapsed_ms,
-            convert_elapsed_ms,
+            messages.len(),
             total_elapsed_ms
         );
 
-        converted
+        messages
     }
 
     /// Resolve an ask event by event ID.
@@ -2879,13 +2407,13 @@ impl TenexCore {
 
         let (ask_event, author_pubkey) = store.get_ask_event_by_id(&event_id)?;
         Some(AskEventLookupInfo {
-            ask_event: ask_event_to_info(&ask_event),
+            ask_event: ask_event.clone(),
             author_pubkey,
         })
     }
 
     /// Get reports for a project.
-    pub fn get_reports(&self, project_id: String) -> Vec<ReportInfo> {
+    pub fn get_reports(&self, project_id: String) -> Vec<Report> {
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -2903,43 +2431,11 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
-        // Get reports for this project
-        let reports = store.reports.get_reports_by_project(&project_a_tag);
-
-        reports
-            .iter()
-            .map(|r| {
-                // Get author display name (Report has `author` field, not `pubkey`)
-                let author_name = store.get_profile_name(&r.author);
-
-                // Convert pubkey to npub
-                let author_npub = hex::decode(&r.author)
-                    .ok()
-                    .and_then(|bytes| {
-                        if bytes.len() == 32 {
-                            let mut arr = [0u8; 32];
-                            arr.copy_from_slice(&bytes);
-                            nostr_sdk::PublicKey::from_slice(&arr).ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .and_then(|pk| pk.to_bech32().ok())
-                    .unwrap_or_else(|| format!("{}...", &r.author[..16.min(r.author.len())]));
-
-                ReportInfo {
-                    id: r.slug.clone(),
-                    project_id: project_id.clone(),
-                    title: r.title.clone(),
-                    summary: Some(r.summary.clone()), // Report has String, not Option<String>
-                    content: r.content.clone(),
-                    author: author_name,
-                    author_npub,
-                    created_at: r.created_at,
-                    updated_at: r.created_at, // Reports are immutable in Nostr
-                    tags: r.hashtags.clone(),
-                }
-            })
+        store
+            .reports
+            .get_reports_by_project(&project_a_tag)
+            .into_iter()
+            .cloned()
             .collect()
     }
 
@@ -2955,13 +2451,7 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
-        // Get inbox items from the store
-        store
-            .inbox
-            .get_items()
-            .iter()
-            .map(|item| inbox_item_to_info(store, item))
-            .collect()
+        store.inbox.get_items().to_vec()
     }
 
     // ===== Search Methods =====
@@ -3174,23 +2664,13 @@ impl TenexCore {
                 let is_active = store.operations.is_event_busy(&thread.id);
 
                 conversations.push(ConversationFullInfo {
-                    id: thread.id.clone(),
-                    title: thread.title.clone(),
+                    thread: thread.clone(),
                     author: author_name,
-                    author_pubkey: thread.pubkey.clone(),
-                    summary: thread.summary.clone(),
                     message_count,
-                    last_activity: thread.last_activity,
-                    effective_last_activity: thread.effective_last_activity,
-                    parent_id: thread.parent_conversation_id.clone(),
-                    status: thread.status_label.clone(),
-                    current_activity: thread.status_current_activity.clone(),
                     is_active,
                     is_archived,
                     has_children,
                     project_a_tag: project_a_tag.clone(),
-                    is_scheduled: thread.is_scheduled,
-                    p_tags: thread.p_tags.clone(),
                 });
             }
         }
@@ -3201,7 +2681,7 @@ impl TenexCore {
         conversations.sort_by(|a, b| match (a.is_active, b.is_active) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => b.effective_last_activity.cmp(&a.effective_last_activity),
+            _ => b.thread.effective_last_activity.cmp(&a.thread.effective_last_activity),
         });
         let sort_elapsed_ms = sort_started_at.elapsed().as_millis();
 
@@ -3263,7 +2743,7 @@ impl TenexCore {
                 ProjectFilterInfo {
                     id: p.id.clone(),
                     a_tag,
-                    title: p.name.clone(),
+                    title: p.title.clone(),
                     is_visible,
                     active_count,
                     total_count,
@@ -3440,7 +2920,7 @@ impl TenexCore {
     ///
     /// Returns agents configured for the specified project.
     /// Returns an error if the store cannot be accessed.
-    pub fn get_agents(&self, project_id: String) -> Result<Vec<AgentInfo>, TenexError> {
+    pub fn get_agents(&self, project_id: String) -> Result<Vec<AgentDefinition>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -3455,8 +2935,8 @@ impl TenexCore {
             .iter()
             .find(|p| p.id == project_id)
             .cloned();
-        let agent_ids: Vec<String> = match project {
-            Some(p) => p.agent_ids,
+        let agent_definition_ids: Vec<String> = match project {
+            Some(p) => p.agent_definition_ids,
             None => return Ok(Vec::new()), // Project not found = empty agents (not an error)
         };
 
@@ -3465,8 +2945,8 @@ impl TenexCore {
             .content
             .get_agent_definitions()
             .into_iter()
-            .filter(|agent| agent_ids.contains(&agent.id))
-            .map(agent_to_info)
+            .filter(|agent| agent_definition_ids.contains(&agent.id))
+            .cloned()
             .collect())
     }
 
@@ -3474,7 +2954,7 @@ impl TenexCore {
     ///
     /// Returns all known agent definitions.
     /// Returns an error if the store cannot be accessed.
-    pub fn get_all_agents(&self) -> Result<Vec<AgentInfo>, TenexError> {
+    pub fn get_all_agents(&self) -> Result<Vec<AgentDefinition>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -3487,7 +2967,7 @@ impl TenexCore {
             .content
             .get_agent_definitions()
             .into_iter()
-            .map(agent_to_info)
+            .cloned()
             .collect())
     }
 
@@ -3631,7 +3111,7 @@ impl TenexCore {
                     title: team.title,
                     description: team.description,
                     image: team.image,
-                    agent_ids: team.agent_ids,
+                    agent_definition_ids: team.agent_definition_ids,
                     categories: team.categories,
                     tags: team.tags,
                     created_at: team.created_at,
@@ -3778,7 +3258,7 @@ impl TenexCore {
     ///
     /// Returns all nudges sorted by created_at descending (most recent first).
     /// Used by iOS for nudge selection in new conversations.
-    pub fn get_nudges(&self) -> Result<Vec<NudgeInfo>, TenexError> {
+    pub fn get_nudges(&self) -> Result<Vec<Nudge>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -3787,24 +3267,14 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store
-            .content
-            .get_nudges()
-            .into_iter()
-            .map(|n| NudgeInfo {
-                id: n.id.clone(),
-                pubkey: n.pubkey.clone(),
-                title: n.title.clone(),
-                description: n.description.clone(),
-            })
-            .collect())
+        Ok(store.content.get_nudges().into_iter().cloned().collect())
     }
 
     /// Get all skills (kind:4202 events).
     ///
     /// Returns all skills sorted by created_at descending (most recent first).
     /// Used by iOS/CLI for skill selection in new conversations.
-    pub fn get_skills(&self) -> Result<Vec<SkillInfo>, TenexError> {
+    pub fn get_skills(&self) -> Result<Vec<Skill>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -3813,18 +3283,7 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store
-            .content
-            .get_skills()
-            .into_iter()
-            .map(|s| SkillInfo {
-                id: s.id.clone(),
-                pubkey: s.pubkey.clone(),
-                title: s.title.clone(),
-                description: s.description.clone(),
-                content: s.content.clone(),
-            })
-            .collect())
+        Ok(store.content.get_skills().into_iter().cloned().collect())
     }
 
     /// Get online agents for a project from the project status (kind:24010).
@@ -3837,7 +3296,7 @@ impl TenexCore {
     pub fn get_online_agents(
         &self,
         project_id: String,
-    ) -> Result<Vec<OnlineAgentInfo>, TenexError> {
+    ) -> Result<Vec<ProjectAgent>, TenexError> {
         use crate::tlog;
         tlog!(
             "FFI",
@@ -3914,7 +3373,7 @@ impl TenexCore {
                 for agent in agents {
                     tlog!("FFI", "  Agent: {} ({})", agent.name, agent.pubkey);
                 }
-                agents.iter().map(project_agent_to_online_info).collect()
+                agents.iter().cloned().collect()
             })
             .unwrap_or_else(|| {
                 tlog!("FFI", "No online agents (status is stale or missing)");
@@ -4103,7 +3562,7 @@ impl TenexCore {
     /// Get all MCP tool definitions (kind:4200 events).
     ///
     /// Returns tools sorted by created_at descending (newest first).
-    pub fn get_all_mcp_tools(&self) -> Result<Vec<McpToolInfo>, TenexError> {
+    pub fn get_all_mcp_tools(&self) -> Result<Vec<MCPTool>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -4112,12 +3571,7 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store
-            .content
-            .get_mcp_tools()
-            .into_iter()
-            .map(mcp_tool_to_info)
-            .collect())
+        Ok(store.content.get_mcp_tools().into_iter().cloned().collect())
     }
 
     /// Update an existing project (kind:31933 replaceable event).
@@ -4130,7 +3584,7 @@ impl TenexCore {
         description: String,
         repo_url: Option<String>,
         picture_url: Option<String>,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
     ) -> Result<(), TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
@@ -4143,7 +3597,7 @@ impl TenexCore {
                 description,
                 repo_url,
                 picture_url,
-                agent_ids,
+                agent_definition_ids,
                 mcp_tool_ids,
                 client: Some("tenex-ios".to_string()),
             })
@@ -4427,7 +3881,7 @@ impl TenexCore {
             "projects": store.get_projects().iter().map(|p| {
                 serde_json::json!({
                     "id": p.id,
-                    "name": p.name,
+                    "name": p.title,
                     "a_tag": p.a_tag(),
                 })
             }).collect::<Vec<_>>(),
@@ -6174,43 +5628,6 @@ mod tests {
                 pubkey
             );
         }
-    }
-
-    #[test]
-    fn test_message_to_info_includes_a_tags() {
-        use crate::models::Message;
-        use crate::store::{AppDataStore, Database};
-        use tempfile::tempdir;
-
-        let dir = tempdir().expect("temp dir");
-        let db = Database::new(dir.path()).expect("database");
-        let store = AppDataStore::new(db.ndb.clone());
-
-        let message = Message {
-            id: "msg-1".to_string(),
-            content: "content".to_string(),
-            pubkey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-                .to_string(),
-            thread_id: "thread-1".to_string(),
-            created_at: 1_700_000_000,
-            reply_to: None,
-            is_reasoning: false,
-            ask_event: None,
-            q_tags: vec!["child-conv-id".to_string()],
-            a_tags: vec![
-                "30023:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:weekly-report"
-                    .to_string(),
-            ],
-            p_tags: vec!["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string()],
-            tool_name: Some("mcp__tenex__report_read".to_string()),
-            tool_args: Some("{\"slug\":\"weekly-report\"}".to_string()),
-            llm_metadata: vec![],
-            delegation_tag: None,
-            branch: None,
-        };
-
-        let info = message_to_info(&store, &message);
-        assert_eq!(info.a_tags, message.a_tags);
     }
 
     #[test]

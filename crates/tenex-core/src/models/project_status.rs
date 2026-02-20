@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::constants::STALENESS_THRESHOLD_SECS;
 
 /// Represents an agent within a project status
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct ProjectAgent {
     pub pubkey: String,
     pub name: String,

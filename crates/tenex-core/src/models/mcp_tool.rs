@@ -1,7 +1,7 @@
 use nostrdb::Note;
 
 /// MCP Tool Definition - kind:4200 events describing MCP servers/tools
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct MCPTool {
     pub id: String,
     pub pubkey: String,

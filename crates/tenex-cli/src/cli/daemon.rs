@@ -431,7 +431,7 @@ fn handle_request(
                     let online_agents = store.get_online_agents(&a_tag);
                     let mut obj = serde_json::json!({
                         "slug": p.id,
-                        "name": p.name,
+                        "name": p.title,
                         "booted": online_agents.is_some(),
                     });
                     if let Some(agents) = online_agents {
@@ -1078,7 +1078,7 @@ fn handle_request(
 
                     serde_json::json!({
                         "slug": project.id,
-                        "name": project.name,
+                        "name": project.title,
                         "pubkey": project.pubkey,
                         "booted": status.is_online(),
                         "agents": agents,
@@ -1093,7 +1093,7 @@ fn handle_request(
                     // Project exists but no status event (not booted)
                     serde_json::json!({
                         "slug": project.id,
-                        "name": project.name,
+                        "name": project.title,
                         "pubkey": project.pubkey,
                         "booted": false,
                         "agents": [],
@@ -1117,7 +1117,7 @@ fn handle_request(
                 #[serde(default)]
                 description: String,
                 #[serde(default)]
-                agent_ids: Vec<String>,
+                agent_definition_ids: Vec<String>,
                 #[serde(default)]
                 mcp_tool_ids: Vec<String>,
                 /// Client identifier for the client tag (e.g., "tenex-cli", "tenex-tui")
@@ -1198,7 +1198,7 @@ fn handle_request(
                     slug: Some(final_slug.clone()),
                     name: name.to_string(),
                     description: params.description,
-                    agent_ids: params.agent_ids,
+                    agent_definition_ids: params.agent_definition_ids,
                     mcp_tool_ids: params.mcp_tool_ids,
                     client: Some(client_tag),
                 })

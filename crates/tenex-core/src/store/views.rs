@@ -486,7 +486,7 @@ mod tests {
 
         let projects = get_projects(&db.ndb).unwrap();
         assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0].name, "Project 1");
+        assert_eq!(projects[0].title, "Project 1");
     }
 
     #[test]
@@ -527,15 +527,15 @@ mod tests {
 
         let projects = get_projects(&db.ndb).unwrap();
         assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0].name, "Project With Agents");
+        assert_eq!(projects[0].title, "Project With Agents");
         assert_eq!(
-            projects[0].agent_ids.len(),
+            projects[0].agent_definition_ids.len(),
             2,
             "Expected 2 agent IDs, got {:?}",
-            projects[0].agent_ids
+            projects[0].agent_definition_ids
         );
-        assert_eq!(projects[0].agent_ids[0], agent_id_1);
-        assert_eq!(projects[0].agent_ids[1], agent_id_2);
+        assert_eq!(projects[0].agent_definition_ids[0], agent_id_1);
+        assert_eq!(projects[0].agent_definition_ids[1], agent_id_2);
     }
 
     #[test]

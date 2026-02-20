@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum InboxEventType {
     /// Ask event (kind:1 with "ask" tag) - agent asking user a question
     Ask,
@@ -8,7 +8,7 @@ pub enum InboxEventType {
 
 use super::message::AskEvent;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct InboxItem {
     pub id: String,
     pub event_type: InboxEventType,

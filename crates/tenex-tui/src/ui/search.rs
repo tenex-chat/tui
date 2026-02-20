@@ -323,7 +323,7 @@ pub fn search_conversations(
             continue;
         }
 
-        let project_name = project.name.clone();
+        let project_name = project.title.clone();
 
         // Search threads
         for thread in store.get_threads(&a_tag) {
@@ -634,7 +634,7 @@ pub fn search_conversations_hierarchical(
             continue;
         }
 
-        let project_name = project.name.clone();
+        let project_name = project.title.clone();
 
         for thread in store.get_threads(&a_tag) {
             // Build message list for the shared matcher

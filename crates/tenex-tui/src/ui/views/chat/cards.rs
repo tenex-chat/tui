@@ -3,6 +3,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
 };
+use std::collections::HashMap;
 
 /// Half-block characters for vertical padding
 const LOWER_HALF_BLOCK: char = '▄';
@@ -431,7 +432,7 @@ pub(crate) fn author_line_with_recipient(
 pub(crate) fn llm_metadata_line(
     message_id: &str,
     created_at: u64,
-    llm_metadata: &[(String, String)],
+    llm_metadata: &HashMap<String, String>,
     indicator_color: Color,
     bg: Color,
     width: usize,

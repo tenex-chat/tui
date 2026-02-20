@@ -406,7 +406,7 @@ fn main() {
                 slug: Some(final_slug),
                 name: name_trimmed.to_string(),
                 description,
-                agent_ids: agent,
+                agent_definition_ids: agent,
                 mcp_tool_ids: validated_mcp_tool_ids,
             }
         }

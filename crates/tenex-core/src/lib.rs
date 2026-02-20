@@ -17,7 +17,7 @@ pub mod store;
 pub mod streaming;
 
 // Re-export FFI types at crate root for convenience
-pub use ffi::{LoginResult, ProjectInfo, TenexCore, TenexError, UserInfo};
+pub use ffi::{LoginResult, TenexCore, TenexError, UserInfo};
 
 // Re-export secure storage types for API key management
 pub use secure_storage::{SecureKey, SecureStorage, SecureStorageError};
