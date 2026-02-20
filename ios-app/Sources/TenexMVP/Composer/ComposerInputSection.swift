@@ -14,42 +14,16 @@ extension MessageComposerView {
         return isNewConversation ? "What would you like to discuss?" : "Type your reply..."
     }
 
+    @ViewBuilder
     var contentEditorView: some View {
-        ZStack(alignment: .topLeading) {
-            if usesWorkspaceInlineLayout {
-                TextField(
-                    "",
-                    text: $localText,
-                    prompt: Text(composerPlaceholderText).foregroundStyle(.secondary.opacity(0.6)),
-                    axis: .vertical
-                )
-                .focused($composerFieldFocused)
-                .textFieldStyle(.plain)
-                .font(.title3)
-                .foregroundStyle(.primary.opacity(0.94))
-                .lineLimit(1...8)
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 14)
-                .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
-                .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
-                .onChange(of: localText) { oldValue, newValue in
-                    scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
-                    scheduleContentSync(newValue)
+        if usesWorkspaceInlineLayout {
+            workspaceTextField
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    composerFieldFocused = true
                 }
-                #if os(macOS)
-                .onKeyPress(.return) { keyPress in
-                    if keyPress.modifiers.contains(.shift) {
-                        localText += "\n"
-                        return .handled
-                    }
-                    if canSend {
-                        sendMessage()
-                    }
-                    return .handled
-                }
-                #endif
-            } else {
+        } else {
+            ZStack(alignment: .topLeading) {
                 TextEditor(text: $localText)
                     .font(.body)
                     .padding(.horizontal, 12)
@@ -70,19 +44,43 @@ extension MessageComposerView {
                         .allowsHitTesting(false)
                 }
             }
+            .frame(minHeight: 200)
         }
-        .frame(
-            minHeight: usesWorkspaceInlineLayout ? nil : 200,
-            idealHeight: usesWorkspaceInlineLayout ? nil : nil,
-            maxHeight: usesWorkspaceInlineLayout ? 196 : nil,
-            alignment: usesWorkspaceInlineLayout ? .topLeading : .center
+    }
+
+    private var workspaceTextField: some View {
+        TextField(
+            "",
+            text: $localText,
+            prompt: Text(composerPlaceholderText).foregroundStyle(.secondary.opacity(0.6)),
+            axis: .vertical
         )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if usesWorkspaceInlineLayout {
-                composerFieldFocused = true
-            }
+        .focused($composerFieldFocused)
+        .textFieldStyle(.plain)
+        .font(.title3)
+        .foregroundStyle(.primary.opacity(0.94))
+        .lineLimit(1...8)
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
+        .padding(.bottom, 14)
+        .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
+        .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
+        .onChange(of: localText) { oldValue, newValue in
+            scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
+            scheduleContentSync(newValue)
         }
+        #if os(macOS)
+        .onKeyPress(.return) { keyPress in
+            if keyPress.modifiers.contains(.shift) {
+                localText += "\n"
+                return .handled
+            }
+            if canSend {
+                sendMessage()
+            }
+            return .handled
+        }
+        #endif
     }
 
     /// Immediately flush localText to DraftManager, canceling any pending debounced sync.
