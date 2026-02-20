@@ -503,6 +503,11 @@ pub enum NostrCommand {
         /// Optional channel to send back the comment event ID after signing
         response_tx: Option<EventIdSender>,
     },
+    /// Publish user profile (kind:0 metadata event)
+    PublishProfile {
+        name: String,
+        picture_url: Option<String>,
+    },
     /// Disconnect from relays but keep the worker running
     Disconnect {
         /// Optional response channel to signal when disconnect is complete
@@ -1005,6 +1010,12 @@ impl NostrWorker {
                                 }
                             }
                             Err(e) => tlog!("ERROR", "Failed to post team comment: {}", e),
+                        }
+                    }
+                    NostrCommand::PublishProfile { name, picture_url } => {
+                        debug_log(&format!("Worker: Publishing user profile '{}'", name));
+                        if let Err(e) = rt.block_on(self.handle_publish_profile(name, picture_url)) {
+                            tlog!("ERROR", "Failed to publish profile: {}", e);
                         }
                     }
                     NostrCommand::Disconnect { response_tx } => {
@@ -2425,6 +2436,31 @@ impl NostrWorker {
 
     async fn handle_subscribe_to_project_metadata(&self, project_a_tag: String) -> Result<()> {
         self.subscribe_to_project_with_dedup(project_a_tag).await
+    }
+
+    async fn handle_publish_profile(&self, name: String, picture_url: Option<String>) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let mut metadata = Metadata::new().name(name);
+        if let Some(url) = picture_url {
+            if let Ok(parsed) = url.parse() {
+                metadata = metadata.picture(parsed);
+            }
+        }
+
+        let event = EventBuilder::metadata(&metadata).sign_with_keys(keys)?;
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&event)
+        ).await {
+            Ok(Ok(output)) => debug_log(&format!("Published profile: {}", output.id())),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to publish profile to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout publishing profile to relay"),
+        }
+
+        Ok(())
     }
 
     async fn handle_disconnect(&mut self) -> Result<()> {
