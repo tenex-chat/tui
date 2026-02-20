@@ -104,6 +104,8 @@ struct MessageComposerView: View {
     @State var isProgrammaticUpdate: Bool = false
     @State var triggerDetectionTask: Task<Void, Never>?
     @State var workspaceAgentToConfig: ProjectAgent?
+    @State var showWorkspaceAgentPopover = false
+    @FocusState var composerFieldFocused: Bool
 
     // Workspace inline layout metrics
     @ScaledMetric(relativeTo: .body) var workspaceContextRowHeight: CGFloat = 34

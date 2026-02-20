@@ -18,10 +18,9 @@ struct ConversationsTabView: View {
     @State private var selectedConversationState: ConversationFullInfo?
     @State private var newConversationProjectIdState: String?
     @State private var projectForNewConversation: SelectedProjectForComposer?
-    @State private var selectedProjectForNewConversation: Project?
-    @State private var showProjectSelector = false
     @State private var pendingCreatedConversationId: String?
     @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
+    @State private var hierarchyRebuildTask: Task<Void, Never>?
     @State private var projectMenuState = ProjectMenuState()
     @State private var projectTitleById: [String: String] = [:]
     // Conversation reference feature state - uses .sheet(item:) pattern for safe state management
@@ -62,6 +61,18 @@ struct ConversationsTabView: View {
     /// Rebuild the cached hierarchy from current filtered conversations
     private func rebuildHierarchy() {
         cachedHierarchy = ConversationFullHierarchy(conversations: filteredConversations)
+    }
+
+    /// Debounced hierarchy rebuild — coalesces rapid conversation upserts
+    /// into a single rebuild to prevent render starvation on the main thread.
+    private func scheduleHierarchyRebuild() {
+        hierarchyRebuildTask?.cancel()
+        hierarchyRebuildTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            rebuildHierarchy()
+            await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+        }
     }
 
     private func rebuildProjectCaches() {
@@ -139,10 +150,7 @@ struct ConversationsTabView: View {
                let conversation = coreManager.conversations.first(where: { $0.thread.id == pendingId }) {
                 selectCreatedConversation(conversation)
             }
-            rebuildHierarchy()
-            Task {
-                await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
-            }
+            scheduleHierarchyRebuild()
         }
         .onChange(of: showArchived) { _, _ in
             rebuildHierarchy()
@@ -154,10 +162,7 @@ struct ConversationsTabView: View {
             rebuildProjectCaches()
         }
         .onChange(of: hideScheduled) { _, _ in
-            rebuildHierarchy()
-            Task {
-                await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
-            }
+            scheduleHierarchyRebuild()
         }
         .onChange(of: filteredConversations.map(\.thread.id)) { _, visibleIds in
             if let selectedId = selectedConversationBinding.wrappedValue?.thread.id,
@@ -448,28 +453,6 @@ struct ConversationsTabView: View {
     }
 
     private var newConversationMenuButton: some View {
-        #if os(macOS)
-        Button {
-            selectedProjectForNewConversation = nil
-            showProjectSelector = true
-        } label: {
-            Image(systemName: "plus")
-        }
-        .accessibilityLabel("Create conversation")
-        .sheet(isPresented: $showProjectSelector) {
-            ProjectSelectorSheet(
-                projects: projectMenuState.booted + projectMenuState.unbooted,
-                projectOnlineStatus: coreManager.projectOnlineStatus,
-                selectedProject: $selectedProjectForNewConversation,
-                onDone: {
-                    if let project = selectedProjectForNewConversation {
-                        startNewConversation(in: project)
-                    }
-                    selectedProjectForNewConversation = nil
-                }
-            )
-        }
-        #else
         Menu {
             if projectMenuState.booted.isEmpty && projectMenuState.unbooted.isEmpty {
                 Text("No projects available")
@@ -502,7 +485,6 @@ struct ConversationsTabView: View {
             Image(systemName: "plus")
         }
         .accessibilityLabel("Create conversation")
-        #endif
     }
 
     private var runtimeButton: some View {

@@ -214,10 +214,18 @@ extension MessageComposerView {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     if let project = selectedProject {
-                        inlineContextToken(text: workspaceProjectLabel(project.title)) {
-                            if isNewConversation {
+                        if isNewConversation {
+                            inlineContextToken(text: workspaceProjectLabel(project.title)) {
                                 showProjectSelector = true
                             }
+                        } else {
+                            Text(workspaceProjectLabel(project.title))
+                                .font(.subheadline)
+                                .lineLimit(1)
+                                .foregroundStyle(.secondary.opacity(0.95))
+                                .padding(.horizontal, 2)
+                                .padding(.vertical, 2)
+                                .frame(height: workspaceContextRowHeight)
                         }
                     } else if isNewConversation {
                         inlineContextToken(text: "Select project") {
@@ -226,7 +234,7 @@ extension MessageComposerView {
                     }
 
                     if selectedProject != nil {
-                        agentDropdownMenu
+                        agentPopoverToken
                     }
 
                     if let agent = selectedAgent, let model = agent.model, !model.isEmpty {
@@ -254,9 +262,6 @@ extension MessageComposerView {
             }
             .buttonStyle(.borderless)
             .disabled(!canSend)
-            #if os(macOS)
-            .keyboardShortcut(.return, modifiers: [.command])
-            #endif
             .help("Send")
         }
         .frame(height: max(workspaceContextRowHeight, workspaceBottomRowHeight))
@@ -264,20 +269,31 @@ extension MessageComposerView {
     }
 
     var workspaceAccessoryButton: some View {
-        Button {
-            #if os(iOS)
-            showImagePicker = true
-            #else
-            openMacFilePicker()
-            #endif
+        Menu {
+            Button {
+                #if os(iOS)
+                showImagePicker = true
+                #else
+                openMacFilePicker()
+                #endif
+            } label: {
+                Label("Attach Image", systemImage: "photo")
+            }
+            .disabled(isUploadingImage)
+
+            Button {
+                openNudgeSkillSelector(mode: .all)
+            } label: {
+                Label("Add Shortcuts", systemImage: "slash.circle")
+            }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: workspaceIconSize, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
         }
-        .buttonStyle(.borderless)
-        .disabled(selectedProject == nil || isUploadingImage)
+        .menuStyle(.borderlessButton)
+        .disabled(selectedProject == nil)
     }
 
     var workspaceMicGlyph: some View {
@@ -287,43 +303,9 @@ extension MessageComposerView {
             .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
     }
 
-    var agentDropdownMenu: some View {
-        Menu {
-            ForEach(availableAgents, id: \.pubkey) { agent in
-                Button {
-                    draft.agentPubkey = agent.pubkey
-                    isDirty = true
-                    if let projectId = selectedProject?.id {
-                        Task {
-                            await draftManager.updateAgent(draft.agentPubkey, conversationId: conversationId, projectId: projectId)
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text(agent.name)
-                        if agent.isPm {
-                            Text("PM")
-                        }
-                        if let model = agent.model, !model.isEmpty {
-                            Text("(\(model))")
-                        }
-                    }
-                }
-            }
-            if draft.agentPubkey != nil {
-                Divider()
-                Button(role: .destructive) {
-                    draft.agentPubkey = nil
-                    isDirty = true
-                    if let projectId = selectedProject?.id {
-                        Task {
-                            await draftManager.updateAgent(nil, conversationId: conversationId, projectId: projectId)
-                        }
-                    }
-                } label: {
-                    Label("Clear agent", systemImage: "xmark")
-                }
-            }
+    var agentPopoverToken: some View {
+        Button {
+            showWorkspaceAgentPopover.toggle()
         } label: {
             HStack(spacing: 4) {
                 Text(selectedAgent.map { workspaceAgentLabel($0.name) } ?? "Agent")
@@ -339,8 +321,38 @@ extension MessageComposerView {
             .frame(height: workspaceContextRowHeight)
             .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
+        .buttonStyle(.borderless)
+        .popover(isPresented: $showWorkspaceAgentPopover) {
+            WorkspaceAgentPopoverContent(
+                agents: availableAgents,
+                selectedPubkey: draft.agentPubkey,
+                onSelect: { pubkey in
+                    draft.agentPubkey = pubkey
+                    isDirty = true
+                    if let projectId = selectedProject?.id {
+                        Task {
+                            await draftManager.updateAgent(pubkey, conversationId: conversationId, projectId: projectId)
+                        }
+                    }
+                    showWorkspaceAgentPopover = false
+                },
+                onClear: {
+                    draft.agentPubkey = nil
+                    isDirty = true
+                    if let projectId = selectedProject?.id {
+                        Task {
+                            await draftManager.updateAgent(nil, conversationId: conversationId, projectId: projectId)
+                        }
+                    }
+                    showWorkspaceAgentPopover = false
+                },
+                onConfig: { agent in
+                    showWorkspaceAgentPopover = false
+                    workspaceAgentToConfig = agent
+                }
+            )
+            .environmentObject(coreManager)
+        }
     }
 
     var nudgeSkillToken: some View {
@@ -348,14 +360,10 @@ extension MessageComposerView {
             openNudgeSkillSelector(mode: .all)
         } label: {
             HStack(spacing: 4) {
-                if selectedNudges.isEmpty && selectedSkills.isEmpty {
-                    Text("/")
-                        .font(.subheadline.monospaced())
-                        .foregroundStyle(.secondary.opacity(0.95))
-                } else {
-                    Text("/")
-                        .font(.subheadline.monospaced())
-                        .foregroundStyle(.secondary.opacity(0.95))
+                Text("/")
+                    .font(.subheadline.monospaced())
+                    .foregroundStyle(.secondary.opacity(0.95))
+                if (selectedNudges.count + selectedSkills.count) > 0 {
                     Text("\(selectedNudges.count + selectedSkills.count)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary.opacity(0.95))
@@ -367,6 +375,7 @@ extension MessageComposerView {
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
+        .help("Shortcuts")
     }
 
     func inlineContextToken(text: String, showChevron: Bool = true, action: @escaping () -> Void) -> some View {
@@ -475,5 +484,144 @@ struct OnlineAgentChipView: View {
         }
         .buttonStyle(.borderless)
         .contentShape(Capsule())
+    }
+}
+
+struct WorkspaceAgentPopoverContent: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+    let agents: [ProjectAgent]
+    let selectedPubkey: String?
+    let onSelect: (String) -> Void
+    let onClear: () -> Void
+    let onConfig: (ProjectAgent) -> Void
+
+    @State private var searchText = ""
+
+    private var filteredAgents: [ProjectAgent] {
+        let list = searchText.isEmpty
+            ? agents
+            : agents.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        return list.sorted { a, b in
+            if a.isPm != b.isPm { return a.isPm }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Search field
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Search agents", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.subheadline)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Divider()
+
+            if filteredAgents.isEmpty {
+                Text(searchText.isEmpty ? "No agents online" : "No results")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredAgents, id: \.pubkey) { agent in
+                            agentRow(agent)
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+
+            if selectedPubkey != nil {
+                Divider()
+                Button(role: .destructive) {
+                    onClear()
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark")
+                            .font(.caption)
+                        Text("Clear agent")
+                            .font(.subheadline)
+                    }
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+        .frame(width: 280)
+    }
+
+    private func agentRow(_ agent: ProjectAgent) -> some View {
+        Button {
+            onSelect(agent.pubkey)
+        } label: {
+            HStack(spacing: 8) {
+                AgentAvatarView(
+                    agentName: agent.name,
+                    pubkey: agent.pubkey,
+                    size: 28,
+                    showBorder: false,
+                    isSelected: selectedPubkey == agent.pubkey
+                )
+                .environmentObject(coreManager)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(agent.name)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.primary)
+                        if agent.isPm {
+                            Text("PM")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.agentBrand))
+                        }
+                    }
+                    if let model = agent.model, !model.isEmpty {
+                        Text(model)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                if selectedPubkey == agent.pubkey {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+
+                Button {
+                    onConfig(agent)
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
     }
 }

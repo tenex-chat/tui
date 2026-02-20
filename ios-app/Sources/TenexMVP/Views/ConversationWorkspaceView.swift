@@ -138,10 +138,17 @@ struct ConversationWorkspaceView: View {
 
     private let seedConversation: ConversationFullInfo
     @StateObject private var viewModel: ConversationDetailViewModel
-    @State private var inspectorVisible = true
+    @State private var inspectorUserPreference = true
+    /// Tracks the workspace width so the inspector auto-hides when space is tight.
+    @State private var workspaceWidth: CGFloat = .infinity
     @State private var selectedDelegationConversation: ConversationFullInfo?
     @State private var selectedReportDestination: SelectedReportDestination?
     @State private var availableAgents: [ProjectAgent] = []
+    @State private var visibleMessageWindow: Int = 30
+    /// Defers ForEach rendering until after the @Published initialization storm settles.
+    /// Without this, 15-20 body re-evaluations each process 30+ rows during loadData().
+    @State private var isTranscriptReady = false
+    @State private var cachedLastAgentPubkey: String?
     @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var navigationErrorMessage: String?
     private let profiler = PerformanceProfiler.shared
@@ -157,6 +164,15 @@ struct ConversationWorkspaceView: View {
 
     init(conversation: ConversationFullInfo) {
         self.init(source: .existing(conversation: conversation))
+    }
+
+    /// Minimum workspace width to show both transcript and inspector side-by-side.
+    /// Transcript minWidth (560) + inspector minWidth (320) + some breathing room.
+    private static let inspectorWidthThreshold: CGFloat = 900
+
+    /// Inspector shows only when the user wants it AND there's enough horizontal space.
+    private var inspectorVisible: Bool {
+        inspectorUserPreference && workspaceWidth >= Self.inspectorWidthThreshold
     }
 
     private var isNewThreadMode: Bool {
@@ -188,8 +204,20 @@ struct ConversationWorkspaceView: View {
         isNewThreadMode ? "New Conversation" : currentConversation.thread.title
     }
 
-    private var transcriptMessages: [Message] {
+    private var allMessages: [Message] {
         isNewThreadMode ? [] : viewModel.messages
+    }
+
+    /// Windowed slice of messages — only the last N are rendered initially.
+    /// Older messages load progressively as the user scrolls up.
+    private var transcriptMessages: ArraySlice<Message> {
+        let all = allMessages
+        guard all.count > visibleMessageWindow else { return all[...] }
+        return all.suffix(visibleMessageWindow)
+    }
+
+    private var hasOlderMessages: Bool {
+        allMessages.count > visibleMessageWindow
     }
 
     /// Keep row iteration lightweight by avoiding tuple arrays with full Message copies.
@@ -207,11 +235,7 @@ struct ConversationWorkspaceView: View {
     }
 
     private var lastAgentPubkey: String? {
-        guard !isNewThreadMode else { return nil }
-        return LastAgentFinder.findLastAgentPubkey(
-            messages: transcriptMessages,
-            availableAgents: availableAgents
-        )
+        cachedLastAgentPubkey
     }
 
     private var statusText: String {
@@ -304,6 +328,9 @@ struct ConversationWorkspaceView: View {
         .onReceive(coreManager.$conversations) { _ in
             refreshAvailableAgents()
         }
+        .onChange(of: viewModel.messages.count) { _, _ in
+            recomputeLastAgentPubkey()
+        }
         .alert("Navigation Error", isPresented: Binding(
             get: { navigationErrorMessage != nil },
             set: { newValue in
@@ -347,47 +374,73 @@ struct ConversationWorkspaceView: View {
             }
             #endif
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(key: WorkspaceWidthKey.self, value: geo.size.width)
+            }
+        )
+        .onPreferenceChange(WorkspaceWidthKey.self) { width in
+            workspaceWidth = width
+        }
         .background(workspaceBackdropColor)
     }
 
     private var inspectorToggleButton: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) {
-                inspectorVisible.toggle()
+                inspectorUserPreference.toggle()
             }
         } label: {
             Image(systemName: "sidebar.right")
         }
-        .accessibilityLabel(inspectorVisible ? "Hide Inspector" : "Show Inspector")
+        .accessibilityLabel(inspectorUserPreference ? "Hide Inspector" : "Show Inspector")
     }
 
     private var transcriptColumn: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(messageIndices, id: \.self) { index in
-                        let message = transcriptMessages[index]
-                        SlackMessageRow(
-                            message: message,
-                            isConsecutive: index > 0 && transcriptMessages[index - 1].pubkey == message.pubkey,
-                            conversationId: currentConversation.thread.id,
-                            projectId: currentConversation.extractedProjectId,
-                            onDelegationTap: { delegationId in
-                                openDelegation(byId: delegationId)
+                    if isTranscriptReady {
+                        if hasOlderMessages {
+                            Button {
+                                visibleMessageWindow += 30
+                            } label: {
+                                Text("Load earlier messages")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
                             }
-                        )
-                        .equatable()
-                        .environmentObject(coreManager)
-                        .id(message.id)
-                    }
+                            .buttonStyle(.borderless)
+                            .onAppear {
+                                visibleMessageWindow += 30
+                            }
+                        }
 
-                    if let buffer = streamingBuffer {
-                        StreamingMessageRow(
-                            buffer: buffer,
-                            isConsecutive: transcriptMessages.last?.pubkey == buffer.agentPubkey
-                        )
-                        .environmentObject(coreManager)
-                        .id("streaming-row")
+                        ForEach(messageIndices, id: \.self) { index in
+                            let message = transcriptMessages[index]
+                            SlackMessageRow(
+                                message: message,
+                                isConsecutive: index > transcriptMessages.startIndex && transcriptMessages[index - 1].pubkey == message.pubkey,
+                                conversationId: currentConversation.thread.id,
+                                projectId: currentConversation.extractedProjectId,
+                                onDelegationTap: { delegationId in
+                                    openDelegation(byId: delegationId)
+                                }
+                            )
+                            .equatable()
+                            .environmentObject(coreManager)
+                            .id(message.id)
+                        }
+
+                        if let buffer = streamingBuffer {
+                            StreamingMessageRow(
+                                buffer: buffer,
+                                isConsecutive: allMessages.last?.pubkey == buffer.agentPubkey
+                            )
+                            .environmentObject(coreManager)
+                            .id("streaming-row")
+                        }
                     }
 
                     Color.clear
@@ -398,13 +451,15 @@ struct ConversationWorkspaceView: View {
                 .padding(.bottom, 12)
             }
             .background(workspaceBackdropColor)
-            .onAppear {
-                if let lastMessage = transcriptMessages.last {
-                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+            .onChange(of: isTranscriptReady) { _, ready in
+                if ready, let lastMessage = transcriptMessages.last {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
                 }
             }
             .onChange(of: transcriptMessages.last?.id) { _, _ in
-                guard let lastMessage = transcriptMessages.last else { return }
+                guard isTranscriptReady, let lastMessage = transcriptMessages.last else { return }
                 DispatchQueue.main.async {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)
@@ -412,6 +467,7 @@ struct ConversationWorkspaceView: View {
                 }
             }
             .onChange(of: streamingTextCount) { _, _ in
+                guard isTranscriptReady else { return }
                 DispatchQueue.main.async {
                     maybeScrollToStreamingRow(with: proxy)
                 }
@@ -613,11 +669,17 @@ struct ConversationWorkspaceView: View {
 
     private func initializeWorkspace() async {
         let startedAt = CFAbsoluteTimeGetCurrent()
+        visibleMessageWindow = 30
+        isTranscriptReady = false
         if !isNewThreadMode {
             viewModel.setCoreManager(coreManager)
             await viewModel.loadData()
         }
         refreshAvailableAgents()
+        // Flip AFTER all @Published properties have settled.
+        // This ensures the ForEach is empty during the initialization storm
+        // (15-20 body re-evaluations), then renders once with final data.
+        isTranscriptReady = true
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
         profiler.logEvent(
             "workspace initialized source=\(source.identity) messages=\(viewModel.messages.count) children=\(viewModel.childConversations.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
@@ -632,6 +694,18 @@ struct ConversationWorkspaceView: View {
         } else {
             availableAgents = []
         }
+        recomputeLastAgentPubkey()
+    }
+
+    private func recomputeLastAgentPubkey() {
+        guard !isNewThreadMode else {
+            cachedLastAgentPubkey = nil
+            return
+        }
+        cachedLastAgentPubkey = LastAgentFinder.findLastAgentPubkey(
+            messages: viewModel.messages,
+            availableAgents: availableAgents
+        )
     }
 
     private func maybeScrollToStreamingRow(with proxy: ScrollViewProxy) {
@@ -813,5 +887,12 @@ private struct WorkspaceInspectorCard<Content: View>: View {
             return Color.secondary.opacity(0.14)
         }
         #endif
+    }
+}
+
+private struct WorkspaceWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = .infinity
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
