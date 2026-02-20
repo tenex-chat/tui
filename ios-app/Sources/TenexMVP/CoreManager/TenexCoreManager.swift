@@ -1,7 +1,6 @@
 import SwiftUI
 import CryptoKit
 import Combine
-import UserNotifications
 
 // MARK: - Streaming Buffer
 
@@ -118,9 +117,19 @@ class TenexCoreManager: ObservableObject {
     /// Used to highlight the runtime indicator when work is happening
     @Published var hasActiveAgents: Bool = false
 
+    /// Formatted today's LLM runtime for statusbar display.
+    /// Centralized here to avoid duplicate updateRuntime() in multiple views.
+    /// Reads directly from TenexCore (lock-free AtomicU64) without actor serialization.
+    @Published var runtimeText: String = "0m"
+
     /// Last project ID tombstoned via a push upsert.
     /// Used by view selection state to clear deleted-project detail panes immediately.
     @Published private(set) var lastDeletedProjectId: String?
+
+    @MainActor
+    func setLastDeletedProjectId(_ projectId: String?) {
+        lastDeletedProjectId = projectId
+    }
 
     // MARK: - Global App Filter
 
@@ -201,19 +210,21 @@ class TenexCoreManager: ObservableObject {
 
     // MARK: - Profile Name Resolution
 
-    /// Synchronously resolves a display name for a pubkey using cached online agent data.
-    /// Falls back to a truncated pubkey prefix when the agent is not in the online cache.
-    /// For async resolution with full profile lookup, use `safeCore.getProfileName(pubkey:)`.
+    private var profileNameCache: [String: String] = [:]
+
+    /// Resolves a display name for a pubkey via kind:0 profile metadata (cached).
     func displayName(for pubkey: String) -> String {
-        for agents in onlineAgents.values {
-            if let agent = agents.first(where: { $0.pubkey == pubkey }) {
-                return agent.name
-            }
+        if let cached = profileNameCache[pubkey] {
+            return cached
         }
-        if pubkey.count > pubkeyDisplayPrefixLength {
-            return String(pubkey.prefix(pubkeyDisplayPrefixLength))
-        }
-        return pubkey
+        let name = core.getProfileName(pubkey: pubkey)
+        profileNameCache[pubkey] = name
+        return name
+    }
+
+    /// Invalidates the profile name cache so next access re-fetches from core.
+    func invalidateProfileNameCache() {
+        profileNameCache.removeAll()
     }
 
     init() {
@@ -253,8 +264,13 @@ class TenexCoreManager: ObservableObject {
     }
 
     /// Trigger a manual sync with relays (optional, user-initiated).
+    /// Runs refresh() via Task.detached to avoid blocking the SafeTenexCore actor queue,
+    /// which would cause priority inversion for lightweight reads like getTodayRuntimeMs().
     func syncNow() async {
-        _ = await safeCore.refresh()
+        let core = self.core
+        await Task.detached {
+            _ = core.refresh()
+        }.value
     }
 
     // MARK: - Event Callback Registration
@@ -267,643 +283,8 @@ class TenexCoreManager: ObservableObject {
     /// Used to skip TTS when the user was recently active in a conversation.
     var lastUserActivityByConversation: [String: UInt64] = [:]
 
-
-    // MARK: - Push-Based Delta Application
-    // These methods update @Published properties directly from Rust callbacks.
-
-    @MainActor
-    func applyMessageAppended(conversationId: String, message: Message) {
-        guard var messages = messagesByConversation[conversationId] else {
-            return
-        }
-        guard !messages.contains(where: { $0.id == message.id }) else {
-            return
-        }
-
-        if let last = messages.last, last.createdAt <= message.createdAt {
-            messages.append(message)
-        } else {
-            messages.append(message)
-            messages.sort { $0.createdAt < $1.createdAt }
-        }
-        setMessagesCache(messages, for: conversationId)
-    }
-
-    @MainActor
-    func applyConversationUpsert(_ conversation: ConversationFullInfo) {
-        var updated = conversations
-        guard conversationMatchesAppFilter(conversation) else {
-            let initialCount = updated.count
-            updated.removeAll { $0.thread.id == conversation.thread.id }
-            guard updated.count != initialCount else {
-                return
-            }
-            conversations = sortedConversations(updated)
-            updateActiveAgentsState()
-            return
-        }
-        if let index = updated.firstIndex(where: { $0.thread.id == conversation.thread.id }) {
-            if updated[index] == conversation {
-                return
-            }
-            updated[index] = conversation
-        } else {
-            updated.append(conversation)
-        }
-        let sorted = sortedConversations(updated)
-        if sorted != conversations {
-            conversations = sorted
-            updateActiveAgentsState()
-        }
-    }
-
-    /// Apply a conversation upsert from callback without triggering a full conversation-list rebuild.
-    /// This path clears streaming state, applies the delta, and only refreshes messages when already cached.
-    @MainActor
-    func applyConversationUpsertDelta(_ conversation: ConversationFullInfo) {
-        let conversationId = conversation.thread.id
-        pendingStreamingDeltas.removeValue(forKey: conversationId)
-        streamingBuffers.removeValue(forKey: conversationId)
-        applyConversationUpsert(conversation)
-
-        // Avoid expensive message fetches for conversations that are not currently loaded.
-        guard let cachedMessages = messagesByConversation[conversationId] else {
-            profiler.logEvent(
-                "applyConversationUpsertDelta conversationId=\(conversationId) messagesCached=false",
-                category: .general,
-                level: .debug
-            )
-            return
-        }
-
-        let expectedCount = Int(conversation.messageCount)
-        if expectedCount > 0, cachedMessages.count == expectedCount {
-            profiler.logEvent(
-                "applyConversationUpsertDelta skip refresh conversationId=\(conversationId) cachedCount=\(cachedMessages.count) expectedCount=\(expectedCount)",
-                category: .general,
-                level: .debug
-            )
-            return
-        }
-
-        let now = CFAbsoluteTimeGetCurrent()
-        if let lastRefresh = lastConversationMessageRefreshAt[conversationId], now - lastRefresh < 0.75 {
-            profiler.logEvent(
-                "applyConversationUpsertDelta throttled conversationId=\(conversationId)",
-                category: .general,
-                level: .debug
-            )
-            return
-        }
-        guard !inflightConversationMessageRefreshes.contains(conversationId) else {
-            profiler.logEvent(
-                "applyConversationUpsertDelta skip inflight conversationId=\(conversationId)",
-                category: .general,
-                level: .debug
-            )
-            return
-        }
-
-        inflightConversationMessageRefreshes.insert(conversationId)
-        lastConversationMessageRefreshAt[conversationId] = now
-        Task {
-            let startedAt = CFAbsoluteTimeGetCurrent()
-            let messages = await safeCore.getMessages(conversationId: conversationId)
-            await MainActor.run {
-                self.setMessagesCache(messages, for: conversationId)
-                self.inflightConversationMessageRefreshes.remove(conversationId)
-                let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-                self.profiler.logEvent(
-                    "applyConversationUpsertDelta refreshed messages conversationId=\(conversationId) count=\(messages.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-                    category: .general,
-                    level: elapsedMs >= 120 ? .error : .info
-                )
-            }
-        }
-    }
-
-    @MainActor
-    func applyProjectUpsert(_ project: Project) {
-        if project.isDeleted {
-            projects.removeAll { $0.id == project.id }
-            projectOnlineStatus.removeValue(forKey: project.id)
-            onlineAgents.removeValue(forKey: project.id)
-            if appFilterProjectIds.contains(project.id) {
-                appFilterProjectIds.remove(project.id)
-                persistAppFilter()
-                refreshConversationsForActiveFilter()
-                updateAppBadge()
-            }
-            lastDeletedProjectId = project.id
-            return
-        }
-
-        var updated = projects
-        if let index = updated.firstIndex(where: { $0.id == project.id }) {
-            updated[index] = project
-        } else {
-            updated.insert(project, at: 0)
-        }
-        projects = updated
-    }
-
-    @MainActor
-    func applyInboxUpsert(_ item: InboxItem) {
-        var updated = inboxItems
-        if let index = updated.firstIndex(where: { $0.id == item.id }) {
-            updated[index] = item
-        } else {
-            updated.append(item)
-        }
-        updated.sort { $0.createdAt > $1.createdAt }
-        inboxItems = updated
-
-        refreshUnansweredAskCount(reason: "applyInboxUpsert")
-        // Update app badge with unanswered ask count
-        updateAppBadge()
-    }
-
-    /// Update the app icon badge with unanswered ask count.
-    @MainActor
-    func updateAppBadge() {
-        let count = unansweredAskCount
-        Task {
-            await NotificationService.shared.updateBadge(count: count)
-        }
-    }
-
-    @MainActor
-    func applyReportUpsert(_ report: Report) {
-        var updated = reports
-        if let index = updated.firstIndex(where: { $0.slug == report.slug && $0.projectATag == report.projectATag }) {
-            updated[index] = report
-        } else {
-            updated.append(report)
-        }
-        // Sort by created date (newest first)
-        updated.sort { $0.createdAt > $1.createdAt }
-        reports = updated
-    }
-
-    @MainActor
-    func applyProjectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [ProjectAgent]) {
-        let resolvedProjectId: String = {
-            if !projectId.isEmpty {
-                return projectId
-            }
-            return Self.projectId(fromATag: projectATag)
-        }()
-
-        guard !resolvedProjectId.isEmpty else { return }
-
-        let normalizedAgents = Self.canonicalOnlineAgents(onlineAgents)
-        let previousStatus = projectOnlineStatus[resolvedProjectId]
-        let previousAgents = self.onlineAgents[resolvedProjectId]
-        let statusChanged = previousStatus != isOnline
-        let agentsChanged = previousAgents != normalizedAgents
-
-        if statusChanged {
-            setProjectOnlineStatus(isOnline, for: resolvedProjectId)
-        }
-        if agentsChanged {
-            setOnlineAgentsCache(normalizedAgents, for: resolvedProjectId)
-        }
-
-        if statusChanged || agentsChanged {
-            signalDiagnosticsUpdate()
-        }
-
-        profiler.logEvent(
-            "applyProjectStatusChanged projectId=\(resolvedProjectId) statusChanged=\(statusChanged) agentsChanged=\(agentsChanged) isOnline=\(isOnline) agentCount=\(normalizedAgents.count)",
-            category: .general,
-            level: (statusChanged || agentsChanged) ? .info : .debug
-        )
-    }
-
-    @MainActor
-    func applyActiveConversationsChanged(projectId: String, projectATag: String, activeConversationIds: [String]) {
-        let normalizedProjectId = projectId.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedProjectATag = projectATag.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedProjectId = !normalizedProjectId.isEmpty ? normalizedProjectId : Self.projectId(fromATag: normalizedProjectATag)
-        guard !resolvedProjectId.isEmpty || !normalizedProjectATag.isEmpty else {
-            return
-        }
-
-        let activeConversationIdSet = Set(activeConversationIds)
-        var updated = conversations
-        var didChange = false
-
-        for index in updated.indices {
-            let conversation = updated[index]
-            let conversationProjectId = Self.projectId(fromATag: conversation.projectATag)
-            let matchesProjectATag = !normalizedProjectATag.isEmpty && conversation.projectATag == normalizedProjectATag
-            let matchesProjectId = !resolvedProjectId.isEmpty && conversationProjectId == resolvedProjectId
-
-            guard matchesProjectATag || matchesProjectId else { continue }
-
-            let shouldBeActive = activeConversationIdSet.contains(conversation.thread.id)
-            if conversation.isActive != shouldBeActive {
-                updated[index].isActive = shouldBeActive
-                didChange = true
-            }
-        }
-
-        if didChange {
-            conversations = sortedConversations(updated)
-            updateActiveAgentsState()
-        }
-    }
-
-    @MainActor
-    func handlePendingBackendApproval(backendPubkey: String, projectATag: String) {
-        #if os(macOS)
-        // Manual approval on macOS: keep backend pending and surface it in Settings > Backends.
-        signalDiagnosticsUpdate()
-        return
-        #else
-        Task {
-            do {
-                try await safeCore.approveBackend(pubkey: backendPubkey)
-            } catch {
-                return
-            }
-
-            let projectId = Self.projectId(fromATag: projectATag)
-            guard !projectId.isEmpty else { return }
-
-            let isOnline = await safeCore.isProjectOnline(projectId: projectId)
-            let agents = (try? await safeCore.getOnlineAgents(projectId: projectId)) ?? []
-            await MainActor.run {
-                self.applyProjectStatusChanged(projectId: projectId, projectATag: projectATag, isOnline: isOnline, onlineAgents: agents)
-            }
-        }
-        #endif
-    }
-
-    @MainActor
-    func applyStreamChunk(agentPubkey: String, conversationId: String, textDelta: String?) {
-        guard let delta = textDelta, !delta.isEmpty else { return }
-
-        if var pending = pendingStreamingDeltas[conversationId] {
-            pending.text.append(delta)
-            pending.chunkCount += 1
-            pendingStreamingDeltas[conversationId] = pending
-        } else {
-            pendingStreamingDeltas[conversationId] = PendingStreamingDelta(
-                agentPubkey: agentPubkey,
-                text: delta,
-                chunkCount: 1,
-                startedAt: CFAbsoluteTimeGetCurrent()
-            )
-        }
-
-        scheduleStreamingFlushIfNeeded()
-    }
-
-    @MainActor
-    func signalStatsUpdate() {
-        bumpStatsVersion()
-    }
-
-    @MainActor
-    func signalDiagnosticsUpdate() {
-        bumpDiagnosticsVersion()
-    }
-
-    @MainActor
-    func signalTeamsUpdate() {
-        bumpTeamsVersion()
-    }
-
-    /// Signal that messages for a specific conversation have been updated.
-    /// This triggers a refresh of the conversation's messages.
-    @MainActor
-    func signalConversationUpdate(conversationId: String) {
-        pendingStreamingDeltas.removeValue(forKey: conversationId)
-        streamingBuffers.removeValue(forKey: conversationId)
-        profiler.logEvent(
-            "signalConversationUpdate conversationId=\(conversationId)",
-            category: .general,
-            level: .debug
-        )
-        Task {
-            let startedAt = CFAbsoluteTimeGetCurrent()
-            // Refresh messages for this specific conversation
-            let messages = await safeCore.getMessages(conversationId: conversationId)
-            let refreshedConversation = await safeCore.getConversationsByIds(conversationIds: [conversationId]).first
-            await MainActor.run {
-                self.setMessagesCache(messages, for: conversationId)
-                if let refreshedConversation {
-                    self.applyConversationUpsert(refreshedConversation)
-                } else {
-                    self.conversations.removeAll { $0.thread.id == conversationId }
-                    self.updateActiveAgentsState()
-                }
-                self.inflightConversationMessageRefreshes.remove(conversationId)
-                let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-                self.profiler.logEvent(
-                    "signalConversationUpdate complete conversationId=\(conversationId) messages=\(messages.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-                    category: .general,
-                    level: elapsedMs >= 150 ? .error : .info
-                )
-            }
-        }
-    }
-
-    @MainActor
-    private func scheduleStreamingFlushIfNeeded() {
-        guard streamingFlushTask == nil else { return }
-
-        streamingFlushTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 80_000_000) // ~12.5 FPS publish cap
-                guard !self.pendingStreamingDeltas.isEmpty else { break }
-                self.flushPendingStreamingDeltas()
-            }
-            self.streamingFlushTask = nil
-        }
-    }
-
-    @MainActor
-    private func flushPendingStreamingDeltas() {
-        guard !pendingStreamingDeltas.isEmpty else { return }
-
-        let flushStartedAt = CFAbsoluteTimeGetCurrent()
-        let pendingConversationCount = pendingStreamingDeltas.count
-        var updatedBuffers = streamingBuffers
-        var totalChars = 0
-        var totalChunks = 0
-        var maxQueuedMs: Double = 0
-
-        for (conversationId, pending) in pendingStreamingDeltas {
-            var buffer = updatedBuffers[conversationId] ?? StreamingBuffer(agentPubkey: pending.agentPubkey, text: "")
-            buffer.text.append(pending.text)
-            updatedBuffers[conversationId] = buffer
-            totalChars += pending.text.count
-            totalChunks += pending.chunkCount
-            let queuedMs = (flushStartedAt - pending.startedAt) * 1000
-            if queuedMs > maxQueuedMs {
-                maxQueuedMs = queuedMs
-            }
-        }
-
-        pendingStreamingDeltas.removeAll(keepingCapacity: true)
-        streamingBuffers = updatedBuffers
-
-        let elapsedMs = (CFAbsoluteTimeGetCurrent() - flushStartedAt) * 1000
-        profiler.logEvent(
-            "flushPendingStreamingDeltas conversations=\(pendingConversationCount) chunks=\(totalChunks) chars=\(totalChars) maxQueuedMs=\(String(format: "%.2f", maxQueuedMs)) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-            category: .swiftUI,
-            level: totalChunks >= 64 ? .debug : .info
-        )
-    }
-
-    /// Signal that project status has changed (kind:24010 events).
-    /// This triggers a refresh of project status data, online status, and agents cache.
-    /// Uses task cancellation to prevent stale overwrites from overlapping refreshes.
-    @MainActor
-    func signalProjectStatusUpdate() {
-        // Cancel any existing refresh task to prevent stale results
-        projectStatusUpdateTask?.cancel()
-
-        projectStatusUpdateTask = Task { [weak self] in
-            guard let self else { return }
-
-            // Fetch projects
-            let projects = await safeCore.getProjects()
-
-            // Check for cancellation before continuing
-            if Task.isCancelled { return }
-
-            await MainActor.run {
-                self.projects = projects
-            }
-
-            // Compute status and agents OFF main actor using shared helper
-            await self.refreshProjectStatusParallel(for: projects)
-
-            // Final diagnostics update on main actor
-            if !Task.isCancelled {
-                await MainActor.run {
-                    self.signalDiagnosticsUpdate()
-                }
-            }
-        }
-    }
-
-    /// Refresh project online status and agents in parallel, OFF the main actor.
-    /// This shared helper is used by both signalProjectStatusUpdate() and fetchData()
-    /// to eliminate code duplication and ensure consistent behavior.
-    /// - Parameter projects: Array of projects to check status for
-    func refreshProjectStatusParallel(for projects: [Project]) async {
-        let startedAt = CFAbsoluteTimeGetCurrent()
-        var statusUpdates: [String: Bool] = [:]
-        var agentsUpdates: [String: [ProjectAgent]] = [:]
-
-        // Use withTaskGroup for concurrent project status checks (runs OFF MainActor)
-        await withTaskGroup(of: (String, Bool, [ProjectAgent]).self) { group in
-            for project in projects {
-                group.addTask {
-                    // Check cancellation inside each task
-                    if Task.isCancelled {
-                        return (project.id, false, [])
-                    }
-
-                    let isOnline = await self.safeCore.isProjectOnline(projectId: project.id)
-                    let agents: [ProjectAgent]
-                    if isOnline {
-                        agents = (try? await self.safeCore.getOnlineAgents(projectId: project.id)) ?? []
-                    } else {
-                        agents = []
-                    }
-                    return (project.id, isOnline, Self.canonicalOnlineAgents(agents))
-                }
-            }
-
-            // Collect results off-main, then publish once to avoid N UI invalidations.
-            for await (projectId, isOnline, agents) in group {
-                if Task.isCancelled { continue }
-                statusUpdates[projectId] = isOnline
-                agentsUpdates[projectId] = agents
-            }
-        }
-
-        if !Task.isCancelled {
-            await MainActor.run {
-                var nextProjectOnlineStatus = self.projectOnlineStatus
-                nextProjectOnlineStatus.merge(statusUpdates, uniquingKeysWith: { _, new in new })
-                if nextProjectOnlineStatus != self.projectOnlineStatus {
-                    self.projectOnlineStatus = nextProjectOnlineStatus
-                }
-
-                var nextOnlineAgents = self.onlineAgents
-                nextOnlineAgents.merge(agentsUpdates, uniquingKeysWith: { _, new in new })
-                if nextOnlineAgents != self.onlineAgents {
-                    self.onlineAgents = nextOnlineAgents
-                }
-
-                // Re-sort projects: online first, then alphabetical
-                self.projects.sort { a, b in
-                    let aOnline = nextProjectOnlineStatus[a.id] ?? false
-                    let bOnline = nextProjectOnlineStatus[b.id] ?? false
-                    if aOnline != bOnline { return aOnline }
-                    return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
-                }
-            }
-        }
-        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-        profiler.logEvent(
-            "refreshProjectStatusParallel projects=\(projects.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-            category: .general,
-            level: elapsedMs >= 200 ? .error : .info
-        )
-    }
-
-
-    /// Update hasActiveAgents based on current conversations
-    @MainActor
-    func updateActiveAgentsState() {
-        hasActiveAgents = conversations.contains { $0.isActive }
-    }
-
-    func sortedConversations(_ items: [ConversationFullInfo]) -> [ConversationFullInfo] {
-        var updated = items
-        updated.sort { lhs, rhs in
-            switch (lhs.isActive, rhs.isActive) {
-            case (true, false):
-                return true
-            case (false, true):
-                return false
-            default:
-                return lhs.thread.effectiveLastActivity > rhs.thread.effectiveLastActivity
-            }
-        }
-        return updated
-    }
-
-    /// Fetch and cache online agents for a specific project.
-    /// This shared method eliminates code duplication and ensures consistent agent caching.
-    /// FFI work runs off the main thread; only state mutation hops to MainActor.
-    /// - Parameter projectId: The ID of the project to fetch agents for
-    func fetchAndCacheAgents(for projectId: String) async {
-        let startedAt = CFAbsoluteTimeGetCurrent()
-        // Perform FFI call OFF the MainActor to avoid UI blocking
-        let agents: [ProjectAgent]
-        do {
-            agents = try await safeCore.getOnlineAgents(projectId: projectId)
-        } catch {
-            // Cache empty array on failure to prevent stale data
-            await MainActor.run { self.setOnlineAgentsCache([], for: projectId) }
-            let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-            profiler.logEvent(
-                "fetchAndCacheAgents failed projectId=\(projectId) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-                category: .general,
-                level: .error
-            )
-            return
-        }
-
-        // Only hop to main actor to mutate state
-        await MainActor.run {
-            self.setOnlineAgentsCache(agents, for: projectId)
-        }
-        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-        profiler.logEvent(
-            "fetchAndCacheAgents projectId=\(projectId) agents=\(agents.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-            category: .general,
-            level: elapsedMs >= 120 ? .error : .info
-        )
-    }
-
-    @MainActor
-    func ensureMessagesLoaded(conversationId: String) async {
-        if messagesByConversation[conversationId] != nil {
-            profiler.logEvent(
-                "ensureMessagesLoaded cache-hit conversationId=\(conversationId)",
-                category: .general,
-                level: .debug
-            )
-            return
-        }
-        let startedAt = CFAbsoluteTimeGetCurrent()
-        let fetched = await safeCore.getMessages(conversationId: conversationId)
-        mergeMessagesCache(fetched, for: conversationId)
-        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-        profiler.logEvent(
-            "ensureMessagesLoaded cache-miss conversationId=\(conversationId) fetched=\(fetched.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-            category: .general,
-            level: elapsedMs >= 120 ? .error : .info
-        )
-    }
-
-    @MainActor
-    private func setMessagesCache(_ messages: [Message], for conversationId: String) {
-        if messagesByConversation[conversationId] == messages {
-            return
-        }
-        messagesByConversation[conversationId] = messages
-    }
-
-    @MainActor
-    private func mergeMessagesCache(_ messages: [Message], for conversationId: String) {
-        var combined = messagesByConversation[conversationId] ?? []
-        if combined.isEmpty {
-            combined = messages
-        } else {
-            let existingIds = Set(combined.map { $0.id })
-            combined.append(contentsOf: messages.filter { !existingIds.contains($0.id) })
-        }
-        combined.sort { $0.createdAt < $1.createdAt }
-        setMessagesCache(combined, for: conversationId)
-    }
-
-    @MainActor
-    private func setOnlineAgentsCache(_ agents: [ProjectAgent], for projectId: String) {
-        let normalizedAgents = Self.canonicalOnlineAgents(agents)
-        if onlineAgents[projectId] == normalizedAgents {
-            return
-        }
-        var updated = onlineAgents
-        updated[projectId] = normalizedAgents
-        onlineAgents = updated
-    }
-
-    @MainActor
-    private func setProjectOnlineStatus(_ isOnline: Bool, for projectId: String) {
-        if projectOnlineStatus[projectId] == isOnline {
-            return
-        }
-        var updated = projectOnlineStatus
-        updated[projectId] = isOnline
-        projectOnlineStatus = updated
-    }
-
-    nonisolated private static func canonicalOnlineAgents(_ agents: [ProjectAgent]) -> [ProjectAgent] {
-        agents
-            .map { agent in
-                var normalized = agent
-                normalized.tools = agent.tools.sorted()
-                return normalized
-            }
-            .sorted { lhs, rhs in
-                if lhs.isPm != rhs.isPm {
-                    return lhs.isPm && !rhs.isPm
-                }
-                if lhs.name != rhs.name {
-                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                }
-                if lhs.pubkey != rhs.pubkey {
-                    return lhs.pubkey < rhs.pubkey
-                }
-                let lhsModel = lhs.model ?? ""
-                let rhsModel = rhs.model ?? ""
-                if lhsModel != rhsModel {
-                    return lhsModel < rhsModel
-                }
-                return lhs.tools.lexicographicallyPrecedes(rhs.tools)
-            }
-    }
+    // NOTE: Push-based delta application and event reaction methods live in
+    // `TenexCoreManager+Callbacks.swift` to keep this root type focused on state + wiring.
 
     @MainActor
     func bumpStatsVersion() {
@@ -923,65 +304,29 @@ class TenexCoreManager: ObservableObject {
         diagnosticsVersionSubject.send(diagnosticsVersion)
     }
 
-    @MainActor
-    func refreshConversationsForActiveFilter() {
-        let snapshot = appFilterSnapshot
-
-        conversationRefreshTask?.cancel()
-        profiler.logEvent(
-            "refreshConversationsForActiveFilter start projectIds=\(snapshot.projectIds.count) timeWindow=\(snapshot.timeWindow.rawValue)",
-            category: .general,
-            level: .debug
-        )
-        conversationRefreshTask = Task { [weak self] in
-            guard let self else { return }
-            let startedAt = CFAbsoluteTimeGetCurrent()
-
-            guard let refreshed = try? await self.fetchConversations(for: snapshot) else { return }
-            guard !Task.isCancelled else { return }
-
-            await MainActor.run {
-                guard self.appFilterSnapshot == snapshot else { return }
-                self.conversations = self.sortedConversations(refreshed)
-                self.updateActiveAgentsState()
-                let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-                self.profiler.logEvent(
-                    "refreshConversationsForActiveFilter complete results=\(refreshed.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-                    category: .general,
-                    level: elapsedMs >= 180 ? .error : .info
-                )
-            }
-        }
-    }
-
-    func fetchConversations(for snapshot: AppGlobalFilterSnapshot) async throws -> [ConversationFullInfo] {
-        let startedAt = CFAbsoluteTimeGetCurrent()
-        let filter = ConversationFilter(
-            projectIds: Array(snapshot.projectIds),
-            showArchived: true,
-            hideScheduled: false,
-            timeFilter: snapshot.timeWindow.coreTimeFilter
-        )
-        let fetched = try await safeCore.getAllConversations(filter: filter)
-        guard !Task.isCancelled else { return [] }
-        let now = UInt64(Date().timeIntervalSince1970)
-        let filtered = fetched.filter { conversation in
-            let projectId = Self.projectId(fromATag: conversation.projectATag)
-            return snapshot.includes(projectId: projectId, timestamp: conversation.thread.effectiveLastActivity, now: now)
-        }
-        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-        profiler.logEvent(
-            "fetchConversations projectIds=\(snapshot.projectIds.count) fetched=\(fetched.count) filtered=\(filtered.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-            category: .general,
-            level: elapsedMs >= 180 ? .error : .info
-        )
-        return filtered
-    }
-
     static func projectId(fromATag aTag: String) -> String {
         let parts = aTag.split(separator: ":")
         guard parts.count >= 3 else { return "" }
         return parts.dropFirst(2).joined(separator: ":")
+    }
+
+    /// Refresh `runtimeText` from the lock-free Rust AtomicU64 cache.
+    /// Calls `core.getTodayRuntimeMs()` directly (not through the actor)
+    /// since it's a lock-free atomic read — safe from any thread.
+    @MainActor
+    func refreshRuntimeText() {
+        let totalMs = core.getTodayRuntimeMs()
+        let totalSeconds = totalMs / 1000
+
+        if totalSeconds < 60 {
+            runtimeText = "\(totalSeconds)s"
+        } else if totalSeconds < 3600 {
+            runtimeText = "\(totalSeconds / 60)m"
+        } else {
+            let hours = totalSeconds / 3600
+            let minutes = (totalSeconds % 3600) / 60
+            runtimeText = minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
     }
 
 }

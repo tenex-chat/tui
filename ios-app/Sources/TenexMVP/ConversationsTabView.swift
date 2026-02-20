@@ -17,7 +17,6 @@ struct ConversationsTabView: View {
     @AppStorage("hideScheduled") private var hideScheduled = true
     @State private var selectedConversationState: ConversationFullInfo?
     @State private var newConversationProjectIdState: String?
-    @State private var runtimeText: String = "0m"
     @State private var projectForNewConversation: SelectedProjectForComposer?
     @State private var selectedProjectForNewConversation: Project?
     @State private var showProjectSelector = false
@@ -63,27 +62,6 @@ struct ConversationsTabView: View {
     /// Rebuild the cached hierarchy from current filtered conversations
     private func rebuildHierarchy() {
         cachedHierarchy = ConversationFullHierarchy(conversations: filteredConversations)
-    }
-
-    /// Updates the runtime text from SafeTenexCore
-    private func updateRuntime() async {
-        let totalMs = await coreManager.safeCore.getTodayRuntimeMs()
-        let totalSeconds = totalMs / 1000
-
-        if totalSeconds < 60 {
-            runtimeText = "\(totalSeconds)s"
-        } else if totalSeconds < 3600 {
-            let minutes = totalSeconds / 60
-            runtimeText = "\(minutes)m"
-        } else {
-            let hours = totalSeconds / 3600
-            let minutes = (totalSeconds % 3600) / 60
-            if minutes > 0 {
-                runtimeText = "\(hours)h \(minutes)m"
-            } else {
-                runtimeText = "\(hours)h"
-            }
-        }
     }
 
     private func rebuildProjectCaches() {
@@ -151,7 +129,6 @@ struct ConversationsTabView: View {
         .task {
             rebuildHierarchy()
             rebuildProjectCaches()
-            await updateRuntime()
             await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
             if let settings = try? await coreManager.safeCore.getAiAudioSettings() {
                 audioNotificationsEnabled = settings.enabled
@@ -164,7 +141,6 @@ struct ConversationsTabView: View {
             }
             rebuildHierarchy()
             Task {
-                await updateRuntime()
                 await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
             }
         }
@@ -531,7 +507,7 @@ struct ConversationsTabView: View {
 
     private var runtimeButton: some View {
         Button(action: { showStats = true }) {
-            Text(runtimeText)
+            Text(coreManager.runtimeText)
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundStyle(coreManager.hasActiveAgents ? Color.presenceOnline : .secondary)

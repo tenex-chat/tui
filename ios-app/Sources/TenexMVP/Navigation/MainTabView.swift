@@ -57,7 +57,6 @@ struct MainTabView: View {
     @State private var showAISettings = false
     @State private var showDiagnostics = false
     @State private var showStats = false
-    @State private var runtimeText: String = "0m"
 
     private var useMailShellLayout: Bool {
         #if os(macOS)
@@ -67,28 +66,13 @@ struct MainTabView: View {
         #endif
     }
 
-    private func updateRuntime() async {
-        let totalMs = await coreManager.safeCore.getTodayRuntimeMs()
-        let totalSeconds = totalMs / 1000
-
-        if totalSeconds < 60 {
-            runtimeText = "\(totalSeconds)s"
-        } else if totalSeconds < 3600 {
-            runtimeText = "\(totalSeconds / 60)m"
-        } else {
-            let hours = totalSeconds / 3600
-            let minutes = (totalSeconds % 3600) / 60
-            runtimeText = minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
-        }
-    }
-
     var body: some View {
         Group {
             if useMailShellLayout {
                 MainShellView(
                     userNpub: $userNpub,
                     isLoggedIn: $isLoggedIn,
-                    runtimeText: runtimeText,
+                    runtimeText: coreManager.runtimeText,
                     onShowSettings: { showAISettings = true },
                     onShowDiagnostics: { showDiagnostics = true },
                     onShowStats: { showStats = true }
@@ -98,12 +82,6 @@ struct MainTabView: View {
             } else {
                 compactTabView
             }
-        }
-        .task {
-            await updateRuntime()
-        }
-        .onChange(of: coreManager.conversations) { _, _ in
-            Task { await updateRuntime() }
         }
         .sheet(isPresented: $showAISettings) {
             AppSettingsView(defaultSection: .audio)
