@@ -19,6 +19,8 @@ final class AgentDefinitionsViewModel: ObservableObject {
     private weak var coreManager: TenexCoreManager?
     private var hasLoaded = false
     private var authorNameCache: [String: String] = [:]
+    private var authorPictureCache: [String: String] = [:]
+    private var resolvedAuthorPictures: Set<String> = []
     private var currentUserPubkey: String?
 
     func configure(with coreManager: TenexCoreManager) {
@@ -50,7 +52,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
                 AgentDefinitionListItem(
                     agent: agent,
                     authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey),
-                    authorPictureURL: nil
+                    authorPictureURL: authorPictureCache[agent.pubkey]
                 )
             }
 
@@ -88,8 +90,8 @@ final class AgentDefinitionsViewModel: ObservableObject {
 
         return AgentDefinitionListItem(
             agent: agent,
-            authorDisplayName: fallbackAuthorDisplay(pubkey: agent.pubkey),
-            authorPictureURL: nil
+            authorDisplayName: authorNameCache[agent.pubkey] ?? fallbackAuthorDisplay(pubkey: agent.pubkey),
+            authorPictureURL: authorPictureCache[agent.pubkey]
         )
     }
 
@@ -199,16 +201,26 @@ final class AgentDefinitionsViewModel: ObservableObject {
     }
 
     private func resolveAuthors(for agents: [AgentDefinition], coreManager: TenexCoreManager) async {
-        let missingPubkeys = Set(agents.map(\.pubkey)).filter { authorNameCache[$0] == nil }
+        let uniquePubkeys = Set(agents.map(\.pubkey))
 
-        for pubkey in missingPubkeys {
-            let profileName = await coreManager.safeCore.getProfileName(pubkey: pubkey)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+        for pubkey in uniquePubkeys {
+            if authorNameCache[pubkey] == nil {
+                let profileName = await coreManager.safeCore.getProfileName(pubkey: pubkey)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if !profileName.isEmpty, profileName != pubkey {
-                authorNameCache[pubkey] = profileName
-            } else {
-                authorNameCache[pubkey] = fallbackAuthorDisplay(pubkey: pubkey)
+                if !profileName.isEmpty, profileName != pubkey {
+                    authorNameCache[pubkey] = profileName
+                } else {
+                    authorNameCache[pubkey] = fallbackAuthorDisplay(pubkey: pubkey)
+                }
+            }
+
+            if !resolvedAuthorPictures.contains(pubkey) {
+                if let picture = try? await coreManager.safeCore.getProfilePicture(pubkey: pubkey),
+                   !picture.isEmpty {
+                    authorPictureCache[pubkey] = picture
+                }
+                resolvedAuthorPictures.insert(pubkey)
             }
         }
     }

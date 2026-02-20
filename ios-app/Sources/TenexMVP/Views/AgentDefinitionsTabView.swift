@@ -168,13 +168,16 @@ struct AgentDefinitionsTabView: View {
     private var listContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                headerSection
+                AgentDefinitionsHeroHeader(
+                    mineCount: viewModel.filteredMine.count,
+                    communityCount: viewModel.filteredCommunity.count
+                )
 
                 if viewModel.filteredMine.isEmpty, viewModel.filteredCommunity.isEmpty {
                     emptyState
                 } else {
                     if !viewModel.filteredMine.isEmpty {
-                        sectionList(
+                        cardSection(
                             title: "Mine",
                             subtitle: "Definitions you authored",
                             items: viewModel.filteredMine
@@ -182,7 +185,7 @@ struct AgentDefinitionsTabView: View {
                     }
 
                     if !viewModel.filteredCommunity.isEmpty {
-                        sectionList(
+                        cardSection(
                             title: "Community",
                             subtitle: "Definitions from other authors",
                             items: viewModel.filteredCommunity
@@ -190,7 +193,7 @@ struct AgentDefinitionsTabView: View {
                     }
                 }
             }
-            .frame(maxWidth: 800, alignment: .leading)
+            .frame(maxWidth: 960, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 20)
             .padding(.vertical, 24)
@@ -203,24 +206,12 @@ struct AgentDefinitionsTabView: View {
         #endif
     }
 
-    private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Agent Definitions")
-                .font(.largeTitle.weight(.semibold))
-
-            Text("Reusable agent templates (kind:4199)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func sectionList(
+    private func cardSection(
         title: String,
         subtitle: String,
         items: [AgentDefinitionListItem]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
@@ -229,23 +220,21 @@ struct AgentDefinitionsTabView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    AgentDefinitionRowView(
-                        item: item,
-                        onOpen: {
-                            selectedAgentBinding.wrappedValue = item.agent
-                            navigationPath.append(item)
-                        },
-                        onAssign: {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 14)], spacing: 14) {
+                ForEach(items) { item in
+                    Button {
+                        selectedAgentBinding.wrappedValue = item.agent
+                        navigationPath.append(item)
+                    } label: {
+                        AgentDefinitionVisualCard(item: item)
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
                             presentAssignmentSheet(for: item)
+                        } label: {
+                            Label("Add to Projects", systemImage: "plus")
                         }
-                    )
-
-                    if index < items.count - 1 {
-                        Divider()
                     }
                 }
             }
@@ -271,92 +260,6 @@ struct AgentDefinitionsTabView: View {
             description: Text(viewModel.searchText.isEmpty ? "Definitions will appear here when discovered" : "Try adjusting your search query")
         )
         .frame(maxWidth: .infinity, minHeight: 280)
-    }
-}
-
-private struct AgentDefinitionRowView: View {
-    @Environment(\.openURL) private var openURL
-
-    let item: AgentDefinitionListItem
-    let onOpen: () -> Void
-    let onAssign: () -> Void
-
-    private var attachmentCount: Int {
-        item.agent.fileIds.count
-    }
-
-    private var displayName: String {
-        item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                Button(action: onOpen) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text(displayName)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-
-                            if let version = item.agent.version, !version.isEmpty {
-                                Text("v\(version)")
-                                    .font(.caption2.weight(.medium))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if !item.agent.role.isEmpty {
-                            Text(item.agent.role)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Button(action: onAssign) {
-                    Label("Add", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Add to Projects")
-            }
-
-            Text(item.agent.description.isEmpty ? "No description provided" : item.agent.description)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-
-            HStack(spacing: 12) {
-                Button(action: openAuthorProfile) {
-                    Text(item.authorDisplayName)
-                        .font(.caption)
-                        .foregroundStyle(Color.agentBrand)
-                        .underline()
-                        .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .disabled(awesomeAgentsProfileURL(for: item.agent.pubkey) == nil)
-
-                if attachmentCount > 0 {
-                    Label("\(attachmentCount) file\(attachmentCount == 1 ? "" : "s")", systemImage: "paperclip")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(.vertical, 10)
-    }
-
-    private func openAuthorProfile() {
-        guard let url = awesomeAgentsProfileURL(for: item.agent.pubkey) else { return }
-        openURL(url)
     }
 }
 

@@ -394,3 +394,39 @@ private struct AgentDefinitionCardPlaceholder: View {
         return String(compact.prefix(2)).uppercased()
     }
 }
+
+// MARK: - Agent Definitions Hero Header
+
+struct AgentDefinitionsHeroHeader: View {
+    let mineCount: Int
+    let communityCount: Int
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color.systemGray6.opacity(0.55))
+
+            TeamsPolygonBackdrop()
+                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Agent Definitions")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+
+                Text("Reusable agent templates for your projects.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                HStack(spacing: 10) {
+                    Label("\(mineCount) mine", systemImage: "person")
+                    Label("\(communityCount) community", systemImage: "person.3")
+                }
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            }
+            .padding(20)
+        }
+        .frame(height: 170)
+    }
+}
