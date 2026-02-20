@@ -12,14 +12,8 @@ struct StreamingMessageRow: View {
     private let avatarSize: CGFloat = 20
     private let avatarFontSize: CGFloat = 8
 
-    /// Resolve agent name from online agents cache
     private var agentName: String {
-        for agents in coreManager.onlineAgents.values {
-            if let agent = agents.first(where: { $0.pubkey == buffer.agentPubkey }) {
-                return agent.name
-            }
-        }
-        return String(buffer.agentPubkey.prefix(8))
+        coreManager.displayName(for: buffer.agentPubkey)
     }
 
     var body: some View {
