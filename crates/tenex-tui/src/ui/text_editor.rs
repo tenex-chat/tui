@@ -111,11 +111,6 @@ impl TextEditor {
         }
     }
 
-    /// Check if there's an active selection
-    pub fn has_selection(&self) -> bool {
-        self.selection_anchor.is_some()
-    }
-
     /// Get selection range as (start, end) byte offsets
     pub fn selection_range(&self) -> Option<(usize, usize)> {
         self.selection_anchor
@@ -488,19 +483,6 @@ impl TextEditor {
         }
     }
 
-    /// Kill from cursor to beginning of line (Ctrl+U legacy behavior)
-    pub fn kill_to_line_start(&mut self) {
-        let start = self.text[..self.cursor]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        if start < self.cursor {
-            self.push_undo_state();
-            self.text.drain(start..self.cursor);
-            self.cursor = start;
-        }
-    }
-
     /// Clear the entire input text (Ctrl+U)
     /// Pushes current state to undo stack so Ctrl+Z can restore it
     pub fn clear_input(&mut self) {
@@ -713,47 +695,6 @@ impl TextEditor {
             .map(|i| self.cursor - i - 1)
             .unwrap_or(self.cursor);
         (row, col)
-    }
-
-    /// Get visual cursor position accounting for line wrapping at given width
-    pub fn visual_cursor_position(&self, wrap_width: usize) -> (usize, usize) {
-        if wrap_width == 0 {
-            return self.cursor_position();
-        }
-        let before_cursor = &self.text[..self.cursor];
-        let last_line_start = before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let col_in_last_line = self.cursor - last_line_start;
-
-        // Count visual rows from logical lines + wrapping within lines
-        let mut visual_row = 0;
-        for (i, line) in self.text.split('\n').enumerate() {
-            let line_start = if i == 0 {
-                0
-            } else {
-                self.text[..self.cursor]
-                    .match_indices('\n')
-                    .nth(i - 1)
-                    .map(|(idx, _)| idx + 1)
-                    .unwrap_or(0)
-            };
-
-            // Check if cursor is on this logical line
-            if self.cursor >= line_start && self.cursor <= line_start + line.len() {
-                // Cursor is on this line - add wrapped rows before cursor position
-                visual_row += col_in_last_line / wrap_width;
-                break;
-            } else {
-                // Add all visual rows from this logical line
-                visual_row += if line.is_empty() {
-                    1
-                } else {
-                    line.len().div_ceil(wrap_width)
-                };
-            }
-        }
-
-        let visual_col = col_in_last_line % wrap_width;
-        (visual_row, visual_col)
     }
 
     /// Move to beginning of visual line (accounting for wrap width)

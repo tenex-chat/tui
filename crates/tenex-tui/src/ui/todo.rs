@@ -12,11 +12,9 @@ pub enum TodoStatus {
 
 #[derive(Debug, Clone)]
 pub struct TodoItem {
-    pub id: String,
     pub title: String,
     pub description: Option<String>,
     pub status: TodoStatus,
-    pub skip_reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -25,10 +23,6 @@ pub struct TodoState {
 }
 
 impl TodoState {
-    pub fn new() -> Self {
-        Self { items: Vec::new() }
-    }
-
     pub fn has_todos(&self) -> bool {
         !self.items.is_empty()
     }
@@ -50,14 +44,12 @@ impl TodoState {
 /// todo_write item format (backend standard)
 #[derive(Debug, Deserialize)]
 struct TodoWriteItem {
-    id: Option<String>,
     content: Option<String>,
     title: Option<String>,
     status: Option<String>,
     #[serde(rename = "activeForm")]
     active_form: Option<String>,
     description: Option<String>,
-    skip_reason: Option<String>,
 }
 
 /// MCP todo_write payload format (supports both "todos" and "items")
@@ -120,28 +112,18 @@ pub fn aggregate_todo_state(messages: &[Message]) -> TodoState {
             if let Ok(payload) = payload_result {
                 if let Some(todos_array) = payload.todos {
                     items.clear();
-                    let mut id_counter = 0usize;
 
                     for todo_item in todos_array {
                         let title = todo_item.content.or(todo_item.title).unwrap_or_default();
 
                         if !title.is_empty() {
-                            // Preserve MCP-provided ID, fallback to generated ID
-                            let id = todo_item.id.unwrap_or_else(|| {
-                                let generated = format!("todo-{}", id_counter);
-                                id_counter += 1;
-                                generated
-                            });
-
                             items.push(TodoItem {
-                                id,
                                 title,
                                 description: todo_item.active_form.or(todo_item.description),
                                 status: todo_item
                                     .status
                                     .map(|s| parse_status(&s))
                                     .unwrap_or(TodoStatus::Pending),
-                                skip_reason: todo_item.skip_reason,
                             });
                         }
                     }
@@ -328,10 +310,6 @@ mod tests {
 
         assert_eq!(state.items.len(), 1);
         assert_eq!(state.items[0].status, TodoStatus::Skipped);
-        assert_eq!(
-            state.items[0].skip_reason,
-            Some("No longer needed".to_string())
-        );
     }
 
     #[test]
@@ -363,38 +341,6 @@ mod tests {
         assert_eq!(state.items[0].status, TodoStatus::Pending);
         assert_eq!(state.items[1].title, "Second item");
         assert_eq!(state.items[1].status, TodoStatus::Done);
-    }
-
-    #[test]
-    fn test_mcp_preserves_provided_ids() {
-        // Test that MCP-provided IDs are preserved instead of generating new ones
-        let msg = make_tag_based_message(
-            "mcp__tenex__todo_write",
-            r#"{"todos":[{"id":"custom-1","title":"Task A","status":"pending"},{"id":"custom-2","title":"Task B","status":"in_progress"}]}"#,
-        );
-
-        let state = aggregate_todo_state(&[msg]);
-
-        assert_eq!(state.items.len(), 2);
-        assert_eq!(state.items[0].id, "custom-1");
-        assert_eq!(state.items[0].title, "Task A");
-        assert_eq!(state.items[1].id, "custom-2");
-        assert_eq!(state.items[1].title, "Task B");
-    }
-
-    #[test]
-    fn test_fallback_to_generated_ids() {
-        // Test that generated IDs are used when MCP doesn't provide them
-        let msg = make_tag_based_message(
-            "todo_write",
-            r#"{"todos":[{"title":"Task without ID","status":"pending"},{"title":"Another task","status":"done"}]}"#,
-        );
-
-        let state = aggregate_todo_state(&[msg]);
-
-        assert_eq!(state.items.len(), 2);
-        assert_eq!(state.items[0].id, "todo-0");
-        assert_eq!(state.items[1].id, "todo-1");
     }
 
     #[test]

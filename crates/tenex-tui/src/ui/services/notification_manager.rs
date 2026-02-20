@@ -40,15 +40,6 @@ impl NotificationManager {
         self.notifications.current()
     }
 
-    /// Check if there are any active notifications
-    pub fn has_notifications(&self) -> bool {
-        !self.notifications.is_empty()
-    }
-
-    /// Check if the notification queue is empty
-    pub fn is_empty(&self) -> bool {
-        self.notifications.is_empty()
-    }
 }
 
 impl Default for NotificationManager {
@@ -64,17 +55,15 @@ mod tests {
     #[test]
     fn test_notification_manager_new() {
         let manager = NotificationManager::new();
-        assert!(manager.is_empty());
-        assert!(!manager.has_notifications());
+        assert!(manager.current().is_none());
     }
 
     #[test]
     fn test_notify() {
         let mut manager = NotificationManager::new();
-        assert!(manager.is_empty());
+        assert!(manager.current().is_none());
         manager.notify(Notification::info("test"));
-        assert!(!manager.is_empty());
-        assert!(manager.has_notifications());
+        assert!(manager.current().is_some());
         assert_eq!(manager.current().unwrap().message, "test");
     }
 
@@ -82,7 +71,7 @@ mod tests {
     fn test_set_warning_status() {
         let mut manager = NotificationManager::new();
         manager.set_warning_status("warning message");
-        assert!(manager.has_notifications());
+        assert!(manager.current().is_some());
         let notification = manager.current().unwrap();
         assert_eq!(notification.message, "warning message");
     }

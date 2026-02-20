@@ -52,8 +52,6 @@ pub enum DisplayItem<'a> {
         is_consecutive: bool,
         /// True if next item has the same pubkey
         has_next_consecutive: bool,
-        /// Branch name from the delegation event (if any)
-        branch: Option<String>,
     },
 }
 
@@ -137,7 +135,6 @@ pub fn group_messages<'a>(messages: &[&'a Message]) -> Vec<DisplayItem<'a>> {
                     parent_pubkey: msg.pubkey.clone(),
                     is_consecutive: false,
                     has_next_consecutive: false,
-                    branch: msg.branch.clone(),
                 });
             }
         }
@@ -302,10 +299,9 @@ mod tests {
         // Second should be DelegationPreview (Q-tag reference)
         match &display_items[1] {
             DisplayItem::DelegationPreview {
-                thread_id, branch, ..
+                thread_id, ..
             } => {
                 assert_eq!(thread_id, "child-conversation-id");
-                assert_eq!(branch, &Some("feature-branch".to_string()));
             }
             _ => panic!("Second item should be DelegationPreview"),
         }

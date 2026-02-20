@@ -327,13 +327,6 @@ impl NudgeFormState {
         self.hashtag_input.clear();
     }
 
-    /// Remove last hashtag
-    pub fn remove_last_hashtag(&mut self) {
-        if self.hashtag_input.is_empty() {
-            self.hashtags.pop();
-        }
-    }
-
     /// Get content line count
     pub fn content_line_count(&self) -> usize {
         self.content.lines().count().max(1)

@@ -472,12 +472,6 @@ impl App {
         self.tabs.tabs()
     }
 
-    /// Get mutable reference to open tabs (delegates to TabManager)
-    #[inline]
-    pub fn open_tabs_mut(&mut self) -> &mut Vec<OpenTab> {
-        self.tabs.tabs_mut()
-    }
-
     /// Get active tab index (delegates to TabManager)
     #[inline]
     pub fn active_tab_index(&self) -> usize {
@@ -488,12 +482,6 @@ impl App {
     #[inline]
     pub fn showing_tab_modal(&self) -> bool {
         self.tabs.modal_open
-    }
-
-    /// Set whether tab modal is showing (delegates to TabManager)
-    #[inline]
-    pub fn set_showing_tab_modal(&mut self, showing: bool) {
-        self.tabs.modal_open = showing;
     }
 
     /// Get tab modal index (delegates to TabManager)
@@ -588,16 +576,6 @@ impl App {
         self.animation_clock.spinner_char()
     }
 
-    /// Get activity indicator for pulsing displays (◉/○)
-    pub fn activity_indicator(&self) -> &'static str {
-        self.animation_clock.activity_indicator()
-    }
-
-    /// Get activity pulse state (true = on, false = off)
-    pub fn activity_pulse(&self) -> bool {
-        self.animation_clock.activity_pulse()
-    }
-
     /// Get wave offset for character-by-character color animation
     pub fn wave_offset(&self) -> usize {
         self.animation_clock.wave_offset()
@@ -625,11 +603,6 @@ impl App {
     /// Get the current notification being displayed
     pub fn current_notification(&self) -> Option<&Notification> {
         self.notification_manager.current()
-    }
-
-    /// Check if there are any active notifications
-    pub fn has_notifications(&self) -> bool {
-        self.notification_manager.has_notifications()
     }
 
     // =============================================================================
@@ -698,24 +671,6 @@ impl App {
     #[inline]
     pub fn show_llm_metadata(&self) -> bool {
         self.conversation.show_llm_metadata
-    }
-
-    /// Set the LLM metadata display toggle
-    #[inline]
-    pub fn set_show_llm_metadata(&mut self, show: bool) {
-        self.conversation.show_llm_metadata = show;
-    }
-
-    /// Get reference to local stream buffers
-    #[inline]
-    pub fn local_stream_buffers(&self) -> &HashMap<String, LocalStreamBuffer> {
-        &self.conversation.local_stream_buffers
-    }
-
-    /// Get mutable reference to local stream buffers
-    #[inline]
-    pub fn local_stream_buffers_mut(&mut self) -> &mut HashMap<String, LocalStreamBuffer> {
-        &mut self.conversation.local_stream_buffers
     }
 
     // =============================================================================
@@ -1357,11 +1312,6 @@ impl App {
             .get_named_drafts_for_project(&project_a_tag)
     }
 
-    /// Get all named drafts
-    pub fn get_all_named_drafts(&self) -> Vec<NamedDraft> {
-        self.draft_service.get_all_named_drafts()
-    }
-
     /// Delete a named draft by ID
     pub fn delete_named_draft(&mut self, id: &str) {
         // Perform the delete and capture result before calling set_status
@@ -1619,30 +1569,6 @@ impl App {
         self.modal_state = ModalState::ComposerProjectSelector {
             selector: SelectorState::new(),
         };
-    }
-
-    /// DEPRECATED: Use open_projects_selector_for_new_thread() or open_projects_selector_for_switch() instead.
-    /// This method remains for temporary backwards compatibility but will be removed.
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use open_projects_selector_for_new_thread() or open_projects_selector_for_switch() instead"
-    )]
-    pub fn open_projects_modal(&mut self, for_new_thread: bool) {
-        if for_new_thread {
-            self.open_projects_selector_for_new_thread();
-        } else {
-            self.open_projects_selector_for_switch();
-        }
-    }
-
-    /// DEPRECATED: Use open_projects_selector_for_switch() instead.
-    /// This method remains for temporary backwards compatibility but will be removed.
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use open_projects_selector_for_switch() instead"
-    )]
-    pub fn open_project_selector(&mut self) {
-        self.open_projects_selector_for_switch();
     }
 
     /// Get projects modal index (from ModalState)
@@ -2002,7 +1928,6 @@ impl App {
         Some(crate::ui::modal::AgentSettingsState::new(
             agent.name.clone(),
             agent.pubkey.clone(),
-            project.a_tag(),
             agent.model.clone(),
             agent.tools.clone(),
             false,
@@ -2066,40 +1991,6 @@ impl App {
     /// Open the command palette modal (Ctrl+T)
     pub fn open_command_palette(&mut self) {
         self.modal_state = ModalState::CommandPalette(CommandPaletteState::new());
-    }
-
-    /// Select agent by index from filtered agents
-    pub fn select_filtered_agent_by_index(&mut self, index: usize) {
-        let filtered = self.filtered_agents();
-        if let Some(project_agent) = filtered.get(index) {
-            self.conversation.selected_agent = Some(project_agent.clone());
-        }
-    }
-
-    /// Copy text to clipboard
-    fn copy_to_clipboard(&self, text: &str) {
-        use arboard::Clipboard;
-        if let Ok(mut clipboard) = Clipboard::new() {
-            let _ = clipboard.set_text(text);
-        }
-    }
-
-    /// Open a URL in the default browser
-    fn open_url(&self, url: &str) {
-        #[cfg(target_os = "macos")]
-        {
-            let _ = std::process::Command::new("open").arg(url).spawn();
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let _ = std::process::Command::new("cmd")
-                .args(["/c", "start", url])
-                .spawn();
-        }
     }
 
     pub fn submit_input(&mut self) -> String {
@@ -2402,24 +2293,6 @@ impl App {
         self.maybe_open_pending_ask();
     }
 
-    /// Cycle to next tab in history (Alt+Tab behavior)
-    pub fn cycle_tab_history_forward(&mut self) {
-        // TabManager handles the history internally
-        self.tabs.cycle_history_forward();
-        self.switch_to_tab(self.tabs.active_index());
-    }
-
-    /// Cycle to previous tab in history (Alt+Shift+Tab behavior)
-    pub fn cycle_tab_history_backward(&mut self) {
-        // For backward, we go to next tab (simpler behavior)
-        self.prev_tab();
-    }
-
-    /// Open tab modal
-    pub fn open_tab_modal(&mut self) {
-        self.tabs.open_modal();
-    }
-
     /// Close tab modal
     pub fn close_tab_modal(&mut self) {
         self.tabs.close_modal();
@@ -2526,11 +2399,6 @@ impl App {
         self.tabs.mark_waiting_for_user(thread_id);
     }
 
-    /// Clear the waiting_for_user state for a thread
-    pub fn clear_tab_waiting_for_user(&mut self, thread_id: &str) {
-        self.tabs.clear_waiting_for_user(thread_id);
-    }
-
     /// Update the agent working state for a thread tab
     /// This is used to show a blue indicator when agents are actively working
     pub fn set_tab_agent_working(&mut self, thread_id: &str, is_working: bool) {
@@ -2562,15 +2430,6 @@ impl App {
     /// Check if a thread is multi-selected
     pub fn is_thread_multi_selected(&self, thread_id: &str) -> bool {
         self.multi_selected_threads.contains(thread_id)
-    }
-
-    /// Toggle multi-selection for a thread
-    pub fn toggle_thread_multi_select(&mut self, thread_id: &str) {
-        if self.multi_selected_threads.contains(thread_id) {
-            self.multi_selected_threads.remove(thread_id);
-        } else {
-            self.multi_selected_threads.insert(thread_id.to_string());
-        }
     }
 
     /// Add a thread to multi-selection
@@ -2926,44 +2785,6 @@ impl App {
             .unwrap_or(false)
     }
 
-    /// Start a new thread for a specific project (navigates to chat without a thread selected)
-    pub fn start_new_thread_for_project(&mut self, project_a_tag: &str) {
-        // Find and set selected project
-        let project = self
-            .data_store
-            .borrow()
-            .get_projects()
-            .iter()
-            .find(|p| p.a_tag() == project_a_tag)
-            .cloned();
-
-        if let Some(project) = project {
-            let a_tag = project.a_tag();
-            self.selected_project = Some(project);
-
-            // Set default agent/branch from project status
-            if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
-                if let Some(pm) = status.pm_agent() {
-                    self.conversation.selected_agent = Some(pm.clone());
-                } else {
-                    self.conversation.selected_agent = None;
-                }
-            } else {
-                self.conversation.selected_agent = None;
-            }
-
-            self.conversation.selected_thread = None;
-            self.creating_thread = true;
-            self.view = View::Chat;
-            self.input_mode = InputMode::Editing;
-            self.chat_editor_mut().clear();
-        } else {
-            // Project not found - clear state to prevent leaks
-            self.selected_project = None;
-            self.conversation.selected_agent = None;
-        }
-    }
-
     /// Get all image URLs from messages in the current thread
     pub fn get_image_urls_from_thread(&self) -> Vec<String> {
         let messages = self.messages();
@@ -3027,7 +2848,6 @@ impl App {
         let input_state = AskInputState::new(ask_event.questions.clone());
         self.modal_state = ModalState::AskModal(AskModalState {
             message_id,
-            ask_event,
             input_state,
             ask_author_pubkey,
         });
@@ -3139,11 +2959,6 @@ impl App {
         self.conversation.clear_local_stream_buffer(conversation_id);
     }
 
-    /// Get current conversation ID (thread ID)
-    pub fn current_conversation_id(&self) -> Option<String> {
-        self.conversation.current_conversation_id()
-    }
-
     // ===== Filter Management Methods =====
 
     /// Load filter preferences from storage
@@ -3234,32 +3049,12 @@ impl App {
         self.save_selected_projects();
     }
 
-    /// Add a project to visible projects (manual selection mode)
-    /// Clears the active workspace since we're now in manual mode
-    pub fn add_visible_project(&mut self, a_tag: String) {
-        // Clear active workspace - we're now in manual mode
-        if self.preferences.borrow().active_workspace_id().is_some() {
-            self.preferences.borrow_mut().set_active_workspace(None);
-        }
-
-        self.visible_projects.insert(a_tag);
-        self.save_selected_projects();
-    }
-
     /// Cycle through time filter options and persist
     pub fn cycle_time_filter(&mut self) {
         self.home.time_filter = TimeFilter::cycle_next(self.home.time_filter);
         self.preferences
             .borrow_mut()
             .set_time_filter(self.home.time_filter);
-    }
-
-    /// Toggle LLM metadata display and persist
-    pub fn toggle_llm_metadata(&mut self) {
-        self.conversation.toggle_llm_metadata();
-        self.preferences
-            .borrow_mut()
-            .set_show_llm_metadata(self.conversation.show_llm_metadata);
     }
 
     // ===== Agent Browser Methods =====
@@ -3315,33 +3110,6 @@ impl App {
             })
             .cloned()
             .collect()
-    }
-
-    /// Get a specific agent definition by ID
-    pub fn get_agent_definition(&self, id: &str) -> Option<AgentDefinition> {
-        self.data_store
-            .borrow()
-            .content
-            .get_agent_definition(id)
-            .cloned()
-    }
-
-    // ===== MCP Tool Methods =====
-
-    /// Get all MCP tools, sorted by created_at descending
-    pub fn get_mcp_tools(&self) -> Vec<MCPTool> {
-        self.data_store
-            .borrow()
-            .content
-            .get_mcp_tools()
-            .into_iter()
-            .cloned()
-            .collect()
-    }
-
-    /// Get a specific MCP tool by ID
-    pub fn get_mcp_tool(&self, id: &str) -> Option<MCPTool> {
-        self.data_store.borrow().content.get_mcp_tool(id).cloned()
     }
 
     /// Get MCP tools filtered by a custom filter string
@@ -3464,9 +3232,7 @@ impl App {
                 thread,
                 project_a_tag,
                 project_name,
-                match_type: SearchMatchType::Message {
-                    message_id: event_id,
-                },
+                match_type: SearchMatchType::Message,
                 excerpt: Some(excerpt),
             });
         }
@@ -3536,11 +3302,6 @@ impl App {
         self.tabs.active_tab().map(|t| &t.chat_search)
     }
 
-    /// Get mutable reference to current tab's chat search state
-    pub fn chat_search_mut(&mut self) -> Option<&mut ChatSearchState> {
-        self.tabs.active_tab_mut().map(|t| &mut t.chat_search)
-    }
-
     /// Check if chat search is active for current tab
     pub fn is_chat_search_active(&self) -> bool {
         self.chat_search().map(|s| s.active).unwrap_or(false)
@@ -3585,8 +3346,6 @@ impl App {
                 let absolute_pos = start + pos;
                 new_matches.push(ChatSearchMatch {
                     message_id: msg.id.clone(),
-                    start_offset: absolute_pos,
-                    length: query.len(),
                 });
                 start = absolute_pos + 1;
             }
@@ -3673,27 +3432,6 @@ impl App {
             .unwrap_or(false)
     }
 
-    /// Get search matches for a specific message (per-tab isolated)
-    pub fn get_message_search_matches(&self, message_id: &str) -> Vec<ChatSearchMatch> {
-        match self.chat_search() {
-            Some(s) if s.active => s
-                .match_locations
-                .iter()
-                .filter(|m| m.message_id == message_id)
-                .cloned()
-                .collect(),
-            _ => vec![],
-        }
-    }
-
-    /// Check if a match is the currently focused one (per-tab isolated)
-    pub fn is_current_search_match(&self, message_id: &str, start_offset: usize) -> bool {
-        self.chat_search()
-            .and_then(|s| s.match_locations.get(s.current_match))
-            .map(|current| current.message_id == message_id && current.start_offset == start_offset)
-            .unwrap_or(false)
-    }
-
     // ===== Unified Nudge/Skill Selector Methods =====
 
     /// Open the unified nudge/skill selector modal.
@@ -3753,14 +3491,6 @@ impl App {
                 .then_with(|| a.id().cmp(b.id()))
         });
         items
-    }
-
-    /// Get unified selector index.
-    pub fn nudge_skill_selector_index(&self) -> usize {
-        match &self.modal_state {
-            ModalState::NudgeSkillSelector(state) => state.selector.index,
-            _ => 0,
-        }
     }
 
     /// Get unified selector filter text.
@@ -3849,11 +3579,8 @@ impl App {
         let mut entries: Vec<HistorySearchEntry> = sent_results
             .into_iter()
             .map(
-                |(event_id, content, created_at, project_a_tag)| HistorySearchEntry {
-                    kind: HistorySearchEntryKind::Message {
-                        event_id,
-                        project_a_tag,
-                    },
+                |(_event_id, content, created_at, _project_a_tag)| HistorySearchEntry {
+                    kind: HistorySearchEntryKind::Message,
                     content,
                     created_at,
                 },
@@ -3958,13 +3685,9 @@ impl App {
         }
 
         // Convert merged drafts to entries
-        for (conversation_id, (text, project_a_tag, last_modified)) in drafts_by_id {
+        for (_conversation_id, (text, _project_a_tag, last_modified)) in drafts_by_id {
             entries.push(HistorySearchEntry {
-                kind: HistorySearchEntryKind::Draft {
-                    draft_id: conversation_id.clone(),
-                    conversation_id,
-                    project_a_tag,
-                },
+                kind: HistorySearchEntryKind::Draft,
                 content: text,
                 created_at: last_modified,
             });
@@ -3993,11 +3716,7 @@ impl App {
 
             seen_named_draft_ids.insert(draft.id.clone());
             entries.push(HistorySearchEntry {
-                kind: HistorySearchEntryKind::NamedDraft {
-                    draft_id: draft.id.clone(),
-                    name: draft.name.clone(),
-                    project_a_tag: draft.project_a_tag.clone(),
-                },
+                kind: HistorySearchEntryKind::NamedDraft,
                 content: draft.text.clone(),
                 created_at: draft.last_modified,
             });
@@ -4070,22 +3789,6 @@ impl App {
         Some(thread.id.clone())
     }
 
-    /// Check if a nudge is selected (per-tab isolated)
-    pub fn is_nudge_selected(&self, nudge_id: &str) -> bool {
-        match &self.modal_state {
-            ModalState::NudgeSkillSelector(state) => {
-                state.selected_nudge_ids.contains(&nudge_id.to_string())
-            }
-            _ => {
-                // Use per-tab state
-                self.tabs
-                    .active_tab()
-                    .map(|t| t.selected_nudge_ids.contains(&nudge_id.to_string()))
-                    .unwrap_or(false)
-            }
-        }
-    }
-
     /// Remove a nudge from selected nudges (per-tab isolated)
     pub fn remove_selected_nudge(&mut self, nudge_id: &str) {
         if let Some(tab) = self.tabs.active_tab_mut() {
@@ -4102,29 +3805,6 @@ impl App {
     }
 
     // ===== Unified Selector Methods (Alt+K/Ctrl+N/Ctrl+/) =====
-
-    /// Check if a skill is selected (per-tab isolated)
-    pub fn is_skill_selected(&self, skill_id: &str) -> bool {
-        match &self.modal_state {
-            ModalState::NudgeSkillSelector(state) => {
-                state.selected_skill_ids.contains(&skill_id.to_string())
-            }
-            _ => {
-                // Use per-tab state
-                self.tabs
-                    .active_tab()
-                    .map(|t| t.selected_skill_ids.contains(&skill_id.to_string()))
-                    .unwrap_or(false)
-            }
-        }
-    }
-
-    /// Remove a skill from selected skills (per-tab isolated)
-    pub fn remove_selected_skill(&mut self, skill_id: &str) {
-        if let Some(tab) = self.tabs.active_tab_mut() {
-            tab.selected_skill_ids.retain(|id| id != skill_id);
-        }
-    }
 
     /// Get selected skill IDs for current tab (per-tab isolated)
     pub fn selected_skill_ids(&self) -> Vec<String> {
@@ -4331,10 +4011,10 @@ impl App {
     }
 
     /// Show the backend approval modal for a pending approval
-    pub fn show_backend_approval_modal(&mut self, backend_pubkey: String, project_a_tag: String) {
+    pub fn show_backend_approval_modal(&mut self, backend_pubkey: String) {
         use crate::ui::modal::BackendApprovalState;
         self.modal_state =
-            ModalState::BackendApproval(BackendApprovalState::new(backend_pubkey, project_a_tag));
+            ModalState::BackendApproval(BackendApprovalState::new(backend_pubkey));
     }
 
     /// Initialize trusted backends from preferences (called on app init)
@@ -4366,7 +4046,6 @@ impl App {
         let store = self.data_store.borrow();
 
         // Clear all result sets
-        self.sidebar_search.results.clear();
         self.sidebar_search.hierarchical_results.clear();
         self.sidebar_search.report_results.clear();
 
@@ -4401,7 +4080,6 @@ impl App {
                     // Close search
                     self.sidebar_search.visible = false;
                     self.sidebar_search.query.clear();
-                    self.sidebar_search.results.clear();
                     self.sidebar_search.hierarchical_results.clear();
                     self.sidebar_search.report_results.clear();
 
@@ -4430,7 +4108,6 @@ impl App {
                     // Close search
                     self.sidebar_search.visible = false;
                     self.sidebar_search.query.clear();
-                    self.sidebar_search.results.clear();
                     self.sidebar_search.hierarchical_results.clear();
                     self.sidebar_search.report_results.clear();
 
@@ -4466,11 +4143,10 @@ impl App {
                 }
                 seen_thread_ids.insert(thread_id.clone());
 
-                // Look up the thread to get its title
-                let (title, target) = if let Some(thread) = store.get_thread_by_id(thread_id) {
-                    // Try to find the target agent name
-                    // Priority: 1) kind:0 profile, 2) agent slug from project status, 3) short pubkey
-                    let target_name = thread
+                // Try to find the target agent name
+                // Priority: 1) kind:0 profile, 2) agent slug from project status, 3) short pubkey
+                let target = if let Some(thread) = store.get_thread_by_id(thread_id) {
+                    thread
                         .p_tags
                         .first()
                         .map(|pk| {
@@ -4495,20 +4171,13 @@ impl App {
                                 profile_name
                             }
                         })
-                        .unwrap_or_else(|| "Unknown".to_string());
-
-                    (thread.title.clone(), target_name)
+                        .unwrap_or_else(|| "Unknown".to_string())
                 } else {
-                    // Thread not found, use short ID
-                    (
-                        format!("Thread {}...", &thread_id[..8.min(thread_id.len())]),
-                        "Unknown".to_string(),
-                    )
+                    "Unknown".to_string()
                 };
 
                 delegations.push(SidebarDelegation {
                     thread_id: thread_id.clone(),
-                    title,
                     target,
                 });
             }
@@ -4537,7 +4206,6 @@ impl App {
                     reports.push(SidebarReport {
                         a_tag: a_tag.clone(),
                         title,
-                        slug: coord.slug,
                     });
                 }
             }
@@ -4599,7 +4267,7 @@ pub struct SearchResult {
 pub enum SearchMatchType {
     Thread,
     ConversationId,
-    Message { message_id: String },
+    Message,
 }
 
 #[derive(Debug, Clone)]

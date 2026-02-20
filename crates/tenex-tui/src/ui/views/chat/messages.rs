@@ -490,7 +490,6 @@ pub(crate) fn render_messages_panel(
                     parent_pubkey,
                     is_consecutive,
                     has_next_consecutive,
-                    branch: _, // branch from delegation tool-call is incorrect; we fetch from thread root below
                 } => {
                     // Check if this delegation preview is selected
                     let is_selected = group_idx == app.selected_message_index()

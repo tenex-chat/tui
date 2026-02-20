@@ -6,19 +6,6 @@ fn now_seconds() -> u64 {
         .unwrap_or(0)
 }
 
-/// Truncate string to a max length without adding an ellipsis.
-pub fn truncate_plain(s: &str, max_len: usize) -> String {
-    if max_len == 0 {
-        return String::new();
-    }
-
-    if s.chars().count() <= max_len {
-        s.to_string()
-    } else {
-        s.chars().take(max_len).collect()
-    }
-}
-
 /// Truncate string to a max length, adding an ellipsis when truncated.
 pub fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
     if max_len == 0 {

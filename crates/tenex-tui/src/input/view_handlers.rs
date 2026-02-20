@@ -476,8 +476,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             let slug = report.slug.clone();
                             let a_tag = report.a_tag();
                             let title = report.title.clone();
-                            let author_pubkey = report.author.clone();
-                            app.tabs.open_report(slug, a_tag, title, author_pubkey);
+                            app.tabs.open_report(slug, a_tag, title);
                             app.view = View::Chat;
                         }
                     }
@@ -1112,7 +1111,6 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                                     report.slug.clone(),
                                     report.a_tag(),
                                     report.title.clone(),
-                                    report.author.clone(),
                                 );
                                 // Stay in Chat view - the tab is now active
                             }

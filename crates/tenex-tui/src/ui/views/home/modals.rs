@@ -264,7 +264,7 @@ pub fn render_search_modal(f: &mut Frame, app: &App, area: Rect) {
                         let id_preview = truncate_with_ellipsis(&result.thread.id, 20);
                         ("I", format!("{} ({})", title, id_preview))
                     }
-                    SearchMatchType::Message { .. } => {
+                    SearchMatchType::Message => {
                         let title = truncate_with_ellipsis(&result.thread.title, 25);
                         let excerpt = result.excerpt.as_deref().unwrap_or("");
                         (

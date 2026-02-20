@@ -15,7 +15,6 @@
 //! - `HotkeyResolver`: Finds matching hotkey for key event + context
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use std::collections::HashMap;
 
 /// Unique identifier for each hotkey action.
 /// This enum serves as the canonical list of all possible keyboard-triggered actions.
@@ -41,10 +40,7 @@ pub enum HotkeyId {
     Back,   // Escape
 
     // === Tab Management ===
-    NextTab,
-    PrevTab,
     CloseTab,
-    TabModal,
     NextHomeTab, // Tab key in Home view
     PrevHomeTab, // Shift+Tab in Home view
 
@@ -101,13 +97,10 @@ pub enum HotkeyId {
     // === Modal Actions ===
     ModalClose,
     ModalConfirm,
-    ModalCancel,
 
     // === Report Viewer ===
     ToggleReportView,
     CopyReportId,
-    CopyReportRaw,
-    CopyReportMarkdown,
 }
 
 /// Context in which a hotkey is active.
@@ -136,8 +129,6 @@ pub enum HotkeyContext {
     ProjectSelectorModal,
     AskModal,
     AttachmentModal,
-    TabModal,
-    SearchModal,
     ConversationActionsModal,
     ChatActionsModal,
     ProjectActionsModal,
@@ -248,10 +239,6 @@ pub struct HotkeyBinding {
     pub key: KeyCode,
     /// Required modifiers (Ctrl, Alt, Shift)
     pub modifiers: KeyModifiers,
-    /// Human-readable label for help text
-    pub label: &'static str,
-    /// Section/category for grouping in help
-    pub section: &'static str,
     /// Contexts where this hotkey is active
     pub contexts: &'static [HotkeyContext],
     /// Priority (higher = checked first, for overlapping contexts)
@@ -263,16 +250,12 @@ impl HotkeyBinding {
     pub const fn new(
         id: HotkeyId,
         key: KeyCode,
-        label: &'static str,
-        section: &'static str,
         contexts: &'static [HotkeyContext],
     ) -> Self {
         Self {
             id,
             key,
             modifiers: KeyModifiers::NONE,
-            label,
-            section,
             contexts,
             priority: 0,
         }
@@ -283,16 +266,12 @@ impl HotkeyBinding {
         id: HotkeyId,
         key: KeyCode,
         modifiers: KeyModifiers,
-        label: &'static str,
-        section: &'static str,
         contexts: &'static [HotkeyContext],
     ) -> Self {
         Self {
             id,
             key,
             modifiers,
-            label,
-            section,
             contexts,
             priority: 0,
         }
@@ -302,33 +281,27 @@ impl HotkeyBinding {
     pub const fn ctrl(
         id: HotkeyId,
         key: KeyCode,
-        label: &'static str,
-        section: &'static str,
         contexts: &'static [HotkeyContext],
     ) -> Self {
-        Self::with_modifiers(id, key, KeyModifiers::CONTROL, label, section, contexts)
+        Self::with_modifiers(id, key, KeyModifiers::CONTROL, contexts)
     }
 
     /// Create with Alt modifier
     pub const fn alt(
         id: HotkeyId,
         key: KeyCode,
-        label: &'static str,
-        section: &'static str,
         contexts: &'static [HotkeyContext],
     ) -> Self {
-        Self::with_modifiers(id, key, KeyModifiers::ALT, label, section, contexts)
+        Self::with_modifiers(id, key, KeyModifiers::ALT, contexts)
     }
 
     /// Create with Shift modifier
     pub const fn shift(
         id: HotkeyId,
         key: KeyCode,
-        label: &'static str,
-        section: &'static str,
         contexts: &'static [HotkeyContext],
     ) -> Self {
-        Self::with_modifiers(id, key, KeyModifiers::SHIFT, label, section, contexts)
+        Self::with_modifiers(id, key, KeyModifiers::SHIFT, contexts)
     }
 
     /// Set priority (higher = checked first)
@@ -347,50 +320,6 @@ impl HotkeyBinding {
         self.contexts.contains(&HotkeyContext::Global) || self.contexts.contains(&context)
     }
 
-    /// Get a display string for the key combination
-    pub fn key_display(&self) -> String {
-        let mut parts = Vec::new();
-
-        if self.modifiers.contains(KeyModifiers::CONTROL) {
-            parts.push("Ctrl");
-        }
-        if self.modifiers.contains(KeyModifiers::ALT) {
-            parts.push("Alt");
-        }
-        if self.modifiers.contains(KeyModifiers::SHIFT) {
-            parts.push("Shift");
-        }
-
-        let key_str = match self.key {
-            KeyCode::Char(' ') => "Space".to_string(),
-            KeyCode::Char(c) => c.to_string(),
-            KeyCode::Enter => "Enter".to_string(),
-            KeyCode::Esc => "Esc".to_string(),
-            KeyCode::Tab => "Tab".to_string(),
-            KeyCode::BackTab => "Shift+Tab".to_string(),
-            KeyCode::Backspace => "Backspace".to_string(),
-            KeyCode::Delete => "Delete".to_string(),
-            KeyCode::Up => "↑".to_string(),
-            KeyCode::Down => "↓".to_string(),
-            KeyCode::Left => "←".to_string(),
-            KeyCode::Right => "→".to_string(),
-            KeyCode::PageUp => "PgUp".to_string(),
-            KeyCode::PageDown => "PgDn".to_string(),
-            KeyCode::Home => "Home".to_string(),
-            KeyCode::End => "End".to_string(),
-            KeyCode::F(n) => format!("F{}", n),
-            _ => "?".to_string(),
-        };
-
-        parts.push(&key_str);
-
-        // Handle BackTab specially (already includes Shift)
-        if matches!(self.key, KeyCode::BackTab) && self.modifiers.contains(KeyModifiers::SHIFT) {
-            return "Shift+Tab".to_string();
-        }
-
-        parts.join("+")
-    }
 }
 
 // ============================================================================
@@ -416,45 +345,33 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::Quit,
         KeyCode::Char('q'),
-        "Quit",
-        "Global",
         &[HotkeyContext::Global],
     ),
     HotkeyBinding::ctrl(
         HotkeyId::CommandPalette,
         KeyCode::Char('t'),
-        "Command Palette",
-        "Global",
         &[HotkeyContext::Global],
     )
     .with_priority(100), // High priority - always available
     HotkeyBinding::new(
         HotkeyId::GoToHome,
         KeyCode::Char('1'),
-        "Go to Home",
-        "Navigation",
         &[HotkeyContext::Global],
     ),
     HotkeyBinding::new(
         HotkeyId::Help,
         KeyCode::Char('?'),
-        "Help",
-        "Global",
         &[HotkeyContext::Global],
     ),
     HotkeyBinding::alt(
         HotkeyId::JumpToNotification,
         KeyCode::Char('m'),
-        "Jump to Message",
-        "Global",
         &[HotkeyContext::Global],
     )
     .with_priority(90), // High priority - works almost everywhere
     HotkeyBinding::ctrl(
         HotkeyId::WorkspaceManager,
         KeyCode::Char('p'),
-        "Workspaces",
-        "Global",
         &[HotkeyContext::Global],
     )
     .with_priority(95), // High priority - opens workspace manager
@@ -462,15 +379,11 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::NavigateUp,
         KeyCode::Up,
-        "Navigate Up",
-        "Navigation",
         &[HotkeyContext::Global],
     ),
     HotkeyBinding::new(
         HotkeyId::NavigateDown,
         KeyCode::Down,
-        "Navigate Down",
-        "Navigation",
         &[HotkeyContext::Global],
     ),
     // NOTE: NavigateLeft and NavigateRight for HomeSidebar were removed
@@ -479,43 +392,31 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::PageUp,
         KeyCode::PageUp,
-        "Page Up",
-        "Navigation",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::PageDown,
         KeyCode::PageDown,
-        "Page Down",
-        "Navigation",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::GoToTop,
         KeyCode::Home,
-        "Go to Top",
-        "Navigation",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::GoToBottom,
         KeyCode::End,
-        "Go to Bottom",
-        "Navigation",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::Select,
         KeyCode::Enter,
-        "Select",
-        "Navigation",
         &[HotkeyContext::Global],
     ),
     HotkeyBinding::new(
         HotkeyId::Back,
         KeyCode::Esc,
-        "Back / Close",
-        "Navigation",
         &[HotkeyContext::Global],
     ),
     // === Tab Management ===
@@ -524,16 +425,12 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::CloseTab,
         KeyCode::Char('x'),
-        "Close Tab",
-        "Tabs",
         &[HotkeyContext::ChatNormal],
     ),
     // === Home View - Recent Tab ===
     HotkeyBinding::new(
         HotkeyId::NewConversation,
         KeyCode::Char('n'),
-        "New Conversation",
-        "Conversation",
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeSidebar,
@@ -543,8 +440,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::OpenSelected,
         KeyCode::Char('o'),
-        "Open Selected",
-        "Conversation",
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
@@ -554,22 +449,16 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::ArchiveToggle,
         KeyCode::Char('a'),
-        "Archive/Unarchive",
-        "Conversation",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::new(
         HotkeyId::ExportJsonl,
         KeyCode::Char('e'),
-        "Export JSONL",
-        "Conversation",
         &[HotkeyContext::HomeConversations, HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::SwitchProject,
         KeyCode::Char('p'),
-        "Switch Project",
-        "Filter",
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
@@ -579,51 +468,37 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::TimeFilter,
         KeyCode::Char('f'),
-        "Time Filter",
-        "Filter",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::AgentBrowser,
         KeyCode::Char('B'),
-        "Agent Browser",
-        "Other",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::CreateProject,
         KeyCode::Char('C'),
-        "Create Project",
-        "Other",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::NewConversation,
         KeyCode::Char('N'),
-        "New Conversation (current project)",
-        "Conversation",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::NewConversationWithPicker,
         KeyCode::Char('P'),
-        "New conversation on project...",
-        "Conversation",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchived,
         KeyCode::Char('A'),
-        "Show/Hide Archived Items",
-        "Filter",
         &[HotkeyContext::Global],
     ),
     // === Home View Tab Navigation ===
     HotkeyBinding::new(
         HotkeyId::NextHomeTab,
         KeyCode::Tab,
-        "Next Tab",
-        "Navigation",
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
@@ -635,8 +510,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::shift(
         HotkeyId::PrevHomeTab,
         KeyCode::BackTab,
-        "Previous Tab",
-        "Navigation",
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
@@ -648,15 +521,11 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::SearchReports,
         KeyCode::Char('/'),
-        "Search Reports",
-        "Filter",
         &[HotkeyContext::HomeReports],
     ),
     HotkeyBinding::shift(
         HotkeyId::ToggleHideScheduled,
         KeyCode::Char('S'),
-        "Toggle Scheduled Events",
-        "Filter",
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
@@ -666,8 +535,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::FocusSidebar,
         KeyCode::Right,
-        "Focus Sidebar",
-        "Navigation",
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
@@ -678,147 +545,107 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::UnfocusSidebar,
         KeyCode::Left,
-        "Unfocus Sidebar",
-        "Navigation",
         &[HotkeyContext::HomeSidebar],
     ),
     // === Home View - Inbox Tab ===
     HotkeyBinding::shift(
         HotkeyId::MarkAsRead,
         KeyCode::Char('R'),
-        "Mark as Read",
-        "Inbox",
         &[HotkeyContext::HomeInbox],
     ),
     HotkeyBinding::shift(
         HotkeyId::MarkAllRead,
         KeyCode::Char('M'),
-        "Mark All Read",
-        "Inbox",
         &[HotkeyContext::HomeInbox],
     ),
     // === Home View - Sidebar ===
     HotkeyBinding::new(
         HotkeyId::ToggleProjectVisibility,
         KeyCode::Char(' '),
-        "Toggle Visibility",
-        "Project",
         &[HotkeyContext::HomeSidebar],
     ),
     HotkeyBinding::new(
         HotkeyId::ProjectSettings,
         KeyCode::Char('s'),
-        "Settings",
-        "Project",
         &[HotkeyContext::HomeSidebar],
     ),
     HotkeyBinding::new(
         HotkeyId::BootProject,
         KeyCode::Char('b'),
-        "Boot Project",
-        "Project",
         &[HotkeyContext::HomeSidebar],
     ),
     HotkeyBinding::new(
         HotkeyId::StopAllAgents,
         KeyCode::Char('.'),
-        "Stop All Agents",
-        "Project",
         &[HotkeyContext::HomeSidebar],
     ),
     // === Chat View - Normal Mode ===
     HotkeyBinding::new(
         HotkeyId::MentionAgent,
         KeyCode::Char('@'),
-        "Mention Agent",
-        "Input",
         &[HotkeyContext::ChatNormal, HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::new(
         HotkeyId::CopyMessage,
         KeyCode::Char('y'),
-        "Copy Content",
-        "Message",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::ViewRawEvent,
         KeyCode::Char('v'),
-        "View Raw Event",
-        "Message",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::OpenTrace,
         KeyCode::Char('t'),
-        "Open Trace",
-        "Message",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::StopAgent,
         KeyCode::Char('.'),
-        "Stop Agent",
-        "Agent",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::GoToParent,
         KeyCode::Char('g'),
-        "Go to Parent",
-        "Conversation",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::EnterEditMode,
         KeyCode::Char('i'),
-        "Enter Edit Mode",
-        "Input",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::ctrl(
         HotkeyId::InConversationSearch,
         KeyCode::Char('f'),
-        "Search in Conversation",
-        "Search",
         &[HotkeyContext::ChatNormal],
     ),
     // === Chat View - Edit Mode ===
     HotkeyBinding::ctrl(
         HotkeyId::SendMessage,
         KeyCode::Enter,
-        "Send Message",
-        "Input",
         &[HotkeyContext::ChatEditing],
     )
     .with_priority(50),
     HotkeyBinding::ctrl(
         HotkeyId::ExpandEditor,
         KeyCode::Char('e'),
-        "Expand Editor",
-        "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::shift(
         HotkeyId::InsertNewline,
         KeyCode::Enter,
-        "Insert Newline",
-        "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::new(
         HotkeyId::CancelEdit,
         KeyCode::Esc,
-        "Cancel Edit",
-        "Input",
         &[HotkeyContext::ChatEditing],
     )
     .with_priority(50),
     HotkeyBinding::ctrl(
         HotkeyId::HistorySearch,
         KeyCode::Char('r'),
-        "Search History",
-        "Input",
         &[HotkeyContext::ChatEditing],
     ),
     // Unified [/] nudges/skills selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
@@ -827,82 +654,60 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::ctrl(
         HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('/'),
-        "Open [/] Nudges/Skills Selector",
-        "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::ctrl(
         HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('n'),
-        "Open [/] Nudges/Skills Selector",
-        "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::alt(
         HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('k'),
-        "Open [/] Nudges/Skills Selector",
-        "Input",
         &[HotkeyContext::ChatEditing],
     ),
     // === Agent Browser ===
     HotkeyBinding::new(
         HotkeyId::ViewAgent,
         KeyCode::Char('o'),
-        "View Agent",
-        "Agent",
         &[HotkeyContext::AgentBrowserList],
     ),
     HotkeyBinding::new(
         HotkeyId::CreateAgent,
         KeyCode::Char('n'),
-        "Create Agent",
-        "Agent",
         &[HotkeyContext::AgentBrowserList],
     ),
     HotkeyBinding::new(
         HotkeyId::ForkAgent,
         KeyCode::Char('f'),
-        "Fork Agent",
-        "Agent",
         &[HotkeyContext::AgentBrowserDetail],
     ),
     HotkeyBinding::new(
         HotkeyId::CloneAgent,
         KeyCode::Char('c'),
-        "Clone Agent",
-        "Agent",
         &[HotkeyContext::AgentBrowserDetail],
     ),
     // === Report Viewer ===
     HotkeyBinding::new(
         HotkeyId::ToggleReportView,
         KeyCode::Tab,
-        "Toggle View Mode",
-        "Report",
         &[HotkeyContext::ReportViewerModal],
     ),
     HotkeyBinding::new(
         HotkeyId::CopyReportId,
         KeyCode::Char('c'),
-        "Copy Options",
-        "Report",
         &[HotkeyContext::ReportViewerModal],
     ),
     // === Modal Actions ===
     HotkeyBinding::new(
         HotkeyId::ModalClose,
         KeyCode::Esc,
-        "Close",
-        "Modal",
         &[HotkeyContext::AnyModal],
     )
     .with_priority(10),
     HotkeyBinding::new(
         HotkeyId::ModalConfirm,
         KeyCode::Enter,
-        "Confirm",
-        "Modal",
         &[HotkeyContext::AnyModal],
     ),
 ];
@@ -948,63 +753,6 @@ impl HotkeyResolver {
         None
     }
 
-    /// Get all hotkeys available in the given context.
-    pub fn hotkeys_for_context(&self, context: HotkeyContext) -> Vec<&'static HotkeyBinding> {
-        self.bindings
-            .iter()
-            .filter(|b| b.is_active_in(context))
-            .copied()
-            .collect()
-    }
-
-    /// Get all hotkeys grouped by section for help display.
-    pub fn hotkeys_by_section(
-        &self,
-        context: HotkeyContext,
-    ) -> HashMap<&'static str, Vec<&'static HotkeyBinding>> {
-        let mut sections: HashMap<&'static str, Vec<&'static HotkeyBinding>> = HashMap::new();
-
-        for binding in self.hotkeys_for_context(context) {
-            sections.entry(binding.section).or_default().push(binding);
-        }
-
-        sections
-    }
-
-    /// Generate help text for the given context.
-    pub fn generate_help(&self, context: HotkeyContext) -> Vec<(String, String)> {
-        self.hotkeys_for_context(context)
-            .iter()
-            .map(|b| (b.key_display(), b.label.to_string()))
-            .collect()
-    }
-
-    /// Check for conflicting hotkeys (same key+modifiers in same context).
-    /// Returns pairs of conflicting hotkey IDs.
-    pub fn find_conflicts(&self) -> Vec<(HotkeyId, HotkeyId)> {
-        let mut conflicts = Vec::new();
-
-        for (i, a) in self.bindings.iter().enumerate() {
-            for b in self.bindings.iter().skip(i + 1) {
-                // Same key and modifiers?
-                if a.key == b.key && a.modifiers == b.modifiers {
-                    // Check for overlapping contexts
-                    for ctx_a in a.contexts {
-                        for ctx_b in b.contexts {
-                            if ctx_a == ctx_b
-                                || *ctx_a == HotkeyContext::Global
-                                || *ctx_b == HotkeyContext::Global
-                            {
-                                conflicts.push((a.id, b.id));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        conflicts
-    }
 }
 
 /// Global resolver instance (lazy initialized)
@@ -1024,16 +772,6 @@ pub fn resolve_hotkey(
     resolver().resolve(key, modifiers, context)
 }
 
-/// Get the binding for a specific hotkey ID (for help display).
-pub fn get_binding(id: HotkeyId) -> Option<&'static HotkeyBinding> {
-    HOTKEYS.iter().find(|b| b.id == id)
-}
-
-/// Get all bindings for a context (for help display).
-pub fn get_bindings_for_context(context: HotkeyContext) -> Vec<&'static HotkeyBinding> {
-    resolver().hotkeys_for_context(context)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1043,8 +781,6 @@ mod tests {
         let binding = HotkeyBinding::ctrl(
             HotkeyId::CommandPalette,
             KeyCode::Char('t'),
-            "Test",
-            "Test",
             &[HotkeyContext::Global],
         );
 
@@ -1058,8 +794,6 @@ mod tests {
         let binding = HotkeyBinding::new(
             HotkeyId::OpenSelected,
             KeyCode::Char('o'),
-            "Open",
-            "Test",
             &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox],
         );
 
@@ -1073,8 +807,6 @@ mod tests {
         let binding = HotkeyBinding::new(
             HotkeyId::Quit,
             KeyCode::Char('q'),
-            "Quit",
-            "Test",
             &[HotkeyContext::Global],
         );
 
@@ -1103,26 +835,5 @@ mod tests {
             HotkeyContext::ChatNormal,
         );
         assert_eq!(result, Some(HotkeyId::Quit));
-    }
-
-    #[test]
-    fn test_key_display() {
-        let binding = HotkeyBinding::ctrl(
-            HotkeyId::CommandPalette,
-            KeyCode::Char('t'),
-            "Test",
-            "Test",
-            &[HotkeyContext::Global],
-        );
-        assert_eq!(binding.key_display(), "Ctrl+t");
-
-        let binding = HotkeyBinding::new(
-            HotkeyId::NavigateUp,
-            KeyCode::Up,
-            "Test",
-            "Test",
-            &[HotkeyContext::Global],
-        );
-        assert_eq!(binding.key_display(), "↑");
     }
 }

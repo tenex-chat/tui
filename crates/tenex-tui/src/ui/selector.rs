@@ -72,9 +72,6 @@ impl SelectorState {
         self.scroll_offset = 0;
     }
 
-    pub fn filter_lowercase(&self) -> String {
-        self.filter.to_lowercase()
-    }
 }
 
 /// Result of handling a key in selector mode

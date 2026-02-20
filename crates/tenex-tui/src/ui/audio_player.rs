@@ -60,11 +60,6 @@ impl AudioPlayer {
         }
     }
 
-    /// Check if audio system is available
-    pub fn is_available(&self) -> bool {
-        self.stream_handle.is_some()
-    }
-
     /// Play an audio file from the given path
     pub fn play(&self, path: &PathBuf) -> Result<(), String> {
         let stream_handle = self
