@@ -75,6 +75,37 @@ extension MessageComposerView {
     }
 
     #if os(macOS)
+    func openMacFilePicker() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.image, .png, .jpeg, .gif, .webP, .heic]
+        panel.message = "Select images to attach"
+
+        guard panel.runModal() == .OK else { return }
+
+        isUploadingImage = true
+        imageUploadError = nil
+
+        Task {
+            var failures: [String] = []
+            for url in panel.urls {
+                do {
+                    let droppedImage = try attachmentUploadService.loadDroppedImage(at: url)
+                    try await uploadImageAttachment(data: droppedImage.data, mimeType: droppedImage.mimeType)
+                } catch {
+                    failures.append(error.localizedDescription)
+                }
+            }
+            isUploadingImage = false
+            if !failures.isEmpty {
+                imageUploadError = failures.joined(separator: "\n")
+                showImageUploadError = true
+            }
+        }
+    }
+
     func handleFileDrop(providers: [NSItemProvider]) -> Bool {
         guard selectedProject != nil else {
             imageUploadError = "Select a project before dropping files."

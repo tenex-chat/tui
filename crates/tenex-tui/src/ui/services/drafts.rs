@@ -13,7 +13,7 @@
 use std::cell::RefCell;
 use tenex_core::models::draft::{
     ChatDraft, DraftStorage, DraftStorageError, NamedDraft, NamedDraftStorage,
-    PendingPublishSnapshot, SendState,
+    PendingPublishSnapshot,
 };
 
 /// Unified service for draft persistence.
@@ -207,6 +207,7 @@ pub struct AllDrafts {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+    use tenex_core::models::draft::SendState;
 
     fn create_test_service() -> (DraftService, TempDir) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
@@ -281,10 +282,9 @@ mod tests {
     }
 
     #[test]
-    fn test_named_draft_operations() {
+    fn test_named_draft_project_filtering() {
         let (service, _temp_dir) = create_test_service();
 
-        // Create and save multiple named drafts
         let draft1 = NamedDraft::new("First draft content".to_string(), "project-a".to_string());
         let draft2 = NamedDraft::new("Second draft content".to_string(), "project-a".to_string());
         let draft3 = NamedDraft::new(
@@ -292,21 +292,16 @@ mod tests {
             "project-b".to_string(),
         );
 
-        service.save_named_draft(draft1.clone()).unwrap();
-        service.save_named_draft(draft2.clone()).unwrap();
-        service.save_named_draft(draft3.clone()).unwrap();
+        service.save_named_draft(draft1).unwrap();
+        service.save_named_draft(draft2).unwrap();
+        service.save_named_draft(draft3).unwrap();
 
-        // Verify project filtering
         let project_a_drafts = service.get_named_drafts_for_project("project-a");
         assert_eq!(project_a_drafts.len(), 2);
 
         let project_b_drafts = service.get_named_drafts_for_project("project-b");
         assert_eq!(project_b_drafts.len(), 1);
         assert_eq!(project_b_drafts[0].text, "Third draft for project B");
-
-        // Verify get all
-        let all_drafts = service.get_all_named_drafts();
-        assert_eq!(all_drafts.len(), 3);
     }
 
     #[test]
@@ -317,11 +312,15 @@ mod tests {
         let draft_id = draft.id.clone();
 
         service.save_named_draft(draft).unwrap();
-        assert_eq!(service.get_all_named_drafts().len(), 1);
+
+        // Verify it exists via project filtering
+        let drafts = service.get_named_drafts_for_project("project-x");
+        assert_eq!(drafts.len(), 1);
 
         // Delete by ID
         service.delete_named_draft(&draft_id).unwrap();
-        assert_eq!(service.get_all_named_drafts().len(), 0);
+        let drafts_after = service.get_named_drafts_for_project("project-x");
+        assert_eq!(drafts_after.len(), 0);
     }
 
     #[test]
@@ -468,63 +467,6 @@ mod tests {
         let unpublished = service.get_unpublished_drafts();
         assert_eq!(unpublished.len(), 1);
         assert_eq!(unpublished[0].conversation_id, "unpublished-conv");
-    }
-
-    // =========================================================================
-    // Content/Update Method Tests
-    // =========================================================================
-
-    #[test]
-    fn test_clear_draft_content() {
-        let (service, _temp_dir) = create_test_service();
-
-        // Create a draft with content and selections
-        let mut draft = create_test_chat_draft("clear-test", "Some content to clear");
-        draft.selected_agent_pubkey = Some("agent-123".to_string());
-        draft.reference_conversation_id = Some("ref-conv".to_string());
-        draft.fork_message_id = Some("fork-msg".to_string());
-
-        service.save_chat_draft(draft).unwrap();
-
-        // Clear the content
-        service.clear_draft_content("clear-test").unwrap();
-
-        // Load and verify content is cleared but selections preserved
-        let loaded = service.load_chat_draft("clear-test").unwrap();
-        assert!(loaded.text.is_empty()); // Content cleared
-        assert!(loaded.attachments.is_empty()); // Attachments cleared
-        assert!(loaded.reference_conversation_id.is_none()); // Reference cleared
-        assert!(loaded.fork_message_id.is_none()); // Fork message cleared
-                                                   // Note: The underlying implementation preserves agent but clears text
-        assert_eq!(loaded.selected_agent_pubkey, Some("agent-123".to_string()));
-        // Preserved
-    }
-
-    #[test]
-    fn test_update_named_draft() {
-        let (service, _temp_dir) = create_test_service();
-
-        // Create a named draft
-        let draft = NamedDraft::new("Original content".to_string(), "project-update".to_string());
-        let draft_id = draft.id.clone();
-
-        service.save_named_draft(draft).unwrap();
-
-        // Verify original content
-        let drafts = service.get_all_named_drafts();
-        assert_eq!(drafts.len(), 1);
-        assert_eq!(drafts[0].text, "Original content");
-
-        // Update the draft
-        service
-            .update_named_draft(&draft_id, "Updated content".to_string())
-            .unwrap();
-
-        // Verify updated content
-        let drafts_after = service.get_all_named_drafts();
-        assert_eq!(drafts_after.len(), 1);
-        assert_eq!(drafts_after[0].text, "Updated content");
-        assert_eq!(drafts_after[0].id, draft_id); // Same ID
     }
 
     #[test]

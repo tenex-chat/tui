@@ -103,6 +103,7 @@ struct MessageComposerView: View {
     // Flag to suppress onChange sync during programmatic localText updates (load/switch/dictation)
     @State var isProgrammaticUpdate: Bool = false
     @State var triggerDetectionTask: Task<Void, Never>?
+    @State var workspaceAgentToConfig: ProjectAgent?
 
     // Workspace inline layout metrics
     @ScaledMetric(relativeTo: .body) var workspaceContextRowHeight: CGFloat = 34
@@ -386,6 +387,10 @@ struct MessageComposerView: View {
                 },
                 initialSearchQuery: agentSelectorInitialQuery
             )
+        }
+        .sheet(item: $workspaceAgentToConfig) { agent in
+            AgentConfigSheet(agent: agent, projectId: selectedProject?.id ?? "")
+                .environmentObject(coreManager)
         }
         .sheet(isPresented: $showNudgeSkillSelector) {
             NudgeSkillSelectorSheet(

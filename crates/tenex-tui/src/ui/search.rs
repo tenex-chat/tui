@@ -313,7 +313,6 @@ pub struct MessageContent<'a> {
     pub id: &'a str,
     pub content: &'a str,
     pub pubkey: &'a str,
-    pub created_at: u64,
 }
 
 /// Scan a thread (title, content, ID) and its messages for search term matches.
@@ -456,7 +455,6 @@ pub fn search_conversations_hierarchical(
                     id: &msg.id,
                     content: &msg.content,
                     pubkey: &msg.pubkey,
-                    created_at: msg.created_at,
                 })
                 .collect();
 
@@ -794,7 +792,6 @@ mod tests {
             id: "msg-1",
             content: "This is critical information",
             pubkey: "author-1",
-            created_at: 1000,
         }];
 
         let result = scan_thread_for_terms("thread-123", "No match", "No match", &messages, &terms);
@@ -832,7 +829,6 @@ mod tests {
             id: "msg-1",
             content: "Timeout occurred",
             pubkey: "author-1",
-            created_at: 1000,
         }];
 
         let result = scan_thread_for_terms(
@@ -891,19 +887,16 @@ mod tests {
                 id: "msg-1",
                 content: "This has an error",
                 pubkey: "author-1",
-                created_at: 1000,
             },
             MessageContent {
                 id: "msg-2",
                 content: "This has a warning",
                 pubkey: "author-2",
-                created_at: 2000,
             },
             MessageContent {
                 id: "msg-3",
                 content: "This is unrelated",
                 pubkey: "author-3",
-                created_at: 3000,
             },
         ];
 
@@ -922,7 +915,6 @@ mod tests {
             id: "thread-123", // Same as thread ID - should be skipped
             content: "This contains secret",
             pubkey: "author-1",
-            created_at: 1000,
         }];
 
         let result = scan_thread_for_terms("thread-123", "No match", "No match", &messages, &terms);
@@ -970,13 +962,11 @@ mod tests {
                 id: "msg-1",
                 content: "Error happened",
                 pubkey: "author-1",
-                created_at: 1000,
             },
             MessageContent {
                 id: "msg-2",
                 content: "Warning issued",
                 pubkey: "author-2",
-                created_at: 2000,
             },
         ];
 
@@ -1004,7 +994,6 @@ mod tests {
             id: "msg-1",
             content: "Error happened",
             pubkey: "author-1",
-            created_at: 1000,
         }];
 
         let result =
@@ -1052,7 +1041,6 @@ mod tests {
             id: "reply-1",
             content: "Added auth middleware",
             pubkey: "dev-1",
-            created_at: 1000,
         }];
 
         // "api" in title, "auth" only in reply
@@ -1082,25 +1070,21 @@ mod tests {
                 id: "msg-1",
                 content: "First error occurred",
                 pubkey: "dev-1",
-                created_at: 1000,
             },
             MessageContent {
                 id: "msg-2",
                 content: "Unrelated message",
                 pubkey: "dev-2",
-                created_at: 2000,
             },
             MessageContent {
                 id: "msg-3",
                 content: "App crash detected",
                 pubkey: "dev-1",
-                created_at: 3000,
             },
             MessageContent {
                 id: "msg-4",
                 content: "Another error here and crash too",
                 pubkey: "dev-3",
-                created_at: 4000,
             },
         ];
 
@@ -1124,7 +1108,6 @@ mod tests {
             id: "msg-1",
             content: "Added a test for the issue",
             pubkey: "dev-1",
-            created_at: 1000,
         }];
 
         let result = scan_thread_for_terms(
