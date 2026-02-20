@@ -12,27 +12,37 @@ struct InlineAskView: View {
     let projectId: String
 
     @EnvironmentObject var coreManager: TenexCoreManager
-    @State private var isAnswered = false
+    @State private var isAlreadyAnswered = false
+    @State private var didAnswerInSession = false
+    @State private var replyContent: String = ""
     @State private var answerSummary: String = ""
 
     var body: some View {
-        if isAnswered {
-            answeredView
-        } else {
-            AskAnswerView(
-                askEvent: askEvent,
-                askEventId: askEventId,
-                askAuthorPubkey: askAuthorPubkey,
-                conversationId: conversationId,
-                projectId: projectId
-            ) {
-                // On submit callback
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    answerSummary = generateAnswerSummary()
-                    isAnswered = true
+        Group {
+            if isAlreadyAnswered || didAnswerInSession {
+                answeredView
+            } else {
+                AskAnswerView(
+                    askEvent: askEvent,
+                    askEventId: askEventId,
+                    askAuthorPubkey: askAuthorPubkey,
+                    conversationId: conversationId,
+                    projectId: projectId
+                ) {
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        answerSummary = generateAnswerSummary()
+                        didAnswerInSession = true
+                    }
                 }
+                .environmentObject(coreManager)
             }
-            .environmentObject(coreManager)
+        }
+        .task {
+            let messages = await coreManager.safeCore.getMessages(conversationId: askEventId)
+            if let reply = messages.first(where: { $0.replyTo == askEventId }) {
+                isAlreadyAnswered = true
+                replyContent = reply.content
+            }
         }
     }
 
@@ -40,13 +50,11 @@ struct InlineAskView: View {
 
     private var answeredView: some View {
         HStack(spacing: 10) {
-            // Checkmark indicator
             Image(systemName: "checkmark.circle.fill")
                 .font(.title3)
                 .foregroundStyle(Color.statusActive)
 
             VStack(alignment: .leading, spacing: 2) {
-                // Title
                 if let title = askEvent.title {
                     Text(title)
                         .font(.subheadline)
@@ -57,8 +65,12 @@ struct InlineAskView: View {
                         .fontWeight(.medium)
                 }
 
-                // Answer summary
-                if !answerSummary.isEmpty {
+                if isAlreadyAnswered, !replyContent.isEmpty {
+                    Text(replyContent)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else if !answerSummary.isEmpty {
                     Text(answerSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -68,17 +80,18 @@ struct InlineAskView: View {
 
             Spacer()
 
-            // Expand button to view full answers
-            Button {
-                withAnimation {
-                    isAnswered = false
+            if didAnswerInSession {
+                Button {
+                    withAnimation {
+                        didAnswerInSession = false
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.borderless)
             }
-            .buttonStyle(.borderless)
         }
         .padding(12)
         .background(Color.presenceOnlineBackground)

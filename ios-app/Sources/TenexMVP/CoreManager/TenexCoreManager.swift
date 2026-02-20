@@ -310,22 +310,28 @@ class TenexCoreManager: ObservableObject {
         return parts.dropFirst(2).joined(separator: ":")
     }
 
-    /// Refresh `runtimeText` from the lock-free Rust AtomicU64 cache.
-    /// Calls `core.getTodayRuntimeMs()` directly (not through the actor)
-    /// since it's a lock-free atomic read — safe from any thread.
+    /// Refresh `runtimeText` from the Rust FFI.
+    /// The Rust side holds an RwLock (not lock-free despite the atomic cache),
+    /// so the FFI call runs on a detached task to avoid blocking the main thread.
     @MainActor
     func refreshRuntimeText() {
-        let totalMs = core.getTodayRuntimeMs()
-        let totalSeconds = totalMs / 1000
-
-        if totalSeconds < 60 {
-            runtimeText = "\(totalSeconds)s"
-        } else if totalSeconds < 3600 {
-            runtimeText = "\(totalSeconds / 60)m"
-        } else {
-            let hours = totalSeconds / 3600
-            let minutes = (totalSeconds % 3600) / 60
-            runtimeText = minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        let core = self.core
+        Task.detached {
+            let totalMs = core.getTodayRuntimeMs()
+            let totalSeconds = totalMs / 1000
+            let text: String
+            if totalSeconds < 60 {
+                text = "\(totalSeconds)s"
+            } else if totalSeconds < 3600 {
+                text = "\(totalSeconds / 60)m"
+            } else {
+                let hours = totalSeconds / 3600
+                let minutes = (totalSeconds % 3600) / 60
+                text = minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+            }
+            await MainActor.run { [weak self] in
+                self?.runtimeText = text
+            }
         }
     }
 

@@ -147,10 +147,13 @@ struct AskAnswerView: View {
                 SelectableChoiceRow(
                     choice: "Other (custom answer)",
                     isSelected: showCustomInput,
-                    isMultiSelect: false
+                    isMultiSelect: isMulti
                 ) {
                     showCustomInput.toggle()
-                    if !showCustomInput {
+                    if showCustomInput {
+                        // Clear regular selection so radio buttons deselect
+                        answers.removeValue(forKey: currentQuestionIndex)
+                    } else {
                         customTextInput = ""
                     }
                 }

@@ -297,9 +297,12 @@ struct ConversationsTabView: View {
     }
 
     private var shellDetailLayout: some View {
-        conversationDetailContent
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .accessibilityIdentifier("detail_column")
+        NavigationStack {
+            conversationDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .id(selectedConversationBinding.wrappedValue?.thread.id ?? newConversationProjectIdBinding.wrappedValue ?? "no-selection")
+        .accessibilityIdentifier("detail_column")
     }
 
     private var shellCompositeLayout: some View {
