@@ -4,16 +4,20 @@ import SwiftUI
 /// Shows agent avatar + name header (hidden when consecutive), streaming indicator,
 /// accumulated text via MarkdownView, and a block cursor character.
 struct StreamingMessageRow: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
-
     let buffer: StreamingBuffer
     let isConsecutive: Bool
+    /// Pre-resolved agent display name (avoids @EnvironmentObject dependency on coreManager).
+    let agentName: String
 
     private let avatarSize: CGFloat = 20
     private let avatarFontSize: CGFloat = 8
 
-    private var agentName: String {
-        coreManager.displayName(for: buffer.agentPubkey)
+    private var messageBodyFont: Font {
+        #if os(macOS)
+        .system(size: 14)
+        #else
+        .body
+        #endif
     }
 
     var body: some View {
@@ -27,7 +31,6 @@ struct StreamingMessageRow: View {
                         fontSize: avatarFontSize,
                         showBorder: false
                     )
-                    .environmentObject(coreManager)
 
                     Text(AgentNameFormatter.format(agentName))
                         .font(.subheadline)
@@ -50,10 +53,11 @@ struct StreamingMessageRow: View {
             if !buffer.text.isEmpty {
                 HStack(alignment: .lastTextBaseline, spacing: 0) {
                     MarkdownView(content: buffer.text)
-                        .font(.body)
+                        .font(messageBodyFont)
                         .foregroundStyle(.primary)
+                        .textSelection(.enabled)
                     Text("\u{258C}")
-                        .font(.body)
+                        .font(messageBodyFont)
                         .foregroundStyle(.secondary)
                         .opacity(0.6)
                 }

@@ -11,12 +11,14 @@ import SwiftUI
 /// - Tool call rendering via ToolCallRow
 /// - Q-tag handling for delegations and ask events
 struct SlackMessageRow: View, Equatable {
-    @EnvironmentObject var coreManager: TenexCoreManager
-
     let message: Message
     let isConsecutive: Bool
     let conversationId: String
     let projectId: String
+    /// Pre-resolved author display name (avoids @EnvironmentObject dependency on coreManager).
+    let authorDisplayName: String
+    /// Pre-formatted "@name1, @name2" string for p-tag recipients (empty when no p-tags).
+    let directedRecipientsText: String
 
     /// Callback when a delegation card is tapped
     var onDelegationTap: ((String) -> Void)?
@@ -25,7 +27,9 @@ struct SlackMessageRow: View, Equatable {
         lhs.message == rhs.message &&
         lhs.isConsecutive == rhs.isConsecutive &&
         lhs.conversationId == rhs.conversationId &&
-        lhs.projectId == rhs.projectId
+        lhs.projectId == rhs.projectId &&
+        lhs.authorDisplayName == rhs.authorDisplayName &&
+        lhs.directedRecipientsText == rhs.directedRecipientsText
     }
 
     /// State for expanded/collapsed content
@@ -65,13 +69,6 @@ struct SlackMessageRow: View, Equatable {
         !isConsecutive || hasPTags
     }
 
-    private var directedRecipientsText: String {
-        message.pTags
-            .map(recipientDisplayName(for:))
-            .map { "@\($0)" }
-            .joined(separator: ", ")
-    }
-
     private var readMoreFadeBackground: Color {
         #if os(macOS)
         return .conversationWorkspaceBackdropMac
@@ -80,29 +77,9 @@ struct SlackMessageRow: View, Equatable {
         #endif
     }
 
-    private var targetedMessageFill: Color {
-        #if os(macOS)
-        return .conversationWorkspaceSurfaceMac.opacity(0.72)
-        #else
-        return .systemGray6.opacity(0.58)
-        #endif
-    }
-
-    private var targetedMessageBorder: Color {
-        #if os(macOS)
-        return .conversationWorkspaceBorderMac.opacity(0.84)
-        #else
-        return Color.secondary.opacity(0.22)
-        #endif
-    }
-
-    private var authorDisplayName: String {
-        coreManager.displayName(for: message.pubkey)
-    }
-
     var body: some View {
         Group {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 6) {
                 // Header with inline avatar (hidden for normal consecutive messages)
                 if shouldShowHeader {
                     HStack(spacing: 6) {
@@ -113,7 +90,6 @@ struct SlackMessageRow: View, Equatable {
                             fontSize: avatarFontSize,
                             showBorder: false
                         )
-                        .environmentObject(coreManager)
 
                         if hasPTags {
                             Text(AgentNameFormatter.format(authorDisplayName))
@@ -163,7 +139,6 @@ struct SlackMessageRow: View, Equatable {
                         conversationId: conversationId,
                         projectId: projectId
                     )
-                    .environmentObject(coreManager)
                 }
 
                 // Q-tags can resolve to either ask events or delegation threads.
@@ -176,27 +151,12 @@ struct SlackMessageRow: View, Equatable {
                             projectId: projectId,
                             onDelegationTap: onDelegationTap
                         )
-                        .environmentObject(coreManager)
                     }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, hasPTags ? 10 : 0)
-            .padding(.vertical, hasPTags ? 8 : 0)
-            .background {
-                if hasPTags {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(targetedMessageFill)
-                }
-            }
-            .overlay {
-                if hasPTags {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(targetedMessageBorder, lineWidth: 1)
-                }
-            }
         }
-        .padding(.vertical, isConsecutive ? 3 : 8)
+        .padding(.vertical, isConsecutive ? 5 : 14)
         #if os(macOS)
         // Large transcripts can trigger expensive accessibility tree traversals on every host update.
         // Keep a compact per-row accessibility representation to avoid deep subtree recomputation.
@@ -213,17 +173,16 @@ struct SlackMessageRow: View, Equatable {
         // macOS transcript performance: avoid per-row geometry measurement and collapse state churn.
         // Most rows are short; rendering directly keeps large transcripts responsive.
         MarkdownView(content: message.content)
-            .font(.body)
-            .foregroundStyle(.primary)
+            .font(.system(size: 14))
+            .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
+            .textSelection(.enabled)
         #else
         VStack(alignment: .leading, spacing: 0) {
             // Content with height measurement
             MarkdownView(content: message.content)
-                .font(.body)
-                .foregroundStyle(.primary)
-                #if !os(macOS)
+                .font(hasPTags ? .body : .callout)
+                .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
                 .textSelection(.enabled)
-                #endif
                 .background(
                     GeometryReader { geometry in
                         Color.clear
@@ -297,10 +256,6 @@ struct SlackMessageRow: View, Equatable {
     }
 
     // MARK: - Helpers
-
-    private func recipientDisplayName(for recipientPubkey: String) -> String {
-        AgentNameFormatter.format(coreManager.displayName(for: recipientPubkey))
-    }
 
     #if os(macOS)
     private var accessibilitySummary: String {
@@ -399,7 +354,9 @@ private struct QTagReferenceRow: View {
             ),
             isConsecutive: false,
             conversationId: "test",
-            projectId: "test"
+            projectId: "test",
+            authorDisplayName: "Test Agent",
+            directedRecipientsText: ""
         )
 
         SlackMessageRow(
@@ -423,7 +380,9 @@ private struct QTagReferenceRow: View {
             ),
             isConsecutive: true,
             conversationId: "test",
-            projectId: "test"
+            projectId: "test",
+            authorDisplayName: "Test Agent",
+            directedRecipientsText: ""
         )
     }
     .padding()

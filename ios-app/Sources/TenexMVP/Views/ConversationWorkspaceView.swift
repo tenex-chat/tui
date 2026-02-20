@@ -424,6 +424,11 @@ struct ConversationWorkspaceView: View {
                                 isConsecutive: index > transcriptMessages.startIndex && transcriptMessages[index - 1].pubkey == message.pubkey,
                                 conversationId: currentConversation.thread.id,
                                 projectId: currentConversation.extractedProjectId,
+                                authorDisplayName: coreManager.displayName(for: message.pubkey),
+                                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                                    .map { "@\($0)" }
+                                    .joined(separator: ", "),
                                 onDelegationTap: { delegationId in
                                     openDelegation(byId: delegationId)
                                 }
@@ -436,7 +441,8 @@ struct ConversationWorkspaceView: View {
                         if let buffer = streamingBuffer {
                             StreamingMessageRow(
                                 buffer: buffer,
-                                isConsecutive: allMessages.last?.pubkey == buffer.agentPubkey
+                                isConsecutive: allMessages.last?.pubkey == buffer.agentPubkey,
+                                agentName: coreManager.displayName(for: buffer.agentPubkey)
                             )
                             .environmentObject(coreManager)
                             .id("streaming-row")
@@ -449,6 +455,9 @@ struct ConversationWorkspaceView: View {
                 }
                 .padding()
                 .padding(.bottom, 12)
+                #if os(macOS)
+                .frame(maxWidth: 800, alignment: .leading)
+                #endif
             }
             .background(workspaceBackdropColor)
             .onChange(of: isTranscriptReady) { _, ready in
@@ -507,6 +516,9 @@ struct ConversationWorkspaceView: View {
             .padding(.horizontal, 14)
             .padding(.top, 8)
             .padding(.bottom, 8)
+            #if os(macOS)
+            .frame(maxWidth: 800, alignment: .leading)
+            #endif
         }
         #if os(macOS)
         .background(workspaceBackdropColor)
@@ -676,6 +688,9 @@ struct ConversationWorkspaceView: View {
             await viewModel.loadData()
         }
         refreshAvailableAgents()
+        // Warm the profile picture cache for message avatars (runs in background, non-blocking).
+        let uniquePubkeys = Array(Set(viewModel.messages.map(\.pubkey).filter { !$0.isEmpty }))
+        coreManager.prefetchProfilePictures(uniquePubkeys)
         // Flip AFTER all @Published properties have settled.
         // This ensures the ForEach is empty during the initialization storm
         // (15-20 body re-evaluations), then renders once with final data.
