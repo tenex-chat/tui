@@ -74,8 +74,7 @@ extension TenexCoreManager {
         return matchesAppFilter(projectId: projectId, timestamp: result.createdAt, now: now)
     }
 
-    static func loadPersistedAppFilter() -> (projectIds: Set<String>, timeWindow: AppTimeWindow) {
-        let defaults = UserDefaults.standard
+    static func loadPersistedAppFilter(defaults: UserDefaults = .standard) -> (projectIds: Set<String>, timeWindow: AppTimeWindow) {
         let persistedProjectIds = Set(defaults.stringArray(forKey: Self.appFilterProjectsDefaultsKey) ?? [])
         let persistedTimeWindow = defaults.string(forKey: Self.appFilterTimeWindowDefaultsKey)
             .flatMap(AppTimeWindow.init(rawValue:))
@@ -83,9 +82,20 @@ extension TenexCoreManager {
         return (persistedProjectIds, persistedTimeWindow)
     }
 
-    func persistAppFilter() {
-        let defaults = UserDefaults.standard
-        defaults.set(Array(appFilterProjectIds).sorted(), forKey: Self.appFilterProjectsDefaultsKey)
-        defaults.set(appFilterTimeWindow.rawValue, forKey: Self.appFilterTimeWindowDefaultsKey)
+    static func persistAppFilter(
+        projectIds: Set<String>,
+        timeWindow: AppTimeWindow,
+        defaults: UserDefaults = .standard
+    ) {
+        defaults.set(Array(projectIds).sorted(), forKey: Self.appFilterProjectsDefaultsKey)
+        defaults.set(timeWindow.rawValue, forKey: Self.appFilterTimeWindowDefaultsKey)
+    }
+
+    func persistAppFilter(defaults: UserDefaults = .standard) {
+        Self.persistAppFilter(
+            projectIds: appFilterProjectIds,
+            timeWindow: appFilterTimeWindow,
+            defaults: defaults
+        )
     }
 }
