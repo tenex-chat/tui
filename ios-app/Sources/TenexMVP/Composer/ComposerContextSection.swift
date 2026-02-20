@@ -268,12 +268,6 @@ extension MessageComposerView {
         }
         .frame(height: max(workspaceContextRowHeight, workspaceBottomRowHeight))
         .padding(.horizontal, 18)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(workspaceComposerStrokeColor.opacity(0.72))
-                .frame(height: 1)
-        }
-        .background(workspaceComposerFooterColor)
     }
 
     var workspaceAccessoryButton: some View {
