@@ -315,7 +315,7 @@ fn render_edit_mode(
             } else {
                 Style::default().fg(theme::TEXT_MUTED)
             };
-            spans.push(Span::styled(&project.name, name_style));
+            spans.push(Span::styled(&project.title, name_style));
 
             let line = Line::from(spans);
             let style = if is_cursor {

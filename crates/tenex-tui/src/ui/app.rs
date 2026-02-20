@@ -1526,7 +1526,7 @@ impl App {
                 self.show_archived || !prefs.is_project_archived(&p.a_tag())
             })
             .filter_map(|p| {
-                fuzzy_score(&p.name, filter).map(|score| {
+                fuzzy_score(&p.title, filter).map(|score| {
                     let is_online = store.is_project_online(&p.a_tag());
                     (p, score, is_online)
                 })
@@ -1539,7 +1539,7 @@ impl App {
             b_online
                 .cmp(a_online)
                 .then_with(|| score_a.cmp(score_b))
-                .then_with(|| a.name.cmp(&b.name))
+                .then_with(|| a.title.cmp(&b.title))
         });
 
         // Separate into online and offline, preserving sort order
@@ -3385,7 +3385,7 @@ impl App {
                 continue;
             }
 
-            let project_name = project.name.clone();
+            let project_name = project.title.clone();
 
             for thread in store.get_threads(&a_tag) {
                 // Check if thread title or content matches

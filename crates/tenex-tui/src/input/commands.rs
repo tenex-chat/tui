@@ -317,7 +317,7 @@ pub static COMMANDS: &[Command] = &[
                 // Chat view: new conversation with same project/agent
                 if let Some(ref project) = app.selected_project {
                     let project_a_tag = project.a_tag();
-                    let project_name = project.name.clone();
+                    let project_name = project.title.clone();
                     let inherited_agent = app.selected_agent().cloned();
 
                     app.save_chat_draft();
@@ -756,7 +756,7 @@ fn new_conversation_current_project(app: &mut App) {
             .get_projects()
             .iter()
             .find(|p| p.a_tag() == first_item.a_tag)
-            .map(|p| (p.a_tag(), p.name.clone(), p.clone()))
+            .map(|p| (p.a_tag(), p.title.clone(), p.clone()))
     } else {
         None
     };
@@ -798,13 +798,13 @@ fn open_project_settings(app: &mut App) {
     let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
     if let Some(project) = all_projects.get(app.sidebar_project_index) {
         let a_tag = project.a_tag();
-        let project_name = project.name.clone();
-        let agent_ids = project.agent_ids.clone();
+        let project_name = project.title.clone();
+        let agent_definition_ids = project.agent_definition_ids.clone();
         let mcp_tool_ids = project.mcp_tool_ids.clone();
         app.modal_state = ModalState::ProjectSettings(modal::ProjectSettingsState::new(
             a_tag,
             project_name,
-            agent_ids,
+            agent_definition_ids,
             mcp_tool_ids,
         ));
     }
@@ -972,7 +972,7 @@ fn archive_toggle(app: &mut App) {
             let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
             if let Some(project) = all_projects.get(app.sidebar_project_index) {
                 let a_tag = project.a_tag();
-                let project_name = project.name.clone();
+                let project_name = project.title.clone();
                 let is_now_archived = app.toggle_project_archived(&a_tag);
 
                 app.last_undo_action = Some(if is_now_archived {
@@ -1224,7 +1224,7 @@ fn open_contextual_draft(
         (
             thread.id.clone(),
             project.a_tag(),
-            project.name.clone(),
+            project.title.clone(),
             app.selected_agent().cloned(),
         )
     };

@@ -351,15 +351,15 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
             if let Some(project) = all_projects.get(app.sidebar_project_index) {
                 let a_tag = project.a_tag();
-                let project_name = project.name.clone();
-                let agent_ids = project.agent_ids.clone();
+                let project_name = project.title.clone();
+                let agent_definition_ids = project.agent_definition_ids.clone();
                 let mcp_tool_ids = project.mcp_tool_ids.clone();
 
                 app.modal_state =
                     ui::modal::ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
                         a_tag,
                         project_name,
-                        agent_ids,
+                        agent_definition_ids,
                         mcp_tool_ids,
                     ));
             }
@@ -409,7 +409,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         } else {
                             app.set_warning_status(&format!(
                                 "Boot request sent for {}",
-                                project.name
+                                project.title
                             ));
                         }
                     }
@@ -430,7 +430,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.modal_state =
                         ui::modal::ModalState::ProjectActions(ui::modal::ProjectActionsState::new(
                             a_tag,
-                            project.name.clone(),
+                            project.title.clone(),
                             project.pubkey.clone(),
                             is_online,
                             is_archived,
@@ -666,7 +666,7 @@ fn new_conversation_current_project(app: &mut App) {
             .get_projects()
             .iter()
             .find(|p| p.a_tag() == first_item.a_tag)
-            .map(|p| (p.a_tag(), p.name.clone(), p.clone()))
+            .map(|p| (p.a_tag(), p.title.clone(), p.clone()))
     } else {
         None
     };
@@ -799,7 +799,7 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 let visible_height = state.visible_height();
                 match state.focus {
                     ProjectSettingsFocus::Agents => {
-                        let count = state.pending_agent_ids.len();
+                        let count = state.pending_agent_definition_ids.len();
                         if state.selector_index + 1 < count {
                             state.selector_index += 1;
                             state.adjust_agents_scroll(visible_height);
@@ -829,9 +829,9 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 let visible_height = state.visible_height();
                 match state.focus {
                     ProjectSettingsFocus::Agents => {
-                        if !state.pending_agent_ids.is_empty() {
+                        if !state.pending_agent_definition_ids.is_empty() {
                             state.remove_agent(state.selector_index);
-                            if state.selector_index >= state.pending_agent_ids.len()
+                            if state.selector_index >= state.pending_agent_definition_ids.len()
                                 && state.selector_index > 0
                             {
                                 state.selector_index -= 1;
@@ -855,7 +855,7 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('p') => {
                 // Set PM only works in agents pane
                 if state.focus == ProjectSettingsFocus::Agents
-                    && !state.pending_agent_ids.is_empty()
+                    && !state.pending_agent_definition_ids.is_empty()
                     && state.selector_index > 0
                 {
                     state.set_pm(state.selector_index);
@@ -866,13 +866,13 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
             KeyCode::Enter => {
                 if state.has_changes() {
                     let project_a_tag = state.project_a_tag.clone();
-                    let agent_ids = state.pending_agent_ids.clone();
+                    let agent_definition_ids = state.pending_agent_definition_ids.clone();
                     let mcp_tool_ids = state.pending_mcp_tool_ids.clone();
 
                     if let Some(ref core_handle) = app.core_handle {
                         if let Err(e) = core_handle.send(NostrCommand::UpdateProjectAgents {
                             project_a_tag,
-                            agent_ids,
+                            agent_definition_ids,
                             mcp_tool_ids,
                         }) {
                             app.set_warning_status(&format!("Failed to update agents: {}", e));
@@ -1020,7 +1020,7 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                             slug: None, // Generate from name
                             name: state.name.clone(),
                             description: state.description.clone(),
-                            agent_ids: state.agent_ids.clone(),
+                            agent_definition_ids: state.agent_definition_ids.clone(),
                             mcp_tool_ids: all_tool_ids,
                             client: Some("tenex-tui".to_string()),
                         }) {
@@ -1156,7 +1156,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                 // New conversation with same project/agent
                 if let Some(ref project) = app.selected_project {
                     let project_a_tag = project.a_tag();
-                    let project_name = project.name.clone();
+                    let project_name = project.title.clone();
                     let inherited_agent = app.selected_agent().cloned();
 
                     app.save_chat_draft();

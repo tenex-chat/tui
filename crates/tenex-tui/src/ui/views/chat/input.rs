@@ -164,7 +164,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     let project_display = app
         .selected_project
         .as_ref()
-        .map(|p| p.name.clone())
+        .map(|p| p.title.clone())
         .unwrap_or_else(|| "no project".to_string());
 
     // Build input card with padding and context line at bottom

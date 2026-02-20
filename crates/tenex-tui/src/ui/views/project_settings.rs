@@ -102,7 +102,7 @@ fn render_side_by_side_layout(
 
     // === Agents pane (left side) ===
     let agents_header_area = Rect::new(remaining.x, remaining.y, agents_width, 1);
-    let agent_count = state.pending_agent_ids.len();
+    let agent_count = state.pending_agent_definition_ids.len();
     let header_text = format!("Agents ({})", agent_count);
     let header_style = if agents_focused {
         Style::default()
@@ -196,7 +196,7 @@ fn render_single_pane_layout(
 
     // Show pane indicator at the top
     let indicator_text = if agents_focused {
-        format!("◀ Agents ({}) ▶ Tools", state.pending_agent_ids.len())
+        format!("◀ Agents ({}) ▶ Tools", state.pending_agent_definition_ids.len())
     } else {
         format!("◀ Agents   ▶ Tools ({})", state.pending_mcp_tool_ids.len())
     };
@@ -207,7 +207,7 @@ fn render_single_pane_layout(
     // Header for current pane
     let header_area = Rect::new(remaining.x, remaining.y + 1, pane_width, 1);
     if agents_focused {
-        let header_text = format!("Agents ({})", state.pending_agent_ids.len());
+        let header_text = format!("Agents ({})", state.pending_agent_definition_ids.len());
         let header = Paragraph::new(header_text).style(
             Style::default()
                 .fg(theme::ACCENT_PRIMARY)
@@ -243,14 +243,14 @@ fn render_agents_list(
     show_selection: bool,
     visible_height: usize,
 ) {
-    if state.pending_agent_ids.is_empty() {
+    if state.pending_agent_definition_ids.is_empty() {
         let empty_msg = Paragraph::new("No agents. Press 'a' to add.")
             .style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(empty_msg, list_area);
     } else {
         let scroll_offset = state.agents_scroll_offset;
         let items: Vec<ListItem> = state
-            .pending_agent_ids
+            .pending_agent_definition_ids
             .iter()
             .enumerate()
             .skip(scroll_offset)
@@ -432,7 +432,7 @@ fn render_hints(
     ];
 
     // Show context-sensitive hints based on focus
-    if agents_focused && !state.pending_agent_ids.is_empty() {
+    if agents_focused && !state.pending_agent_definition_ids.is_empty() {
         hint_spans.extend(vec![
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("d", Style::default().fg(theme::ACCENT_WARNING)),
@@ -492,7 +492,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         .content
         .get_agent_definitions()
         .into_iter()
-        .filter(|a| !state.pending_agent_ids.contains(&a.id))
+        .filter(|a| !state.pending_agent_definition_ids.contains(&a.id))
         .filter(|a| {
             fuzzy_matches(&a.name, filter)
                 || fuzzy_matches(&a.description, filter)
@@ -631,7 +631,7 @@ pub fn available_agent_count(app: &App, state: &ProjectSettingsState) -> usize {
         .content
         .get_agent_definitions()
         .into_iter()
-        .filter(|a| !state.pending_agent_ids.contains(&a.id))
+        .filter(|a| !state.pending_agent_definition_ids.contains(&a.id))
         .filter(|a| {
             fuzzy_matches(&a.name, filter)
                 || fuzzy_matches(&a.description, filter)
@@ -652,7 +652,7 @@ pub fn get_agent_id_at_index(
         .content
         .get_agent_definitions()
         .into_iter()
-        .filter(|a| !state.pending_agent_ids.contains(&a.id))
+        .filter(|a| !state.pending_agent_definition_ids.contains(&a.id))
         .filter(|a| {
             fuzzy_matches(&a.name, filter)
                 || fuzzy_matches(&a.description, filter)

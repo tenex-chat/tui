@@ -1,16 +1,16 @@
 use nostrdb::Note;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Project {
     pub id: String,
-    pub name: String,
+    pub title: String,
     pub description: Option<String>,
     pub repo_url: Option<String>,
     pub picture_url: Option<String>,
     pub is_deleted: bool,
     pub pubkey: String,
     pub participants: Vec<String>,
-    pub agent_ids: Vec<String>, // Agent definition event IDs (kind 4199)
+    pub agent_definition_ids: Vec<String>, // Agent definition event IDs (kind 4199)
     pub mcp_tool_ids: Vec<String>, // MCP tool event IDs (kind 4200)
     pub created_at: u64,
 }
@@ -31,7 +31,7 @@ impl Project {
         let mut picture_url: Option<String> = None;
         let mut is_deleted = false;
         let mut participants = Vec::new();
-        let mut agent_ids = Vec::new();
+        let mut agent_definition_ids = Vec::new();
         let mut mcp_tool_ids = Vec::new();
 
         for tag in note.tags() {
@@ -81,9 +81,9 @@ impl Project {
                     if let Some(elem) = tag.get(1) {
                         // nostrdb stores event IDs as binary Id variant, not as strings
                         if let Some(id_bytes) = elem.variant().id() {
-                            agent_ids.push(hex::encode(id_bytes));
+                            agent_definition_ids.push(hex::encode(id_bytes));
                         } else if let Some(s) = elem.variant().str() {
-                            agent_ids.push(s.to_string());
+                            agent_definition_ids.push(s.to_string());
                         }
                     }
                 }
@@ -112,14 +112,14 @@ impl Project {
 
         Some(Project {
             id: id.clone(),
-            name: display_name,
+            title: display_name,
             description,
             repo_url,
             picture_url,
             is_deleted,
             pubkey,
             participants,
-            agent_ids,
+            agent_definition_ids,
             mcp_tool_ids,
             created_at: note.created_at(),
         })
@@ -160,14 +160,14 @@ mod tests {
     fn test_a_tag() {
         let project = Project {
             id: "proj1".to_string(),
-            name: "Project 1".to_string(),
+            title: "Project 1".to_string(),
             description: None,
             repo_url: None,
             picture_url: None,
             is_deleted: false,
             pubkey: "a".repeat(64),
             participants: vec![],
-            agent_ids: vec![],
+            agent_definition_ids: vec![],
             mcp_tool_ids: vec![],
             created_at: 0,
         };
@@ -216,7 +216,7 @@ mod tests {
 
         let project = parse_project_from_event(event);
         assert_eq!(project.id, "proj-meta");
-        assert_eq!(project.name, "Project Meta");
+        assert_eq!(project.title, "Project Meta");
         assert_eq!(project.description.as_deref(), Some("Project description"));
         assert_eq!(
             project.repo_url.as_deref(),
@@ -227,7 +227,7 @@ mod tests {
             Some("https://cdn.example.com/project.png")
         );
         assert_eq!(project.participants, vec![participant]);
-        assert_eq!(project.agent_ids, vec![agent_id]);
+        assert_eq!(project.agent_definition_ids, vec![agent_id]);
         assert_eq!(project.mcp_tool_ids, vec![mcp_id]);
         assert!(!project.is_deleted);
     }

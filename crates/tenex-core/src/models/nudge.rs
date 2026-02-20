@@ -3,7 +3,7 @@ use nostrdb::Note;
 use crate::constants::DEFAULT_NUDGE_TITLE;
 
 /// Nudge - kind:4201 events for agent nudges/prompts
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, uniffi::Record)]
 pub struct Nudge {
     pub id: String,
     pub pubkey: String,

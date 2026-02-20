@@ -232,7 +232,7 @@ impl StatisticsStore {
     pub fn increment_llm_activity_hour(
         &mut self,
         created_at: u64,
-        llm_metadata: &[(String, String)],
+        llm_metadata: &HashMap<String, String>,
     ) {
         if llm_metadata.is_empty() {
             return;
@@ -246,9 +246,8 @@ impl StatisticsStore {
         let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
 
         let tokens = llm_metadata
-            .iter()
-            .find(|(key, _)| key == "total-tokens")
-            .and_then(|(_, value)| value.parse::<u64>().ok())
+            .get("total-tokens")
+            .and_then(|value| value.parse::<u64>().ok())
             .unwrap_or(0);
 
         let entry = self
@@ -262,17 +261,16 @@ impl StatisticsStore {
     pub fn increment_runtime_day_count(
         &mut self,
         created_at: u64,
-        llm_metadata: &[(String, String)],
+        llm_metadata: &HashMap<String, String>,
     ) {
         if created_at < RUNTIME_CUTOFF_TIMESTAMP {
             return;
         }
 
         let runtime_ms: u64 = llm_metadata
-            .iter()
-            .filter(|(key, _)| key == "runtime")
-            .filter_map(|(_, value)| value.parse::<u64>().ok())
-            .sum();
+            .get("runtime")
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
 
         if runtime_ms == 0 {
             return;
@@ -606,9 +604,8 @@ impl StatisticsStore {
 
                     let tokens = message
                         .llm_metadata
-                        .iter()
-                        .find(|(key, _)| key == "total-tokens")
-                        .and_then(|(_, value)| value.parse::<u64>().ok())
+                        .get("total-tokens")
+                        .and_then(|value| value.parse::<u64>().ok())
                         .unwrap_or(0);
 
                     let entry = self
@@ -637,10 +634,9 @@ impl StatisticsStore {
 
                 let runtime_ms: u64 = message
                     .llm_metadata
-                    .iter()
-                    .filter(|(key, _)| key == "runtime")
-                    .filter_map(|(_, value)| value.parse::<u64>().ok())
-                    .sum();
+                    .get("runtime")
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(0);
 
                 if runtime_ms == 0 {
                     continue;
@@ -682,7 +678,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![],
+            llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         }
@@ -782,10 +778,10 @@ mod tests {
         assert_ne!(day1_start, day2_start);
 
         let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test", day1_timestamp);
-        msg1.llm_metadata = vec![("total-tokens".to_string(), "100".to_string())];
+        msg1.llm_metadata = HashMap::from([("total-tokens".to_string(), "100".to_string())]);
 
         let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test", day2_timestamp);
-        msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
+        msg2.llm_metadata = HashMap::from([("total-tokens".to_string(), "200".to_string())]);
 
         let mut messages_by_thread = HashMap::new();
         messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2]);
@@ -810,11 +806,11 @@ mod tests {
 
         let mut llm_msg =
             make_test_message("msg2", "pubkey1", "thread1", "LLM response", timestamp);
-        llm_msg.llm_metadata = vec![("total-tokens".to_string(), "150".to_string())];
+        llm_msg.llm_metadata = HashMap::from([("total-tokens".to_string(), "150".to_string())]);
 
         let mut empty_metadata_msg =
             make_test_message("msg3", "pubkey1", "thread1", "empty metadata", timestamp);
-        empty_metadata_msg.llm_metadata = vec![];
+        empty_metadata_msg.llm_metadata = HashMap::new();
 
         let mut messages_by_thread = HashMap::new();
         messages_by_thread.insert(
@@ -842,13 +838,13 @@ mod tests {
         let timestamp = 1705363800_u64;
 
         let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test", timestamp);
-        msg1.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
+        msg1.llm_metadata = HashMap::from([("total-tokens".to_string(), "500".to_string())]);
 
         let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test", timestamp);
-        msg2.llm_metadata = vec![("other-key".to_string(), "value".to_string())];
+        msg2.llm_metadata = HashMap::from([("other-key".to_string(), "value".to_string())]);
 
         let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test", timestamp);
-        msg3.llm_metadata = vec![("total-tokens".to_string(), "invalid".to_string())];
+        msg3.llm_metadata = HashMap::from([("total-tokens".to_string(), "invalid".to_string())]);
 
         let mut messages_by_thread = HashMap::new();
         messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
@@ -881,7 +877,7 @@ mod tests {
                 "test",
                 timestamp,
             );
-            msg.llm_metadata = vec![("total-tokens".to_string(), format!("{}", (i + 1) * 100))];
+            msg.llm_metadata = HashMap::from([("total-tokens".to_string(), format!("{}", (i + 1) * 100))]);
             messages_by_thread
                 .entry("thread1".to_string())
                 .or_default()
@@ -923,13 +919,13 @@ mod tests {
         let timestamp = 1705363800_u64;
 
         let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test1", timestamp);
-        msg1.llm_metadata = vec![("total-tokens".to_string(), "100".to_string())];
+        msg1.llm_metadata = HashMap::from([("total-tokens".to_string(), "100".to_string())]);
 
         let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test2", timestamp + 60);
-        msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
+        msg2.llm_metadata = HashMap::from([("total-tokens".to_string(), "200".to_string())]);
 
         let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test3", timestamp + 120);
-        msg3.llm_metadata = vec![("total-tokens".to_string(), "300".to_string())];
+        msg3.llm_metadata = HashMap::from([("total-tokens".to_string(), "300".to_string())]);
 
         let mut messages_by_thread = HashMap::new();
         messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
@@ -958,7 +954,7 @@ mod tests {
 
         // Hour 0: 1 message with 1000 tokens
         let mut msg = make_test_message("msg0", "pubkey1", "thread1", "test", base_timestamp);
-        msg.llm_metadata = vec![("total-tokens".to_string(), "1000".to_string())];
+        msg.llm_metadata = HashMap::from([("total-tokens".to_string(), "1000".to_string())]);
         messages_by_thread
             .entry("thread1".to_string())
             .or_default()
@@ -973,7 +969,7 @@ mod tests {
                 "test",
                 base_timestamp + seconds_per_hour,
             );
-            msg.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
+            msg.llm_metadata = HashMap::from([("total-tokens".to_string(), "500".to_string())]);
             messages_by_thread
                 .entry("thread1".to_string())
                 .or_default()
@@ -989,7 +985,7 @@ mod tests {
                 "test",
                 base_timestamp + 2 * seconds_per_hour,
             );
-            msg.llm_metadata = vec![("total-tokens".to_string(), "333".to_string())];
+            msg.llm_metadata = HashMap::from([("total-tokens".to_string(), "333".to_string())]);
             messages_by_thread
                 .entry("thread1".to_string())
                 .or_default()
@@ -1057,7 +1053,7 @@ mod tests {
                 p_tags: vec![],
                 tool_name: None,
                 tool_args: None,
-                llm_metadata: vec![("runtime".to_string(), runtime_ms.to_string())],
+                llm_metadata: HashMap::from([("runtime".to_string(), runtime_ms.to_string())]),
                 delegation_tag: None,
                 branch: None,
             }

@@ -305,7 +305,7 @@ mod tests {
             title: title.to_string(),
             description: String::new(),
             image: None,
-            agent_ids: vec![],
+            agent_definition_ids: vec![],
             categories: vec![],
             tags: vec![],
             created_at,

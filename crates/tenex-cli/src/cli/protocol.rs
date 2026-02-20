@@ -112,7 +112,7 @@ pub enum CliCommand {
         slug: Option<String>,
         name: String,
         description: String,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
     },
     /// Set agent settings (kind:24020)
@@ -212,7 +212,7 @@ impl CliCommand {
                 slug,
                 name,
                 description,
-                agent_ids,
+                agent_definition_ids,
                 mcp_tool_ids,
             } => (
                 "save_project",
@@ -220,7 +220,7 @@ impl CliCommand {
                     "slug": slug,
                     "name": name,
                     "description": description,
-                    "agent_ids": agent_ids,
+                    "agent_definition_ids": agent_definition_ids,
                     "mcp_tool_ids": mcp_tool_ids,
                     "client": "tenex-cli"
                 }),

@@ -910,7 +910,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             (false, true) => 10,  // Just archived
             (false, false) => 20, // Neither
         };
-        let name = truncate_with_ellipsis(&project.name, name_max);
+        let name = truncate_with_ellipsis(&project.title, name_max);
 
         let checkbox_style = if is_focused {
             Style::default()
@@ -997,7 +997,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             (false, true) => 10,  // Just archived
             (false, false) => 20, // Neither
         };
-        let name = truncate_with_ellipsis(&project.name, name_max);
+        let name = truncate_with_ellipsis(&project.title, name_max);
 
         let checkbox_style = if is_focused {
             Style::default()

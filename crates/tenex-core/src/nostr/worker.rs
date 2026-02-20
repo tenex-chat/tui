@@ -370,7 +370,7 @@ pub enum NostrCommand {
     },
     UpdateProjectAgents {
         project_a_tag: String,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
     },
     /// Save a project - create new or update existing (kind:31933)
@@ -380,7 +380,7 @@ pub enum NostrCommand {
         slug: Option<String>,
         name: String,
         description: String,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
         /// Client identifier for the client tag (e.g., "tenex-cli", "tenex-tui")
         #[allow(dead_code)]
@@ -393,7 +393,7 @@ pub enum NostrCommand {
         description: String,
         repo_url: Option<String>,
         picture_url: Option<String>,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
         /// Client identifier for the client tag
         client: Option<String>,
@@ -717,7 +717,7 @@ impl NostrWorker {
                     }
                     NostrCommand::UpdateProjectAgents {
                         project_a_tag,
-                        agent_ids,
+                        agent_definition_ids,
                         mcp_tool_ids,
                     } => {
                         debug_log(&format!(
@@ -726,7 +726,7 @@ impl NostrWorker {
                         ));
                         if let Err(e) = rt.block_on(self.handle_update_project_agents(
                             project_a_tag,
-                            agent_ids,
+                            agent_definition_ids,
                             mcp_tool_ids,
                         )) {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
@@ -736,7 +736,7 @@ impl NostrWorker {
                         slug,
                         name,
                         description,
-                        agent_ids,
+                        agent_definition_ids,
                         mcp_tool_ids,
                         client,
                     } => {
@@ -745,7 +745,7 @@ impl NostrWorker {
                             slug,
                             name,
                             description,
-                            agent_ids,
+                            agent_definition_ids,
                             mcp_tool_ids,
                             client,
                         )) {
@@ -758,7 +758,7 @@ impl NostrWorker {
                         description,
                         repo_url,
                         picture_url,
-                        agent_ids,
+                        agent_definition_ids,
                         mcp_tool_ids,
                         client,
                     } => {
@@ -769,7 +769,7 @@ impl NostrWorker {
                             description,
                             repo_url,
                             picture_url,
-                            agent_ids,
+                            agent_definition_ids,
                             mcp_tool_ids,
                             client,
                         )) {
@@ -1815,7 +1815,7 @@ impl NostrWorker {
         repo_url: Option<String>,
         picture_url: Option<String>,
         participants: &[String],
-        agent_ids: &[String],
+        agent_definition_ids: &[String],
         mcp_tool_ids: &[String],
         client_name: String,
         is_deleted: bool,
@@ -1861,7 +1861,7 @@ impl NostrWorker {
             }
         }
 
-        for agent_id in agent_ids {
+        for agent_id in agent_definition_ids {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
                 vec![agent_id.clone()],
@@ -1908,7 +1908,7 @@ impl NostrWorker {
     async fn handle_update_project_agents(
         &self,
         project_a_tag: String,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
     ) -> Result<()> {
         let client = self
@@ -1929,12 +1929,12 @@ impl NostrWorker {
 
         let event = Self::build_project_event_builder(
             project.id.clone(),
-            project.name.clone(),
+            project.title.clone(),
             project.description.clone().unwrap_or_default(),
             project.repo_url.clone(),
             project.picture_url.clone(),
             &project.participants,
-            &agent_ids,
+            &agent_definition_ids,
             &mcp_tool_ids,
             "tenex-tui".to_string(),
             false,
@@ -1949,7 +1949,7 @@ impl NostrWorker {
         slug: Option<String>,
         name: String,
         description: String,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
         client_tag: Option<String>,
     ) -> Result<()> {
@@ -1977,7 +1977,7 @@ impl NostrWorker {
             None,
             None,
             &[],
-            &agent_ids,
+            &agent_definition_ids,
             &mcp_tool_ids,
             client_name,
             false,
@@ -1995,7 +1995,7 @@ impl NostrWorker {
         description: String,
         repo_url: Option<String>,
         picture_url: Option<String>,
-        agent_ids: Vec<String>,
+        agent_definition_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
         client_tag: Option<String>,
     ) -> Result<()> {
@@ -2022,7 +2022,7 @@ impl NostrWorker {
             repo_url,
             picture_url,
             &project.participants,
-            &agent_ids,
+            &agent_definition_ids,
             &mcp_tool_ids,
             client_name,
             false,
@@ -2055,12 +2055,12 @@ impl NostrWorker {
         let client_name = client_tag.unwrap_or_else(|| "tenex-ios".to_string());
         let event = Self::build_project_event_builder(
             project.id.clone(),
-            project.name.clone(),
+            project.title.clone(),
             project.description.clone().unwrap_or_default(),
             project.repo_url.clone(),
             project.picture_url.clone(),
             &project.participants,
-            &project.agent_ids,
+            &project.agent_definition_ids,
             &project.mcp_tool_ids,
             client_name,
             true,

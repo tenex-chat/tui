@@ -10,7 +10,7 @@ pub struct TeamPack {
     pub description: String,
     pub image: Option<String>,
     /// Agent definition event IDs (kind:4199) from repeated `e` tags.
-    pub agent_ids: Vec<String>,
+    pub agent_definition_ids: Vec<String>,
     /// Team categories from repeated `c` tags.
     pub categories: Vec<String>,
     /// Hashtags from repeated `t` tags.
@@ -33,7 +33,7 @@ impl TeamPack {
         let mut d_tag: Option<String> = None;
         let mut title: Option<String> = None;
         let mut image: Option<String> = None;
-        let mut agent_ids: Vec<String> = Vec::new();
+        let mut agent_definition_ids: Vec<String> = Vec::new();
         let mut categories: Vec<String> = Vec::new();
         let mut tags: Vec<String> = Vec::new();
 
@@ -52,7 +52,7 @@ impl TeamPack {
                     nostrdb::NdbStrVariant::Str(s) => s.to_string(),
                     nostrdb::NdbStrVariant::Id(bytes) => hex::encode(bytes),
                 }) {
-                    agent_ids.push(agent_id);
+                    agent_definition_ids.push(agent_id);
                 }
                 continue;
             }
@@ -78,7 +78,7 @@ impl TeamPack {
             title: title.unwrap_or_else(|| "Untitled Team".to_string()),
             description,
             image,
-            agent_ids,
+            agent_definition_ids,
             categories,
             tags,
             created_at,
@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(team.title, "Default Team");
         assert_eq!(team.description, "Team description markdown");
         assert_eq!(team.image.as_deref(), Some("https://example.com/team.png"));
-        assert_eq!(team.agent_ids.len(), 1);
+        assert_eq!(team.agent_definition_ids.len(), 1);
         assert_eq!(team.categories, vec!["Marketing"]);
         assert_eq!(team.tags, vec!["growth"]);
     }
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(team.d_tag, "");
         assert_eq!(team.title, "Untitled Team");
         assert!(team.image.is_none());
-        assert!(team.agent_ids.is_empty());
+        assert!(team.agent_definition_ids.is_empty());
         assert!(team.categories.is_empty());
     }
 }
