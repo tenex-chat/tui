@@ -283,7 +283,11 @@ struct MessageComposerView: View {
                 NavigationStack {
                     composerContent
                         .navigationTitle(isNewConversation ? "New Conversation" : "Reply")
+                        #if os(iOS)
                         .navigationBarTitleDisplayMode(.inline)
+                        #else
+                        .toolbarTitleDisplayMode(.inline)
+                        #endif
                         .toolbar {
                             ToolbarItem(placement: .cancellationAction) {
                                 Button("Cancel") {

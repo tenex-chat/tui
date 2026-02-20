@@ -29,7 +29,11 @@ struct DraftBrowserSheet: View {
                 }
             }
             .navigationTitle("Saved Drafts")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }

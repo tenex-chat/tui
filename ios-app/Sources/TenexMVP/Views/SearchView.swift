@@ -160,7 +160,11 @@ struct SearchView: View {
         NavigationStack {
             searchResultsList
                 .navigationTitle("Search")
+                #if os(iOS)
                 .navigationBarTitleDisplayMode(.inline)
+                #else
+                .toolbarTitleDisplayMode(.inline)
+                #endif
                 .navigationDestination(item: selectedConversationBinding) { conversation in
                     ConversationAdaptiveDetailView(conversation: conversation)
                         .environmentObject(coreManager)
@@ -294,10 +298,10 @@ struct SearchView: View {
         .searchable(text: $searchText)
         #endif
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .automatic) {
                 Toggle(isOn: $includesDrafts) {
                     Label("Include Drafts", systemImage: "doc.text")
                 }
