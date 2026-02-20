@@ -417,6 +417,11 @@ struct FullConversationSheet: View {
                                 isConsecutive: index > 0 && messages[index - 1].pubkey == message.pubkey,
                                 conversationId: conversation.thread.id,
                                 projectId: conversation.extractedProjectId,
+                                authorDisplayName: coreManager.displayName(for: message.pubkey),
+                                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                                    .map { "@\($0)" }
+                                    .joined(separator: ", "),
                                 onDelegationTap: { delegationId in
                                     selectedDelegation = delegationId
                                 }
@@ -429,7 +434,8 @@ struct FullConversationSheet: View {
                         if let buffer = coreManager.streamingBuffers[conversation.thread.id] {
                             StreamingMessageRow(
                                 buffer: buffer,
-                                isConsecutive: messages.last?.pubkey == buffer.agentPubkey
+                                isConsecutive: messages.last?.pubkey == buffer.agentPubkey,
+                                agentName: coreManager.displayName(for: buffer.agentPubkey)
                             )
                             .environmentObject(coreManager)
                             .id("streaming-row")
