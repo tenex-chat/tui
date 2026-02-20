@@ -74,7 +74,9 @@ fn get_tokio_runtime() -> &'static tokio::runtime::Runtime {
 
 /// Get the data directory for nostrdb
 fn get_data_dir() -> PathBuf {
-    // Use a subdirectory in the user's data directory
+    if let Ok(base_dir) = std::env::var("TENEX_BASE_DIR") {
+        return PathBuf::from(base_dir).join("nostrdb");
+    }
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("tenex").join("nostrdb")
 }
@@ -933,6 +935,17 @@ pub struct LoginResult {
     pub npub: String,
     /// Whether login was successful
     pub success: bool,
+}
+
+/// A freshly generated Nostr keypair.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct GeneratedKeypair {
+    /// Bech32-encoded secret key (nsec1...)
+    pub nsec: String,
+    /// Bech32-encoded public key (npub1...)
+    pub npub: String,
+    /// Hex-encoded public key (for whitelistedPubkeys config)
+    pub pubkey_hex: String,
 }
 
 /// Result of sending a message.
@@ -1983,6 +1996,28 @@ impl TenexCore {
             pubkey,
             npub,
             success: true,
+        })
+    }
+
+    /// Generate a fresh Nostr keypair.
+    ///
+    /// Pure function — no state changes, no login side effects.
+    /// Returns nsec, npub, and hex pubkey for the caller to store as needed.
+    pub fn generate_keypair(&self) -> Result<GeneratedKeypair, TenexError> {
+        let keys = Keys::generate();
+
+        let nsec = keys.secret_key().to_bech32().map_err(|e| TenexError::Internal {
+            message: format!("Failed to encode nsec: {}", e),
+        })?;
+        let npub = keys.public_key().to_bech32().map_err(|e| TenexError::Internal {
+            message: format!("Failed to encode npub: {}", e),
+        })?;
+        let pubkey_hex = keys.public_key().to_hex();
+
+        Ok(GeneratedKeypair {
+            nsec,
+            npub,
+            pubkey_hex,
         })
     }
 

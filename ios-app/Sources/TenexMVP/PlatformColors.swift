@@ -206,25 +206,5 @@ extension Color {
     }
 }
 
-// MARK: - macOS SwiftUI Compatibility
-
-#if os(macOS)
-
-// .navigationBarTitleDisplayMode is iOS-only; no-op on macOS
-enum NavigationBarTitleDisplayMode {
-    case inline, large, automatic
-}
-
-extension View {
-    func navigationBarTitleDisplayMode(_ displayMode: NavigationBarTitleDisplayMode) -> some View {
-        self
-    }
-}
-
-// iOS-only toolbar placements mapped to native macOS placements
-extension ToolbarItemPlacement {
-    static var topBarTrailing: ToolbarItemPlacement { .primaryAction }
-    static var topBarLeading: ToolbarItemPlacement { .navigation }
-}
-
-#endif
+// Note: macOS compatibility shims (NavigationBarTitleDisplayMode, toolbar placements, etc.)
+// are provided by the main project's PlatformCompat.swift to avoid duplicate definitions
