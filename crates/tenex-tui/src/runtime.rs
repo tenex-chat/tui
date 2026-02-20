@@ -330,14 +330,7 @@ pub(crate) async fn run_app(
                             .and_then(|s| s.to_str())
                             .unwrap_or("audio")
                             .to_string();
-                        let mut queue_item = TTSQueueItem::new(
-                            format!("tts-{}", std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis())
-                                .unwrap_or(0)),
-                            file_name.clone(),
-                            "default".to_string(),
-                        );
+                        let mut queue_item = TTSQueueItem::new(&file_name);
                         queue_item.audio_path = Some(audio_path.clone());
                         queue_item.status = TTSQueueItemStatus::Playing;
                         // Set the source conversation and message for Enter navigation
@@ -405,7 +398,6 @@ pub(crate) async fn run_app(
                                         voice_id: v.voice_id,
                                         name: v.name,
                                         category: v.category,
-                                        description: v.description,
                                     }).collect();
                                 }
                             }
@@ -419,7 +411,6 @@ pub(crate) async fn run_app(
                                     browser.items = models.into_iter().map(|m| ModelBrowseItem {
                                         id: m.id,
                                         name: m.name,
-                                        description: m.description,
                                         context_length: m.context_length,
                                     }).collect();
                                 }
@@ -599,7 +590,7 @@ fn handle_core_events(
             CoreEvent::PendingBackendApproval(pending) => {
                 // Show approval modal if no modal is currently open
                 if app.modal_state.is_none() {
-                    app.show_backend_approval_modal(pending.backend_pubkey, pending.project_a_tag);
+                    app.show_backend_approval_modal(pending.backend_pubkey);
                 }
             }
             CoreEvent::ReportUpsert(_report) => {
@@ -751,7 +742,7 @@ fn check_pending_backend_approvals(app: &mut App) {
         .borrow_mut()
         .drain_pending_backend_approvals();
     if let Some(first) = pending.into_iter().next() {
-        app.show_backend_approval_modal(first.backend_pubkey, first.project_a_tag);
+        app.show_backend_approval_modal(first.backend_pubkey);
     }
 }
 

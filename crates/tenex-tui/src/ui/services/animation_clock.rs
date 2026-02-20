@@ -22,22 +22,6 @@ impl AnimationClock {
         SPINNERS[(self.frame_counter / 2) as usize % SPINNERS.len()]
     }
 
-    /// Get a pulsing indicator for activity displays (alternates every ~200ms)
-    /// Returns true for "on" phase, false for "off" phase
-    pub fn activity_pulse(&self) -> bool {
-        // Pulse every 4 frames at 10fps = ~400ms cycle
-        self.frame_counter % 4 < 2
-    }
-
-    /// Get the filled/empty activity indicator characters
-    pub fn activity_indicator(&self) -> &'static str {
-        if self.activity_pulse() {
-            "◉"
-        } else {
-            "○"
-        }
-    }
-
     /// Get the wave offset for character-by-character color animation
     /// Returns a value that changes over time, suitable for creating a wave effect
     pub fn wave_offset(&self) -> usize {
@@ -72,35 +56,6 @@ mod tests {
         clock.tick();
         let next_spinner = clock.spinner_char();
         assert_ne!(initial_spinner, next_spinner);
-    }
-
-    #[test]
-    fn test_activity_pulse() {
-        let mut clock = AnimationClock::new();
-        // Frame 0: pulse is true (on)
-        assert!(clock.activity_pulse());
-        clock.tick(); // Frame 1: still on
-        assert!(clock.activity_pulse());
-        clock.tick(); // Frame 2: now off
-        assert!(!clock.activity_pulse());
-        clock.tick(); // Frame 3: still off
-        assert!(!clock.activity_pulse());
-        clock.tick(); // Frame 4: back on
-        assert!(clock.activity_pulse());
-    }
-
-    #[test]
-    fn test_activity_indicator() {
-        let mut clock = AnimationClock::new();
-        assert_eq!(clock.activity_indicator(), "◉"); // On at frame 0
-        clock.tick();
-        assert_eq!(clock.activity_indicator(), "◉"); // Still on at frame 1
-        clock.tick();
-        assert_eq!(clock.activity_indicator(), "○"); // Off at frame 2
-        clock.tick();
-        assert_eq!(clock.activity_indicator(), "○"); // Still off at frame 3
-        clock.tick();
-        assert_eq!(clock.activity_indicator(), "◉"); // Back on at frame 4
     }
 
     #[test]

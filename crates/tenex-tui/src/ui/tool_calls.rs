@@ -111,27 +111,6 @@ pub fn parse_message_content(content: &str) -> MessageContent {
     }
 }
 
-/// Get icon for a tool call based on its name (Unicode symbols for consistent width)
-pub fn tool_icon(name: &str) -> &'static str {
-    let lower = name.to_lowercase();
-
-    if is_todo_write(&lower) {
-        return "☐";
-    }
-
-    match lower.as_str() {
-        "edit" | "str_replace_editor" | "fs_edit" => "✎",
-        "write" | "file_write" | "fs_write" => "✎",
-        "read" | "file_read" | "fs_read" => "◉",
-        "bash" | "execute_bash" | "shell" => "$",
-        "glob" | "find" | "fs_glob" => "◎",
-        "grep" | "search" | "fs_grep" => "◎",
-        "task" | "agent" => "▶",
-        "web_search" | "websearch" => "◎",
-        _ => "⚙",
-    }
-}
-
 /// Get semantic verb for a tool (e.g., "Reading", "Writing")
 pub fn tool_verb(name: &str) -> &'static str {
     let lower = name.to_lowercase();

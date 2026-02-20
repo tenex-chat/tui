@@ -1023,23 +1023,3 @@ pub(super) fn render_bottom_padding(f: &mut Frame, area: Rect) {
     f.render_widget(padding, area);
 }
 
-/// Get the actual project at the given selection index
-/// Returns (project, is_online)
-pub fn get_project_at_index(app: &App, index: usize) -> Option<(crate::models::Project, bool)> {
-    let (online_projects, offline_projects) = app.filtered_projects();
-
-    if index < online_projects.len() {
-        online_projects.get(index).map(|p| (p.clone(), true))
-    } else {
-        let offline_index = index - online_projects.len();
-        offline_projects
-            .get(offline_index)
-            .map(|p| (p.clone(), false))
-    }
-}
-
-/// Get the total count of selectable projects
-pub fn selectable_project_count(app: &App) -> usize {
-    let (online, offline) = app.filtered_projects();
-    online.len() + offline.len()
-}

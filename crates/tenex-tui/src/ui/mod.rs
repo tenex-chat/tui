@@ -27,8 +27,8 @@ pub use app::{App, HomeTab, InputMode, StatsSubtab, UndoAction, View};
 // Hotkey registry - used for centralized hotkey resolution and help generation
 #[allow(unused_imports)]
 pub use hotkeys::{
-    get_binding, get_bindings_for_context, resolve_hotkey, resolver as hotkey_resolver,
-    HotkeyBinding, HotkeyContext, HotkeyId, HotkeyResolver,
+    resolve_hotkey, resolver as hotkey_resolver, HotkeyBinding, HotkeyContext, HotkeyId,
+    HotkeyResolver,
 };
 pub use modal::ModalState;
 pub use terminal::{init as init_terminal, restore as restore_terminal, Tui};

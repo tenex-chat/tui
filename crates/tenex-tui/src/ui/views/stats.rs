@@ -66,27 +66,23 @@ const MONTHS: [&str; 12] = [
 // Activity grid constants
 const HOURS_PER_DAY: usize = 24;
 const DAYS_IN_WEEK: usize = 7;
-const DAYS_IN_MONTH: usize = 30;
 
 /// View mode for the activity grid
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityViewMode {
-    Week,  // 7 days × 24 hours = 168 hours
-    Month, // 30 days × 24 hours = 720 hours
+    Week, // 7 days × 24 hours = 168 hours
 }
 
 impl ActivityViewMode {
     pub fn num_hours(&self) -> usize {
         match self {
             ActivityViewMode::Week => DAYS_IN_WEEK * HOURS_PER_DAY,
-            ActivityViewMode::Month => DAYS_IN_MONTH * HOURS_PER_DAY,
         }
     }
 
     pub fn num_days(&self) -> usize {
         match self {
             ActivityViewMode::Week => DAYS_IN_WEEK,
-            ActivityViewMode::Month => DAYS_IN_MONTH,
         }
     }
 }
@@ -94,8 +90,7 @@ impl ActivityViewMode {
 /// Visualization type for the activity grid
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityVisualization {
-    Tokens,   // Total tokens used per hour
-    Messages, // Number of messages generated per hour
+    Tokens, // Total tokens used per hour
 }
 
 /// Render the Stats tab content with a dashboard layout featuring subtabs
@@ -971,12 +966,6 @@ fn render_activity_grid(
                 .statistics
                 .get_tokens_by_hour(view_mode.num_hours());
             ("LLM Token Usage", tokens_data)
-        }
-        ActivityVisualization::Messages => {
-            let messages_data = data_store
-                .statistics
-                .get_message_count_by_hour(view_mode.num_hours());
-            ("Message Activity", messages_data)
         }
     };
 

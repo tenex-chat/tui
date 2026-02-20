@@ -147,49 +147,6 @@ pub fn text_muted() -> Style {
     Style::default().fg(TEXT_MUTED)
 }
 
-pub fn text_dim() -> Style {
-    Style::default().fg(TEXT_DIM)
-}
-
-pub fn text_bold() -> Style {
-    Style::default()
-        .fg(TEXT_PRIMARY)
-        .add_modifier(Modifier::BOLD)
-}
-
-// -----------------------------------------------------------------------------
-// Border Styles
-// -----------------------------------------------------------------------------
-
-pub fn border_active() -> Style {
-    Style::default().fg(BORDER_ACTIVE)
-}
-
-pub fn border_inactive() -> Style {
-    Style::default().fg(BORDER_INACTIVE)
-}
-
-pub fn border_focused() -> Style {
-    Style::default().fg(ACCENT_PRIMARY)
-}
-
-// -----------------------------------------------------------------------------
-// Interactive Element Styles
-// -----------------------------------------------------------------------------
-
-pub fn interactive_normal() -> Style {
-    Style::default().fg(TEXT_PRIMARY)
-}
-
-pub fn interactive_selected() -> Style {
-    Style::default()
-        .fg(ACCENT_PRIMARY)
-        .add_modifier(Modifier::BOLD)
-}
-
-pub fn interactive_hover() -> Style {
-    Style::default().fg(TEXT_PRIMARY).bg(BG_SELECTED)
-}
 
 // -----------------------------------------------------------------------------
 // Status Styles
@@ -207,71 +164,6 @@ pub fn status_error() -> Style {
     Style::default().fg(ACCENT_ERROR)
 }
 
-pub fn status_info() -> Style {
-    Style::default().fg(ACCENT_PRIMARY)
-}
-
-// -----------------------------------------------------------------------------
-// Input Styles
-// -----------------------------------------------------------------------------
-
-pub fn input_active() -> Style {
-    Style::default().fg(TEXT_PRIMARY).bg(BG_INPUT)
-}
-
-pub fn input_inactive() -> Style {
-    Style::default().fg(TEXT_MUTED).bg(BG_INPUT)
-}
-
-pub fn input_placeholder() -> Style {
-    Style::default().fg(TEXT_DIM).bg(BG_INPUT)
-}
-
-// -----------------------------------------------------------------------------
-// Card/Message Styles
-// -----------------------------------------------------------------------------
-
-pub fn card_bg() -> Style {
-    Style::default().bg(BG_CARD)
-}
-
-pub fn card_bg_selected() -> Style {
-    Style::default().bg(BG_SELECTED)
-}
-
-// -----------------------------------------------------------------------------
-// Markdown/Content Styles
-// -----------------------------------------------------------------------------
-
-pub fn markdown_heading() -> Style {
-    Style::default()
-        .fg(TEXT_PRIMARY)
-        .add_modifier(Modifier::BOLD)
-}
-
-pub fn markdown_code() -> Style {
-    Style::default().fg(ACCENT_SUCCESS)
-}
-
-pub fn markdown_quote() -> Style {
-    Style::default()
-        .fg(TEXT_MUTED)
-        .add_modifier(Modifier::ITALIC)
-}
-
-pub fn markdown_link() -> Style {
-    Style::default()
-        .fg(ACCENT_PRIMARY)
-        .add_modifier(Modifier::UNDERLINED)
-}
-
-pub fn markdown_list_bullet() -> Style {
-    Style::default().fg(TEXT_MUTED)
-}
-
-pub fn markdown_image() -> Style {
-    Style::default().fg(ACCENT_SPECIAL)
-}
 
 // -----------------------------------------------------------------------------
 // Tab/Navigation Styles
@@ -312,14 +204,6 @@ pub fn tab_agent_working() -> Style {
 // Tool Call Styles
 // -----------------------------------------------------------------------------
 
-pub fn tool_name() -> Style {
-    Style::default().fg(TEXT_MUTED)
-}
-
-pub fn tool_target() -> Style {
-    Style::default().fg(ACCENT_PRIMARY)
-}
-
 // -----------------------------------------------------------------------------
 // Todo/Progress Styles
 // -----------------------------------------------------------------------------
@@ -344,31 +228,6 @@ pub fn todo_skipped() -> Style {
 // Project/Agent Styles
 // -----------------------------------------------------------------------------
 
-pub fn project_online() -> Style {
-    Style::default().fg(ACCENT_SUCCESS)
-}
-
-pub fn project_offline() -> Style {
-    Style::default().fg(TEXT_MUTED)
-}
-
-pub fn agent_name() -> Style {
-    Style::default().fg(ACCENT_SPECIAL)
-}
-
-// -----------------------------------------------------------------------------
-// Streaming/Activity Styles
-// -----------------------------------------------------------------------------
-
-pub fn streaming_indicator() -> Style {
-    Style::default()
-        .fg(ACCENT_SPECIAL)
-        .add_modifier(Modifier::ITALIC)
-}
-
-pub fn typing_indicator() -> Style {
-    Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)
-}
 
 // -----------------------------------------------------------------------------
 // Modal Styles - Consistent command palette / popup modal styling
@@ -432,23 +291,3 @@ pub fn modal_item_shortcut_selected() -> Style {
     Style::default().fg(Color::Black).bg(ACCENT_WARNING)
 }
 
-/// Check if a color is light (for text contrast)
-/// Returns true if the color is light enough to need dark text on top
-pub fn is_light_color(color: Color) -> bool {
-    match color {
-        Color::Rgb(r, g, b) => {
-            // Simple luminance calculation
-            let luminance = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0;
-            luminance > 0.5
-        }
-        Color::White
-        | Color::LightRed
-        | Color::LightGreen
-        | Color::LightYellow
-        | Color::LightBlue
-        | Color::LightMagenta
-        | Color::LightCyan
-        | Color::Gray => true,
-        _ => false,
-    }
-}

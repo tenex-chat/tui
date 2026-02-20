@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NotificationLevel {
     Info,
+    #[allow(dead_code)]
     Success,
     Warning,
     Error,
@@ -48,17 +49,6 @@ impl Notification {
         }
     }
 
-    /// Create a success notification (default 3 second duration)
-    pub fn success(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            level: NotificationLevel::Success,
-            duration: Duration::from_secs(3),
-            shown_at: None,
-            thread_id: None,
-        }
-    }
-
     /// Create a warning notification (default 4 second duration)
     pub fn warning(message: impl Into<String>) -> Self {
         Self {
@@ -91,12 +81,6 @@ impl Notification {
             shown_at: None,
             thread_id: Some(thread_id),
         }
-    }
-
-    /// Set a custom duration for this notification
-    pub fn duration(mut self, duration: Duration) -> Self {
-        self.duration = duration;
-        self
     }
 
     /// Check if this notification has expired
@@ -210,17 +194,6 @@ impl NotificationQueue {
         }
     }
 
-    /// Check if there are any notifications (current or pending)
-    pub fn is_empty(&self) -> bool {
-        self.current.is_none() && self.queue.is_empty()
-    }
-
-    /// Clear all notifications
-    pub fn clear(&mut self) {
-        self.current = None;
-        self.queue.clear();
-    }
-
     /// Simple hash for deduplication
     fn hash_message(message: &str) -> u64 {
         use std::collections::hash_map::DefaultHasher;
@@ -241,22 +214,22 @@ mod tests {
         assert_eq!(n.level, NotificationLevel::Info);
         assert_eq!(n.duration, Duration::from_secs(3));
 
-        let n = Notification::error("error").duration(Duration::from_secs(10));
+        let n = Notification::error("error");
         assert_eq!(n.level, NotificationLevel::Error);
-        assert_eq!(n.duration, Duration::from_secs(10));
+        assert_eq!(n.duration, Duration::from_secs(5));
     }
 
     #[test]
     fn test_queue_basic() {
         let mut q = NotificationQueue::new();
-        assert!(q.is_empty());
+        assert!(q.current().is_none());
 
         q.push(Notification::info("first"));
-        assert!(!q.is_empty());
+        assert!(q.current().is_some());
         assert_eq!(q.current().unwrap().message, "first");
 
         q.dismiss();
-        assert!(q.is_empty());
+        assert!(q.current().is_none());
     }
 
     #[test]
@@ -279,7 +252,6 @@ mod tests {
     #[test]
     fn test_level_ordering() {
         assert!(NotificationLevel::Error > NotificationLevel::Warning);
-        assert!(NotificationLevel::Warning > NotificationLevel::Success);
-        assert!(NotificationLevel::Success > NotificationLevel::Info);
+        assert!(NotificationLevel::Warning > NotificationLevel::Info);
     }
 }

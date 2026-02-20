@@ -861,7 +861,6 @@ fn view_raw_event(app: &mut App) {
                         json
                     };
                 app.modal_state = ModalState::ViewRawEvent {
-                    message_id: id,
                     json: pretty_json,
                     scroll_offset: 0,
                 };

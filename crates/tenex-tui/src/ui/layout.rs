@@ -31,9 +31,6 @@ pub const SIDEBAR_WIDTH_CHAT: u16 = 45;
 // CHROME CONSTANTS - Header/footer heights
 // =============================================================================
 
-/// Header height for home view (tabs + underline)
-pub const HEADER_HEIGHT_HOME: u16 = 2;
-
 /// Header height for chat view (title area)
 pub const HEADER_HEIGHT_CHAT: u16 = 3;
 

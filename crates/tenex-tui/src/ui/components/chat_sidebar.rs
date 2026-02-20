@@ -15,8 +15,6 @@ use ratatui::{
 pub struct SidebarDelegation {
     /// Thread ID of the delegation (q-tag value)
     pub thread_id: String,
-    /// Title of the delegated conversation
-    pub title: String,
     /// Target agent name (or short pubkey if unknown)
     pub target: String,
 }
@@ -28,16 +26,12 @@ pub struct SidebarReport {
     pub a_tag: String,
     /// Report title
     pub title: String,
-    /// Report slug (for display)
-    pub slug: String,
 }
 
 /// Parsed report a-tag coordinate
 /// Format: "30023:pubkey:slug" where slug may contain colons
 #[derive(Debug, Clone)]
 pub struct ReportCoordinate {
-    pub kind: u32,
-    pub pubkey: String,
     pub slug: String,
 }
 
@@ -47,11 +41,9 @@ impl ReportCoordinate {
     pub fn parse(a_tag: &str) -> Option<Self> {
         let parts: Vec<&str> = a_tag.split(':').collect();
         if parts.len() >= 3 {
-            let kind = parts[0].parse::<u32>().ok()?;
-            let pubkey = parts[1].to_string();
             // Slug may contain colons, so join the rest
             let slug = parts[2..].join(":");
-            Some(ReportCoordinate { kind, pubkey, slug })
+            Some(ReportCoordinate { slug })
         } else {
             None
         }

@@ -1,4 +1,3 @@
-use crate::models::AskEvent;
 use crate::ui::ask_input::AskInputState;
 use crate::ui::nudge::NudgeFormState;
 use crate::ui::selector::SelectorState;
@@ -107,7 +106,6 @@ pub struct VoiceBrowseItem {
     pub voice_id: String,
     pub name: String,
     pub category: Option<String>,
-    pub description: Option<String>,
 }
 
 /// State for the voice browser overlay within AI settings
@@ -176,17 +174,6 @@ impl VoiceBrowserState {
         }
     }
 
-    pub fn adjust_scroll(&mut self, visible_height: usize) {
-        if visible_height == 0 {
-            return;
-        }
-        if self.selected_index < self.scroll_offset {
-            self.scroll_offset = self.selected_index;
-        } else if self.selected_index >= self.scroll_offset + visible_height {
-            self.scroll_offset = self.selected_index.saturating_sub(visible_height - 1);
-        }
-    }
-
     pub fn add_filter_char(&mut self, c: char) {
         self.filter.push(c);
         self.selected_index = 0;
@@ -205,7 +192,6 @@ impl VoiceBrowserState {
 pub struct ModelBrowseItem {
     pub id: String,
     pub name: Option<String>,
-    pub description: Option<String>,
     pub context_length: Option<u32>,
 }
 
@@ -263,17 +249,6 @@ impl ModelBrowserState {
     pub fn move_down(&mut self, max: usize) {
         if self.selected_index + 1 < max {
             self.selected_index += 1;
-        }
-    }
-
-    pub fn adjust_scroll(&mut self, visible_height: usize) {
-        if visible_height == 0 {
-            return;
-        }
-        if self.selected_index < self.scroll_offset {
-            self.scroll_offset = self.selected_index;
-        } else if self.selected_index >= self.scroll_offset + visible_height {
-            self.scroll_offset = self.selected_index.saturating_sub(visible_height - 1);
         }
     }
 
@@ -526,7 +501,6 @@ impl AppSettingsState {
 #[derive(Debug, Clone)]
 pub struct AskModalState {
     pub message_id: String,
-    pub ask_event: AskEvent,
     pub input_state: AskInputState,
     /// Pubkey of the ask event author (for p-tagging in response)
     pub ask_author_pubkey: String,
@@ -1048,21 +1022,6 @@ pub struct ConversationActionsState {
 }
 
 impl ConversationActionsState {
-    pub fn new(
-        thread_id: String,
-        thread_title: String,
-        project_a_tag: String,
-        is_archived: bool,
-    ) -> Self {
-        Self {
-            thread_id,
-            thread_title,
-            project_a_tag,
-            is_archived,
-            selected_index: 0,
-        }
-    }
-
     pub fn selected_action(&self) -> ConversationAction {
         ConversationAction::ALL[self.selected_index]
     }
@@ -1118,21 +1077,6 @@ pub struct ChatActionsState {
 }
 
 impl ChatActionsState {
-    pub fn new(
-        thread_id: String,
-        thread_title: String,
-        project_a_tag: String,
-        parent_conversation_id: Option<String>,
-    ) -> Self {
-        Self {
-            thread_id,
-            thread_title,
-            project_a_tag,
-            parent_conversation_id,
-            selected_index: 0,
-        }
-    }
-
     pub fn has_parent(&self) -> bool {
         self.parent_conversation_id.is_some()
     }
@@ -1246,7 +1190,6 @@ pub struct ReportViewerState {
     pub focus: ReportViewerFocus,
     pub view_mode: ReportViewMode,
     pub content_scroll: usize,
-    pub threads_scroll: usize,
     pub selected_thread_index: usize,
     pub version_index: usize,
     pub show_threads: bool,
@@ -1261,7 +1204,6 @@ impl ReportViewerState {
             focus: ReportViewerFocus::Content,
             view_mode: ReportViewMode::Current,
             content_scroll: 0,
-            threads_scroll: 0,
             selected_thread_index: 0,
             version_index: 0,
             show_threads: false,
@@ -1323,7 +1265,6 @@ impl ToolGroup {
 pub struct AgentSettingsState {
     pub agent_name: String,
     pub agent_pubkey: String,
-    pub project_a_tag: String,
     /// Whether this agent is currently the PM for the project
     pub is_pm: bool,
     /// Available models to choose from (from project status)
@@ -1344,7 +1285,6 @@ impl AgentSettingsState {
     pub fn new(
         agent_name: String,
         agent_pubkey: String,
-        project_a_tag: String,
         current_model: Option<String>,
         current_tools: Vec<String>,
         is_pm: bool,
@@ -1366,7 +1306,6 @@ impl AgentSettingsState {
         Self {
             agent_name,
             agent_pubkey,
-            project_a_tag,
             is_pm,
             available_models,
             model_index,
@@ -1645,31 +1584,11 @@ impl AgentConfigState {
 #[derive(Debug, Clone)]
 pub enum HistorySearchEntryKind {
     /// A sent message from Nostr
-    Message {
-        /// Event ID of the published message
-        event_id: String,
-        /// Project a-tag the message belongs to
-        project_a_tag: Option<String>,
-    },
+    Message,
     /// An unsent chat/versioned/archived draft (associated with a conversation)
-    Draft {
-        /// Draft identifier (conversation_id for chat drafts)
-        draft_id: String,
-        /// Conversation ID the draft belongs to
-        conversation_id: String,
-        /// Project a-tag the draft belongs to
-        project_a_tag: Option<String>,
-    },
+    Draft,
     /// A named draft (project-scoped, not associated with a specific conversation)
-    /// Navigates to the project rather than a conversation
-    NamedDraft {
-        /// Unique draft identifier
-        draft_id: String,
-        /// Human-readable name of the draft
-        name: String,
-        /// Project a-tag (also the navigation target)
-        project_a_tag: String,
-    },
+    NamedDraft,
 }
 
 /// A history search result entry
@@ -1688,47 +1607,8 @@ impl HistorySearchEntry {
     pub fn is_draft(&self) -> bool {
         matches!(
             self.kind,
-            HistorySearchEntryKind::Draft { .. } | HistorySearchEntryKind::NamedDraft { .. }
+            HistorySearchEntryKind::Draft | HistorySearchEntryKind::NamedDraft
         )
-    }
-
-    /// Get the project a-tag for this entry
-    pub fn project_a_tag(&self) -> Option<&str> {
-        match &self.kind {
-            HistorySearchEntryKind::Message { project_a_tag, .. } => project_a_tag.as_deref(),
-            HistorySearchEntryKind::Draft { project_a_tag, .. } => project_a_tag.as_deref(),
-            HistorySearchEntryKind::NamedDraft { project_a_tag, .. } => {
-                Some(project_a_tag.as_str())
-            }
-        }
-    }
-
-    /// Get a unique identifier for this entry (for deduplication)
-    pub fn unique_id(&self) -> &str {
-        match &self.kind {
-            HistorySearchEntryKind::Message { event_id, .. } => event_id,
-            HistorySearchEntryKind::Draft { draft_id, .. } => draft_id,
-            HistorySearchEntryKind::NamedDraft { draft_id, .. } => draft_id,
-        }
-    }
-
-    /// Get the navigation target ID
-    /// - Messages: event_id
-    /// - Chat/versioned/archived drafts: conversation_id
-    /// - Named drafts: project_a_tag (navigates to project)
-    pub fn navigation_id(&self) -> &str {
-        match &self.kind {
-            HistorySearchEntryKind::Message { event_id, .. } => event_id,
-            HistorySearchEntryKind::Draft {
-                conversation_id, ..
-            } => conversation_id,
-            HistorySearchEntryKind::NamedDraft { project_a_tag, .. } => project_a_tag,
-        }
-    }
-
-    /// Check if this is a named draft (project-scoped, not conversation-scoped)
-    pub fn is_named_draft(&self) -> bool {
-        matches!(self.kind, HistorySearchEntryKind::NamedDraft { .. })
     }
 }
 
@@ -1874,7 +1754,6 @@ pub enum WorkspaceFocus {
 pub struct WorkspaceManagerState {
     pub mode: WorkspaceMode,
     pub selected_index: usize,
-    pub filter: String,
     /// For create/edit mode - workspace name being edited
     pub editing_name: String,
     /// For create/edit mode - selected project a-tags
@@ -1892,7 +1771,6 @@ impl WorkspaceManagerState {
         Self {
             mode: WorkspaceMode::List,
             selected_index: 0,
-            filter: String::new(),
             editing_name: String::new(),
             editing_project_ids: std::collections::HashSet::new(),
             editing_workspace_id: None,
@@ -1991,14 +1869,6 @@ impl BackendApprovalAction {
         }
     }
 
-    pub fn description(&self) -> &'static str {
-        match self {
-            BackendApprovalAction::Approve => "Trust this backend and show status updates",
-            BackendApprovalAction::Reject => "Dismiss for now, ask again later",
-            BackendApprovalAction::Block => "Never show events from this backend",
-        }
-    }
-
     pub fn hotkey(&self) -> char {
         match self {
             BackendApprovalAction::Approve => 'a',
@@ -2012,15 +1882,13 @@ impl BackendApprovalAction {
 #[derive(Debug, Clone)]
 pub struct BackendApprovalState {
     pub backend_pubkey: String,
-    pub project_a_tag: String,
     pub selected_index: usize,
 }
 
 impl BackendApprovalState {
-    pub fn new(backend_pubkey: String, project_a_tag: String) -> Self {
+    pub fn new(backend_pubkey: String) -> Self {
         Self {
             backend_pubkey,
-            project_a_tag,
             selected_index: 0,
         }
     }
@@ -2208,13 +2076,6 @@ impl DebugStatsState {
         }
     }
 
-    /// Get the currently selected project filter (None = All)
-    pub fn selected_project_filter(&self) -> Option<&str> {
-        self.sub_project_filters
-            .get(self.sub_selected_filter_index)
-            .and_then(|f| f.as_deref())
-    }
-
     pub fn next_tab(&mut self) {
         self.switch_tab(self.active_tab.next());
     }
@@ -2231,6 +2092,7 @@ pub enum ModalState {
     None,
     /// Command palette (Ctrl+T) - context-sensitive command menu
     CommandPalette(CommandPaletteState),
+    #[allow(dead_code)]
     AttachmentEditor {
         editor: TextEditor,
     },
@@ -2247,12 +2109,13 @@ pub enum ModalState {
     /// Unified nudge/skill selector for adding context to messages
     NudgeSkillSelector(NudgeSkillSelectorState),
     /// Conversation action menu in Home view - shows actions for selected conversation (via Ctrl+T)
+    #[allow(dead_code)]
     ConversationActions(ConversationActionsState),
     /// Chat action menu in Chat view - shows actions for current conversation (via Ctrl+T)
+    #[allow(dead_code)]
     ChatActions(ChatActionsState),
     /// View raw event JSON in a scrollable modal
     ViewRawEvent {
-        message_id: String,
         json: String,
         scroll_offset: usize,
     },
@@ -2299,10 +2162,6 @@ impl ModalState {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
-
-    pub fn close(&mut self) {
-        *self = Self::None;
-    }
 }
 
 #[cfg(test)]
@@ -2327,7 +2186,6 @@ mod tests {
         let settings = AgentSettingsState::new(
             "agent-a".to_string(),
             "pubkey-a".to_string(),
-            "31933:pubkey:project".to_string(),
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
             false,
@@ -2371,7 +2229,6 @@ mod tests {
         let first = AgentSettingsState::new(
             "agent-a".to_string(),
             "pubkey-a".to_string(),
-            "31933:pubkey:project".to_string(),
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
             false,
@@ -2396,7 +2253,6 @@ mod tests {
         let second = AgentSettingsState::new(
             "agent-b".to_string(),
             "pubkey-b".to_string(),
-            "31933:pubkey:project".to_string(),
             Some("model-b".to_string()),
             vec!["tool_write".to_string()],
             true,

@@ -40,8 +40,6 @@ pub struct SidebarSearchState {
     pub query: String,
     /// Cursor position within query
     pub cursor: usize,
-    /// Cached search results for conversations (legacy flat format)
-    pub results: Vec<SearchResult>,
     /// Hierarchical search results (new format with ancestor context)
     pub hierarchical_results: Vec<HierarchicalSearchItem>,
     /// Cached search results for reports
@@ -64,7 +62,6 @@ impl SidebarSearchState {
             // Clear state when hiding
             self.query.clear();
             self.cursor = 0;
-            self.results.clear();
             self.hierarchical_results.clear();
             self.report_results.clear();
             self.selected_index = 0;
@@ -143,16 +140,6 @@ impl SidebarSearchState {
         }
     }
 
-    /// Get currently selected result (clamped to valid range) - legacy flat format
-    pub fn selected_result(&self) -> Option<&SearchResult> {
-        if self.results.is_empty() {
-            None
-        } else {
-            let idx = self.selected_index.min(self.results.len() - 1);
-            self.results.get(idx)
-        }
-    }
-
     /// Get currently selected hierarchical result (clamped to valid range)
     pub fn selected_hierarchical_result(&self) -> Option<&HierarchicalSearchItem> {
         if self.hierarchical_results.is_empty() {
@@ -173,55 +160,10 @@ impl SidebarSearchState {
         }
     }
 
-    /// Clamp selected_index to valid range based on current results
-    /// Call this after updating results to ensure index stays valid
-    pub fn clamp_selection(&mut self, for_reports: bool) {
-        let max_len = if for_reports {
-            self.report_results.len()
-        } else {
-            self.hierarchical_results.len()
-        };
-        if max_len == 0 {
-            self.selected_index = 0;
-        } else if self.selected_index >= max_len {
-            self.selected_index = max_len - 1;
-        }
-    }
-
     /// Check if search has a non-empty query
     pub fn has_query(&self) -> bool {
         !self.query.trim().is_empty()
     }
-}
-
-/// A search result representing a thread with a matching reply
-#[derive(Debug, Clone)]
-pub struct SearchResult {
-    /// The thread containing the match
-    pub thread: Thread,
-    /// Thread ID
-    pub thread_id: String,
-    /// Thread title
-    pub thread_title: String,
-    /// Project a_tag
-    pub project_a_tag: String,
-    /// Project name for display
-    pub project_name: String,
-    /// The matching reply content (if match was in a reply)
-    pub matching_reply: Option<MatchingReply>,
-    /// Match type
-    pub match_type: SearchMatchType,
-    /// When the match was created (for sorting)
-    pub created_at: u64,
-}
-
-/// Information about a matching reply
-#[derive(Debug, Clone)]
-pub struct MatchingReply {
-    /// Reply content
-    pub content: String,
-    /// Author pubkey
-    pub author_pubkey: String,
 }
 
 /// A single matching message within a conversation
@@ -231,8 +173,6 @@ pub struct MatchingMessage {
     pub content: String,
     /// Author pubkey
     pub author_pubkey: String,
-    /// When the message was created
-    pub created_at: u64,
 }
 
 /// An item in the hierarchical search result display
@@ -242,7 +182,6 @@ pub enum HierarchicalSearchItem {
     /// Displayed dimmed to show it's not a direct match
     ContextAncestor {
         thread: Thread,
-        thread_id: String,
         thread_title: String,
         project_a_tag: String,
         depth: usize,
@@ -250,7 +189,6 @@ pub enum HierarchicalSearchItem {
     /// A conversation with actual search matches
     MatchedConversation {
         thread: Thread,
-        thread_id: String,
         thread_title: String,
         project_a_tag: String,
         project_name: String,
@@ -267,129 +205,6 @@ pub enum HierarchicalSearchItem {
         /// For single-term searches, this contains one term
         matched_terms: Vec<String>,
     },
-}
-
-/// Type of search match
-#[derive(Debug, Clone, PartialEq)]
-pub enum SearchMatchType {
-    /// Match in thread title
-    ThreadTitle,
-    /// Match in thread content
-    ThreadContent,
-    /// Match in a reply message
-    Reply,
-    /// Match in conversation ID
-    ConversationId,
-}
-
-/// Search conversations and messages for a query
-///
-/// Returns results matching the query in thread titles, content, or reply messages.
-/// Respects project filters (visible_projects) but NOT time filters.
-/// Empty visible_projects = show nothing (consistent with other lists)
-///
-/// # Multi-term Search ('+' operator)
-/// When the query contains '+', it's split into multiple terms with AND semantics:
-/// - A conversation matches only if ALL terms are found somewhere in the conversation
-pub fn search_conversations(
-    query: &str,
-    store: &Ref<AppDataStore>,
-    visible_projects: &HashSet<String>,
-) -> Vec<SearchResult> {
-    // Empty visible_projects = show nothing (consistent with other lists)
-    if visible_projects.is_empty() {
-        return vec![];
-    }
-
-    if query.trim().is_empty() {
-        return vec![];
-    }
-
-    // Parse search terms (supports '+' operator for AND semantics)
-    let terms = parse_search_terms(query);
-    if terms.is_empty() {
-        return vec![];
-    }
-
-    let mut results = Vec::new();
-    let mut seen_threads: HashSet<String> = HashSet::new();
-
-    // Search through all projects
-    for project in store.get_projects() {
-        let a_tag = project.a_tag();
-
-        // Skip projects not in visible_projects
-        if !visible_projects.contains(&a_tag) {
-            continue;
-        }
-
-        let project_name = project.title.clone();
-
-        // Search threads
-        for thread in store.get_threads(&a_tag) {
-            // Build message list for the shared matcher
-            let messages = store.get_messages(&thread.id);
-            let msg_contents: Vec<MessageContent> = messages
-                .iter()
-                .map(|msg| MessageContent {
-                    id: &msg.id,
-                    content: &msg.content,
-                    pubkey: &msg.pubkey,
-                    created_at: msg.created_at,
-                })
-                .collect();
-
-            // Use shared matcher
-            let match_result = scan_thread_for_terms(
-                &thread.id,
-                &thread.title,
-                &thread.content,
-                &msg_contents,
-                &terms,
-            );
-
-            if match_result.all_terms_matched && !seen_threads.contains(&thread.id) {
-                seen_threads.insert(thread.id.clone());
-
-                // Determine match type based on where matches were found
-                let match_type = if match_result.id_matched() {
-                    SearchMatchType::ConversationId
-                } else if match_result.title_matched() {
-                    SearchMatchType::ThreadTitle
-                } else if match_result.content_matched() {
-                    SearchMatchType::ThreadContent
-                } else {
-                    SearchMatchType::Reply
-                };
-
-                // Get first matching reply for legacy format
-                let matching_reply =
-                    match_result
-                        .matching_messages
-                        .first()
-                        .map(|msg| MatchingReply {
-                            content: msg.content.clone(),
-                            author_pubkey: msg.author_pubkey.clone(),
-                        });
-
-                results.push(SearchResult {
-                    thread: thread.clone(),
-                    thread_id: thread.id.clone(),
-                    thread_title: thread.title.clone(),
-                    project_a_tag: a_tag.clone(),
-                    project_name: project_name.clone(),
-                    matching_reply,
-                    match_type,
-                    created_at: thread.last_activity,
-                });
-            }
-        }
-    }
-
-    // Sort by last activity (most recent first)
-    results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    results
 }
 
 /// Search reports for a query
@@ -470,8 +285,6 @@ pub struct TermMatchResult {
     pub terms_in_content: HashSet<usize>,
     /// Which term indices matched in the ID (prefix match)
     pub terms_in_id: HashSet<usize>,
-    /// Which term indices matched in messages
-    pub terms_in_messages: HashSet<usize>,
     /// Messages that matched any search term (for display)
     pub matching_messages: Vec<MatchingMessage>,
     /// Whether all terms were found (respects multi-term AND logic)
@@ -554,7 +367,6 @@ pub fn scan_thread_for_terms(
             matching_messages.push(MatchingMessage {
                 content: msg.content.to_string(),
                 author_pubkey: msg.pubkey.to_string(),
-                created_at: msg.created_at,
             });
         }
     }
@@ -578,7 +390,6 @@ pub fn scan_thread_for_terms(
         terms_in_title,
         terms_in_content,
         terms_in_id,
-        terms_in_messages,
         matching_messages,
         all_terms_matched,
     }
@@ -797,7 +608,6 @@ pub fn search_conversations_hierarchical(
             // This is a matched conversation
             result.push(HierarchicalSearchItem::MatchedConversation {
                 thread: conv_match.thread.clone(),
-                thread_id: conv_id.to_string(),
                 thread_title: conv_match.thread.title.clone(),
                 project_a_tag: conv_match.project_a_tag.clone(),
                 project_name: conv_match.project_name.clone(),
@@ -813,7 +623,6 @@ pub fn search_conversations_hierarchical(
             if let Some((thread, a_tag)) = all_threads.get(conv_id) {
                 result.push(HierarchicalSearchItem::ContextAncestor {
                     thread: thread.clone(),
-                    thread_id: conv_id.to_string(),
                     thread_title: thread.title.clone(),
                     project_a_tag: a_tag.clone(),
                     depth,
@@ -853,14 +662,6 @@ pub fn search_conversations_hierarchical(
 }
 
 impl HierarchicalSearchItem {
-    /// Get the thread ID for this item
-    pub fn thread_id(&self) -> &str {
-        match self {
-            HierarchicalSearchItem::ContextAncestor { thread_id, .. } => thread_id,
-            HierarchicalSearchItem::MatchedConversation { thread_id, .. } => thread_id,
-        }
-    }
-
     /// Get the depth (indentation level) for this item
     pub fn depth(&self) -> usize {
         match self {
@@ -872,30 +673,6 @@ impl HierarchicalSearchItem {
     /// Check if this item is a context ancestor (no direct matches)
     pub fn is_context_ancestor(&self) -> bool {
         matches!(self, HierarchicalSearchItem::ContextAncestor { .. })
-    }
-
-    /// Get the thread title
-    pub fn title(&self) -> &str {
-        match self {
-            HierarchicalSearchItem::ContextAncestor { thread_title, .. } => thread_title,
-            HierarchicalSearchItem::MatchedConversation { thread_title, .. } => thread_title,
-        }
-    }
-
-    /// Get the project a_tag
-    pub fn project_a_tag(&self) -> &str {
-        match self {
-            HierarchicalSearchItem::ContextAncestor { project_a_tag, .. } => project_a_tag,
-            HierarchicalSearchItem::MatchedConversation { project_a_tag, .. } => project_a_tag,
-        }
-    }
-
-    /// Get the matched search terms (only for MatchedConversation)
-    pub fn matched_terms(&self) -> &[String] {
-        match self {
-            HierarchicalSearchItem::ContextAncestor { .. } => &[],
-            HierarchicalSearchItem::MatchedConversation { matched_terms, .. } => matched_terms,
-        }
     }
 }
 
@@ -1368,8 +1145,8 @@ mod tests {
             "Term 'fix' should be tracked in title"
         );
         assert!(
-            result.terms_in_messages.contains(&2),
-            "Term 'test' should be tracked in messages"
+            !result.matching_messages.is_empty(),
+            "Term 'test' should be found in messages"
         );
     }
 
