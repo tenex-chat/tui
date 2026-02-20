@@ -2021,6 +2021,29 @@ impl TenexCore {
         })
     }
 
+    /// Publish a kind:0 profile metadata event for the logged-in user.
+    ///
+    /// Sets the user's display name and optionally a profile picture URL.
+    /// Fire-and-forget — does not wait for relay confirmation.
+    pub fn publish_profile(&self, name: String, picture_url: Option<String>) -> Result<(), TenexError> {
+        let keys_guard = self.keys.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire keys lock: {}", e),
+        })?;
+        if keys_guard.is_none() {
+            return Err(TenexError::NotLoggedIn);
+        }
+        drop(keys_guard);
+
+        let core_handle = get_core_handle(&self.core_handle)?;
+        core_handle
+            .send(NostrCommand::PublishProfile { name, picture_url })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send publish profile command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
     /// Get information about the currently logged-in user.
     ///
     /// Returns None if not logged in.
