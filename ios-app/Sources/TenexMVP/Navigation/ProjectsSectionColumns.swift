@@ -49,7 +49,7 @@ struct ProjectsSectionListColumn: View {
     @EnvironmentObject private var coreManager: TenexCoreManager
     @Binding var selectedProjectId: String?
 
-    private var sortedProjects: [ProjectInfo] {
+    private var sortedProjects: [Project] {
         coreManager.projects.sorted { a, b in
             let aOnline = coreManager.projectOnlineStatus[a.id] ?? false
             let bOnline = coreManager.projectOnlineStatus[b.id] ?? false

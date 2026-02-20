@@ -64,22 +64,29 @@ struct StatusBadge: View {
 
 /// Unified message bubble component used in conversation detail and full conversation views
 struct SharedMessageBubble: View {
-    let message: MessageInfo
+    @EnvironmentObject var coreManager: TenexCoreManager
+    let message: Message
+    let userPubkey: String
     let showAvatar: Bool
 
-    init(message: MessageInfo, showAvatar: Bool = true) {
+    init(message: Message, userPubkey: String, showAvatar: Bool = true) {
         self.message = message
+        self.userPubkey = userPubkey
         self.showAvatar = showAvatar
     }
 
     private var isUser: Bool {
-        message.role == "user"
+        !userPubkey.isEmpty && message.pubkey == userPubkey
+    }
+
+    private var authorDisplayName: String {
+        coreManager.displayName(for: message.pubkey)
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             if !isUser && showAvatar {
-                SharedAgentAvatar(agentName: message.author, size: 32, fontSize: 11)
+                SharedAgentAvatar(agentName: authorDisplayName, size: 32, fontSize: 11)
             }
 
             if isUser { Spacer(minLength: 60) }
@@ -88,7 +95,7 @@ struct SharedMessageBubble: View {
                 // Header with author name and time
                 HStack(spacing: 6) {
                     if !isUser {
-                        Text(AgentNameFormatter.format(message.author))
+                        Text(AgentNameFormatter.format(authorDisplayName))
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundStyle(.secondary)
@@ -211,7 +218,7 @@ struct SharedConversationRow: View {
 
     private var statusColor: Color {
         if conversation.isActive { return .green }
-        switch conversation.status?.lowercased() ?? "" {
+        switch conversation.thread.statusLabel?.lowercased() ?? "" {
         case "active", "in progress": return .green
         case "waiting", "blocked": return .orange
         case "completed", "done": return .gray
@@ -237,20 +244,20 @@ struct SharedConversationRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 // Row 1: Title and effective last active time
                 HStack(alignment: .top) {
-                    Text(conversation.title)
+                    Text(conversation.thread.title)
                         .font(.headline)
                         .lineLimit(2)
 
                     Spacer()
 
-                    Text(ConversationFormatters.formatRelativeTime(conversation.effectiveLastActivity))
+                    Text(ConversationFormatters.formatRelativeTime(conversation.thread.effectiveLastActivity))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 // Row 2: Summary or current activity
                 HStack(alignment: .top) {
-                    if let activity = conversation.currentActivity, conversation.isActive {
+                    if let activity = conversation.thread.statusCurrentActivity, conversation.isActive {
                         HStack(spacing: 4) {
                             Image(systemName: "bolt.fill")
                                 .font(.caption2)
@@ -260,7 +267,7 @@ struct SharedConversationRow: View {
                                 .foregroundStyle(Color.skillBrand)
                                 .lineLimit(1)
                         }
-                    } else if let summary = conversation.summary {
+                    } else if let summary = conversation.thread.summary {
                         Text(summary)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -293,7 +300,7 @@ struct SharedConversationRow: View {
                     Spacer()
 
                     // Status badge
-                    if let status = conversation.status {
+                    if let status = conversation.thread.statusLabel {
                         StatusBadge(status: status, isActive: conversation.isActive)
                     }
                 }

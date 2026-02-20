@@ -172,7 +172,7 @@ struct AppGlobalFilterSheet: View {
         #endif
     }
 
-    private var sortedProjects: [ProjectInfo] {
+    private var sortedProjects: [Project] {
         coreManager.projects.sorted { lhs, rhs in
             let lhsOnline = coreManager.projectOnlineStatus[lhs.id] ?? false
             let rhsOnline = coreManager.projectOnlineStatus[rhs.id] ?? false

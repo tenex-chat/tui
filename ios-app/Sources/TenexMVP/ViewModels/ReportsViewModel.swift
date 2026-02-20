@@ -7,8 +7,8 @@ import Combine
 final class ReportsViewModel: ObservableObject {
     // MARK: - Published Properties
 
-    /// All reports from all projects, sorted by updated date (newest first)
-    @Published private(set) var reports: [ReportInfo] = []
+    /// All reports from all projects, sorted by created date (newest first)
+    @Published private(set) var reports: [Report] = []
 
     /// Whether reports are currently being loaded
     @Published private(set) var isLoading = false
@@ -24,16 +24,17 @@ final class ReportsViewModel: ObservableObject {
     // MARK: - Computed Properties
 
     /// Filtered reports based on global project/time filters and search text.
-    var filteredReports: [ReportInfo] {
+    var filteredReports: [Report] {
         var result = reports
 
         // Filter by global app filter first
         if let coreManager {
             let now = UInt64(Date().timeIntervalSince1970)
             result = result.filter { report in
-                coreManager.matchesAppFilter(
-                    projectId: report.projectId,
-                    timestamp: report.updatedAt,
+                let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
+                return coreManager.matchesAppFilter(
+                    projectId: projectId,
+                    timestamp: report.createdAt,
                     now: now
                 )
             }
@@ -44,9 +45,8 @@ final class ReportsViewModel: ObservableObject {
             let lowercasedSearch = searchText.lowercased()
             result = result.filter { report in
                 report.title.lowercased().contains(lowercasedSearch) ||
-                (report.summary?.lowercased().contains(lowercasedSearch) ?? false) ||
-                report.author.lowercased().contains(lowercasedSearch) ||
-                report.tags.contains { $0.lowercased().contains(lowercasedSearch) }
+                report.summary.lowercased().contains(lowercasedSearch) ||
+                report.hashtags.contains { $0.lowercased().contains(lowercasedSearch) }
             }
         }
 
@@ -81,7 +81,7 @@ final class ReportsViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        var allReports: [ReportInfo] = []
+        var allReports: [Report] = []
 
         // Fetch reports from each project via FFI for initial load
         let projects = coreManager.projects
@@ -90,8 +90,8 @@ final class ReportsViewModel: ObservableObject {
             allReports.append(contentsOf: projectReports)
         }
 
-        // Sort by updated date (newest first)
-        allReports.sort { $0.updatedAt > $1.updatedAt }
+        // Sort by created date (newest first)
+        allReports.sort { $0.createdAt > $1.createdAt }
 
         // Update both local state and coreManager's reactive property
         self.reports = allReports
@@ -106,7 +106,8 @@ final class ReportsViewModel: ObservableObject {
     }
 
     /// Get the project associated with a report
-    func projectFor(report: ReportInfo) -> ProjectInfo? {
-        coreManager?.projects.first { $0.id == report.projectId }
+    func projectFor(report: Report) -> Project? {
+        let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
+        return coreManager?.projects.first { $0.id == projectId }
     }
 }

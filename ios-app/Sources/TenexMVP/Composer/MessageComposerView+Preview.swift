@@ -2,16 +2,18 @@ import SwiftUI
 
 #Preview("New Conversation") {
     MessageComposerView(
-        project: ProjectInfo(
+        project: Project(
             id: "test-project",
             title: "Test Project",
             description: "A test project",
             repoUrl: nil,
             pictureUrl: nil,
-            createdAt: 0,
-            agentIds: [],
+            isDeleted: false,
+            pubkey: "",
+            participants: [],
+            agentDefinitionIds: [],
             mcpToolIds: [],
-            isDeleted: false
+            createdAt: 0
         )
     )
     .environmentObject(TenexCoreManager())
@@ -19,16 +21,18 @@ import SwiftUI
 
 #Preview("Reply") {
     MessageComposerView(
-        project: ProjectInfo(
+        project: Project(
             id: "test-project",
             title: "Test Project",
             description: "A test project",
             repoUrl: nil,
             pictureUrl: nil,
-            createdAt: 0,
-            agentIds: [],
+            isDeleted: false,
+            pubkey: "",
+            participants: [],
+            agentDefinitionIds: [],
             mcpToolIds: [],
-            isDeleted: false
+            createdAt: 0
         ),
         conversationId: "conv-123",
         conversationTitle: "Test Conversation"

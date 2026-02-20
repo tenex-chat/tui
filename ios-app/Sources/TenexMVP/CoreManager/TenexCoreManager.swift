@@ -78,11 +78,11 @@ class TenexCoreManager: ObservableObject {
     // MARK: - Centralized Reactive Data Store
     // These granular @Published properties enable targeted updates without full UI refresh.
     // Views that observe specific properties only re-render when those properties change.
-    @Published var projects: [ProjectInfo] = []
+    @Published var projects: [Project] = []
     @Published var conversations: [ConversationFullInfo] = []
     @Published var inboxItems: [InboxItem] = []
-    @Published var reports: [ReportInfo] = []
-    @Published var messagesByConversation: [String: [MessageInfo]] = [:]
+    @Published var reports: [Report] = []
+    @Published var messagesByConversation: [String: [Message]] = [:]
     private(set) var statsVersion: UInt64 = 0
     private(set) var teamsVersion: UInt64 = 0
     private(set) var diagnosticsVersion: UInt64 = 0
@@ -109,10 +109,10 @@ class TenexCoreManager: ObservableObject {
     @Published var projectOnlineStatus: [String: Bool] = [:]
 
     /// Online agents for each project - updated reactively via event callbacks.
-    /// Key: project ID, Value: array of OnlineAgentInfo.
+    /// Key: project ID, Value: array of ProjectAgent.
     /// Subscribe to this instead of fetching agents on-demand via getOnlineAgents().
     /// This eliminates multi-second delays from redundant FFI calls.
-    @Published var onlineAgents: [String: [OnlineAgentInfo]] = [:]
+    @Published var onlineAgents: [String: [ProjectAgent]] = [:]
 
     /// Whether any conversation currently has active agents (24133 events with agents)
     /// Used to highlight the runtime indicator when work is happening
@@ -141,8 +141,8 @@ class TenexCoreManager: ObservableObject {
         var count = 0
 
         for item in inboxItems {
-            guard item.eventType == "ask", item.status == "waiting" else { continue }
-            if snapshot.includes(projectId: item.projectId, timestamp: item.createdAt, now: resolvedNow) {
+            guard item.eventType == .ask, !item.isRead else { continue }
+            if snapshot.includes(projectId: item.resolvedProjectId, timestamp: item.createdAt, now: resolvedNow) {
                 count += 1
             }
         }
@@ -198,6 +198,23 @@ class TenexCoreManager: ObservableObject {
 
     /// Cache for conversation hierarchy data to prevent N+1 FFI calls in list views
     let hierarchyCache = ConversationHierarchyCache()
+
+    // MARK: - Profile Name Resolution
+
+    /// Synchronously resolves a display name for a pubkey using cached online agent data.
+    /// Falls back to a truncated pubkey prefix when the agent is not in the online cache.
+    /// For async resolution with full profile lookup, use `safeCore.getProfileName(pubkey:)`.
+    func displayName(for pubkey: String) -> String {
+        for agents in onlineAgents.values {
+            if let agent = agents.first(where: { $0.pubkey == pubkey }) {
+                return agent.name
+            }
+        }
+        if pubkey.count > pubkeyDisplayPrefixLength {
+            return String(pubkey.prefix(pubkeyDisplayPrefixLength))
+        }
+        return pubkey
+    }
 
     init() {
         let persistedFilter = Self.loadPersistedAppFilter()
@@ -255,7 +272,7 @@ class TenexCoreManager: ObservableObject {
     // These methods update @Published properties directly from Rust callbacks.
 
     @MainActor
-    func applyMessageAppended(conversationId: String, message: MessageInfo) {
+    func applyMessageAppended(conversationId: String, message: Message) {
         guard var messages = messagesByConversation[conversationId] else {
             return
         }
@@ -277,7 +294,7 @@ class TenexCoreManager: ObservableObject {
         var updated = conversations
         guard conversationMatchesAppFilter(conversation) else {
             let initialCount = updated.count
-            updated.removeAll { $0.id == conversation.id }
+            updated.removeAll { $0.thread.id == conversation.thread.id }
             guard updated.count != initialCount else {
                 return
             }
@@ -285,7 +302,7 @@ class TenexCoreManager: ObservableObject {
             updateActiveAgentsState()
             return
         }
-        if let index = updated.firstIndex(where: { $0.id == conversation.id }) {
+        if let index = updated.firstIndex(where: { $0.thread.id == conversation.thread.id }) {
             if updated[index] == conversation {
                 return
             }
@@ -304,7 +321,7 @@ class TenexCoreManager: ObservableObject {
     /// This path clears streaming state, applies the delta, and only refreshes messages when already cached.
     @MainActor
     func applyConversationUpsertDelta(_ conversation: ConversationFullInfo) {
-        let conversationId = conversation.id
+        let conversationId = conversation.thread.id
         pendingStreamingDeltas.removeValue(forKey: conversationId)
         streamingBuffers.removeValue(forKey: conversationId)
         applyConversationUpsert(conversation)
@@ -366,7 +383,7 @@ class TenexCoreManager: ObservableObject {
     }
 
     @MainActor
-    func applyProjectUpsert(_ project: ProjectInfo) {
+    func applyProjectUpsert(_ project: Project) {
         if project.isDeleted {
             projects.removeAll { $0.id == project.id }
             projectOnlineStatus.removeValue(forKey: project.id)
@@ -416,20 +433,20 @@ class TenexCoreManager: ObservableObject {
     }
 
     @MainActor
-    func applyReportUpsert(_ report: ReportInfo) {
+    func applyReportUpsert(_ report: Report) {
         var updated = reports
-        if let index = updated.firstIndex(where: { $0.id == report.id && $0.projectId == report.projectId }) {
+        if let index = updated.firstIndex(where: { $0.slug == report.slug && $0.projectATag == report.projectATag }) {
             updated[index] = report
         } else {
             updated.append(report)
         }
-        // Sort by updated date (newest first)
-        updated.sort { $0.updatedAt > $1.updatedAt }
+        // Sort by created date (newest first)
+        updated.sort { $0.createdAt > $1.createdAt }
         reports = updated
     }
 
     @MainActor
-    func applyProjectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [OnlineAgentInfo]) {
+    func applyProjectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [ProjectAgent]) {
         let resolvedProjectId: String = {
             if !projectId.isEmpty {
                 return projectId
@@ -484,7 +501,7 @@ class TenexCoreManager: ObservableObject {
 
             guard matchesProjectATag || matchesProjectId else { continue }
 
-            let shouldBeActive = activeConversationIdSet.contains(conversation.id)
+            let shouldBeActive = activeConversationIdSet.contains(conversation.thread.id)
             if conversation.isActive != shouldBeActive {
                 updated[index].isActive = shouldBeActive
                 didChange = true
@@ -579,7 +596,7 @@ class TenexCoreManager: ObservableObject {
                 if let refreshedConversation {
                     self.applyConversationUpsert(refreshedConversation)
                 } else {
-                    self.conversations.removeAll { $0.id == conversationId }
+                    self.conversations.removeAll { $0.thread.id == conversationId }
                     self.updateActiveAgentsState()
                 }
                 self.inflightConversationMessageRefreshes.remove(conversationId)
@@ -679,13 +696,13 @@ class TenexCoreManager: ObservableObject {
     /// This shared helper is used by both signalProjectStatusUpdate() and fetchData()
     /// to eliminate code duplication and ensure consistent behavior.
     /// - Parameter projects: Array of projects to check status for
-    func refreshProjectStatusParallel(for projects: [ProjectInfo]) async {
+    func refreshProjectStatusParallel(for projects: [Project]) async {
         let startedAt = CFAbsoluteTimeGetCurrent()
         var statusUpdates: [String: Bool] = [:]
-        var agentsUpdates: [String: [OnlineAgentInfo]] = [:]
+        var agentsUpdates: [String: [ProjectAgent]] = [:]
 
         // Use withTaskGroup for concurrent project status checks (runs OFF MainActor)
-        await withTaskGroup(of: (String, Bool, [OnlineAgentInfo]).self) { group in
+        await withTaskGroup(of: (String, Bool, [ProjectAgent]).self) { group in
             for project in projects {
                 group.addTask {
                     // Check cancellation inside each task
@@ -694,7 +711,7 @@ class TenexCoreManager: ObservableObject {
                     }
 
                     let isOnline = await self.safeCore.isProjectOnline(projectId: project.id)
-                    let agents: [OnlineAgentInfo]
+                    let agents: [ProjectAgent]
                     if isOnline {
                         agents = (try? await self.safeCore.getOnlineAgents(projectId: project.id)) ?? []
                     } else {
@@ -759,7 +776,7 @@ class TenexCoreManager: ObservableObject {
             case (false, true):
                 return false
             default:
-                return lhs.effectiveLastActivity > rhs.effectiveLastActivity
+                return lhs.thread.effectiveLastActivity > rhs.thread.effectiveLastActivity
             }
         }
         return updated
@@ -772,7 +789,7 @@ class TenexCoreManager: ObservableObject {
     func fetchAndCacheAgents(for projectId: String) async {
         let startedAt = CFAbsoluteTimeGetCurrent()
         // Perform FFI call OFF the MainActor to avoid UI blocking
-        let agents: [OnlineAgentInfo]
+        let agents: [ProjectAgent]
         do {
             agents = try await safeCore.getOnlineAgents(projectId: projectId)
         } catch {
@@ -821,7 +838,7 @@ class TenexCoreManager: ObservableObject {
     }
 
     @MainActor
-    private func setMessagesCache(_ messages: [MessageInfo], for conversationId: String) {
+    private func setMessagesCache(_ messages: [Message], for conversationId: String) {
         if messagesByConversation[conversationId] == messages {
             return
         }
@@ -829,7 +846,7 @@ class TenexCoreManager: ObservableObject {
     }
 
     @MainActor
-    private func mergeMessagesCache(_ messages: [MessageInfo], for conversationId: String) {
+    private func mergeMessagesCache(_ messages: [Message], for conversationId: String) {
         var combined = messagesByConversation[conversationId] ?? []
         if combined.isEmpty {
             combined = messages
@@ -842,7 +859,7 @@ class TenexCoreManager: ObservableObject {
     }
 
     @MainActor
-    private func setOnlineAgentsCache(_ agents: [OnlineAgentInfo], for projectId: String) {
+    private func setOnlineAgentsCache(_ agents: [ProjectAgent], for projectId: String) {
         let normalizedAgents = Self.canonicalOnlineAgents(agents)
         if onlineAgents[projectId] == normalizedAgents {
             return
@@ -862,7 +879,7 @@ class TenexCoreManager: ObservableObject {
         projectOnlineStatus = updated
     }
 
-    nonisolated private static func canonicalOnlineAgents(_ agents: [OnlineAgentInfo]) -> [OnlineAgentInfo] {
+    nonisolated private static func canonicalOnlineAgents(_ agents: [ProjectAgent]) -> [ProjectAgent] {
         agents
             .map { agent in
                 var normalized = agent
@@ -950,7 +967,7 @@ class TenexCoreManager: ObservableObject {
         let now = UInt64(Date().timeIntervalSince1970)
         let filtered = fetched.filter { conversation in
             let projectId = Self.projectId(fromATag: conversation.projectATag)
-            return snapshot.includes(projectId: projectId, timestamp: conversation.effectiveLastActivity, now: now)
+            return snapshot.includes(projectId: projectId, timestamp: conversation.thread.effectiveLastActivity, now: now)
         }
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
         profiler.logEvent(

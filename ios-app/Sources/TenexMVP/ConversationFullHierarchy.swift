@@ -25,22 +25,22 @@ final class ConversationFullHierarchy {
     /// - Parameter conversations: All conversations to process
     init(conversations: [ConversationFullInfo]) {
         // Step 1: Build O(1) lookup maps
-        let byId = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
+        let byId = Dictionary(uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) })
         self.conversationById = byId
 
         // Step 2: Build parent→children map (O(n))
         var childrenMap: [String: [ConversationFullInfo]] = [:]
         for conversation in conversations {
-            if let parentId = conversation.parentId {
+            if let parentId = conversation.thread.parentConversationId {
                 childrenMap[parentId, default: []].append(conversation)
             }
         }
         self.childrenByParentId = childrenMap
 
         // Step 3: Identify root conversations (no parent OR orphaned)
-        let allIds = Set(conversations.map { $0.id })
+        let allIds = Set(conversations.map { $0.thread.id })
         let roots = conversations.filter { conv in
-            if let parentId = conv.parentId {
+            if let parentId = conv.thread.parentConversationId {
                 return !allIds.contains(parentId) // Orphaned: parent doesn't exist
             }
             return true // No parent - true root
@@ -59,15 +59,15 @@ final class ConversationFullHierarchy {
 
         // Step 5: Sort roots by hierarchical activity first, then by effective last activity
         self.sortedRootConversations = roots.sorted { a, b in
-            let aActive = activityMap[a.id] ?? a.isActive
-            let bActive = activityMap[b.id] ?? b.isActive
+            let aActive = activityMap[a.thread.id] ?? a.isActive
+            let bActive = activityMap[b.thread.id] ?? b.isActive
 
             // Active conversations come first
             if aActive && !bActive { return true }
             if !aActive && bActive { return false }
 
             // Within same activity status, sort by effective last activity (newest first)
-            return a.effectiveLastActivity > b.effectiveLastActivity
+            return a.thread.effectiveLastActivity > b.thread.effectiveLastActivity
         }
     }
 
@@ -78,14 +78,14 @@ final class ConversationFullHierarchy {
         childrenMap: [String: [ConversationFullInfo]],
         activityMap: inout [String: Bool]
     ) {
-        let conversationsById = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
+        let conversationsById = Dictionary(uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) })
         var visited = Set<String>()
 
         // Process all conversations using DFS with memoization
         for conversation in conversations {
-            if activityMap[conversation.id] == nil {
+            if activityMap[conversation.thread.id] == nil {
                 _ = computeActivityRecursive(
-                    conversationId: conversation.id,
+                    conversationId: conversation.thread.id,
                     conversations: conversationsById,
                     childrenMap: childrenMap,
                     activityMap: &activityMap,
@@ -133,7 +133,7 @@ final class ConversationFullHierarchy {
         let children = childrenMap[conversationId] ?? []
         for child in children {
             if computeActivityRecursive(
-                conversationId: child.id,
+                conversationId: child.thread.id,
                 conversations: conversations,
                 childrenMap: childrenMap,
                 activityMap: &activityMap,

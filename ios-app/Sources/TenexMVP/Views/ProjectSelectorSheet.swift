@@ -7,13 +7,13 @@ struct ProjectSelectorSheet: View {
     // MARK: - Properties
 
     /// Available projects to choose from
-    let projects: [ProjectInfo]
+    let projects: [Project]
 
     /// Online status per project ID
     var projectOnlineStatus: [String: Bool] = [:]
 
     /// Currently selected project (binding for single-select)
-    @Binding var selectedProject: ProjectInfo?
+    @Binding var selectedProject: Project?
 
     /// Callback when selection is confirmed
     var onDone: (() -> Void)?
@@ -25,12 +25,12 @@ struct ProjectSelectorSheet: View {
     // MARK: - State
 
     /// Local copy of selection - only committed on Done, discarded on Cancel
-    @State private var localSelectedProject: ProjectInfo?
+    @State private var localSelectedProject: Project?
     @State private var searchText = ""
 
     // MARK: - Computed
 
-    private var filteredProjects: [ProjectInfo] {
+    private var filteredProjects: [Project] {
         let base = searchText.isEmpty ? projects : projects.filter { project in
             let lowercasedSearch = searchText.lowercased()
             return project.title.lowercased().contains(lowercasedSearch) ||
@@ -147,7 +147,7 @@ struct ProjectSelectorSheet: View {
         #endif
     }
 
-    private func selectedProjectBar(_ project: ProjectInfo) -> some View {
+    private func selectedProjectBar(_ project: Project) -> some View {
         HStack(spacing: 8) {
             Text(project.title)
                 .font(.subheadline)
@@ -195,7 +195,7 @@ struct ProjectSelectorSheet: View {
 
     // MARK: - Actions
 
-    private func selectProject(_ project: ProjectInfo) {
+    private func selectProject(_ project: Project) {
         // Toggle selection (single-select)
         if localSelectedProject?.id == project.id {
             localSelectedProject = nil
@@ -208,7 +208,7 @@ struct ProjectSelectorSheet: View {
 // MARK: - Project Row Select View
 
 struct ProjectRowSelectView: View {
-    let project: ProjectInfo
+    let project: Project
     var isOnline: Bool = false
     let isSelected: Bool
     var onTap: (() -> Void)?
@@ -292,51 +292,59 @@ struct ProjectRowSelectView: View {
 #Preview {
     ProjectSelectorSheet(
         projects: [
-            ProjectInfo(
+            Project(
                 id: "tenex-tui",
                 title: "TENEX TUI Client",
                 description: "Terminal UI client for TENEX",
                 repoUrl: nil,
                 pictureUrl: nil,
-                createdAt: 0,
-                agentIds: [],
+                isDeleted: false,
+                pubkey: "",
+                participants: [],
+                agentDefinitionIds: [],
                 mcpToolIds: [],
-                isDeleted: false
+                createdAt: 0
             ),
-            ProjectInfo(
+            Project(
                 id: "nostr-sdk",
                 title: "Nostr SDK",
                 description: "Swift SDK for Nostr protocol",
                 repoUrl: nil,
                 pictureUrl: nil,
-                createdAt: 0,
-                agentIds: [],
+                isDeleted: false,
+                pubkey: "",
+                participants: [],
+                agentDefinitionIds: [],
                 mcpToolIds: [],
-                isDeleted: false
+                createdAt: 0
             ),
-            ProjectInfo(
+            Project(
                 id: "mobile-app",
                 title: "Mobile App",
                 description: nil,
                 repoUrl: nil,
                 pictureUrl: nil,
-                createdAt: 0,
-                agentIds: [],
+                isDeleted: false,
+                pubkey: "",
+                participants: [],
+                agentDefinitionIds: [],
                 mcpToolIds: [],
-                isDeleted: false
+                createdAt: 0
             )
         ],
         selectedProject: .constant(
-            ProjectInfo(
+            Project(
                 id: "tenex-tui",
                 title: "TENEX TUI Client",
                 description: "Terminal UI client for TENEX",
                 repoUrl: nil,
                 pictureUrl: nil,
-                createdAt: 0,
-                agentIds: [],
+                isDeleted: false,
+                pubkey: "",
+                participants: [],
+                agentDefinitionIds: [],
                 mcpToolIds: [],
-                isDeleted: false
+                createdAt: 0
             )
         )
     )

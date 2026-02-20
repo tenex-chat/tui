@@ -2,12 +2,12 @@ import Foundation
 
 @MainActor
 protocol CoreGateway: AnyObject {
-    var projects: [ProjectInfo] { get }
+    var projects: [Project] { get }
     var conversations: [ConversationFullInfo] { get }
-    var onlineAgents: [String: [OnlineAgentInfo]] { get }
+    var onlineAgents: [String: [ProjectAgent]] { get }
 
-    func getNudges() async throws -> [NudgeInfo]
-    func getSkills() async throws -> [SkillInfo]
+    func getNudges() async throws -> [Nudge]
+    func getSkills() async throws -> [Skill]
     func getProfileName(pubkey: String) async -> String
     func sendThread(
         projectId: String,
@@ -87,11 +87,11 @@ struct ComposerDependencies {
 }
 
 extension TenexCoreManager: CoreGateway {
-    func getNudges() async throws -> [NudgeInfo] {
+    func getNudges() async throws -> [Nudge] {
         try await safeCore.getNudges()
     }
 
-    func getSkills() async throws -> [SkillInfo] {
+    func getSkills() async throws -> [Skill] {
         try await safeCore.getSkills()
     }
 

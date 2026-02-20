@@ -75,7 +75,7 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveNsec(_ nsec: String) -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return saveFileCredential(nsec, fileName: Self.nsecFileName)
@@ -119,7 +119,7 @@ final class KeychainService {
     /// - Returns: Result containing the nsec string or specific failure
     /// - Precondition: Must be called from a background thread
     func loadNsec() -> KeychainResult<String> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return loadFileCredential(fileName: Self.nsecFileName)
@@ -155,7 +155,7 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteNsec() -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return deleteFileCredential(fileName: Self.nsecFileName)
@@ -181,7 +181,7 @@ final class KeychainService {
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasStoredNsec() -> KeychainResult<Bool> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return hasFileCredential(fileName: Self.nsecFileName)
@@ -213,7 +213,7 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveElevenLabsApiKey(_ key: String) -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return saveFileCredential(key, fileName: Self.elevenLabsFileName)
@@ -255,7 +255,7 @@ final class KeychainService {
     /// - Returns: Result containing the API key or specific failure
     /// - Precondition: Must be called from a background thread
     func loadElevenLabsApiKey() -> KeychainResult<String> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return loadFileCredential(fileName: Self.elevenLabsFileName)
@@ -291,7 +291,7 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteElevenLabsApiKey() -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return deleteFileCredential(fileName: Self.elevenLabsFileName)
@@ -316,7 +316,7 @@ final class KeychainService {
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasElevenLabsApiKey() -> KeychainResult<Bool> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return hasFileCredential(fileName: Self.elevenLabsFileName)
@@ -348,7 +348,7 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveOpenRouterApiKey(_ key: String) -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return saveFileCredential(key, fileName: Self.openRouterFileName)
@@ -390,7 +390,7 @@ final class KeychainService {
     /// - Returns: Result containing the API key or specific failure
     /// - Precondition: Must be called from a background thread
     func loadOpenRouterApiKey() -> KeychainResult<String> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return loadFileCredential(fileName: Self.openRouterFileName)
@@ -426,7 +426,7 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteOpenRouterApiKey() -> KeychainResult<Void> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return deleteFileCredential(fileName: Self.openRouterFileName)
@@ -451,7 +451,7 @@ final class KeychainService {
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasOpenRouterApiKey() -> KeychainResult<Bool> {
-        precondition(!Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
         return hasFileCredential(fileName: Self.openRouterFileName)

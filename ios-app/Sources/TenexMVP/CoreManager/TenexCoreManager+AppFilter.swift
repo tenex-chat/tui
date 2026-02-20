@@ -57,15 +57,16 @@ extension TenexCoreManager {
 
     func conversationMatchesAppFilter(_ conversation: ConversationFullInfo, now: UInt64? = nil) -> Bool {
         let projectId = Self.projectId(fromATag: conversation.projectATag)
-        return matchesAppFilter(projectId: projectId, timestamp: conversation.effectiveLastActivity, now: now)
+        return matchesAppFilter(projectId: projectId, timestamp: conversation.thread.effectiveLastActivity, now: now)
     }
 
-    func reportMatchesAppFilter(_ report: ReportInfo, now: UInt64? = nil) -> Bool {
-        matchesAppFilter(projectId: report.projectId, timestamp: report.updatedAt, now: now)
+    func reportMatchesAppFilter(_ report: Report, now: UInt64? = nil) -> Bool {
+        let projectId = Self.projectId(fromATag: report.projectATag)
+        return matchesAppFilter(projectId: projectId, timestamp: report.createdAt, now: now)
     }
 
     func inboxItemMatchesAppFilter(_ item: InboxItem, now: UInt64? = nil) -> Bool {
-        matchesAppFilter(projectId: item.projectId, timestamp: item.createdAt, now: now)
+        matchesAppFilter(projectId: item.resolvedProjectId, timestamp: item.createdAt, now: now)
     }
 
     func searchResultMatchesAppFilter(_ result: SearchResult, now: UInt64? = nil) -> Bool {

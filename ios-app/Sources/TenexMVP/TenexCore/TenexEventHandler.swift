@@ -59,30 +59,30 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
                 coreManager.applyInboxUpsert(item)
 
                 // Only process new events (skip stale inbox items from before this session)
-                guard item.status == "waiting" && item.createdAt >= coreManager.sessionStartTimestamp else {
+                guard !item.isRead && item.createdAt >= coreManager.sessionStartTimestamp else {
                     break
                 }
 
-                if item.eventType == "ask" {
+                if item.eventType == .ask {
                     // Trigger local push notification for ask events
                     Task {
                         await NotificationService.shared.scheduleAskNotification(
                             askEventId: item.id,
                             title: item.title,
                             body: item.content,
-                            fromAgent: item.fromAgent,
-                            projectId: item.projectId,
-                            conversationId: item.conversationId
+                            fromAgent: item.authorPubkey,
+                            projectId: item.resolvedProjectId,
+                            conversationId: item.threadId
                         )
                     }
-                } else if item.eventType == "mention" {
+                } else if item.eventType == .mention {
                     // Trigger audio notification for mentions
                     Task {
                         await coreManager.triggerAudioNotification(
                             agentPubkey: item.authorPubkey,
                             conversationTitle: item.title,
                             messageText: item.content,
-                            conversationId: item.conversationId
+                            conversationId: item.threadId
                         )
                     }
                 }

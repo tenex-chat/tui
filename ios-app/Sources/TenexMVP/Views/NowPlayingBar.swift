@@ -26,12 +26,12 @@ struct NowPlayingBar: View {
     /// Look up the conversation from coreManager data
     private var conversation: ConversationFullInfo? {
         guard let id = player.currentConversationId else { return nil }
-        return coreManager.conversations.first { $0.id == id }
+        return coreManager.conversations.first { $0.thread.id == id }
     }
 
     /// Real conversation title from live data
     private var conversationTitle: String {
-        conversation?.title ?? player.currentConversationTitle ?? "Audio Notification"
+        conversation?.thread.title ?? player.currentConversationTitle ?? "Audio Notification"
     }
 
     /// Project title for the subtitle
@@ -270,15 +270,15 @@ struct AudioQueueSheet: View {
 
     private func resolveConversationTitle(conversationId: String?, fallback: String?) -> String {
         if let id = conversationId,
-           let conv = coreManager.conversations.first(where: { $0.id == id }) {
-            return conv.title
+           let conv = coreManager.conversations.first(where: { $0.thread.id == id }) {
+            return conv.thread.title
         }
         return fallback ?? "Audio Notification"
     }
 
     private func resolveProjectTitle(conversationId: String?) -> String? {
         guard let id = conversationId,
-              let conv = coreManager.conversations.first(where: { $0.id == id }) else { return nil }
+              let conv = coreManager.conversations.first(where: { $0.thread.id == id }) else { return nil }
         let projectId = TenexCoreManager.projectId(fromATag: conv.projectATag)
         return coreManager.projects.first { $0.id == projectId }?.title
     }

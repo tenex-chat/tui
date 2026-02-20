@@ -27,7 +27,7 @@ struct ConversationDetailView: View {
 
     var body: some View {
         contentView
-            .navigationTitle(conversation.title)
+            .navigationTitle(conversation.thread.title)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $selectedDelegationConv) { conv in
                 ConversationDetailView(conversation: conv)
@@ -96,7 +96,7 @@ struct ConversationDetailView: View {
                 }
 
                 // Streaming Section - shows live agent output from local socket
-                if let buffer = coreManager.streamingBuffers[conversation.id] {
+                if let buffer = coreManager.streamingBuffers[conversation.thread.id] {
                     streamingSection(buffer)
                 }
 
@@ -126,7 +126,7 @@ struct ConversationDetailView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Summary (no truncation)
-            if let summary = conversation.summary, !summary.isEmpty {
+            if let summary = conversation.thread.summary, !summary.isEmpty {
                 Text(summary)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -185,40 +185,40 @@ struct ConversationDetailView: View {
     }
 
     /// Find the project for this conversation
-    private var project: ProjectInfo? {
+    private var project: Project? {
         coreManager.projects.first { $0.id == conversation.extractedProjectId }
     }
 
     /// Find the last agent that spoke in the conversation (hex pubkey format)
-    /// Filters by role to exclude user messages and only selects from available agents
+    /// Filters to exclude user messages and only selects from available agents
     private var lastAgentPubkey: String? {
         let availableAgents = project.flatMap { coreManager.onlineAgents[$0.id] } ?? []
         return LastAgentFinder.findLastAgentPubkey(
             messages: viewModel.messages,
-            availableAgents: availableAgents,
-            npubToHex: { Bech32.npubToHex($0) }
+            availableAgents: availableAgents
         )
     }
 
-    private func latestReplySection(_ reply: MessageInfo) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+    private func latestReplySection(_ reply: Message) -> some View {
+        let replyAuthorName = coreManager.displayName(for: reply.pubkey)
+        return VStack(alignment: .leading, spacing: 12) {
             // Header with author and timestamp
             HStack {
                 // Author avatar and name
                 HStack(spacing: 6) {
                     AgentAvatarView(
-                        agentName: reply.author,
-                        pubkey: reply.authorNpub.isEmpty ? nil : Bech32.npubToHex(reply.authorNpub),
+                        agentName: replyAuthorName,
+                        pubkey: reply.pubkey,
                         size: 20,
                         fontSize: 8,
                         showBorder: false
                     )
                     .environmentObject(coreManager)
 
-                    Text(AgentNameFormatter.format(reply.author))
+                    Text(AgentNameFormatter.format(replyAuthorName))
                         .font(.subheadline)
                         .fontWeight(.semibold)
-                        .foregroundStyle(deterministicColor(for: reply.authorNpub))
+                        .foregroundStyle(deterministicColor(for: reply.pubkey))
                 }
 
                 Spacer()
@@ -338,8 +338,8 @@ struct ConversationDetailView: View {
         .sheet(isPresented: $showComposer) {
             MessageComposerView(
                 project: project,
-                conversationId: conversation.id,
-                conversationTitle: conversation.title,
+                conversationId: conversation.thread.id,
+                conversationTitle: conversation.thread.title,
                 initialAgentPubkey: lastAgentPubkey
             )
             .environmentObject(coreManager)

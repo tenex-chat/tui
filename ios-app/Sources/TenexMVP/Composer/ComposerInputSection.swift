@@ -20,11 +20,12 @@ extension MessageComposerView {
                 TextField(
                     "",
                     text: $localText,
-                    prompt: Text(composerPlaceholderText).foregroundStyle(.tertiary),
+                    prompt: Text(composerPlaceholderText).foregroundStyle(.secondary.opacity(0.6)),
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
-                .font(.body)
+                .font(.title3)
+                .foregroundStyle(.primary.opacity(0.94))
                 .lineLimit(1...8)
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -58,9 +59,9 @@ extension MessageComposerView {
             }
         }
         .frame(
-            minHeight: usesWorkspaceInlineLayout ? 72 : 200,
-            idealHeight: usesWorkspaceInlineLayout ? 88 : nil,
-            maxHeight: usesWorkspaceInlineLayout ? 176 : nil,
+            minHeight: usesWorkspaceInlineLayout ? 84 : 200,
+            idealHeight: usesWorkspaceInlineLayout ? 102 : nil,
+            maxHeight: usesWorkspaceInlineLayout ? 196 : nil,
             alignment: usesWorkspaceInlineLayout ? .topLeading : .center
         )
     }

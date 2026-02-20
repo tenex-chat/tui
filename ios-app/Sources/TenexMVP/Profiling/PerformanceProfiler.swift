@@ -103,7 +103,7 @@ final class PerformanceProfiler {
         let result = try operation()
         let durationMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
 
-        let message = "\(name) took \(String(format: "%.2f", durationMs)) ms [thread=\(Thread.isMainThread ? "main" : "background")]"
+        let message = "\(name) took \(String(format: "%.2f", durationMs)) ms [thread=\(Foundation.Thread.isMainThread ? "main" : "background")]"
         let level: OSLogType = durationMs >= slowThresholdMs ? .error : .info
         logEvent(message, category: category, level: level)
 

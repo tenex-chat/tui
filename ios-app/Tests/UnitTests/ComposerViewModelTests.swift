@@ -146,7 +146,7 @@ final class ComposerViewModelTests: XCTestCase {
     func testValidatedAgentPubkeyClearsInvalidSelectionWhenAgentListIsLoaded() async {
         let drafts = MockDraftStore()
         let viewModel = makeViewModel(core: MockCoreGateway(), drafts: drafts)
-        let agents = [OnlineAgentInfo(pubkey: "other", name: "Other", isPm: false, model: nil, tools: [])]
+        let agents = [ProjectAgent(pubkey: "other", name: "Other", isPm: false, model: nil, tools: [])]
 
         let validated = await viewModel.validatedAgentPubkey(
             candidate: "missing",
@@ -177,17 +177,19 @@ final class ComposerViewModelTests: XCTestCase {
         )
     }
 
-    private func makeProject(id: String) -> ProjectInfo {
-        ProjectInfo(
+    private func makeProject(id: String) -> Project {
+        Project(
             id: id,
             title: id,
             description: nil,
             repoUrl: nil,
             pictureUrl: nil,
-            createdAt: 0,
-            agentIds: [],
+            isDeleted: false,
+            pubkey: "",
+            participants: [],
+            agentDefinitionIds: [],
             mcpToolIds: [],
-            isDeleted: false
+            createdAt: 0
         )
     }
 
@@ -197,24 +199,29 @@ final class ComposerViewModelTests: XCTestCase {
         lastActivity: UInt64,
         isScheduled: Bool
     ) -> ConversationFullInfo {
-        ConversationFullInfo(
+        let thread = Thread(
             id: id,
             title: id,
-            author: "author",
-            authorPubkey: "author-pubkey",
-            summary: nil,
-            messageCount: 1,
+            content: "",
+            pubkey: "author-pubkey",
             lastActivity: lastActivity,
             effectiveLastActivity: lastActivity,
-            parentId: nil,
-            status: nil,
-            currentActivity: nil,
+            statusLabel: nil,
+            statusCurrentActivity: nil,
+            summary: nil,
+            parentConversationId: nil,
+            pTags: [],
+            askEvent: nil,
+            isScheduled: isScheduled
+        )
+        return ConversationFullInfo(
+            thread: thread,
+            author: "author",
+            messageCount: 1,
             isActive: false,
             isArchived: false,
             hasChildren: false,
-            projectATag: "31922:owner:\(projectId)",
-            isScheduled: isScheduled,
-            pTags: []
+            projectATag: "31922:owner:\(projectId)"
         )
     }
 }
@@ -230,12 +237,12 @@ private struct SendInvocation: Equatable {
 
 @MainActor
 private final class MockCoreGateway: CoreGateway {
-    var projects: [ProjectInfo] = []
+    var projects: [Project] = []
     var conversations: [ConversationFullInfo] = []
-    var onlineAgents: [String: [OnlineAgentInfo]] = [:]
+    var onlineAgents: [String: [ProjectAgent]] = [:]
 
-    var nudges: [NudgeInfo] = []
-    var skills: [SkillInfo] = []
+    var nudges: [Nudge] = []
+    var skills: [Skill] = []
     var profileNamesByPubkey: [String: String] = [:]
 
     var sendThreadCalls: [SendInvocation] = []
@@ -243,11 +250,11 @@ private final class MockCoreGateway: CoreGateway {
     var threadSendResult = SendMessageResult(eventId: "thread", success: true)
     var replySendResult = SendMessageResult(eventId: "reply", success: true)
 
-    func getNudges() async throws -> [NudgeInfo] {
+    func getNudges() async throws -> [Nudge] {
         nudges
     }
 
-    func getSkills() async throws -> [SkillInfo] {
+    func getSkills() async throws -> [Skill] {
         skills
     }
 

@@ -19,15 +19,15 @@ enum ConversationActivityMetrics {
         conversationsById.reserveCapacity(allDescendants.count + directChildren.count)
 
         for descendant in allDescendants {
-            conversationsById[descendant.id] = descendant
+            conversationsById[descendant.thread.id] = descendant
         }
         for child in directChildren {
-            conversationsById[child.id] = child
+            conversationsById[child.thread.id] = child
         }
 
         let hierarchy = ConversationFullHierarchy(conversations: Array(conversationsById.values))
         return Dictionary(uniqueKeysWithValues: directChildren.map { child in
-            (child.id, hierarchy.isHierarchicallyActive(child.id))
+            (child.thread.id, hierarchy.isHierarchicallyActive(child.thread.id))
         })
     }
 }

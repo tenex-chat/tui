@@ -15,10 +15,10 @@ struct AgentDefinitionsTabView: View {
     @EnvironmentObject private var coreManager: TenexCoreManager
 
     let layoutMode: AgentDefinitionsLayoutMode
-    private let selectedAgentBindingOverride: Binding<AgentInfo?>?
+    private let selectedAgentBindingOverride: Binding<AgentDefinition?>?
 
     @StateObject private var viewModel = AgentDefinitionsViewModel()
-    @State private var selectedAgentState: AgentInfo?
+    @State private var selectedAgentState: AgentDefinition?
     @State private var hasConfiguredViewModel = false
     @State private var navigationPath: [AgentDefinitionListItem] = []
     @State private var assignmentTarget: AgentDefinitionListItem?
@@ -27,13 +27,13 @@ struct AgentDefinitionsTabView: View {
 
     init(
         layoutMode: AgentDefinitionsLayoutMode = .adaptive,
-        selectedAgent: Binding<AgentInfo?>? = nil
+        selectedAgent: Binding<AgentDefinition?>? = nil
     ) {
         self.layoutMode = layoutMode
         self.selectedAgentBindingOverride = selectedAgent
     }
 
-    private var selectedAgentBinding: Binding<AgentInfo?> {
+    private var selectedAgentBinding: Binding<AgentDefinition?> {
         selectedAgentBindingOverride ?? $selectedAgentState
     }
 
@@ -652,7 +652,7 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
         item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name
     }
 
-    private var sortedProjects: [ProjectInfo] {
+    private var sortedProjects: [Project] {
         coreManager.projects
             .filter { !$0.isDeleted }
             .sorted { lhs, rhs in
@@ -660,7 +660,7 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
             }
     }
 
-    private var filteredProjects: [ProjectInfo] {
+    private var filteredProjects: [Project] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return sortedProjects }
 
@@ -729,8 +729,8 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
         #endif
     }
 
-    private func projectRow(_ project: ProjectInfo) -> some View {
-        let alreadyAssigned = project.agentIds.contains(item.agent.id)
+    private func projectRow(_ project: Project) -> some View {
+        let alreadyAssigned = project.agentDefinitionIds.contains(item.agent.id)
         let isSelected = selectedProjectIds.contains(project.id)
 
         return Button {
@@ -790,11 +790,11 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
         var failedProjects: [String] = []
 
         for project in targetProjects {
-            if project.agentIds.contains(item.agent.id) {
+            if project.agentDefinitionIds.contains(item.agent.id) {
                 continue
             }
 
-            var updatedAgentIds = project.agentIds
+            var updatedAgentIds = project.agentDefinitionIds
             updatedAgentIds.append(item.agent.id)
 
             do {
@@ -804,7 +804,7 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
                     description: project.description ?? "",
                     repoUrl: project.repoUrl,
                     pictureUrl: project.pictureUrl,
-                    agentIds: updatedAgentIds,
+                    agentDefinitionIds: updatedAgentIds,
                     mcpToolIds: project.mcpToolIds
                 )
                 updatedCount += 1

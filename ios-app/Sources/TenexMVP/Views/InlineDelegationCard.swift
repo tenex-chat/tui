@@ -24,7 +24,7 @@ struct InlineDelegationCard: View {
                 if let info = conversationInfo {
                     AgentAvatarView(
                         agentName: info.author,
-                        pubkey: info.authorPubkey,
+                        pubkey: info.thread.pubkey,
                         size: avatarSize,
                         fontSize: 11,
                         showBorder: false
@@ -56,7 +56,7 @@ struct InlineDelegationCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     // Title or preview
                     if let info = conversationInfo {
-                        Text(info.title)
+                        Text(info.thread.title)
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .foregroundStyle(.primary)
@@ -66,15 +66,15 @@ struct InlineDelegationCard: View {
                         HStack(spacing: 4) {
                             Text("@\(AgentNameFormatter.format(info.author))")
                                 .font(.caption)
-                                .foregroundStyle(deterministicColor(for: info.authorPubkey))
+                                .foregroundStyle(deterministicColor(for: info.thread.pubkey))
 
-                            if let status = info.status {
+                            if let status = info.thread.statusLabel {
                                 StatusBadge(status: status, isActive: info.isActive)
                             }
                         }
 
                         // Summary preview
-                        if let summary = info.summary, !summary.isEmpty {
+                        if let summary = info.thread.summary, !summary.isEmpty {
                             Text(summary)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)

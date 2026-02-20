@@ -76,18 +76,18 @@ struct ConversationByIdAdaptiveDetailView: View {
 }
 
 private struct SelectedReportDestination: Identifiable, Hashable {
-    let report: ReportInfo
-    var id: String { "\(report.projectId):\(report.id)" }
+    let report: Report
+    var id: String { "\(report.projectATag):\(report.slug)" }
 }
 
 enum ConversationWorkspaceSource {
     case existing(conversation: ConversationFullInfo)
-    case newThread(project: ProjectInfo)
+    case newThread(project: Project)
 
     var identity: String {
         switch self {
         case .existing(let conversation):
-            return "existing-\(conversation.id)"
+            return "existing-\(conversation.thread.id)"
         case .newThread(let project):
             return "new-thread-\(project.id)"
         }
@@ -99,24 +99,29 @@ enum ConversationWorkspaceSource {
             return conversation
         case .newThread(let project):
             let now = UInt64(Date().timeIntervalSince1970)
-            return ConversationFullInfo(
+            let thread = Thread(
                 id: "new-thread-\(project.id)",
                 title: "New Conversation",
-                author: "You",
-                authorPubkey: "",
-                summary: nil,
-                messageCount: 0,
+                content: "",
+                pubkey: "",
                 lastActivity: now,
                 effectiveLastActivity: now,
-                parentId: nil,
-                status: "draft",
-                currentActivity: nil,
+                statusLabel: "draft",
+                statusCurrentActivity: nil,
+                summary: nil,
+                parentConversationId: nil,
+                pTags: [],
+                askEvent: nil,
+                isScheduled: false
+            )
+            return ConversationFullInfo(
+                thread: thread,
+                author: "You",
+                messageCount: 0,
                 isActive: false,
                 isArchived: false,
                 hasChildren: false,
-                projectATag: "31922:local:\(project.id)",
-                isScheduled: false,
-                pTags: []
+                projectATag: "31922:local:\(project.id)"
             )
         }
     }
@@ -136,7 +141,7 @@ struct ConversationWorkspaceView: View {
     @State private var inspectorVisible = true
     @State private var selectedDelegationConversation: ConversationFullInfo?
     @State private var selectedReportDestination: SelectedReportDestination?
-    @State private var availableAgents: [OnlineAgentInfo] = []
+    @State private var availableAgents: [ProjectAgent] = []
     @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var navigationErrorMessage: String?
     private let profiler = PerformanceProfiler.shared
@@ -164,13 +169,13 @@ struct ConversationWorkspaceView: View {
     private var currentConversation: ConversationFullInfo {
         switch source {
         case .existing(let conversation):
-            return coreManager.conversations.first(where: { $0.id == conversation.id }) ?? conversation
+            return coreManager.conversations.first(where: { $0.thread.id == conversation.thread.id }) ?? conversation
         case .newThread:
             return seedConversation
         }
     }
 
-    private var project: ProjectInfo? {
+    private var project: Project? {
         switch source {
         case .existing:
             return coreManager.projects.first { $0.id == currentConversation.extractedProjectId }
@@ -180,21 +185,21 @@ struct ConversationWorkspaceView: View {
     }
 
     private var conversationTitle: String {
-        isNewThreadMode ? "New Conversation" : currentConversation.title
+        isNewThreadMode ? "New Conversation" : currentConversation.thread.title
     }
 
-    private var transcriptMessages: [MessageInfo] {
+    private var transcriptMessages: [Message] {
         isNewThreadMode ? [] : viewModel.messages
     }
 
-    /// Keep row iteration lightweight by avoiding tuple arrays with full MessageInfo copies.
+    /// Keep row iteration lightweight by avoiding tuple arrays with full Message copies.
     private var messageIndices: Range<Int> {
         transcriptMessages.indices
     }
 
     private var streamingBuffer: StreamingBuffer? {
         guard !isNewThreadMode else { return nil }
-        return coreManager.streamingBuffers[currentConversation.id]
+        return coreManager.streamingBuffers[currentConversation.thread.id]
     }
 
     private var streamingTextCount: Int? {
@@ -205,8 +210,7 @@ struct ConversationWorkspaceView: View {
         guard !isNewThreadMode else { return nil }
         return LastAgentFinder.findLastAgentPubkey(
             messages: transcriptMessages,
-            availableAgents: availableAgents,
-            npubToHex: { Bech32.npubToHex($0) }
+            availableAgents: availableAgents
         )
     }
 
@@ -283,7 +287,7 @@ struct ConversationWorkspaceView: View {
         .navigationDestination(item: $selectedReportDestination) { destination in
             ReportsTabDetailView(
                 report: destination.report,
-                project: coreManager.projects.first { $0.id == destination.report.projectId }
+                project: coreManager.projects.first { $0.id == TenexCoreManager.projectId(fromATag: destination.report.projectATag) }
             )
             .environmentObject(coreManager)
         }
@@ -365,8 +369,8 @@ struct ConversationWorkspaceView: View {
                         let message = transcriptMessages[index]
                         SlackMessageRow(
                             message: message,
-                            isConsecutive: index > 0 && transcriptMessages[index - 1].authorNpub == message.authorNpub,
-                            conversationId: currentConversation.id,
+                            isConsecutive: index > 0 && transcriptMessages[index - 1].pubkey == message.pubkey,
+                            conversationId: currentConversation.thread.id,
                             projectId: currentConversation.extractedProjectId,
                             onDelegationTap: { delegationId in
                                 openDelegation(byId: delegationId)
@@ -380,7 +384,7 @@ struct ConversationWorkspaceView: View {
                     if let buffer = streamingBuffer {
                         StreamingMessageRow(
                             buffer: buffer,
-                            isConsecutive: transcriptMessages.last?.authorNpub == buffer.agentPubkey
+                            isConsecutive: transcriptMessages.last?.pubkey == buffer.agentPubkey
                         )
                         .environmentObject(coreManager)
                         .id("streaming-row")
@@ -422,8 +426,8 @@ struct ConversationWorkspaceView: View {
         VStack(spacing: 0) {
             MessageComposerView(
                 project: project,
-                conversationId: isNewThreadMode ? nil : currentConversation.id,
-                conversationTitle: isNewThreadMode ? nil : currentConversation.title,
+                conversationId: isNewThreadMode ? nil : currentConversation.thread.id,
+                conversationTitle: isNewThreadMode ? nil : currentConversation.thread.title,
                 initialAgentPubkey: isNewThreadMode ? nil : lastAgentPubkey,
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace,
@@ -433,17 +437,20 @@ struct ConversationWorkspaceView: View {
             )
             .environmentObject(coreManager)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(workspaceComposerShellColor)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        RoundedRectangle(cornerRadius: 24, style: .continuous)
                             .stroke(workspaceComposerStrokeColor, lineWidth: 1)
                     )
             )
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            #if os(macOS)
+            .shadow(color: .black.opacity(0.24), radius: 12, x: 0, y: 4)
+            #endif
             .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
         }
         #if os(macOS)
         .background(workspaceBackdropColor)
@@ -484,7 +491,7 @@ struct ConversationWorkspaceView: View {
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if let summary = currentConversation.summary, !summary.isEmpty {
+                if let summary = currentConversation.thread.summary, !summary.isEmpty {
                     Text(summary)
                         .font(.subheadline)
                         .foregroundStyle(Color.secondary.opacity(0.86))
@@ -640,7 +647,7 @@ struct ConversationWorkspaceView: View {
     }
 
     private func openDelegation(byId delegationId: String) {
-        if let cached = coreManager.conversations.first(where: { $0.id == delegationId }) {
+        if let cached = coreManager.conversations.first(where: { $0.thread.id == delegationId }) {
             selectedDelegationConversation = cached
             profiler.logEvent(
                 "delegation navigation cache-hit id=\(delegationId)",
@@ -687,10 +694,9 @@ struct ConversationWorkspaceView: View {
         }
     }
 
-    private func resolveReport(aTag: String) -> ReportInfo? {
+    private func resolveReport(aTag: String) -> Report? {
         coreManager.reports.first { report in
-            guard let authorHex = Bech32.npubToHex(report.authorNpub) else { return false }
-            return "30023:\(authorHex):\(report.id)" == aTag
+            "30023:\(report.author):\(report.slug)" == aTag
         }
     }
 
@@ -698,7 +704,7 @@ struct ConversationWorkspaceView: View {
         if let child = viewModel.childConversation(for: delegation.conversationId) {
             return child
         }
-        return coreManager.conversations.first { $0.id == delegation.conversationId }
+        return coreManager.conversations.first { $0.thread.id == delegation.conversationId }
     }
 
     @ViewBuilder

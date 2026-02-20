@@ -8,12 +8,12 @@ struct DelegationTreeNode: Identifiable {
     /// The conversation this node represents
     let conversation: ConversationFullInfo
     /// The delegate tool-call message in the *parent's* conversation (outgoing arrow content)
-    let delegationMessage: MessageInfo?
+    let delegationMessage: Message?
     /// The kind:1 in *this* conversation where this agent p-tags the parent's author (return arrow)
-    let returnMessage: MessageInfo?
+    let returnMessage: Message?
     var children: [DelegationTreeNode]
 
-    var id: String { conversation.id }
+    var id: String { conversation.thread.id }
     /// Set during layout computation
     var depth: Int = 0
 }
