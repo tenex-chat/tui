@@ -56,6 +56,22 @@ pub fn format_relative_time(timestamp: u64) -> String {
     }
 }
 
+/// Format a timestamp as short relative time (e.g., "now", "6m", "3h", "1d").
+pub fn format_relative_time_short(timestamp: u64) -> String {
+    let diff = now_seconds().saturating_sub(timestamp);
+    if diff < 60 {
+        "now".to_string()
+    } else if diff < 3600 {
+        format!("{}m", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h", diff / 3600)
+    } else if diff < 604800 {
+        format!("{}d", diff / 86400)
+    } else {
+        format!("{}w", diff / 604800)
+    }
+}
+
 /// Format duration since a timestamp started (e.g., "2m", "1h 30m", "2d 5h").
 pub fn format_duration_since(started_at: u64) -> String {
     let diff = now_seconds().saturating_sub(started_at);
