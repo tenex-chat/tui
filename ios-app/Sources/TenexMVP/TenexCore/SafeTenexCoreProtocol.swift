@@ -14,7 +14,7 @@ protocol SafeTenexCoreProtocol: Actor {
     // MARK: - Conversations
     func getAllConversations(filter: ConversationFilter) throws -> [ConversationFullInfo]
     func getConversationsByIds(conversationIds: [String]) -> [ConversationFullInfo]
-    func getConversations(projectId: String) -> [ConversationInfo]
+    func getConversations(projectId: String) -> [ConversationFullInfo]
     func getDescendantConversationIds(conversationId: String) -> [String]
     func getArchivedConversationIds() throws -> [String]
     func isConversationArchived(conversationId: String) -> Bool

@@ -7,9 +7,6 @@ import Kingfisher
 /// Maximum number of agent avatars to display before showing "+N" overflow badge
 let maxVisibleAvatars = 6
 
-/// Length of pubkey prefix to display in truncated form (e.g., in logs and error messages)
-let pubkeyDisplayPrefixLength = 12
-
 // MARK: - Shared Color Utilities
 
 /// Deterministic color selection using SHA-256 hash.
@@ -33,30 +30,30 @@ func deterministicColor(for identifier: String, from colors: [Color]? = nil) -> 
 /// avoiding O(n²) BFS traversals per row render.
 final class ConversationHierarchy {
     /// Map from conversation ID to its direct children
-    let childrenByParentId: [String: [ConversationInfo]]
+    let childrenByParentId: [String: [ConversationFullInfo]]
 
     /// Map from conversation ID to precomputed aggregated data
     let aggregatedData: [String: AggregatedConversationData]
 
     /// Root conversations (including orphaned nodes whose parents are missing)
-    let rootConversations: [ConversationInfo]
+    let rootConversations: [ConversationFullInfo]
 
     /// Initialize hierarchy from a flat list of conversations
     /// - Parameter conversations: All conversations to process
-    init(conversations: [ConversationInfo]) {
+    init(conversations: [ConversationFullInfo]) {
         // Step 1: Build parent→children map (O(n))
-        var childrenMap: [String: [ConversationInfo]] = [:]
-        let conversationIds = Set(conversations.map { $0.id })
+        var childrenMap: [String: [ConversationFullInfo]] = [:]
+        let conversationIds = Set(conversations.map { $0.thread.id })
 
         for conversation in conversations {
-            if let parentId = conversation.parentId {
+            if let parentId = conversation.thread.parentConversationId {
                 childrenMap[parentId, default: []].append(conversation)
             }
         }
 
         // Sort children by lastActivity descending for deterministic ordering
         for (parentId, children) in childrenMap {
-            childrenMap[parentId] = children.sorted { $0.lastActivity > $1.lastActivity }
+            childrenMap[parentId] = children.sorted { $0.thread.lastActivity > $1.thread.lastActivity }
         }
 
         self.childrenByParentId = childrenMap
@@ -64,7 +61,7 @@ final class ConversationHierarchy {
         // Step 2: Identify root conversations (no parent OR orphaned)
         // Orphaned = has parentId but that parent doesn't exist in our set
         let roots = conversations.filter { conversation in
-            if let parentId = conversation.parentId {
+            if let parentId = conversation.thread.parentConversationId {
                 // Orphaned: parent doesn't exist - treat as root
                 return !conversationIds.contains(parentId)
             }
@@ -73,23 +70,23 @@ final class ConversationHierarchy {
         }
 
         // Sort roots by effective last activity (computed below) - we'll re-sort after computing aggregates
-        self.rootConversations = roots.sorted { $0.lastActivity > $1.lastActivity }
+        self.rootConversations = roots.sorted { $0.thread.lastActivity > $1.thread.lastActivity }
 
         // Step 3: Compute aggregated data for each conversation (using safe BFS with cycle detection)
         var aggregated: [String: AggregatedConversationData] = [:]
 
         for conversation in conversations {
             let descendants = Self.computeDescendants(
-                rootId: conversation.id,
+                rootId: conversation.thread.id,
                 childrenMap: childrenMap
             )
 
-            let allActivities = [conversation.lastActivity] + descendants.map { $0.lastActivity }
-            let effectiveLastActivity = allActivities.max() ?? conversation.lastActivity
-            let earliestActivity = allActivities.min() ?? conversation.lastActivity
+            let allActivities = [conversation.thread.lastActivity] + descendants.map { $0.thread.lastActivity }
+            let effectiveLastActivity = allActivities.max() ?? conversation.thread.lastActivity
+            let earliestActivity = allActivities.min() ?? conversation.thread.lastActivity
             let activitySpan = TimeInterval(effectiveLastActivity - earliestActivity)
 
-            // Track agent names (for backward compatibility)
+            // Track agent names
             var agentNames = Set<String>()
             agentNames.insert(conversation.author)
             for descendant in descendants {
@@ -100,17 +97,17 @@ final class ConversationHierarchy {
             // Use pubkey as unique key to avoid duplicates from same agent
             let authorInfo = AgentAvatarInfo(
                 name: conversation.author,
-                pubkey: conversation.authorPubkey
+                pubkey: conversation.thread.pubkey
             )
 
             // Collect delegation agents (descendants only, excluding the author)
             var delegationAgentsByPubkey: [String: AgentAvatarInfo] = [:]
             for descendant in descendants {
                 // Skip if this is the same agent as the author
-                if descendant.authorPubkey != conversation.authorPubkey {
-                    delegationAgentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
+                if descendant.thread.pubkey != conversation.thread.pubkey {
+                    delegationAgentsByPubkey[descendant.thread.pubkey] = AgentAvatarInfo(
                         name: descendant.author,
-                        pubkey: descendant.authorPubkey
+                        pubkey: descendant.thread.pubkey
                     )
                 }
             }
@@ -118,12 +115,12 @@ final class ConversationHierarchy {
             // Sort delegation agents by name for consistent display
             let sortedDelegationAgents = delegationAgentsByPubkey.values.sorted { $0.name < $1.name }
 
-            // All participating agents (for backward compatibility)
+            // All participating agents
             var allAgentsByPubkey = delegationAgentsByPubkey
-            allAgentsByPubkey[conversation.authorPubkey] = authorInfo
+            allAgentsByPubkey[conversation.thread.pubkey] = authorInfo
             let sortedAgentInfos = allAgentsByPubkey.values.sorted { $0.name < $1.name }
 
-            aggregated[conversation.id] = AggregatedConversationData(
+            aggregated[conversation.thread.id] = AggregatedConversationData(
                 effectiveLastActivity: effectiveLastActivity,
                 activitySpan: activitySpan,
                 participatingAgents: agentNames.sorted(),
@@ -144,9 +141,9 @@ final class ConversationHierarchy {
     /// - Returns: All descendant conversations (empty if none or cycle detected)
     private static func computeDescendants(
         rootId: String,
-        childrenMap: [String: [ConversationInfo]]
-    ) -> [ConversationInfo] {
-        var descendants: [ConversationInfo] = []
+        childrenMap: [String: [ConversationFullInfo]]
+    ) -> [ConversationFullInfo] {
+        var descendants: [ConversationFullInfo] = []
         var visited = Set<String>()
 
         // Use ArraySlice for O(1) removeFirst via index tracking
@@ -158,15 +155,15 @@ final class ConversationHierarchy {
             queueIndex += 1
 
             // Cycle detection: skip if already visited
-            if visited.contains(current.id) {
+            if visited.contains(current.thread.id) {
                 continue
             }
-            visited.insert(current.id)
+            visited.insert(current.thread.id)
 
             descendants.append(current)
 
             // Add children to queue
-            if let children = childrenMap[current.id] {
+            if let children = childrenMap[current.thread.id] {
                 queue.append(contentsOf: children)
             }
         }
@@ -180,16 +177,16 @@ final class ConversationHierarchy {
     }
 
     /// Get root conversations sorted by effective last activity (stable ordering)
-    func getSortedRoots() -> [ConversationInfo] {
+    func getSortedRoots() -> [ConversationFullInfo] {
         rootConversations.sorted { lhs, rhs in
-            let lhsActivity = aggregatedData[lhs.id]?.effectiveLastActivity ?? lhs.lastActivity
-            let rhsActivity = aggregatedData[rhs.id]?.effectiveLastActivity ?? rhs.lastActivity
+            let lhsActivity = aggregatedData[lhs.thread.id]?.effectiveLastActivity ?? lhs.thread.lastActivity
+            let rhsActivity = aggregatedData[rhs.thread.id]?.effectiveLastActivity ?? rhs.thread.lastActivity
 
             if lhsActivity != rhsActivity {
                 return lhsActivity > rhsActivity // Descending by activity
             }
             // Tiebreaker: sort by ID for deterministic ordering
-            return lhs.id < rhs.id
+            return lhs.thread.id < rhs.thread.id
         }
     }
 }
@@ -636,6 +633,3 @@ enum ConversationFormatters {
     }
 }
 
-// MARK: - ConversationInfo Conformances
-
-extension ConversationInfo: Identifiable {}
