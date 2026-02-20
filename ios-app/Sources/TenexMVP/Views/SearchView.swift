@@ -13,6 +13,40 @@ struct ConversationSearchGroup: Identifiable {
     var matchCount: Int { matches.count }
 }
 
+/// A draft that matched a search query (either a chat draft or named draft)
+enum DraftSearchResult: Identifiable {
+    case chatDraft(key: String, draft: Draft)
+    case namedDraft(NamedDraft)
+
+    var id: String {
+        switch self {
+        case .chatDraft(let key, _): return "chat-\(key)"
+        case .namedDraft(let d): return "named-\(d.id)"
+        }
+    }
+
+    var text: String {
+        switch self {
+        case .chatDraft(_, let d): return d.content
+        case .namedDraft(let d): return d.text
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .chatDraft: return "Chat Draft"
+        case .namedDraft(let d): return d.name
+        }
+    }
+
+    var lastModified: Date {
+        switch self {
+        case .chatDraft(_, let d): return d.lastEdited
+        case .namedDraft(let d): return d.lastModified
+        }
+    }
+}
+
 // MARK: - Search View
 
 enum SearchLayoutMode {
@@ -31,12 +65,16 @@ struct SearchView: View {
 
     @State private var searchText = ""
     @State private var groupedResults: [ConversationSearchGroup] = []
+    @State private var draftResults: [DraftSearchResult] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
     @State private var selectedConversationState: ConversationFullInfo?
     @State private var isLoadingConversation = false
     @State private var loadingConversationId: String?  // Track which conversation we're loading for "latest wins"
     @State private var loadErrorMessage: String?  // Error feedback for failed loads
+    @State private var includesDrafts = true
+    @State private var showDraftComposer = false
+    @State private var draftTextForComposer: String = ""
 
     init(
         layoutMode: SearchLayoutMode = .adaptive,
@@ -78,12 +116,17 @@ struct SearchView: View {
         }
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
+            searchDrafts(query: newValue)
         }
         .onChange(of: coreManager.appFilterProjectIds) { _, _ in
             performSearch(query: searchText)
+            searchDrafts(query: searchText)
         }
         .onChange(of: coreManager.appFilterTimeWindow) { _, _ in
             performSearch(query: searchText)
+        }
+        .onChange(of: includesDrafts) { _, _ in
+            searchDrafts(query: searchText)
         }
         .onChange(of: groupedResults.map(\.id)) { _, visibleConversationIds in
             if let selectedId = selectedConversationBinding.wrappedValue?.id,
@@ -179,21 +222,41 @@ struct SearchView: View {
         }
     }
 
+    private var noResults: Bool {
+        groupedResults.isEmpty && draftResults.isEmpty
+    }
+
     private var searchResultsList: some View {
         List {
-            if groupedResults.isEmpty && !searchText.isEmpty && !isSearching {
+            if noResults && !searchText.isEmpty && !isSearching {
                 ContentUnavailableView(
                     "No Results",
                     systemImage: "magnifyingglass",
                     description: Text("No messages found matching \"\(searchText)\"")
                 )
-            } else if groupedResults.isEmpty && searchText.isEmpty {
+            } else if noResults && searchText.isEmpty {
                 ContentUnavailableView(
                     "Search Messages",
                     systemImage: "magnifyingglass",
-                    description: Text("Enter a search term to find messages across all conversations")
+                    description: Text("Enter a search term to find messages and drafts")
                 )
             } else {
+                // Draft results section
+                if !draftResults.isEmpty {
+                    Section("Drafts") {
+                        ForEach(draftResults) { draftResult in
+                            Button {
+                                draftTextForComposer = draftResult.text
+                                showDraftComposer = true
+                            } label: {
+                                DraftSearchRow(result: draftResult, searchTerm: searchText)
+                            }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                        }
+                    }
+                }
+
+                // Conversation results
                 ForEach(groupedResults) { group in
                     Section {
                         Button {
@@ -234,6 +297,21 @@ struct SearchView: View {
             ToolbarItem(placement: .topBarLeading) {
                 AppGlobalFilterToolbarButton()
             }
+            ToolbarItem(placement: .topBarTrailing) {
+                Toggle(isOn: $includesDrafts) {
+                    Label("Include Drafts", systemImage: "doc.text")
+                }
+                .toggleStyle(.button)
+                .buttonStyle(.borderless)
+                .tint(includesDrafts ? .accentColor : .secondary)
+            }
+        }
+        .sheet(isPresented: $showDraftComposer) {
+            MessageComposerView(
+                initialContent: draftTextForComposer,
+                displayStyle: .modal
+            )
+            .environmentObject(coreManager)
         }
     }
 
@@ -313,6 +391,38 @@ struct SearchView: View {
         }
     }
 
+    private func searchDrafts(query: String) {
+        guard includesDrafts, query.count >= 2 else {
+            draftResults = []
+            return
+        }
+
+        let lowered = query.lowercased()
+        let filterSnapshot = coreManager.appFilterSnapshot
+        var results: [DraftSearchResult] = []
+
+        // Search chat drafts
+        for (key, draft) in DraftManager.shared.drafts {
+            guard draft.hasContent else { continue }
+            let projectId = draft.projectId.isEmpty ? nil : draft.projectId
+            guard filterSnapshot.includes(projectId: projectId, timestamp: UInt64(draft.lastEdited.timeIntervalSince1970), now: UInt64(Date().timeIntervalSince1970)) else { continue }
+            if draft.content.lowercased().contains(lowered) {
+                results.append(.chatDraft(key: key, draft: draft))
+            }
+        }
+
+        // Search named drafts
+        for nd in NamedDraftManager.shared.allDrafts() {
+            let projectId = nd.projectId.isEmpty ? nil : nd.projectId
+            guard filterSnapshot.includes(projectId: projectId, timestamp: UInt64(nd.lastModified.timeIntervalSince1970), now: UInt64(Date().timeIntervalSince1970)) else { continue }
+            if nd.name.lowercased().contains(lowered) || nd.text.lowercased().contains(lowered) {
+                results.append(.namedDraft(nd))
+            }
+        }
+
+        draftResults = results.sorted { $0.lastModified > $1.lastModified }
+    }
+
     /// Fetch conversation details and present the detail sheet
     /// Uses "latest request wins" pattern to prevent race conditions when user taps multiple results quickly
     private func loadAndSelectConversation(id: String) async {
@@ -387,6 +497,75 @@ struct ConversationGroupHeader: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+}
+
+// MARK: - Draft Search Row
+
+struct DraftSearchRow: View {
+    let result: DraftSearchResult
+    let searchTerm: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "doc.text.fill")
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("DRAFT")
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.8))
+                        .clipShape(Capsule())
+
+                    Text(result.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    Text(result.lastModified, style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                highlightedText(result.text, searchTerm: searchTerm)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private func highlightedText(_ text: String, searchTerm: String) -> Text {
+        guard !searchTerm.isEmpty else { return Text(text) }
+
+        var result = AttributedString(text)
+        let lowercasedText = text.lowercased()
+        let lowercasedTerm = searchTerm.lowercased()
+
+        var searchStart = lowercasedText.startIndex
+        while let range = lowercasedText.range(of: lowercasedTerm, range: searchStart..<lowercasedText.endIndex) {
+            let startOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.lowerBound)
+            let endOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.upperBound)
+
+            let attrStart = result.index(result.startIndex, offsetByCharacters: startOffset)
+            let attrEnd = result.index(result.startIndex, offsetByCharacters: endOffset)
+
+            result[attrStart..<attrEnd].font = .body.bold()
+            result[attrStart..<attrEnd].foregroundColor = .orange
+
+            searchStart = range.upperBound
+        }
+
+        return Text(result)
     }
 }
 

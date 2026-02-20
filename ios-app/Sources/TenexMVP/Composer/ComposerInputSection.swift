@@ -70,13 +70,31 @@ extension MessageComposerView {
             scheduleContentSync(newValue)
         }
         #if os(macOS)
-        .onKeyPress(.return) { keyPress in
+        .onKeyPress(.return, phases: .down) { keyPress in
             if keyPress.modifiers.contains(.shift) {
                 localText += "\n"
                 return .handled
             }
             if canSend {
                 sendMessage()
+            }
+            return .handled
+        }
+        .onKeyPress(.upArrow, phases: .down) { _ in
+            guard localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return .ignored
+            }
+            if let previous = messageHistory.previous(currentText: localText) {
+                isProgrammaticUpdate = true
+                localText = previous
+            }
+            return .handled
+        }
+        .onKeyPress(.downArrow, phases: .down) { _ in
+            guard messageHistory.currentIndex != nil else { return .ignored }
+            if let next = messageHistory.next() {
+                isProgrammaticUpdate = true
+                localText = next
             }
             return .handled
         }
@@ -183,6 +201,29 @@ extension MessageComposerView {
             .disabled(!dictationManager.state.isIdle || selectedProject == nil)
             #endif
 
+            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    saveDraftAsNamed()
+                } label: {
+                    Image(systemName: draftSavedConfirmation ? "bookmark.fill" : "bookmark")
+                        .foregroundStyle(draftSavedConfirmation ? Color.accentColor : Color.composerAction)
+                }
+                .buttonStyle(.borderless)
+                .disabled(selectedProject == nil)
+                .help("Save as reusable draft")
+            }
+
+            if selectedProject != nil {
+                Button {
+                    showDraftBrowser = true
+                } label: {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .foregroundStyle(Color.composerAction)
+                }
+                .buttonStyle(.borderless)
+                .help("Browse saved drafts")
+            }
+
             Spacer()
 
             if !localImageAttachments.isEmpty {
@@ -258,5 +299,18 @@ extension MessageComposerView {
     func openAgentSelector(initialQuery: String = "") {
         agentSelectorInitialQuery = initialQuery
         showAgentSelector = true
+    }
+
+    func saveDraftAsNamed() {
+        guard let projectId = selectedProject?.id else { return }
+        let text = localText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        Task {
+            await NamedDraftManager.shared.save(text, projectId: projectId)
+            draftSavedConfirmation = true
+            try? await Task.sleep(for: .seconds(1.5))
+            draftSavedConfirmation = false
+        }
     }
 }

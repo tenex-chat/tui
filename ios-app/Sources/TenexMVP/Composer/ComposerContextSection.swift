@@ -286,6 +286,21 @@ extension MessageComposerView {
             } label: {
                 Label("Add Shortcuts", systemImage: "slash.circle")
             }
+
+            Divider()
+
+            Button {
+                saveDraftAsNamed()
+            } label: {
+                Label("Save Draft", systemImage: "bookmark")
+            }
+            .disabled(localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            Button {
+                showDraftBrowser = true
+            } label: {
+                Label("Browse Drafts", systemImage: "doc.text.magnifyingglass")
+            }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: workspaceIconSize, weight: .medium))
