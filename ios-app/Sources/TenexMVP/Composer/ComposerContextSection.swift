@@ -225,24 +225,17 @@ extension MessageComposerView {
                         }
                     }
 
-                    if let agent = selectedAgent {
-                        inlineContextToken(text: workspaceAgentLabel(agentContextSummary(agent: agent))) {
-                            openAgentSelector()
-                        }
-                    } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
-                        inlineContextToken(text: workspaceAgentLabel(targetName)) {
-                            draft.setAgent(targetPubkey)
-                            openAgentSelector()
-                        }
-                    } else if selectedProject != nil {
-                        inlineContextToken(text: "Agent") {
-                            openAgentSelector()
+                    if selectedProject != nil {
+                        agentDropdownMenu
+                    }
+
+                    if let agent = selectedAgent, let model = agent.model, !model.isEmpty {
+                        inlineContextToken(text: model, showChevron: false) {
+                            workspaceAgentToConfig = agent
                         }
                     }
 
-                    inlineContextToken(text: nudgeSkillContextSummary) {
-                        openNudgeSkillSelector(mode: .all)
-                    }
+                    nudgeSkillToken
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -275,7 +268,7 @@ extension MessageComposerView {
             #if os(iOS)
             showImagePicker = true
             #else
-            openNudgeSkillSelector(mode: .all)
+            openMacFilePicker()
             #endif
         } label: {
             Image(systemName: "plus")
@@ -284,11 +277,7 @@ extension MessageComposerView {
                 .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
         }
         .buttonStyle(.borderless)
-        #if os(iOS)
         .disabled(selectedProject == nil || isUploadingImage)
-        #else
-        .disabled(selectedProject == nil)
-        #endif
     }
 
     var workspaceMicGlyph: some View {
@@ -296,6 +285,88 @@ extension MessageComposerView {
             .font(.system(size: workspaceIconSize, weight: .medium))
             .foregroundStyle(.secondary.opacity(0.88))
             .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+    }
+
+    var agentDropdownMenu: some View {
+        Menu {
+            ForEach(availableAgents, id: \.pubkey) { agent in
+                Button {
+                    draft.agentPubkey = agent.pubkey
+                    isDirty = true
+                    if let projectId = selectedProject?.id {
+                        Task {
+                            await draftManager.updateAgent(draft.agentPubkey, conversationId: conversationId, projectId: projectId)
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(agent.name)
+                        if agent.isPm {
+                            Text("PM")
+                        }
+                        if let model = agent.model, !model.isEmpty {
+                            Text("(\(model))")
+                        }
+                    }
+                }
+            }
+            if draft.agentPubkey != nil {
+                Divider()
+                Button(role: .destructive) {
+                    draft.agentPubkey = nil
+                    isDirty = true
+                    if let projectId = selectedProject?.id {
+                        Task {
+                            await draftManager.updateAgent(nil, conversationId: conversationId, projectId: projectId)
+                        }
+                    }
+                } label: {
+                    Label("Clear agent", systemImage: "xmark")
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(selectedAgent.map { workspaceAgentLabel($0.name) } ?? "Agent")
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary.opacity(0.95))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: max(9, workspaceIconSize - 4), weight: .semibold))
+                    .foregroundStyle(.secondary.opacity(0.88))
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 2)
+            .frame(height: workspaceContextRowHeight)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    var nudgeSkillToken: some View {
+        Button {
+            openNudgeSkillSelector(mode: .all)
+        } label: {
+            HStack(spacing: 4) {
+                if selectedNudges.isEmpty && selectedSkills.isEmpty {
+                    Text("/")
+                        .font(.subheadline.monospaced())
+                        .foregroundStyle(.secondary.opacity(0.95))
+                } else {
+                    Text("/")
+                        .font(.subheadline.monospaced())
+                        .foregroundStyle(.secondary.opacity(0.95))
+                    Text("\(selectedNudges.count + selectedSkills.count)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary.opacity(0.95))
+                }
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 2)
+            .frame(height: workspaceContextRowHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
     }
 
     func inlineContextToken(text: String, showChevron: Bool = true, action: @escaping () -> Void) -> some View {
@@ -333,18 +404,6 @@ extension MessageComposerView {
         return "\(value[..<end])..."
     }
 
-    func agentContextSummary(agent: ProjectAgent) -> String {
-        if !usesWorkspaceInlineLayout, let model = agent.model, !model.isEmpty {
-            return "\(agent.name) (\(model))"
-        }
-        return agent.name
-    }
-
-    var nudgeSkillContextSummary: String {
-        let selectedCount = selectedNudges.count + selectedSkills.count
-        guard selectedCount > 0 else { return "Shortcuts" }
-        return selectedCount == 1 ? "1 selected" : "\(selectedCount) selected"
-    }
 }
 
 struct ProjectChipView: View {
