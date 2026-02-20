@@ -6,6 +6,9 @@ struct AppRootSceneView: View {
     let notificationScheduler: NotificationScheduling
 
     @State private var showNotificationDeniedAlert = false
+    @State private var previousInitializedState: Bool?
+    @State private var previousLoginState: Bool?
+    @State private var previousScenePhase: ScenePhase?
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -45,76 +48,20 @@ struct AppRootSceneView: View {
             }
         }
         .onAppear {
-            Task { @MainActor in
-                PerformanceProfiler.shared.startRuntimeMonitorsIfNeeded()
-            }
+            PerformanceProfiler.shared.startRuntimeMonitorsIfNeeded()
             PerformanceProfiler.shared.logEvent("App root appeared", category: .general)
             #if os(macOS)
             MacWindowAuthSizing.updateMainWindowForAuthState(isLoggedIn: sessionStore.isLoggedIn)
             #endif
         }
-        .onChange(of: coreManager.isInitialized) { _, isInitialized in
-            PerformanceProfiler.shared.logEvent(
-                "coreManager.isInitialized changed value=\(isInitialized)",
-                category: .general
-            )
-            if isInitialized {
-                sessionStore.attemptAutoLogin(coreManager: coreManager)
-            }
+        .task(id: coreManager.isInitialized) {
+            handleInitializationTransition(coreManager.isInitialized)
         }
-        .onChange(of: sessionStore.isLoggedIn) { _, loggedIn in
-            PerformanceProfiler.shared.logEvent(
-                "isLoggedIn changed value=\(loggedIn)",
-                category: .general
-            )
-            #if os(macOS)
-            MacWindowAuthSizing.updateMainWindowForAuthState(isLoggedIn: loggedIn)
-            #endif
-            // Register/unregister event callback based on login state
-            if loggedIn {
-                coreManager.registerEventCallback()
-                // Initial data fetch on login with proper authorization sequencing
-                Task { @MainActor in
-                    // Request authorization FIRST so badge can be set after data load
-                    // This checks status first - only shows dialog if status is .notDetermined
-                    let result = await notificationScheduler.requestAuthorization()
-
-                    // Handle the authorization result
-                    switch result {
-                    case .granted:
-                        break
-                    case .denied, .previouslyDenied:
-                        // User denied notifications - show alert directing them to Settings.
-                        showNotificationDeniedAlert = true
-                    case .error(let error):
-                        _ = error
-                        break
-                    }
-
-                    await coreManager.fetchData()
-                    // Update badge after both authorization and data load complete
-                    coreManager.updateAppBadge()
-                }
-            } else {
-                coreManager.unregisterEventCallback()
-                // Clear badge on logout
-                Task {
-                    await notificationScheduler.clearBadge()
-                }
-            }
+        .task(id: sessionStore.isLoggedIn) {
+            await handleLoginTransition(sessionStore.isLoggedIn)
         }
-        .onChange(of: scenePhase) { _, newPhase in
-            // Handle app becoming active
-            if newPhase == .active && sessionStore.isLoggedIn {
-                Task {
-                    // Refresh authorization status (user may have changed permissions in Settings)
-                    await notificationScheduler.checkAuthorizationStatus()
-                    // Recalculate badge in case global filter scope changed while inactive
-                    await MainActor.run {
-                        coreManager.updateAppBadge()
-                    }
-                }
-            }
+        .task(id: scenePhase) {
+            await handleScenePhaseTransition(scenePhase)
         }
         #if os(iOS)
         .alert("Notifications Disabled", isPresented: $showNotificationDeniedAlert) {
@@ -126,5 +73,90 @@ struct AppRootSceneView: View {
             Text("To receive notifications when agents need your input, please enable notifications in Settings.")
         }
         #endif
+    }
+
+    private func handleInitializationTransition(_ isInitialized: Bool) {
+        defer {
+            previousInitializedState = isInitialized
+        }
+
+        guard previousInitializedState != nil else {
+            return
+        }
+
+        PerformanceProfiler.shared.logEvent(
+            "coreManager.isInitialized changed value=\(isInitialized)",
+            category: .general
+        )
+
+        if isInitialized {
+            sessionStore.attemptAutoLogin(coreManager: coreManager)
+        }
+    }
+
+    private func handleLoginTransition(_ loggedIn: Bool) async {
+        defer {
+            previousLoginState = loggedIn
+        }
+
+        guard previousLoginState != nil else {
+            return
+        }
+
+        PerformanceProfiler.shared.logEvent(
+            "isLoggedIn changed value=\(loggedIn)",
+            category: .general
+        )
+        #if os(macOS)
+        MacWindowAuthSizing.updateMainWindowForAuthState(isLoggedIn: loggedIn)
+        #endif
+
+        if loggedIn {
+            coreManager.registerEventCallback()
+            await performInitialLoginBootstrap()
+        } else {
+            coreManager.unregisterEventCallback()
+            await notificationScheduler.clearBadge()
+        }
+    }
+
+    private func performInitialLoginBootstrap() async {
+        // Request authorization first so badge updates are ready after data load.
+        let result = await notificationScheduler.requestAuthorization()
+        guard !Task.isCancelled else { return }
+
+        switch result {
+        case .granted:
+            break
+        case .denied, .previouslyDenied:
+            showNotificationDeniedAlert = true
+        case .error:
+            break
+        }
+
+        await coreManager.fetchData()
+        guard !Task.isCancelled else { return }
+        coreManager.updateAppBadge()
+    }
+
+    private func handleScenePhaseTransition(_ phase: ScenePhase) async {
+        defer {
+            previousScenePhase = phase
+        }
+
+        guard previousScenePhase != nil else {
+            return
+        }
+
+        guard phase == .active, sessionStore.isLoggedIn else {
+            return
+        }
+
+        // User may have changed notification permissions while inactive.
+        await notificationScheduler.checkAuthorizationStatus()
+        guard !Task.isCancelled else { return }
+
+        // Recalculate badge in case filter scope changed while inactive.
+        coreManager.updateAppBadge()
     }
 }
