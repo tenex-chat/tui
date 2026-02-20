@@ -5,29 +5,36 @@ struct AppGlobalFilterToolbarButton: View {
     @State private var isPresented = false
 
     var body: some View {
-        Button {
-            isPresented = true
+        #if os(macOS)
+        Menu {
+            timeSubmenu
+            projectsSubmenu
+            if !coreManager.isAppFilterDefault {
+                Divider()
+                Button {
+                    coreManager.resetAppFilterToDefaults()
+                } label: {
+                    Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
+                }
+            }
         } label: {
-            #if os(macOS)
             Image(systemName: filterIcon)
-            #else
-            Label(coreManager.appFilterSummaryLabel, systemImage: filterIcon)
-                .lineLimit(1)
-            #endif
         }
         .accessibilityIdentifier("global_filter_button")
         .accessibilityLabel("Global Filter")
         .accessibilityValue(coreManager.appFilterSummaryLabel)
         .help("Filter by time and project")
-        #if os(macOS)
-        .popover(isPresented: $isPresented, arrowEdge: .top) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
         #else
+        Button {
+            isPresented = true
+        } label: {
+            Label(coreManager.appFilterSummaryLabel, systemImage: filterIcon)
+                .lineLimit(1)
+        }
+        .accessibilityIdentifier("global_filter_button")
+        .accessibilityLabel("Global Filter")
+        .accessibilityValue(coreManager.appFilterSummaryLabel)
+        .help("Filter by time and project")
         .sheet(isPresented: $isPresented) {
             AppGlobalFilterSheet(
                 selectedProjectIds: coreManager.appFilterProjectIds,
@@ -43,6 +50,94 @@ struct AppGlobalFilterToolbarButton: View {
             ? "line.3.horizontal.decrease.circle"
             : "line.3.horizontal.decrease.circle.fill"
     }
+
+    // MARK: - macOS Menu Submenus
+
+    #if os(macOS)
+    @ViewBuilder
+    private var timeSubmenu: some View {
+        Picker(selection: Binding(
+            get: { coreManager.appFilterTimeWindow },
+            set: { newValue in
+                coreManager.updateAppFilter(
+                    projectIds: coreManager.appFilterProjectIds,
+                    timeWindow: newValue
+                )
+            }
+        )) {
+            ForEach(AppTimeWindow.allCases, id: \.self) { window in
+                Text(window.label).tag(window)
+            }
+        } label: {
+            Label("Time", systemImage: "clock")
+        }
+    }
+
+    @ViewBuilder
+    private var projectsSubmenu: some View {
+        Menu {
+            Button {
+                coreManager.updateAppFilter(projectIds: [], timeWindow: coreManager.appFilterTimeWindow)
+            } label: {
+                if coreManager.appFilterProjectIds.isEmpty {
+                    Label("All Projects", systemImage: "checkmark")
+                } else {
+                    Text("All Projects")
+                }
+            }
+
+            Divider()
+
+            ForEach(bootedProjects, id: \.id) { project in
+                Toggle(isOn: Binding(
+                    get: { coreManager.appFilterProjectIds.contains(project.id) },
+                    set: { _ in toggleProject(project.id) }
+                )) {
+                    Label(project.title, systemImage: "bolt.fill")
+                }
+            }
+
+            if !unbootedProjects.isEmpty {
+                Divider()
+
+                Menu("Unbooted Projects") {
+                    ForEach(unbootedProjects, id: \.id) { project in
+                        Toggle(isOn: Binding(
+                            get: { coreManager.appFilterProjectIds.contains(project.id) },
+                            set: { _ in toggleProject(project.id) }
+                        )) {
+                            Text(project.title)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Projects", systemImage: "folder")
+        }
+    }
+
+    private var bootedProjects: [Project] {
+        coreManager.projects
+            .filter { coreManager.projectOnlineStatus[$0.id] == true }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private var unbootedProjects: [Project] {
+        coreManager.projects
+            .filter { coreManager.projectOnlineStatus[$0.id] != true }
+            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    private func toggleProject(_ projectId: String) {
+        var ids = coreManager.appFilterProjectIds
+        if ids.contains(projectId) {
+            ids.remove(projectId)
+        } else {
+            ids.insert(projectId)
+        }
+        coreManager.updateAppFilter(projectIds: ids, timeWindow: coreManager.appFilterTimeWindow)
+    }
+    #endif
 }
 
 struct AppGlobalFilterSheet: View {

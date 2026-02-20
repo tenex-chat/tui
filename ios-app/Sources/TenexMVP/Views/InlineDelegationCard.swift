@@ -17,24 +17,24 @@ struct InlineDelegationCard: View {
     /// Avatar size for recipient
     private let avatarSize: CGFloat = 32
 
+    /// Resolve recipient pubkey: prefer thread p-tags, fall back to message p-tags, then thread creator.
+    private var recipientPubkey: String? {
+        conversationInfo?.thread.pTags.first ?? recipientPubkeys.first ?? conversationInfo?.thread.pubkey
+    }
+
+    private var recipientName: String {
+        guard let pk = recipientPubkey else { return "delegate" }
+        return coreManager.displayName(for: pk)
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 10) {
                 // Recipient avatar
-                if let info = conversationInfo {
+                if let pk = recipientPubkey {
                     AgentAvatarView(
-                        agentName: info.author,
-                        pubkey: info.thread.pubkey,
-                        size: avatarSize,
-                        fontSize: 11,
-                        showBorder: false
-                    )
-                    .environmentObject(coreManager)
-                } else if let firstPubkey = recipientPubkeys.first {
-                    // Fallback: use first p-tag pubkey
-                    AgentAvatarView(
-                        agentName: "delegate",
-                        pubkey: firstPubkey,
+                        agentName: recipientName,
+                        pubkey: pk,
                         size: avatarSize,
                         fontSize: 11,
                         showBorder: false
@@ -62,11 +62,13 @@ struct InlineDelegationCard: View {
                             .foregroundStyle(.primary)
                             .lineLimit(1)
 
-                        // Author with colored name
+                        // Recipient with colored name
                         HStack(spacing: 4) {
-                            Text("@\(AgentNameFormatter.format(info.author))")
-                                .font(.caption)
-                                .foregroundStyle(deterministicColor(for: info.thread.pubkey))
+                            if let pk = recipientPubkey {
+                                Text("@\(AgentNameFormatter.format(recipientName))")
+                                    .font(.caption)
+                                    .foregroundStyle(deterministicColor(for: pk))
+                            }
 
                             if let status = info.thread.statusLabel {
                                 StatusBadge(status: status, isActive: info.isActive)
@@ -110,6 +112,12 @@ struct InlineDelegationCard: View {
         .buttonStyle(.borderless)
         .task {
             await loadConversationInfo()
+        }
+        .onReceive(coreManager.$conversations) { conversations in
+            if let updated = conversations.first(where: { $0.thread.id == conversationId }) {
+                conversationInfo = updated
+                isLoading = false
+            }
         }
     }
 
