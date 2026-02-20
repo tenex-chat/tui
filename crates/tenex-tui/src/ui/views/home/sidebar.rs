@@ -859,66 +859,47 @@ fn highlight_text_spans(
     }
 }
 
-/// Render the projects list with checkboxes
+/// Render the projects list without checkboxes — minimal clean style.
 fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
     let (online_projects, offline_projects) = app.filtered_projects();
 
     let mut items: Vec<ListItem> = Vec::new();
 
-    // Calculate which item index is selected (0-based, not accounting for headers)
     let selected_project_index = if app.sidebar_focused {
         Some(app.sidebar_project_index)
     } else {
         None
     };
 
-    // Online section header
+    // "Online" section header — no bullet prefix
     if !online_projects.is_empty() {
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(card::BULLET, Style::default().fg(theme::ACCENT_SUCCESS)),
-            Span::styled(
-                "Online",
-                Style::default()
-                    .fg(theme::ACCENT_SUCCESS)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ])));
+        items.push(ListItem::new(Line::from(Span::styled(
+            "Online",
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ))));
     }
 
-    // Online projects - now empty = none (inverted)
     for (i, project) in online_projects.iter().enumerate() {
         let a_tag = project.a_tag();
-        let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(i);
         let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
 
-        let checkbox = if is_visible {
-            card::CHECKBOX_ON_PAD
-        } else {
-            card::CHECKBOX_OFF_PAD
-        };
         let focus_indicator = if is_focused {
             card::COLLAPSE_CLOSED
         } else {
             card::SPACER
         };
-        // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
+
         let name_max = match (is_busy, is_archived) {
-            (true, true) => 8,    // Both spinner and archived
-            (true, false) => 18,  // Just spinner
-            (false, true) => 10,  // Just archived
-            (false, false) => 20, // Neither
+            (true, true) => 10,
+            (true, false) => 18,
+            (false, true) => 12,
+            (false, false) => 20,
         };
         let name = truncate_with_ellipsis(&project.title, name_max);
-
-        let checkbox_style = if is_focused {
-            Style::default()
-                .fg(theme::ACCENT_PRIMARY)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::ACCENT_PRIMARY)
-        };
 
         let name_style = if is_focused {
             Style::default()
@@ -930,11 +911,9 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
 
         let mut spans = vec![
             Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
-            Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
         ];
 
-        // Add archived tag if project is archived
         if is_archived {
             spans.push(Span::styled(
                 " [archived]",
@@ -944,7 +923,6 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             ));
         }
 
-        // Add spinner if project is busy
         if is_busy {
             spans.push(Span::styled(
                 format!(" {}", app.spinner_char()),
@@ -953,85 +931,66 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         }
 
         let item = ListItem::new(Line::from(spans));
-
         let item = if is_focused {
             item.style(Style::default().bg(theme::BG_SELECTED))
         } else {
             item
         };
-
         items.push(item);
     }
 
-    // Offline section header
+    // "Offline" section header — no bullet prefix
     if !offline_projects.is_empty() {
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(card::HOLLOW_BULLET, Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled("Offline", Style::default().fg(theme::TEXT_MUTED)),
-        ])));
+        items.push(ListItem::new(Line::from(Span::styled(
+            "Offline",
+            Style::default().fg(ratatui::style::Color::Rgb(56, 56, 56)),
+        ))));
     }
 
-    // Offline projects - now empty = none (inverted)
     let online_count = online_projects.len();
     for (i, project) in offline_projects.iter().enumerate() {
         let a_tag = project.a_tag();
-        let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(online_count + i);
         let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
 
-        let checkbox = if is_visible {
-            card::CHECKBOX_ON_PAD
-        } else {
-            card::CHECKBOX_OFF_PAD
-        };
         let focus_indicator = if is_focused {
             card::COLLAPSE_CLOSED
         } else {
             card::SPACER
         };
-        // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
+
         let name_max = match (is_busy, is_archived) {
-            (true, true) => 8,    // Both spinner and archived
-            (true, false) => 18,  // Just spinner
-            (false, true) => 10,  // Just archived
-            (false, false) => 20, // Neither
+            (true, true) => 10,
+            (true, false) => 18,
+            (false, true) => 12,
+            (false, false) => 20,
         };
         let name = truncate_with_ellipsis(&project.title, name_max);
 
-        let checkbox_style = if is_focused {
-            Style::default()
-                .fg(theme::ACCENT_PRIMARY)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::TEXT_MUTED)
-        };
-
+        let offline_color = ratatui::style::Color::Rgb(56, 56, 56);
         let name_style = if is_focused {
             Style::default()
                 .fg(theme::TEXT_PRIMARY)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(theme::TEXT_MUTED)
+            Style::default().fg(offline_color)
         };
 
         let mut spans = vec![
             Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
-            Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
         ];
 
-        // Add archived tag if project is archived
         if is_archived {
             spans.push(Span::styled(
                 " [archived]",
                 Style::default()
-                    .fg(theme::TEXT_MUTED)
+                    .fg(offline_color)
                     .add_modifier(Modifier::DIM),
             ));
         }
 
-        // Add spinner if project is busy (unlikely for offline, but for consistency)
         if is_busy {
             spans.push(Span::styled(
                 format!(" {}", app.spinner_char()),
@@ -1040,13 +999,11 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         }
 
         let item = ListItem::new(Line::from(spans));
-
         let item = if is_focused {
             item.style(Style::default().bg(theme::BG_SELECTED))
         } else {
             item
         };
-
         items.push(item);
     }
 
@@ -1055,7 +1012,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .borders(Borders::NONE)
                 .padding(Padding::new(2, 2, 1, 0)),
-        ) // Reduced left padding to fit indicator
+        )
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(list, area);
