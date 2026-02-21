@@ -160,9 +160,9 @@ struct NowPlayingBar: View {
                 if let conversation {
                     NavigationStack {
                         ConversationDetailView(conversation: conversation)
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
                             .toolbar {
-                                ToolbarItem(placement: .topBarTrailing) {
+                                ToolbarItem(placement: .confirmationAction) {
                                     Button("Done") {
                                         showConversationDetail = false
                                     }
