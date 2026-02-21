@@ -541,7 +541,7 @@ const AGENT_RESPONSE_TIMEOUT_SECS: u64 = 300;
 fn create_responses_sse_stream(
     mut data_rx: broadcast::Receiver<DataChange>,
     thread_id: String,
-    agent_pubkey: String,
+    _agent_pubkey: String,
     response_id: String,
     created_at: u64,
     previous_response_id: Option<String>,
@@ -655,14 +655,14 @@ fn create_responses_sse_stream(
 
             match recv_result {
                 Ok(Ok(DataChange::LocalStreamChunk {
-                    agent_pubkey: chunk_agent,
+                    agent_pubkey: _chunk_agent,
                     conversation_id,
                     text_delta,
                     reasoning_delta: _,
                     is_finish,
                 })) => {
-                    // Only process chunks for our agent and thread
-                    if chunk_agent != agent_pubkey || conversation_id != thread_id {
+                    // Only process chunks for our thread (conversation)
+                    if conversation_id != thread_id {
                         continue;
                     }
 
