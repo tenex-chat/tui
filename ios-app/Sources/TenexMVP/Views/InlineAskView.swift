@@ -11,7 +11,7 @@ struct InlineAskView: View {
     let conversationId: String
     let projectId: String
 
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @State private var isAlreadyAnswered = false
     @State private var didAnswerInSession = false
     @State private var replyContent: String = ""
@@ -34,7 +34,7 @@ struct InlineAskView: View {
                         didAnswerInSession = true
                     }
                 }
-                .environmentObject(coreManager)
+                .environment(coreManager)
             }
         }
         .task {
@@ -137,7 +137,7 @@ struct InlineAskView: View {
             conversationId: "test-conv",
             projectId: "test-project"
         )
-        .environmentObject(TenexCoreManager())
+        .environment(TenexCoreManager())
     }
     .padding()
 }

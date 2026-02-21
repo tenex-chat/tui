@@ -46,7 +46,7 @@ struct ProjectsSectionContainer: View {
 }
 
 struct ProjectsSectionListColumn: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Binding var selectedProjectId: String?
 
     private var sortedProjects: [Project] {
@@ -96,7 +96,7 @@ struct ProjectsSectionListColumn: View {
 }
 
 struct ProjectsSectionDetailColumn: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Binding var selectedProjectId: String?
 
     var body: some View {
@@ -106,7 +106,7 @@ struct ProjectsSectionDetailColumn: View {
                     projectId: selectedProjectId,
                     selectedProjectId: $selectedProjectId
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
             } else {
                 ContentUnavailableView(
                     "Select a Project",
@@ -120,13 +120,13 @@ struct ProjectsSectionDetailColumn: View {
 }
 
 struct ProjectsTabView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @State private var selectedProjectIds: Set<String> = []
 
     var body: some View {
         NavigationStack {
             ProjectsContentView(selectedProjectIds: $selectedProjectIds)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         }
     }
 }

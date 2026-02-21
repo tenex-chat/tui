@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AppRootSceneView: View {
-    @ObservedObject var coreManager: TenexCoreManager
+    var coreManager: TenexCoreManager
     @ObservedObject var sessionStore: AppSessionStore
     let notificationScheduler: NotificationScheduling
 
@@ -37,14 +37,14 @@ struct AppRootSceneView: View {
                 }
             } else if sessionStore.isLoggedIn {
                 MainTabView(userNpub: $sessionStore.userNpub, isLoggedIn: $sessionStore.isLoggedIn)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             } else {
                 LoginView(
                     isLoggedIn: $sessionStore.isLoggedIn,
                     userNpub: $sessionStore.userNpub,
                     autoLoginError: sessionStore.autoLoginError
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
             }
         }
         .onAppear {

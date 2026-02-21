@@ -23,7 +23,7 @@ struct AgentSelectorSheet: View {
 
     // MARK: - Environment
 
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - State
@@ -116,7 +116,7 @@ struct AgentSelectorSheet: View {
             }
             .sheet(item: $agentToConfig) { agent in
                 AgentConfigSheet(agent: agent, projectId: projectId)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             }
         }
         #if os(iOS)
@@ -294,7 +294,7 @@ extension ProjectAgent: Identifiable {
 // MARK: - Online Agent Row View
 
 struct OnlineAgentRowView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let agent: ProjectAgent
     let isSelected: Bool
     var onTap: (() -> Void)?
@@ -310,7 +310,7 @@ struct OnlineAgentRowView: View {
                 showBorder: false,
                 isSelected: isSelected
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
 
             // Agent info
             VStack(alignment: .leading, spacing: 2) {
@@ -411,5 +411,5 @@ struct OnlineAgentRowView: View {
         projectId: "test-project",
         selectedPubkey: .constant("abc123def456")
     )
-    .environmentObject(TenexCoreManager())
+    .environment(TenexCoreManager())
 }

@@ -116,7 +116,7 @@ extension MessageComposerView {
                         size: 24,
                         showBorder: false
                     )
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
 
                     Text("@\(name)")
                         .font(.subheadline)
@@ -366,7 +366,7 @@ extension MessageComposerView {
                     workspaceAgentToConfig = agent
                 }
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
     }
 
@@ -469,7 +469,7 @@ struct ProjectChipView: View {
 }
 
 struct OnlineAgentChipView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let agent: ProjectAgent
     let onChange: () -> Void
 
@@ -482,7 +482,7 @@ struct OnlineAgentChipView: View {
                     size: 24,
                     showBorder: false
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
 
                 Text("@\(agent.name)")
                     .font(.subheadline)
@@ -503,7 +503,7 @@ struct OnlineAgentChipView: View {
 }
 
 struct WorkspaceAgentPopoverContent: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let agents: [ProjectAgent]
     let selectedPubkey: String?
     let onSelect: (String) -> Void
@@ -590,7 +590,7 @@ struct WorkspaceAgentPopoverContent: View {
                     showBorder: false,
                     isSelected: selectedPubkey == agent.pubkey
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct TeamDetailView: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     let teamId: String
     @ObservedObject var viewModel: TeamsViewModel
@@ -78,7 +78,7 @@ struct TeamDetailView: View {
                         hireResult = result
                     }
                 }
-                .environmentObject(coreManager)
+                .environment(coreManager)
             }
         }
         .alert(item: $hireResult) { result in

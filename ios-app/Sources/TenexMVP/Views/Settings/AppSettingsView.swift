@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AppSettingsView: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = AppSettingsViewModel()
     @State private var selectedSection: SettingsSection?
@@ -38,7 +38,7 @@ struct AppSettingsView: View {
         .task {
             await viewModel.load(coreManager: coreManager)
         }
-        .onReceive(coreManager.diagnosticsVersionPublisher) { _ in
+        .onChange(of: coreManager.diagnosticsVersion) { _, _ in
             Task {
                 await viewModel.reloadRelays(coreManager: coreManager)
                 await viewModel.reloadBackends(coreManager: coreManager)
@@ -77,7 +77,7 @@ struct AppSettingsView: View {
             .navigationTitle(selectedSection?.title ?? "Settings")
             .toolbar {
                 if !isEmbedded {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
@@ -104,7 +104,7 @@ struct AppSettingsView: View {
             .navigationTitle("Settings")
             .toolbar {
                 if !isEmbedded {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
@@ -122,23 +122,23 @@ struct AppSettingsView: View {
         switch section {
         case .relays:
             RelaysSettingsSectionView(viewModel: viewModel)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         case .backends:
             BackendsSettingsSectionView(viewModel: viewModel)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         case .ai:
             AISettingsSectionView(viewModel: viewModel)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         case .audio:
             AudioSettingsSectionView(viewModel: viewModel)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         }
     }
 }
 
 private struct RelaysSettingsSectionView: View {
     @ObservedObject var viewModel: AppSettingsViewModel
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     var body: some View {
         Form {
@@ -221,7 +221,7 @@ private struct RelaysSettingsSectionView: View {
 
 private struct BackendsSettingsSectionView: View {
     @ObservedObject var viewModel: AppSettingsViewModel
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     var body: some View {
         Form {
@@ -334,7 +334,7 @@ private struct BackendsSettingsSectionView: View {
 }
 
 private struct AISettingsSectionView: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @ObservedObject var viewModel: AppSettingsViewModel
 
     @State private var elevenLabsKeyInput = ""
@@ -417,7 +417,7 @@ private struct AISettingsSectionView: View {
         #endif
         .sheet(isPresented: $showModelSelector) {
             ModelSelectorSheet(viewModel: viewModel)
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 #if os(macOS)
                 .frame(minWidth: 500, idealWidth: 560, minHeight: 420, idealHeight: 560)
                 #endif
@@ -484,7 +484,7 @@ private struct AISettingsSectionView: View {
 }
 
 private struct AudioSettingsSectionView: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @ObservedObject var viewModel: AppSettingsViewModel
     @State private var showVoiceBrowser = false
 
@@ -570,7 +570,7 @@ private struct AudioSettingsSectionView: View {
             Section("Debug") {
                 NavigationLink {
                     AudioNotificationsLogView()
-                        .environmentObject(coreManager)
+                        .environment(coreManager)
                 } label: {
                     Label("Audio Debug Log", systemImage: "list.bullet.rectangle")
                 }
@@ -581,7 +581,7 @@ private struct AudioSettingsSectionView: View {
         #endif
         .sheet(isPresented: $showVoiceBrowser) {
             VoiceBrowserSheet(viewModel: viewModel)
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 #if os(macOS)
                 .frame(minWidth: 700, idealWidth: 780, minHeight: 480, idealHeight: 620)
                 #endif
@@ -590,7 +590,7 @@ private struct AudioSettingsSectionView: View {
 }
 
 private struct ModelSelectorSheet: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var viewModel: AppSettingsViewModel
     @State private var searchText = ""
@@ -651,21 +651,25 @@ private struct ModelSelectorSheet: View {
             }
             .searchable(text: $searchText, prompt: "Search models")
             .navigationTitle("OpenRouter Models")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .automatic) {
                     Button("Refresh") {
                         Task { await viewModel.fetchModels(coreManager: coreManager) }
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .automatic) {
                     if !viewModel.selectedModelIds.isEmpty {
                         Button("Clear") {
                             Task { await viewModel.clearSelectedModels(coreManager: coreManager) }
                         }
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -687,7 +691,7 @@ private enum VoiceSortMode: String, CaseIterable, Identifiable {
 }
 
 private struct VoiceBrowserSheet: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var viewModel: AppSettingsViewModel
     @StateObject private var previewPlayer = VoicePreviewPlayer()
@@ -752,14 +756,18 @@ private struct VoiceBrowserSheet: View {
             }
             .searchable(text: $searchText, prompt: "Search voices")
             .navigationTitle("ElevenLabs Voices")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .automatic) {
                     Button("Refresh") {
                         Task { await viewModel.fetchVoices(coreManager: coreManager) }
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         previewPlayer.stop()
                         dismiss()

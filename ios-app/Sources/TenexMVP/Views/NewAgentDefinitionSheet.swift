@@ -40,7 +40,7 @@ private struct PromptTransformOption: Identifiable {
 }
 
 struct NewAgentDefinitionSheet: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -107,7 +107,11 @@ struct NewAgentDefinitionSheet: View {
             }
             .background(backgroundView)
             .navigationTitle("New Agent Definition")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -132,7 +136,7 @@ struct NewAgentDefinitionSheet: View {
                     instructions = rewrittenPrompt
                 }
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
             #if os(macOS)
             .frame(minWidth: 700, idealWidth: 820, minHeight: 560, idealHeight: 680)
             #endif
@@ -587,7 +591,7 @@ private enum PromptRewriteStyle: String, CaseIterable, Identifiable {
 }
 
 private struct AIAssistedPromptRewriteSheet: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -655,7 +659,11 @@ private struct AIAssistedPromptRewriteSheet: View {
                 .ignoresSafeArea()
             )
             .navigationTitle("AI Prompt Editor")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

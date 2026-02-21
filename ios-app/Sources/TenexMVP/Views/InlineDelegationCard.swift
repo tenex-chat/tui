@@ -9,7 +9,7 @@ struct InlineDelegationCard: View {
     let recipientPubkeys: [String]
     let onTap: () -> Void
 
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @State private var conversationInfo: ConversationFullInfo?
     @State private var isLoading = true
     private let profiler = PerformanceProfiler.shared
@@ -39,7 +39,7 @@ struct InlineDelegationCard: View {
                         fontSize: 11,
                         showBorder: false
                     )
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                 } else {
                     // Generic placeholder
                     Circle()
@@ -113,8 +113,8 @@ struct InlineDelegationCard: View {
         .task {
             await loadConversationInfo()
         }
-        .onReceive(coreManager.$conversations) { conversations in
-            if let updated = conversations.first(where: { $0.thread.id == conversationId }) {
+        .onChange(of: coreManager.conversations) { _, _ in
+            if let updated = coreManager.conversationById[conversationId] {
                 conversationInfo = updated
                 isLoading = false
             }
@@ -149,7 +149,7 @@ struct InlineDelegationCard: View {
             recipientPubkeys: ["abc123"]
         ) {
         }
-        .environmentObject(TenexCoreManager())
+        .environment(TenexCoreManager())
     }
     .padding()
 }

@@ -3,7 +3,11 @@ import SwiftUI
 // MARK: - Data Structures
 
 /// A group of search results within the same conversation
-struct ConversationSearchGroup: Identifiable {
+struct ConversationSearchGroup: Identifiable, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id && lhs.matchCount == rhs.matchCount
+    }
+
     let id: String  // threadId
     let title: String
     let projectName: String?
@@ -56,7 +60,7 @@ enum SearchLayoutMode {
 }
 
 struct SearchView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let layoutMode: SearchLayoutMode
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
     #if os(iOS)
@@ -128,9 +132,9 @@ struct SearchView: View {
         .onChange(of: includesDrafts) { _, _ in
             searchDrafts(query: searchText)
         }
-        .onChange(of: groupedResults.map(\.id)) { _, visibleConversationIds in
+        .onChange(of: groupedResults) { _, _ in
             if let selectedId = selectedConversationBinding.wrappedValue?.id,
-               !visibleConversationIds.contains(selectedId) {
+               !groupedResults.contains(where: { $0.id == selectedId }) {
                 selectedConversationBinding.wrappedValue = nil
             }
         }
@@ -167,7 +171,7 @@ struct SearchView: View {
                 #endif
                 .navigationDestination(item: selectedConversationBinding) { conversation in
                     ConversationAdaptiveDetailView(conversation: conversation)
-                        .environmentObject(coreManager)
+                        .environment(coreManager)
                 }
         }
     }
@@ -216,7 +220,7 @@ struct SearchView: View {
     private var splitDetailContent: some View {
         if let conversation = selectedConversationBinding.wrappedValue {
             ConversationAdaptiveDetailView(conversation: conversation)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         } else {
             ContentUnavailableView(
                 "Select a Conversation",
@@ -315,7 +319,7 @@ struct SearchView: View {
                 initialContent: draftTextForComposer,
                 displayStyle: .modal
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
     }
 

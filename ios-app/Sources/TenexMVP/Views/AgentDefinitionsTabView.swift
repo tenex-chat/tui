@@ -12,7 +12,7 @@ private func awesomeAgentsProfileURL(for pubkey: String) -> URL? {
 }
 
 struct AgentDefinitionsTabView: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     let layoutMode: AgentDefinitionsLayoutMode
     private let selectedAgentBindingOverride: Binding<AgentDefinition?>?
@@ -53,14 +53,14 @@ struct AgentDefinitionsTabView: View {
             }
             await viewModel.loadIfNeeded()
         }
-        .onReceive(coreManager.diagnosticsVersionPublisher) { _ in
+        .onChange(of: coreManager.diagnosticsVersion) { _, _ in
             Task { await viewModel.refresh() }
         }
         .sheet(item: $assignmentTarget) { item in
             AgentDefinitionProjectAssignmentSheet(item: item) { result in
                 assignmentResult = result
             }
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
         .sheet(isPresented: $showNewAgentDefinitionModal) {
             NewAgentDefinitionSheet {
@@ -72,7 +72,7 @@ struct AgentDefinitionsTabView: View {
                     }
                 }
             }
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
         .alert(item: $assignmentResult) { result in
             Alert(
@@ -128,14 +128,14 @@ struct AgentDefinitionsTabView: View {
                 }
                 .searchable(text: $viewModel.searchText, placement: .toolbar, prompt: "Search definitions")
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .automatic) {
                         if viewModel.isLoading {
                             ProgressView()
                                 .controlSize(.small)
                         }
                     }
 
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .automatic) {
                         Button {
                             showNewAgentDefinitionModal = true
                         } label: {
@@ -143,7 +143,7 @@ struct AgentDefinitionsTabView: View {
                         }
                     }
 
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .automatic) {
                         Button {
                             Task { await viewModel.refresh() }
                         } label: {
@@ -541,7 +541,7 @@ private struct AgentDefinitionDetailView: View {
 }
 
 private struct AgentDefinitionProjectAssignmentSheet: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
 
     let item: AgentDefinitionListItem

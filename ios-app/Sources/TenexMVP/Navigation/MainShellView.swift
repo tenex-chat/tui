@@ -8,7 +8,7 @@ struct MainShellView: View {
     let onShowDiagnostics: () -> Void
     let onShowStats: () -> Void
 
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     @State private var selectedSection: AppSection? = .chats
     @State private var selectedConversation: ConversationFullInfo?
@@ -42,11 +42,6 @@ struct MainShellView: View {
 
     var body: some View {
         stableShell
-        .onChange(of: coreManager.projects.map(\.id)) { _, ids in
-            if let selectedProjectId, !ids.contains(selectedProjectId) {
-                self.selectedProjectId = nil
-            }
-        }
         .onChange(of: coreManager.lastDeletedProjectId) { _, deletedProjectId in
             guard let deletedProjectId else { return }
             if selectedProjectId == deletedProjectId {
@@ -158,6 +153,7 @@ struct MainShellView: View {
             appSidebar
         } detail: {
             sectionContentHost
+                .background(Color.systemBackground.ignoresSafeArea())
                 .accessibilityIdentifier("section_content_host")
         }
         .navigationSplitViewStyle(.balanced)

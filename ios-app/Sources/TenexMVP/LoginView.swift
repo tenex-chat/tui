@@ -3,7 +3,7 @@ import SwiftUI
 struct LoginView: View {
     @Binding var isLoggedIn: Bool
     @Binding var userNpub: String
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     /// Error message from auto-login attempt (if any)
     var autoLoginError: String?
@@ -123,7 +123,11 @@ struct LoginView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
         }
     }
 
@@ -199,5 +203,5 @@ struct LoginView: View {
 
 #Preview {
     LoginView(isLoggedIn: .constant(false), userNpub: .constant(""), autoLoginError: nil)
-        .environmentObject(TenexCoreManager())
+        .environment(TenexCoreManager())
 }

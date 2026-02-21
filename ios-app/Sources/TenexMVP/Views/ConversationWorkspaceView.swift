@@ -6,7 +6,7 @@ import SwiftUI
 /// - iPhone (compact): existing overview-first detail layout
 struct ConversationAdaptiveDetailView: View {
     let conversation: ConversationFullInfo
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
@@ -14,14 +14,14 @@ struct ConversationAdaptiveDetailView: View {
     var body: some View {
         #if os(macOS)
         ConversationWorkspaceView(source: .existing(conversation: conversation))
-            .environmentObject(coreManager)
+            .environment(coreManager)
         #else
         if horizontalSizeClass == .regular {
             ConversationWorkspaceView(source: .existing(conversation: conversation))
-                .environmentObject(coreManager)
+                .environment(coreManager)
         } else {
             ConversationDetailView(conversation: conversation)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         }
         #endif
     }
@@ -31,7 +31,7 @@ struct ConversationAdaptiveDetailView: View {
 /// Useful for entry points that only carry conversation IDs (e.g. inbox items).
 struct ConversationByIdAdaptiveDetailView: View {
     let conversationId: String
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     @State private var conversation: ConversationFullInfo?
     @State private var isLoading = true
@@ -40,7 +40,7 @@ struct ConversationByIdAdaptiveDetailView: View {
         Group {
             if let conversation {
                 ConversationAdaptiveDetailView(conversation: conversation)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             } else if isLoading {
                 ProgressView("Loading conversation...")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,15 +55,15 @@ struct ConversationByIdAdaptiveDetailView: View {
         .task(id: conversationId) {
             await resolveConversation()
         }
-        .onReceive(coreManager.$conversations) { conversations in
-            if let updated = conversations.first(where: { $0.id == conversationId }) {
+        .onChange(of: coreManager.conversations) { _, _ in
+            if let updated = coreManager.conversationById[conversationId] {
                 conversation = updated
             }
         }
     }
 
     private func resolveConversation() async {
-        if let cached = coreManager.conversations.first(where: { $0.id == conversationId }) {
+        if let cached = coreManager.conversationById[conversationId] {
             conversation = cached
             isLoading = false
             return
@@ -134,7 +134,7 @@ struct ConversationWorkspaceView: View {
     let source: ConversationWorkspaceSource
     let onThreadCreated: ((String) -> Void)?
 
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     private let seedConversation: ConversationFullInfo
     @StateObject private var viewModel: ConversationDetailViewModel
@@ -185,7 +185,7 @@ struct ConversationWorkspaceView: View {
     private var currentConversation: ConversationFullInfo {
         switch source {
         case .existing(let conversation):
-            return coreManager.conversations.first(where: { $0.thread.id == conversation.thread.id }) ?? conversation
+            return coreManager.conversationById[conversation.thread.id] ?? conversation
         case .newThread:
             return seedConversation
         }
@@ -310,14 +310,14 @@ struct ConversationWorkspaceView: View {
         }
         .navigationDestination(item: $selectedDelegationConversation) { delegatedConversation in
             ConversationAdaptiveDetailView(conversation: delegatedConversation)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         }
         .navigationDestination(item: $selectedReportDestination) { destination in
             ReportsTabDetailView(
                 report: destination.report,
                 project: coreManager.projects.first { $0.id == TenexCoreManager.projectId(fromATag: destination.report.projectATag) }
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
         .task(id: source.identity) {
             profiler.logEvent(
@@ -326,11 +326,18 @@ struct ConversationWorkspaceView: View {
             )
             await initializeWorkspace()
         }
-        .onReceive(coreManager.$onlineAgents) { _ in
+        .onChange(of: coreManager.onlineAgents) { _, _ in
             refreshAvailableAgents()
         }
-        .onReceive(coreManager.$conversations) { _ in
+        .onChange(of: coreManager.conversations) { _, _ in
             refreshAvailableAgents()
+            viewModel.handleConversationsChanged(coreManager.conversations)
+        }
+        .onChange(of: coreManager.messagesByConversation) { _, _ in
+            viewModel.handleMessagesChanged(coreManager.messagesByConversation)
+        }
+        .onChange(of: coreManager.reports) { _, _ in
+            viewModel.handleReportsChanged()
         }
         .onChange(of: viewModel.messages.count) { _, _ in
             recomputeLastAgentPubkey()
@@ -438,7 +445,7 @@ struct ConversationWorkspaceView: View {
                                 }
                             )
                             .equatable()
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
                             .id(message.id)
                         }
 
@@ -448,7 +455,7 @@ struct ConversationWorkspaceView: View {
                                 isConsecutive: allMessages.last?.pubkey == buffer.agentPubkey,
                                 agentName: coreManager.displayName(for: buffer.agentPubkey)
                             )
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
                             .id("streaming-row")
                         }
                     }
@@ -504,7 +511,7 @@ struct ConversationWorkspaceView: View {
                     onThreadCreated?(result.eventId)
                 } : nil
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(workspaceComposerShellColor)
@@ -624,7 +631,7 @@ struct ConversationWorkspaceView: View {
                     if let delegatedConversation = delegationConversation(for: delegation) {
                         NavigationLink {
                             ConversationAdaptiveDetailView(conversation: delegatedConversation)
-                                .environmentObject(coreManager)
+                                .environment(coreManager)
                         } label: {
                             delegationRowLabel(delegation, isWorking: isWorking)
                         }
@@ -700,9 +707,12 @@ struct ConversationWorkspaceView: View {
             await viewModel.loadData()
         }
         refreshAvailableAgents()
-        // Warm the profile picture cache for message avatars (runs in background, non-blocking).
+        // Warm caches for message avatars and display names before rendering the transcript.
         let uniquePubkeys = Array(Set(viewModel.messages.map(\.pubkey).filter { !$0.isEmpty }))
         coreManager.prefetchProfilePictures(uniquePubkeys)
+        for pubkey in uniquePubkeys {
+            _ = coreManager.displayName(for: pubkey)
+        }
         // Flip AFTER all @Published properties have settled.
         // This ensures the ForEach is empty during the initialization storm
         // (15-20 body re-evaluations), then renders once with final data.
@@ -748,7 +758,7 @@ struct ConversationWorkspaceView: View {
     }
 
     private func openDelegation(byId delegationId: String) {
-        if let cached = coreManager.conversations.first(where: { $0.thread.id == delegationId }) {
+        if let cached = coreManager.conversationById[delegationId] {
             selectedDelegationConversation = cached
             profiler.logEvent(
                 "delegation navigation cache-hit id=\(delegationId)",
@@ -805,7 +815,7 @@ struct ConversationWorkspaceView: View {
         if let child = viewModel.childConversation(for: delegation.conversationId) {
             return child
         }
-        return coreManager.conversations.first { $0.thread.id == delegation.conversationId }
+        return coreManager.conversationById[delegation.conversationId]
     }
 
     @ViewBuilder
@@ -818,7 +828,7 @@ struct ConversationWorkspaceView: View {
                 fontSize: 9,
                 showBorder: false
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(AgentNameFormatter.format(delegation.recipient))

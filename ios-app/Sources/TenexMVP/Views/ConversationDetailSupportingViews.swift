@@ -165,7 +165,7 @@ struct WorkingActivityBadge: View {
 
 /// Tappable delegation row without card styling
 struct DelegationRowView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let delegation: DelegationItem
     let isWorking: Bool
     let onTap: () -> Void
@@ -174,7 +174,7 @@ struct DelegationRowView: View {
         HStack(spacing: 10) {
             // Smaller avatar for compact look
             AgentAvatarView(agentName: delegation.recipient, pubkey: delegation.recipientPubkey, size: 32, fontSize: 11)
-                .environmentObject(coreManager)
+                .environment(coreManager)
 
             VStack(alignment: .leading, spacing: 2) {
                 // Agent name - callout size
@@ -259,9 +259,13 @@ struct DelegationPreviewSheet: View {
             }
             .padding(.top, 40)
             .navigationTitle("Delegation")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -279,7 +283,7 @@ struct FullConversationSheet: View {
     let conversation: ConversationFullInfo
     let messages: [Message]
     let presentationStyle: PresentationStyle
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedDelegation: String?
@@ -361,7 +365,7 @@ struct FullConversationSheet: View {
                 NavigationStack {
                     conversationContent
                         .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
+                            ToolbarItem(placement: .confirmationAction) {
                                 Button("Done") { dismiss() }
                             }
                         }
@@ -369,11 +373,15 @@ struct FullConversationSheet: View {
             }
         }
         .navigationTitle("Full Conversation")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
         #if os(iOS)
         .sheet(item: $selectedDelegation) { delegationId in
             DelegationSheetFromId(delegationId: delegationId)
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 .tenexModalPresentation(detents: [.large])
         }
         .sheet(isPresented: $showComposer) {
@@ -383,7 +391,7 @@ struct FullConversationSheet: View {
                 conversationTitle: conversation.thread.title,
                 initialAgentPubkey: lastAgentPubkey
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
         #endif
     }
@@ -427,7 +435,7 @@ struct FullConversationSheet: View {
                                 }
                             )
                             .equatable()
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
                             .id(message.id)
                         }
 
@@ -437,7 +445,7 @@ struct FullConversationSheet: View {
                                 isConsecutive: messages.last?.pubkey == buffer.agentPubkey,
                                 agentName: coreManager.displayName(for: buffer.agentPubkey)
                             )
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
                             .id("streaming-row")
                         }
                     }
@@ -488,9 +496,9 @@ struct FullConversationSheet: View {
                         availableAgents = coreManager.onlineAgents[projectId] ?? []
                     }
                 }
-                .onReceive(coreManager.$onlineAgents) { cache in
+                .onChange(of: coreManager.onlineAgents) { _, _ in
                     if let projectId = project?.id {
-                        availableAgents = cache[projectId] ?? []
+                        availableAgents = coreManager.onlineAgents[projectId] ?? []
                     }
                 }
             }
@@ -561,7 +569,7 @@ struct FullConversationSheet: View {
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Color.conversationComposerShellMac)
@@ -586,7 +594,7 @@ struct FullConversationSheet: View {
 /// Helper view to load and display a delegation conversation by ID
 private struct DelegationSheetFromId: View {
     let delegationId: String
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var conversation: ConversationFullInfo?
@@ -597,7 +605,7 @@ private struct DelegationSheetFromId: View {
             Group {
                 if let conv = conversation {
                     ConversationDetailView(conversation: conv)
-                        .environmentObject(coreManager)
+                        .environment(coreManager)
                 } else {
                     VStack(spacing: 16) {
                         ContentUnavailableView(
@@ -612,9 +620,13 @@ private struct DelegationSheetFromId: View {
                     }
                 }
             }
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -687,5 +699,5 @@ extension ConversationFullInfo {
         hasChildren: true,
         projectATag: "project-123"
     ))
-    .environmentObject(TenexCoreManager())
+    .environment(TenexCoreManager())
 }

@@ -288,7 +288,7 @@ struct SlackMessageRow: View, Equatable {
 }
 
 private struct QTagReferenceRow: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     let qTag: String
     let recipientPubkeys: [String]
@@ -308,7 +308,7 @@ private struct QTagReferenceRow: View {
                     conversationId: conversationId,
                     projectId: projectId
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
             } else {
                 InlineDelegationCard(
                     conversationId: qTag,
@@ -316,7 +316,7 @@ private struct QTagReferenceRow: View {
                 ) {
                     onDelegationTap?(qTag)
                 }
-                .environmentObject(coreManager)
+                .environment(coreManager)
             }
         }
         .task(id: qTag) {
@@ -386,5 +386,5 @@ private struct QTagReferenceRow: View {
         )
     }
     .padding()
-    .environmentObject(TenexCoreManager())
+    .environment(TenexCoreManager())
 }

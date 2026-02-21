@@ -36,9 +36,13 @@ struct ProfilingView: View {
                 }
             }
             .navigationTitle("Performance Profiling")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .automatic) {
                     Button("Refresh") {
                         refreshMetrics()
                     }

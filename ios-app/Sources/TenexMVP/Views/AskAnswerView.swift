@@ -12,7 +12,7 @@ struct AskAnswerView: View {
     let projectId: String
     let onSubmit: () -> Void
 
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @State private var currentQuestionIndex = 0
     @State private var answers: [Int: AnswerState] = [:]
     @State private var isSubmitting = false
@@ -435,6 +435,6 @@ private struct SelectableChoiceRow: View {
         projectId: "test-project"
     ) {
     }
-    .environmentObject(TenexCoreManager())
+    .environment(TenexCoreManager())
     .padding()
 }

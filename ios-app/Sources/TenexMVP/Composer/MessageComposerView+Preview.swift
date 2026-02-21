@@ -16,7 +16,7 @@ import SwiftUI
             createdAt: 0
         )
     )
-    .environmentObject(TenexCoreManager())
+    .environment(TenexCoreManager())
 }
 
 #Preview("Reply") {
@@ -37,5 +37,5 @@ import SwiftUI
         conversationId: "conv-123",
         conversationTitle: "Test Conversation"
     )
-    .environmentObject(TenexCoreManager())
+    .environment(TenexCoreManager())
 }

@@ -47,7 +47,7 @@ enum AppSection: String, CaseIterable, Identifiable {
 struct MainTabView: View {
     @Binding var userNpub: String
     @Binding var isLoggedIn: Bool
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -77,7 +77,7 @@ struct MainTabView: View {
                     onShowDiagnostics: { showDiagnostics = true },
                     onShowStats: { showStats = true }
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 .nowPlayingInset(coreManager: coreManager)
             } else {
                 compactTabView
@@ -94,7 +94,7 @@ struct MainTabView: View {
             NavigationStack {
                 DiagnosticsView(coreManager: coreManager)
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
+                        ToolbarItem(placement: .cancellationAction) {
                             Button("Done") { showDiagnostics = false }
                         }
                     }
@@ -105,7 +105,7 @@ struct MainTabView: View {
             NavigationStack {
                 StatsView(coreManager: coreManager)
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
+                        ToolbarItem(placement: .cancellationAction) {
                             Button("Done") { showStats = false }
                         }
                     }
@@ -119,32 +119,32 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: 0) {
                 ConversationsTabView()
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
 
             Tab("Projects", systemImage: "folder", value: 1) {
                 ProjectsTabView()
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
 
             Tab("Reports", systemImage: "doc.richtext", value: 4) {
                 ReportsTabView()
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
 
             Tab("Inbox", systemImage: "tray", value: 3) {
                 InboxView()
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
             .badge(coreManager.unansweredAskCount)
 
             Tab(value: 10, role: .search) {
                 SearchView()
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                 .nowPlayingInset(coreManager: coreManager)
             } label: {
                 Label("Search", systemImage: "magnifyingglass")
