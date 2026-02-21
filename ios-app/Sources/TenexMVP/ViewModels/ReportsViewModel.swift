@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 
 /// ViewModel for managing reports data across all projects.
 /// Observes reactive reports updates from TenexCoreManager for real-time updates.
@@ -19,7 +18,6 @@ final class ReportsViewModel: ObservableObject {
     // MARK: - Private Properties
 
     private weak var coreManager: TenexCoreManager?
-    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Computed Properties
 
@@ -59,17 +57,16 @@ final class ReportsViewModel: ObservableObject {
         self.coreManager = coreManager
     }
 
-    /// Configure the ViewModel with a core manager reference and set up reactive bindings
+    /// Configure the ViewModel with a core manager reference.
+    /// Reactivity is handled by the view layer via .onChange modifiers.
     func configure(with coreManager: TenexCoreManager) {
         self.coreManager = coreManager
+        reports = coreManager.reports
+    }
 
-        // Observe reactive reports updates from coreManager
-        coreManager.$reports
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] newReports in
-                self?.reports = newReports
-            }
-            .store(in: &cancellables)
+    /// Called from the view layer when coreManager.reports changes.
+    func handleReportsChanged(_ newReports: [Report]) {
+        reports = newReports
     }
 
     // MARK: - Public Methods

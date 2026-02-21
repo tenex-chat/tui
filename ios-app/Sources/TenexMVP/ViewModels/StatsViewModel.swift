@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 /// ViewModel for Stats tab with full TUI parity
 /// Manages stats data fetching, chart state, and tab selection
@@ -22,7 +21,6 @@ class StatsViewModel: ObservableObject {
     // MARK: - Dependencies
 
     private let coreManager: TenexCoreManager
-    private var subscriptions = Set<AnyCancellable>()
     private var refreshTask: Task<Void, Never>?
     private var currentFetchID: UUID?
 
@@ -30,7 +28,6 @@ class StatsViewModel: ObservableObject {
 
     init(coreManager: TenexCoreManager) {
         self.coreManager = coreManager
-        bindToUpdates()
     }
 
     // MARK: - Public Methods
@@ -45,17 +42,6 @@ class StatsViewModel: ObservableObject {
     func refresh() async {
         await coreManager.syncNow()
         await reloadSnapshot()
-    }
-
-    private func bindToUpdates() {
-        coreManager.statsVersionPublisher
-            .removeDuplicates()
-            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                Task { await self.reloadSnapshot() }
-            }
-            .store(in: &subscriptions)
     }
 
     private func reloadSnapshot() async {
