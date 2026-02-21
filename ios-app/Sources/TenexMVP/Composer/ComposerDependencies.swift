@@ -59,6 +59,14 @@ protocol NotificationScheduling: AnyObject {
     func checkAuthorizationStatus() async
     func updateBadge(count: Int) async
     func clearBadge() async
+    func scheduleAskNotification(
+        askEventId: String,
+        title: String,
+        body: String,
+        fromAgent: String,
+        projectId: String?,
+        conversationId: String?
+    ) async
 }
 
 struct ComposerDependencies {
