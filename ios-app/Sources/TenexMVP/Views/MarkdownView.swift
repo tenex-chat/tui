@@ -618,8 +618,20 @@ struct FlowLayout: Layout {
                 // First, try to fit with remaining width constraint
                 let constrainedSize = subview.sizeThatFits(ProposedViewSize(width: remainingWidth, height: nil))
 
-                // If the constrained size doesn't fit and we're not at line start, try full width on new line
-                if constrainedSize.width > remainingWidth && currentX > 0 {
+                // Determine if we should wrap to a new line
+                var shouldWrap = constrainedSize.width > remainingWidth && currentX > 0
+
+                // Text views always "fit" by wrapping vertically, so also check if
+                // constraining to the remaining width causes excessive height compared
+                // to full width — this prevents single-character-wide text columns
+                if !shouldWrap && currentX > 0 {
+                    let fullWidthSize = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+                    if constrainedSize.height > fullWidthSize.height * 1.5 {
+                        shouldWrap = true
+                    }
+                }
+
+                if shouldWrap {
                     // Move to next line
                     currentX = 0
                     currentY += lineHeight + spacing
