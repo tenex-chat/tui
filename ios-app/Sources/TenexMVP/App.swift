@@ -18,7 +18,7 @@ import SwiftUI
 
 @main
 struct TenexMVPApp: App {
-    @StateObject private var coreManager = TenexCoreManager()
+    @State private var coreManager = TenexCoreManager()
     @StateObject private var sessionStore = AppSessionStore()
     private let notificationScheduler: NotificationScheduling = NotificationService.shared
 
@@ -38,7 +38,7 @@ struct TenexMVPApp: App {
         WindowGroup(id: "full-conversation", for: String.self) { $conversationId in
             if let conversationId {
                 FullConversationWindow(conversationId: conversationId)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             }
         }
         .defaultSize(width: 800, height: 700)
@@ -46,7 +46,7 @@ struct TenexMVPApp: App {
         WindowGroup(id: "delegation-tree", for: String.self) { $conversationId in
             if let id = conversationId {
                 DelegationTreeView(rootConversationId: id)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             }
         }
         .defaultSize(width: 1300, height: 820)

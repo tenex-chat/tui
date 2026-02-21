@@ -1,6 +1,6 @@
 import SwiftUI
 import CryptoKit
-import Combine
+import Observation
 
 // MARK: - Streaming Buffer
 
@@ -63,68 +63,62 @@ final class ProfilePictureCache: @unchecked Sendable {
     }
 }
 
-/// Shared TenexCore instance wrapper for environment object
-/// Initializes the core OFF the main thread to avoid UI jank
-@MainActor
-class TenexCoreManager: ObservableObject {
-    let core: TenexCore
+/// Shared TenexCore instance wrapper for environment injection.
+/// Uses @Observable for property-level observation tracking,
+/// eliminating whole-tree invalidation on any single property change.
+@Observable @MainActor
+class TenexCoreManager {
+    @ObservationIgnored let core: TenexCore
     /// Thread-safe async wrapper for FFI access with proper error handling
-    let safeCore: SafeTenexCore
-    let profiler = PerformanceProfiler.shared
-    @Published var isInitialized = false
-    @Published var initializationError: String?
+    @ObservationIgnored let safeCore: SafeTenexCore
+    @ObservationIgnored let profiler = PerformanceProfiler.shared
+    var isInitialized = false
+    var initializationError: String?
 
     // MARK: - Centralized Reactive Data Store
-    // These granular @Published properties enable targeted updates without full UI refresh.
-    // Views that observe specific properties only re-render when those properties change.
-    @Published var projects: [Project] = []
-    @Published var conversations: [ConversationFullInfo] = []
-    @Published var inboxItems: [InboxItem] = []
-    @Published var reports: [Report] = []
-    @Published var messagesByConversation: [String: [Message]] = [:]
+    // With @Observable, SwiftUI tracks reads at the property level.
+    // Views only re-render when the specific properties they read change.
+    var projects: [Project] = []
+    var conversations: [ConversationFullInfo] = [] {
+        didSet { rebuildConversationById() }
+    }
+
+    /// O(1) lookup by thread ID. Rebuilt automatically when `conversations` changes.
+    @ObservationIgnored private(set) var conversationById: [String: ConversationFullInfo] = [:]
+
+    private func rebuildConversationById() {
+        var map = [String: ConversationFullInfo](minimumCapacity: conversations.count)
+        for conv in conversations {
+            map[conv.thread.id] = conv
+        }
+        conversationById = map
+    }
+    var inboxItems: [InboxItem] = []
+    var reports: [Report] = []
+    var messagesByConversation: [String: [Message]] = [:]
     private(set) var statsVersion: UInt64 = 0
     private(set) var teamsVersion: UInt64 = 0
     private(set) var diagnosticsVersion: UInt64 = 0
-    private let statsVersionSubject = PassthroughSubject<UInt64, Never>()
-    private let teamsVersionSubject = PassthroughSubject<UInt64, Never>()
-    private let diagnosticsVersionSubject = PassthroughSubject<UInt64, Never>()
-    @Published var streamingBuffers: [String: StreamingBuffer] = [:]
-
-    var statsVersionPublisher: AnyPublisher<UInt64, Never> {
-        statsVersionSubject.eraseToAnyPublisher()
-    }
-
-    var teamsVersionPublisher: AnyPublisher<UInt64, Never> {
-        teamsVersionSubject.eraseToAnyPublisher()
-    }
-
-    var diagnosticsVersionPublisher: AnyPublisher<UInt64, Never> {
-        diagnosticsVersionSubject.eraseToAnyPublisher()
-    }
+    var streamingBuffers: [String: StreamingBuffer] = [:]
 
     /// Project online status - updated reactively via event callbacks.
     /// Key: project ID, Value: true if online.
-    /// Subscribe to this instead of polling isProjectOnline().
-    @Published var projectOnlineStatus: [String: Bool] = [:]
+    var projectOnlineStatus: [String: Bool] = [:]
 
     /// Online agents for each project - updated reactively via event callbacks.
     /// Key: project ID, Value: array of ProjectAgent.
-    /// Subscribe to this instead of fetching agents on-demand via getOnlineAgents().
-    /// This eliminates multi-second delays from redundant FFI calls.
-    @Published var onlineAgents: [String: [ProjectAgent]] = [:]
+    var onlineAgents: [String: [ProjectAgent]] = [:]
 
     /// Whether any conversation currently has active agents (24133 events with agents)
     /// Used to highlight the runtime indicator when work is happening
-    @Published var hasActiveAgents: Bool = false
+    var hasActiveAgents: Bool = false
 
     /// Formatted today's LLM runtime for statusbar display.
-    /// Centralized here to avoid duplicate updateRuntime() in multiple views.
-    /// Reads directly from TenexCore (lock-free AtomicU64) without actor serialization.
-    @Published var runtimeText: String = "0m"
+    var runtimeText: String = "0m"
 
     /// Last project ID tombstoned via a push upsert.
     /// Used by view selection state to clear deleted-project detail panes immediately.
-    @Published private(set) var lastDeletedProjectId: String?
+    private(set) var lastDeletedProjectId: String?
 
     @MainActor
     func setLastDeletedProjectId(_ projectId: String?) {
@@ -133,8 +127,8 @@ class TenexCoreManager: ObservableObject {
 
     // MARK: - Global App Filter
 
-    @Published var appFilterProjectIds: Set<String>
-    @Published var appFilterTimeWindow: AppTimeWindow
+    var appFilterProjectIds: Set<String>
+    var appFilterTimeWindow: AppTimeWindow
 
     static let appFilterProjectsDefaultsKey = "app.global.filter.projectIds"
     static let appFilterTimeWindowDefaultsKey = "app.global.filter.timeWindow"
@@ -142,7 +136,7 @@ class TenexCoreManager: ObservableObject {
     // MARK: - Ask Badge Support
 
     /// Count of unanswered ask events within the selected global filter scope.
-    @Published private(set) var unansweredAskCount: Int = 0
+    private(set) var unansweredAskCount: Int = 0
 
     private func computeUnansweredAskCount(now: UInt64? = nil) -> Int {
         let resolvedNow = now ?? UInt64(Date().timeIntervalSince1970)
@@ -186,31 +180,31 @@ class TenexCoreManager: ObservableObject {
 
     // MARK: - Event Callback
     /// Event handler for push-based updates from Rust core
-    var eventHandler: TenexEventHandler?
+    @ObservationIgnored var eventHandler: TenexEventHandler?
 
     /// Task reference for project status updates - enables cancellation of stale refreshes
-    var projectStatusUpdateTask: Task<Void, Never>?
+    @ObservationIgnored var projectStatusUpdateTask: Task<Void, Never>?
     /// Task reference for app-filtered conversation refreshes
-    var conversationRefreshTask: Task<Void, Never>?
+    @ObservationIgnored var conversationRefreshTask: Task<Void, Never>?
     /// Coalesced streaming chunks pending publish to reduce SwiftUI invalidation storms.
-    var pendingStreamingDeltas: [String: PendingStreamingDelta] = [:]
-    var streamingFlushTask: Task<Void, Never>?
+    @ObservationIgnored var pendingStreamingDeltas: [String: PendingStreamingDelta] = [:]
+    @ObservationIgnored var streamingFlushTask: Task<Void, Never>?
     /// In-flight message refreshes keyed by conversation to prevent redundant FFI fetch storms.
-    var inflightConversationMessageRefreshes: Set<String> = []
+    @ObservationIgnored var inflightConversationMessageRefreshes: Set<String> = []
     /// Last message refresh timestamp per conversation for lightweight throttling.
-    var lastConversationMessageRefreshAt: [String: CFAbsoluteTime] = [:]
+    @ObservationIgnored var lastConversationMessageRefreshAt: [String: CFAbsoluteTime] = [:]
 
     /// Cache for profile picture URLs to prevent repeated FFI calls
-    nonisolated let profilePictureCache = ProfilePictureCache.shared
+    @ObservationIgnored nonisolated let profilePictureCache = ProfilePictureCache.shared
 
     // MARK: - Performance Caches
 
     /// Cache for conversation hierarchy data to prevent N+1 FFI calls in list views
-    let hierarchyCache = ConversationHierarchyCache()
+    @ObservationIgnored let hierarchyCache = ConversationHierarchyCache()
 
     // MARK: - Profile Name Resolution
 
-    private var profileNameCache: [String: String] = [:]
+    @ObservationIgnored private var profileNameCache: [String: String] = [:]
 
     /// Resolves a display name for a pubkey via kind:0 profile metadata (cached).
     func displayName(for pubkey: String) -> String {
@@ -229,8 +223,8 @@ class TenexCoreManager: ObservableObject {
 
     init() {
         let persistedFilter = Self.loadPersistedAppFilter()
-        _appFilterProjectIds = Published(initialValue: persistedFilter.projectIds)
-        _appFilterTimeWindow = Published(initialValue: persistedFilter.timeWindow)
+        appFilterProjectIds = persistedFilter.projectIds
+        appFilterTimeWindow = persistedFilter.timeWindow
 
         // Create core immediately (lightweight)
         let tenexCore = TenexCore()
@@ -277,11 +271,11 @@ class TenexCoreManager: ObservableObject {
 
     /// Timestamp (Unix seconds) when the event callback was registered.
     /// Used to filter out stale inbox items that arrived before this session started.
-    var sessionStartTimestamp: UInt64 = 0
+    @ObservationIgnored var sessionStartTimestamp: UInt64 = 0
 
     /// Last time the user sent a message per conversation (Unix seconds).
     /// Used to skip TTS when the user was recently active in a conversation.
-    var lastUserActivityByConversation: [String: UInt64] = [:]
+    @ObservationIgnored var lastUserActivityByConversation: [String: UInt64] = [:]
 
     // NOTE: Push-based delta application and event reaction methods live in
     // `TenexCoreManager+Callbacks.swift` to keep this root type focused on state + wiring.
@@ -289,19 +283,16 @@ class TenexCoreManager: ObservableObject {
     @MainActor
     func bumpStatsVersion() {
         statsVersion &+= 1
-        statsVersionSubject.send(statsVersion)
     }
 
     @MainActor
     func bumpTeamsVersion() {
         teamsVersion &+= 1
-        teamsVersionSubject.send(teamsVersion)
     }
 
     @MainActor
     func bumpDiagnosticsVersion() {
         diagnosticsVersion &+= 1
-        diagnosticsVersionSubject.send(diagnosticsVersion)
     }
 
     static func projectId(fromATag aTag: String) -> String {

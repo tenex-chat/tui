@@ -197,15 +197,6 @@ class DiagnosticsViewModel: ObservableObject {
     }
 
     private func bindToUpdates() {
-        coreManager.diagnosticsVersionPublisher
-            .removeDuplicates()
-            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                Task { await self.loadDiagnostics() }
-            }
-            .store(in: &subscriptions)
-
         $selectedTab
             .removeDuplicates()
             .sink { [weak self] _ in

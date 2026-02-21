@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 
 // MARK: - Conversation Detail ViewModel
 
@@ -119,7 +118,6 @@ final class ConversationDetailViewModel: ObservableObject {
     private let conversation: ConversationFullInfo
     private weak var coreManager: TenexCoreManager?
 
-    private var subscriptions = Set<AnyCancellable>()
     private let profiler = PerformanceProfiler.shared
     private var recomputeTask: Task<Void, Never>?
     private var recomputePending = false
@@ -146,53 +144,43 @@ final class ConversationDetailViewModel: ObservableObject {
 
     deinit {
         recomputeTask?.cancel()
-        subscriptions.removeAll()
     }
 
-    /// Sets the core manager after initialization (called from view's onAppear/task)
+    /// Sets the core manager after initialization (called from view's onAppear/task).
+    /// Reactivity is handled by the view layer via .onChange modifiers.
     func setCoreManager(_ coreManager: TenexCoreManager) {
         guard self.coreManager == nil else { return }
         self.coreManager = coreManager
-        bindToCoreManager()
+
+        // Apply current state immediately
+        applyConversationUpdates(coreManager.conversations)
+        if let cached = coreManager.messagesByConversation[conversation.thread.id] {
+            applyMessages(cached)
+        }
+
         profiler.logEvent(
             "ConversationDetailViewModel bound coreManager conversationId=\(conversation.thread.id)",
             category: .general,
             level: .debug
         )
     }
-    private func bindToCoreManager() {
-        guard let coreManager = coreManager else { return }
 
-        coreManager.$messagesByConversation
-            .receive(on: RunLoop.main)
-            .sink { [weak self] cache in
-                guard let self = self else { return }
-                if let updated = cache[self.conversation.thread.id] {
-                    self.applyMessages(updated)
-                }
-                self.applyDescendantMessages(from: cache)
-            }
-            .store(in: &subscriptions)
+    // MARK: - View-Layer Reactive Hooks
+    // Called by the hosting view's .onChange modifiers to push updates.
 
-        coreManager.$conversations
-            .receive(on: RunLoop.main)
-            .sink { [weak self] conversations in
-                self?.applyConversationUpdates(conversations)
-            }
-            .store(in: &subscriptions)
-
-        coreManager.$reports
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                guard let self = self else { return }
-                self.scheduleDerivedStateRecompute()
-            }
-            .store(in: &subscriptions)
-
-        applyConversationUpdates(coreManager.conversations)
-        if let cached = coreManager.messagesByConversation[conversation.thread.id] {
-            applyMessages(cached)
+    func handleMessagesChanged(_ cache: [String: [Message]]) {
+        if let updated = cache[conversation.thread.id] {
+            applyMessages(updated)
         }
+        applyDescendantMessages(from: cache)
+    }
+
+    func handleConversationsChanged(_ conversations: [ConversationFullInfo]) {
+        applyConversationUpdates(conversations)
+    }
+
+    func handleReportsChanged() {
+        scheduleDerivedStateRecompute()
     }
 
     // MARK: - Data Loading (Async/Await)
