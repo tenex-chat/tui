@@ -2,7 +2,7 @@ import SwiftUI
 
 /// AI Settings view for configuring audio notifications
 struct AISettingsView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceTransparency) var reduceTransparency
     var isEmbedded: Bool = false
@@ -47,9 +47,13 @@ struct AISettingsView: View {
                 NavigationStack {
                     settingsForm
                         .navigationTitle("AI Settings")
+                        #if os(iOS)
                         .navigationBarTitleDisplayMode(.inline)
+                        #else
+                        .toolbarTitleDisplayMode(.inline)
+                        #endif
                         .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
+                            ToolbarItem(placement: .confirmationAction) {
                                 Button("Done") {
                                     dismiss()
                                 }
@@ -250,7 +254,7 @@ struct AISettingsView: View {
                 Section("Debug") {
                     NavigationLink {
                         AudioNotificationsLogView()
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
                     } label: {
                         Label("Audio Debug Log", systemImage: "list.bullet.rectangle")
                     }
@@ -648,9 +652,13 @@ private struct VoiceSelectorSheet: View {
                 }
             }
             .navigationTitle("Voice Whitelist")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -713,9 +721,13 @@ private struct ModelSelectorSheet: View {
                 }
             }
             .navigationTitle("Text Message Model")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -726,5 +738,5 @@ private struct ModelSelectorSheet: View {
 
 #Preview {
     AISettingsView()
-        .environmentObject(TenexCoreManager())
+        .environment(TenexCoreManager())
 }

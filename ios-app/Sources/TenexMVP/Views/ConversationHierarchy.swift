@@ -260,7 +260,7 @@ struct AgentAvatarInfo: Hashable, Identifiable {
 /// AgentAvatarView(agentName: "claude-code")
 /// ```
 struct AgentAvatarView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     /// Agent's display name (used for initials and color if no pubkey)
     let agentName: String
@@ -408,7 +408,7 @@ struct AgentAvatarView: View {
 /// Used in both conversation list and conversation detail views for consistent avatar display.
 /// Shows author + p-tagged recipient overlapping, then a gap, then other participants overlapping.
 struct ConversationAvatarGroup: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     /// Author who started the conversation
     let authorInfo: AgentAvatarInfo
@@ -442,7 +442,7 @@ struct ConversationAvatarGroup: View {
                     size: avatarSize,
                     fontSize: fontSize
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 .zIndex(1)
 
                 // P-tagged recipient overlapping with author
@@ -453,7 +453,7 @@ struct ConversationAvatarGroup: View {
                         size: avatarSize,
                         fontSize: fontSize
                     )
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                     .offset(x: overlapOffset)
                     .zIndex(0)
                 }
@@ -474,7 +474,7 @@ struct ConversationAvatarGroup: View {
                             size: avatarSize,
                             fontSize: fontSize
                         )
-                        .environmentObject(coreManager)
+                        .environment(coreManager)
                         .offset(x: CGFloat(index) * (avatarSize - 8))
                         .zIndex(Double(maxVisibleAvatars - index))
                     }
@@ -504,7 +504,7 @@ struct ConversationAvatarGroup: View {
 /// Legacy SharedAgentAvatar - now a thin wrapper around AgentAvatarView.
 /// Prefer using AgentAvatarView directly for new code.
 struct SharedAgentAvatar: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let agentName: String
     var pictureUrl: String? = nil
     var size: CGFloat = 24
@@ -517,14 +517,14 @@ struct SharedAgentAvatar: View {
             size: size,
             fontSize: fontSize
         )
-        .environmentObject(coreManager)
+        .environment(coreManager)
     }
 }
 
 /// Legacy AgentAvatarWithPicture - now a thin wrapper around AgentAvatarView.
 /// Prefer using AgentAvatarView directly for new code.
 struct AgentAvatarWithPicture: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let agentInfo: AgentAvatarInfo
     var size: CGFloat = 24
     var fontSize: CGFloat = 10
@@ -536,7 +536,7 @@ struct AgentAvatarWithPicture: View {
             size: size,
             fontSize: fontSize
         )
-        .environmentObject(coreManager)
+        .environment(coreManager)
     }
 }
 

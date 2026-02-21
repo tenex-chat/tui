@@ -3,7 +3,7 @@ import SwiftUI
 /// Reusable projects content for filtering conversations by project.
 /// Row tap only toggles filter selection; project boot remains a dedicated button.
 struct ProjectsContentView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Binding var selectedProjectIds: Set<String>
     var showDoneButton: Bool = false
     @Environment(\.dismiss) private var dismiss
@@ -36,7 +36,7 @@ struct ProjectsContentView: View {
         #endif
         .toolbar {
             if showDoneButton {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
                 }
@@ -89,7 +89,7 @@ struct ProjectsContentView: View {
 
 /// Sheet wrapper for `ProjectsContentView`.
 struct ProjectsSheet: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Binding var selectedProjectIds: Set<String>
 
     var body: some View {
@@ -98,7 +98,7 @@ struct ProjectsSheet: View {
                 selectedProjectIds: $selectedProjectIds,
                 showDoneButton: true
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
         #if os(iOS)
         .tenexModalPresentation(detents: [.medium, .large])
@@ -109,7 +109,7 @@ struct ProjectsSheet: View {
 }
 
 private struct ProjectsSheetRow: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     let project: Project
     let isFiltered: Bool
@@ -226,5 +226,5 @@ private struct ProjectsSheetRow: View {
 
 #Preview {
     ProjectsSheet(selectedProjectIds: .constant([]))
-        .environmentObject(TenexCoreManager())
+        .environment(TenexCoreManager())
 }

@@ -12,7 +12,7 @@ enum ReportsLayoutMode {
 }
 
 struct ReportsTabView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let layoutMode: ReportsLayoutMode
     private let selectedReportBindingOverride: Binding<Report?>?
     @StateObject private var viewModel = ReportsViewModel()
@@ -72,15 +72,16 @@ struct ReportsTabView: View {
                 await viewModel.loadReports()
             }
         }
-        .onChange(of: viewModel.filteredReports.map(reportIdentity)) { _, visibleReportIds in
+        .onChange(of: viewModel.filteredReports) { _, _ in
             guard let selectedReport = selectedReportBinding.wrappedValue else { return }
             let selectedIdentity = reportIdentity(selectedReport)
-            if !visibleReportIds.contains(selectedIdentity) {
+            if !viewModel.filteredReports.contains(where: { reportIdentity($0) == selectedIdentity }) {
                 selectedReportBinding.wrappedValue = nil
             }
         }
-        // Reports now update reactively via TenexEventHandler -> coreManager.reports -> viewModel
-        // No need to observe coreManager.projects for report updates
+        .onChange(of: coreManager.reports) { _, newReports in
+            viewModel.handleReportsChanged(newReports)
+        }
     }
 
     // MARK: - Split View Layout (iPad/Mac)
@@ -180,10 +181,10 @@ struct ReportsTabView: View {
         }
         .searchable(text: $viewModel.searchText, prompt: "Search reports...")
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .automatic) {
                 if viewModel.isLoading {
                     ProgressView()
                         .scaleEffect(0.8)
@@ -355,7 +356,7 @@ struct ReportsTabDetailView: View {
     let report: Report
     let project: Project?
 
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @State private var showChatWithAuthor = false
 
     private static let dateFormatter: DateFormatter = {
@@ -391,9 +392,13 @@ struct ReportsTabDetailView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(report.title)
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItem(placement: .automatic) {
                 Button {
                     showChatWithAuthor = true
                 } label: {
@@ -410,7 +415,7 @@ struct ReportsTabDetailView: View {
                     initialContent: ConversationFormatters.generateReportContextMessage(report: report),
                     referenceReportATag: reportATag
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 .tenexModalPresentation(detents: [.large])
             }
         }
@@ -491,7 +496,7 @@ struct ReportsTabDetailView: View {
 
 private struct ReportAuthorName: View {
     let pubkey: String
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     var body: some View {
         Text(coreManager.displayName(for: pubkey))
@@ -500,5 +505,5 @@ private struct ReportAuthorName: View {
 
 #Preview {
     ReportsTabView()
-        .environmentObject(TenexCoreManager())
+        .environment(TenexCoreManager())
 }

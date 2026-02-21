@@ -107,7 +107,7 @@ enum InboxLayoutMode {
 }
 
 struct InboxView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let layoutMode: InboxLayoutMode
     private let selectedFilterBindingOverride: Binding<InboxFilter>?
     private let selectedItemIdBindingOverride: Binding<String?>?
@@ -216,8 +216,9 @@ struct InboxView: View {
             .onChange(of: selectedFilterBinding.wrappedValue) { _, _ in
                 activeConversationIdBinding.wrappedValue = nil
             }
-            .onChange(of: items.map(\.id)) { _, ids in
-                if let selectedItemId = selectedItemIdBinding.wrappedValue, !ids.contains(selectedItemId) {
+            .onChange(of: items) { _, _ in
+                if let selectedItemId = selectedItemIdBinding.wrappedValue,
+                   !items.contains(where: { $0.id == selectedItemId }) {
                     selectedItemIdBinding.wrappedValue = nil
                     activeConversationIdBinding.wrappedValue = nil
                 }
@@ -276,7 +277,7 @@ struct InboxView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
+            ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }
         }
@@ -286,7 +287,7 @@ struct InboxView: View {
     private func splitDetailContent(now: UInt64) -> some View {
         if let conversationId = activeConversationIdBinding.wrappedValue {
             ConversationByIdAdaptiveDetailView(conversationId: conversationId)
-                .environmentObject(coreManager)
+                .environment(coreManager)
         } else if let item = selectedItem(now: now) {
             InboxDetailView(
                 item: item,
@@ -295,7 +296,7 @@ struct InboxView: View {
                 },
                 isEmbedded: true
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         } else {
             ContentUnavailableView(
                 "Select a Notification",
@@ -341,9 +342,13 @@ struct InboxView: View {
                 }
             }
             .navigationTitle("Inbox")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .automatic) {
                     AppGlobalFilterToolbarButton()
                 }
             }
@@ -357,11 +362,11 @@ struct InboxView: View {
                     pendingNavigation = ConversationNavigationData(conversationId: convId)
                     presentedItem = nil
                 })
-                .environmentObject(coreManager)
+                .environment(coreManager)
             }
             .navigationDestination(item: $navigateToConversation) { navData in
                 ConversationByIdAdaptiveDetailView(conversationId: navData.conversationId)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             }
         }
     }
@@ -528,7 +533,7 @@ struct InboxDetailView: View {
     let item: InboxItem
     let onNavigateToConversation: (String) -> Void
     var isEmbedded: Bool = false
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Environment(\.dismiss) private var dismiss
 
     @ViewBuilder
@@ -543,9 +548,13 @@ struct InboxDetailView: View {
     private var modalDetailContent: some View {
         NavigationStack {
             detailContent
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -655,7 +664,7 @@ struct InboxDetailView: View {
                 // Dismiss after successful submit
                 dismiss()
             }
-            .environmentObject(coreManager)
+            .environment(coreManager)
         } else {
             // Regular text content
             Text(item.content)
@@ -719,7 +728,7 @@ struct ConversationNavigationData: Identifiable, Hashable {
 
 struct InboxConversationView: View {
     let conversationId: String
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @State private var messages: [Message] = []
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>?
@@ -752,13 +761,17 @@ struct InboxConversationView: View {
             }
         }
         .navigationTitle("Conversation")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
         .task {
             userPubkey = (await coreManager.safeCore.getCurrentUser())?.pubkey ?? ""
             await loadMessages()
         }
-        .onReceive(coreManager.$messagesByConversation) { cache in
-            if let updated = cache[conversationId] {
+        .onChange(of: coreManager.messagesByConversation) { _, _ in
+            if let updated = coreManager.messagesByConversation[conversationId] {
                 messages = updated
             }
         }

@@ -8,7 +8,7 @@ private struct ProjectGeneralDraft: Equatable {
 }
 
 struct ProjectSettingsView: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     let projectId: String

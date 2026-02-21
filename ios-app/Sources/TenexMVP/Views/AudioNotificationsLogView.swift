@@ -3,7 +3,7 @@ import SwiftUI
 /// Debug view for inspecting saved audio notifications — shows original text,
 /// massaged text, and allows playback of generated audio files.
 struct AudioNotificationsLogView: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @StateObject private var player = AudioNotificationPlayer.shared
 
     @State private var notifications: [AudioNotificationInfo] = []
@@ -40,7 +40,11 @@ struct AudioNotificationsLogView: View {
             }
         }
         .navigationTitle("Audio Debug Log")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
         .onAppear { loadNotifications() }
         .refreshable { loadNotifications() }
         .alert("Error", isPresented: $showError) {
@@ -175,7 +179,11 @@ private struct AudioNotificationDetailView: View {
             }
         }
         .navigationTitle("Notification Detail")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
     }
 }
 

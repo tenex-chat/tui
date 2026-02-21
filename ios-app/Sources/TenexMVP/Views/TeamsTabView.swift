@@ -7,7 +7,7 @@ enum TeamsLayoutMode {
 }
 
 struct TeamsTabView: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
 
     let layoutMode: TeamsLayoutMode
     private let selectedTeamBindingOverride: Binding<TeamInfo?>?
@@ -62,7 +62,7 @@ struct TeamsTabView: View {
             }
             await viewModel.loadIfNeeded()
         }
-        .onReceive(coreManager.teamsVersionPublisher) { _ in
+        .onChange(of: coreManager.teamsVersion) { _, _ in
             Task { await viewModel.refresh() }
         }
         .alert(
@@ -98,14 +98,14 @@ struct TeamsTabView: View {
                 }
                 .searchable(text: $searchText, placement: .toolbar, prompt: "Search teams")
                 .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .automatic) {
                         if viewModel.isLoading {
                             ProgressView()
                                 .controlSize(.small)
                         }
                     }
 
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: .automatic) {
                         Button {
                             Task { await viewModel.refresh() }
                         } label: {

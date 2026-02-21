@@ -58,7 +58,7 @@ struct MessageComposerView: View {
 
     @Environment(\.dismiss) var dismiss
     @Environment(\.scenePhase) var scenePhase
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     // MARK: - State
 
@@ -399,7 +399,7 @@ struct MessageComposerView: View {
         }
         .sheet(item: $workspaceAgentToConfig) { agent in
             AgentConfigSheet(agent: agent, projectId: selectedProject?.id ?? "")
-                .environmentObject(coreManager)
+                .environment(coreManager)
         }
         .sheet(isPresented: $showNudgeSkillSelector) {
             NudgeSkillSelectorSheet(
@@ -496,7 +496,7 @@ struct MessageComposerView: View {
                                 OnlineAgentChipView(agent: agent) {
                                     openAgentSelector()
                                 }
-                                .environmentObject(coreManager)
+                                .environment(coreManager)
                             } else {
                                 agentPromptButton
                             }

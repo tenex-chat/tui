@@ -64,7 +64,7 @@ struct StatusBadge: View {
 
 /// Unified message bubble component used in conversation detail and full conversation views
 struct SharedMessageBubble: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let message: Message
     let userPubkey: String
     let showAvatar: Bool

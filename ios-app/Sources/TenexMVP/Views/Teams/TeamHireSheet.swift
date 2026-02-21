@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct TeamHireSheet: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
 
     let team: TeamInfo

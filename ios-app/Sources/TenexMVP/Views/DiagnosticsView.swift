@@ -33,7 +33,7 @@ struct DiagnosticsView: View {
             // Tab Content
             if viewModel.selectedTab == .settings {
                 AppSettingsView(defaultSection: .audio, isEmbedded: true)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             } else {
                 ScrollView {
                     if let snapshot = viewModel.snapshot {
@@ -47,12 +47,19 @@ struct DiagnosticsView: View {
             }
         }
         .navigationTitle("Diagnostics")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
         .task {
             await viewModel.loadDiagnostics()
         }
         .onDisappear {
             viewModel.cancelFetch()
+        }
+        .onChange(of: coreManager.diagnosticsVersion) { _, _ in
+            Task { await viewModel.loadDiagnostics() }
         }
     }
 }

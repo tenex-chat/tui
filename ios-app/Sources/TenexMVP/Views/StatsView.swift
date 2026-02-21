@@ -4,8 +4,10 @@ import SwiftUI
 /// Shows metric cards, charts, rankings, and activity grid
 struct StatsView: View {
     @StateObject private var viewModel: StatsViewModel
+    private let coreManager: TenexCoreManager
 
     init(coreManager: TenexCoreManager) {
+        self.coreManager = coreManager
         _viewModel = StateObject(wrappedValue: StatsViewModel(coreManager: coreManager))
     }
 
@@ -39,10 +41,16 @@ struct StatsView: View {
             }
         }
         .navigationTitle("Stats")
+        #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
         .task {
-            // Load stats on appear
             await viewModel.loadStats()
+        }
+        .onChange(of: coreManager.statsVersion) { _, _ in
+            Task { await viewModel.loadStats() }
         }
     }
 }

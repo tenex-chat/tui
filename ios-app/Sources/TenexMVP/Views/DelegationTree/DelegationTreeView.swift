@@ -8,7 +8,7 @@ import SwiftUI
 struct DelegationTreeView: View {
     let rootConversationId: String
 
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @StateObject private var viewModel = DelegationTreeViewModel()
     @State private var selectedNode: DelegationTreeNode?
 
@@ -218,7 +218,7 @@ private struct DelegationCanvasView: View {
 // MARK: - Delegation Node Card
 
 private struct DelegationNodeCard: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let node: DelegationTreeNode
     let isSelected: Bool
     let onTap: () -> Void
@@ -238,7 +238,7 @@ private struct DelegationNodeCard: View {
                     pubkey: conversation.thread.pubkey,
                     size: 28
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
@@ -318,7 +318,7 @@ private struct DelegationNodeCard: View {
 // MARK: - Delegation Detail Panel
 
 private struct DelegationDetailPanel: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     let node: DelegationTreeNode
     let onClose: () -> Void
 
@@ -344,7 +344,7 @@ private struct DelegationDetailPanel: View {
 
             NavigationStack {
                 ConversationAdaptiveDetailView(conversation: node.conversation)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             }
         }
         .background(Color.systemBackground)

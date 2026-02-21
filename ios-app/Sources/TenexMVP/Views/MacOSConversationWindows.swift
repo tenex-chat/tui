@@ -7,7 +7,7 @@ import SwiftUI
 /// Used as the content for the "conversation-summary" WindowGroup.
 struct ConversationSummaryWindow: View {
     let conversationId: String
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     @State private var conversation: ConversationFullInfo?
     @State private var isLoading = true
@@ -17,7 +17,7 @@ struct ConversationSummaryWindow: View {
             Group {
                 if let conversation {
                     ConversationAdaptiveDetailView(conversation: conversation)
-                        .environmentObject(coreManager)
+                        .environment(coreManager)
                 } else if isLoading {
                     ProgressView("Loading conversation...")
                 } else {
@@ -32,8 +32,8 @@ struct ConversationSummaryWindow: View {
         .task {
             await resolveConversation()
         }
-        .onReceive(coreManager.$conversations) { conversations in
-            if let updated = conversations.first(where: { $0.thread.id == conversationId }) {
+        .onChange(of: coreManager.conversations) { _, _ in
+            if let updated = coreManager.conversationById[conversationId] {
                 conversation = updated
             }
         }
@@ -41,7 +41,7 @@ struct ConversationSummaryWindow: View {
 
     private func resolveConversation() async {
         // Try local cache first
-        if let cached = coreManager.conversations.first(where: { $0.thread.id == conversationId }) {
+        if let cached = coreManager.conversationById[conversationId] {
             conversation = cached
             isLoading = false
             return
@@ -60,7 +60,7 @@ struct ConversationSummaryWindow: View {
 /// Used as the content for the "full-conversation" WindowGroup.
 struct FullConversationWindow: View {
     let conversationId: String
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     @State private var conversation: ConversationFullInfo?
     @State private var messages: [Message] = []
@@ -73,7 +73,7 @@ struct FullConversationWindow: View {
                     conversation: conversation,
                     messages: messages
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
             } else if isLoading {
                 ProgressView("Loading conversation...")
             } else {
@@ -89,20 +89,20 @@ struct FullConversationWindow: View {
             await coreManager.ensureMessagesLoaded(conversationId: conversationId)
             messages = coreManager.messagesByConversation[conversationId] ?? []
         }
-        .onReceive(coreManager.$conversations) { conversations in
-            if let updated = conversations.first(where: { $0.thread.id == conversationId }) {
+        .onChange(of: coreManager.conversations) { _, _ in
+            if let updated = coreManager.conversationById[conversationId] {
                 conversation = updated
             }
         }
-        .onReceive(coreManager.$messagesByConversation) { cache in
-            if let updated = cache[conversationId] {
+        .onChange(of: coreManager.messagesByConversation) { _, _ in
+            if let updated = coreManager.messagesByConversation[conversationId] {
                 messages = updated
             }
         }
     }
 
     private func resolveConversation() async {
-        if let cached = coreManager.conversations.first(where: { $0.thread.id == conversationId }) {
+        if let cached = coreManager.conversationById[conversationId] {
             conversation = cached
             isLoading = false
             return

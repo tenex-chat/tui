@@ -8,7 +8,7 @@ extension View {
     func nowPlayingInset(coreManager: TenexCoreManager) -> some View {
         self.safeAreaInset(edge: .bottom) {
             NowPlayingBar()
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 .animation(.spring(duration: 0.3), value: AudioNotificationPlayer.shared.playbackState)
         }
     }
@@ -17,7 +17,7 @@ extension View {
 /// Apple Music-style Now Playing bar that sits above the tab bar.
 /// Shows conversation title, agent avatar + name, text snippet, progress bar, and controls.
 struct NowPlayingBar: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @ObservedObject var player = AudioNotificationPlayer.shared
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -27,7 +27,7 @@ struct NowPlayingBar: View {
     /// Look up the conversation from coreManager data
     private var conversation: ConversationFullInfo? {
         guard let id = player.currentConversationId else { return nil }
-        return coreManager.conversations.first { $0.thread.id == id }
+        return coreManager.conversationById[id]
     }
 
     /// Real conversation title from live data
@@ -64,7 +64,7 @@ struct NowPlayingBar: View {
                                 fontSize: 13,
                                 showBorder: false
                             )
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(conversationTitle)
@@ -154,7 +154,7 @@ struct NowPlayingBar: View {
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .sheet(isPresented: $showQueueSheet) {
                 AudioQueueSheet()
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             }
             .sheet(isPresented: $showConversationDetail) {
                 if let conversation {
@@ -179,7 +179,7 @@ struct NowPlayingBar: View {
 // MARK: - Audio Queue Sheet
 
 struct AudioQueueSheet: View {
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @ObservedObject var player = AudioNotificationPlayer.shared
     @Environment(\.dismiss) private var dismiss
 
@@ -223,7 +223,7 @@ struct AudioQueueSheet: View {
                                     fontSize: 11,
                                     showBorder: false
                                 )
-                                .environmentObject(coreManager)
+                                .environment(coreManager)
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(resolveConversationTitle(conversationId: item.conversationId, fallback: item.notification.conversationTitle))
@@ -258,16 +258,20 @@ struct AudioQueueSheet: View {
                 }
             }
             .navigationTitle("Audio Queue")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .automatic) {
                     if !player.queue.isEmpty {
                         Button("Clear All") {
                             player.clearQueue()
                         }
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
@@ -284,7 +288,7 @@ struct AudioQueueSheet: View {
 
     private func resolveConversationTitle(conversationId: String?, fallback: String?) -> String {
         if let id = conversationId,
-           let conv = coreManager.conversations.first(where: { $0.thread.id == id }) {
+           let conv = coreManager.conversationById[id] {
             return conv.thread.title
         }
         return fallback ?? "Audio Notification"
@@ -292,7 +296,7 @@ struct AudioQueueSheet: View {
 
     private func resolveProjectTitle(conversationId: String?) -> String? {
         guard let id = conversationId,
-              let conv = coreManager.conversations.first(where: { $0.thread.id == id }) else { return nil }
+              let conv = coreManager.conversationById[id] else { return nil }
         let projectId = TenexCoreManager.projectId(fromATag: conv.projectATag)
         return coreManager.projects.first { $0.id == projectId }?.title
     }

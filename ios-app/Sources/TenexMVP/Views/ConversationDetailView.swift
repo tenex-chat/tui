@@ -6,7 +6,7 @@ import SwiftUI
 /// Based on the approved wireframe at wireframes/ios-conversation-detail.html
 struct ConversationDetailView: View {
     let conversation: ConversationFullInfo
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
 
     @StateObject private var viewModel: ConversationDetailViewModel
     @State private var selectedDelegation: DelegationItem?
@@ -21,17 +21,21 @@ struct ConversationDetailView: View {
     init(conversation: ConversationFullInfo, coreManager: TenexCoreManager? = nil) {
         self.conversation = conversation
         // Create the view model with a placeholder coreManager initially
-        // The actual coreManager will be set via onAppear when using @EnvironmentObject
+        // The actual coreManager will be set via setCoreManager when the .task fires
         self._viewModel = StateObject(wrappedValue: ConversationDetailViewModel(conversation: conversation))
     }
 
     var body: some View {
         contentView
             .navigationTitle(conversation.thread.title)
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .navigationDestination(item: $selectedDelegationConv) { conv in
                 ConversationDetailView(conversation: conv)
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
             }
             #if os(macOS)
             .navigationDestination(isPresented: $showFullConversation) {
@@ -40,18 +44,27 @@ struct ConversationDetailView: View {
                     messages: viewModel.messages,
                     presentationStyle: .embedded
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
             }
             #endif
             .task {
                 await initializeAndLoad()
+            }
+            .onChange(of: coreManager.conversations) { _, _ in
+                viewModel.handleConversationsChanged(coreManager.conversations)
+            }
+            .onChange(of: coreManager.messagesByConversation) { _, _ in
+                viewModel.handleMessagesChanged(coreManager.messagesByConversation)
+            }
+            .onChange(of: coreManager.reports) { _, _ in
+                viewModel.handleReportsChanged()
             }
             #if os(iOS)
             .sheet(item: $selectedDelegation) { delegation in
                 if let childConv = viewModel.childConversation(for: delegation.conversationId) {
                     NavigationStack {
                         ConversationDetailView(conversation: childConv)
-                            .environmentObject(coreManager)
+                            .environment(coreManager)
                             .toolbar {
                                 ToolbarItem(placement: .topBarTrailing) {
                                     Button("Done") {
@@ -71,7 +84,7 @@ struct ConversationDetailView: View {
                     conversation: conversation,
                     messages: viewModel.messages
                 )
-                .environmentObject(coreManager)
+                .environment(coreManager)
                 .tenexModalPresentation(detents: [.large])
             }
             #endif
@@ -155,7 +168,7 @@ struct ConversationDetailView: View {
                         fontSize: 8,
                         maxVisibleAvatars: 5
                     )
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
                 }
 
                 // Runtime
@@ -213,7 +226,7 @@ struct ConversationDetailView: View {
                         fontSize: 8,
                         showBorder: false
                     )
-                    .environmentObject(coreManager)
+                    .environment(coreManager)
 
                     Text(AgentNameFormatter.format(replyAuthorName))
                         .font(.subheadline)
@@ -342,7 +355,7 @@ struct ConversationDetailView: View {
                 conversationTitle: conversation.thread.title,
                 initialAgentPubkey: lastAgentPubkey
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
         #endif
     }
@@ -421,7 +434,7 @@ struct ConversationDetailView: View {
                     selectedDelegation = delegation
                     #endif
                 }
-                .environmentObject(coreManager)
+                .environment(coreManager)
 
                 if delegation.id != viewModel.delegations.last?.id {
                     Divider()

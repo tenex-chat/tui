@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AppGlobalFilterToolbarButton: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @State private var isPresented = false
 
     var body: some View {
@@ -40,7 +40,7 @@ struct AppGlobalFilterToolbarButton: View {
                 selectedProjectIds: coreManager.appFilterProjectIds,
                 selectedTimeWindow: coreManager.appFilterTimeWindow
             )
-            .environmentObject(coreManager)
+            .environment(coreManager)
         }
         #endif
     }
@@ -141,7 +141,7 @@ struct AppGlobalFilterToolbarButton: View {
 }
 
 struct AppGlobalFilterSheet: View {
-    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var draftProjectIds: Set<String>
@@ -244,14 +244,18 @@ struct AppGlobalFilterSheet: View {
             .listStyle(.inset)
             #endif
             .navigationTitle("Global Filter")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         applyAndDismiss()
                     }

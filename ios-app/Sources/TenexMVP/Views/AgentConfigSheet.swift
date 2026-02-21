@@ -9,7 +9,7 @@ struct AgentConfigSheet: View {
 
     // MARK: - Environment
 
-    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(TenexCoreManager.self) var coreManager
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - State
@@ -321,5 +321,5 @@ struct AgentConfigSheet: View {
         ),
         projectId: "test-project"
     )
-    .environmentObject(TenexCoreManager())
+    .environment(TenexCoreManager())
 }
