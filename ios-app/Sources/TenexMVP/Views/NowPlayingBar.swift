@@ -22,6 +22,7 @@ struct NowPlayingBar: View {
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var showQueueSheet = false
+    @State private var showConversationDetail = false
 
     /// Look up the conversation from coreManager data
     private var conversation: ConversationFullInfo? {
@@ -51,9 +52,9 @@ struct NowPlayingBar: View {
         if player.playbackState != .idle {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    // Tappable area: avatar + text opens queue sheet
+                    // Tappable area: avatar + text opens conversation detail
                     Button {
-                        showQueueSheet = true
+                        showConversationDetail = true
                     } label: {
                         HStack(spacing: 12) {
                             AgentAvatarView(
@@ -84,6 +85,17 @@ struct NowPlayingBar: View {
                     .buttonStyle(.borderless)
 
                     Spacer()
+
+                    // Queue button
+                    Button {
+                        showQueueSheet = true
+                    } label: {
+                        Image(systemName: "list.bullet")
+                            .font(.title3)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
 
                     // Play/Pause button
                     Button {
@@ -143,6 +155,22 @@ struct NowPlayingBar: View {
             .sheet(isPresented: $showQueueSheet) {
                 AudioQueueSheet()
                     .environmentObject(coreManager)
+            }
+            .sheet(isPresented: $showConversationDetail) {
+                if let conversation {
+                    NavigationStack {
+                        ConversationDetailView(conversation: conversation)
+                            .environmentObject(coreManager)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") {
+                                        showConversationDetail = false
+                                    }
+                                }
+                            }
+                    }
+                    .tenexModalPresentation(detents: [.large])
+                }
             }
         }
     }
