@@ -127,6 +127,14 @@ extension MessageComposerView {
             contentToSend = contentToSend.replacingOccurrences(of: marker, with: attachment.url)
         }
 
+        // OPTIMISTIC DISMISS FIX: Dismiss immediately for snappy UX
+        // Then post in background with error recovery
+        let shouldDismissImmediately = !isInlineComposer
+        if shouldDismissImmediately {
+            // For modal composers (reply sheets), dismiss immediately
+            dismiss()
+        }
+
         Task {
             do {
                 let validatedAgentPubkey = await composerViewModel.validatedAgentPubkey(
@@ -161,12 +169,25 @@ extension MessageComposerView {
                     await clearDraftAfterInlineSend(projectId: project.id)
                 } else {
                     await draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
-                    dismiss()
                 }
             } catch {
                 isSending = false
                 sendError = error.localizedDescription
-                showSendError = true
+                
+                if shouldDismissImmediately {
+                    // ERROR RECOVERY: Sheet already dismissed, use local notification
+                    await composerDependencies.notifications.scheduleAskNotification(
+                        askEventId: "send-error-\(UUID().uuidString)",
+                        title: "Failed to send message",
+                        body: error.localizedDescription,
+                        fromAgent: "System",
+                        projectId: project.id,
+                        conversationId: conversationId
+                    )
+                } else {
+                    // For inline composers, show the error alert normally
+                    showSendError = true
+                }
             }
         }
     }
