@@ -17,6 +17,14 @@ ios-app/DerivedData/
 ios-app/DerivedDevice/
 ios-app/DerivedTests/
 ios-app/mockups/
+
+# Xcode build artifacts (wherever they appear)
+DerivedData/
+*.o
+*.dylib
+*.app/
+*.dSYM/
+*.ipa
 __.SYMDEF
 rustc-ice-*.txt
 .xcodebuildmcp/
