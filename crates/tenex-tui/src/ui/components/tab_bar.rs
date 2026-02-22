@@ -244,18 +244,14 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         // Determine indicator and title based on content type
         let (indicator, indicator_fg, title, project) = match &tab.content_type {
             TabContentType::Conversation => {
-                // Indicator priority (for inactive tabs):
-                // 1. @ (waiting_for_user/mention) - red/orange (ACCENT_ERROR)
-                // 2. • (agent working) - blue (ACCENT_PRIMARY)
-                // 3. • (unread, no mention) - white (TEXT_WHITE)
-                // 4. + (draft) - green (ACCENT_SUCCESS)
-                // 5. none
+                // Simplified indicator priority (for inactive tabs):
+                // 1. • (waiting_for_user/mention) - orange (ACCENT_WARNING)
+                // 2. • (unread, no mention) - white (TEXT_WHITE)
+                // 3. + (draft) - green (ACCENT_SUCCESS)
+                // 4. none
                 let (ind, ind_fg) = if tab.waiting_for_user && !is_active {
-                    // User is mentioned - show @ with red/orange
-                    ("@ ".to_string(), Some(theme::ACCENT_ERROR))
-                } else if tab.is_agent_working && !is_active {
-                    // Agent is working - show blue bullet
-                    (card::BULLET.to_string(), Some(theme::ACCENT_PRIMARY))
+                    // User is mentioned - show bullet with orange
+                    (card::BULLET.to_string(), Some(theme::ACCENT_WARNING))
                 } else if tab.has_unread && !is_active {
                     // Unread activity but no mention - show white bullet
                     (card::BULLET.to_string(), Some(theme::TEXT_WHITE))
@@ -362,8 +358,6 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
             theme::tab_active()
         } else if tab.waiting_for_user {
             theme::tab_waiting_for_user()
-        } else if tab.is_agent_working {
-            theme::tab_agent_working()
         } else if tab.has_unread {
             theme::tab_unread()
         } else {
