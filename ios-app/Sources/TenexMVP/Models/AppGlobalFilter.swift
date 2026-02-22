@@ -1,5 +1,36 @@
 import Foundation
 
+/// Three-state filter for scheduled events in conversation lists.
+enum ScheduledEventFilter: String, CaseIterable, Codable {
+    /// Show all conversations regardless of scheduled status (default)
+    case showAll
+    /// Hide scheduled conversations from the list
+    case hide
+    /// Show only scheduled conversations
+    case showOnly
+
+    var label: String {
+        switch self {
+        case .showAll: return "Show All"
+        case .hide: return "Hide"
+        case .showOnly: return "Show Only"
+        }
+    }
+
+    /// Returns true if an item with the given scheduled status passes this filter
+    func allows(isScheduled: Bool) -> Bool {
+        switch self {
+        case .showAll: return true
+        case .hide: return !isScheduled
+        case .showOnly: return isScheduled
+        }
+    }
+}
+
+extension ScheduledEventFilter {
+    static let defaultValue: ScheduledEventFilter = .showAll
+}
+
 /// App-level time window for global filtering across chats/reports/inbox/search.
 enum AppTimeWindow: String, CaseIterable, Codable {
     case hours4
@@ -67,11 +98,29 @@ extension AppTimeWindow {
 struct AppGlobalFilterSnapshot: Equatable {
     let projectIds: Set<String>
     let timeWindow: AppTimeWindow
+    let scheduledEventFilter: ScheduledEventFilter
 
     var isDefault: Bool {
-        projectIds.isEmpty && timeWindow == .defaultValue
+        projectIds.isEmpty && timeWindow == .defaultValue && scheduledEventFilter == .defaultValue
     }
 
+    /// Include check for conversations (applies scheduled event filter).
+    func includes(projectId: String?, timestamp: UInt64, now: UInt64, isScheduled: Bool) -> Bool {
+        let matchesProject: Bool
+        if projectIds.isEmpty {
+            matchesProject = true
+        } else if let projectId {
+            matchesProject = projectIds.contains(projectId)
+        } else {
+            matchesProject = false
+        }
+
+        return matchesProject
+            && timeWindow.includes(timestamp: timestamp, now: now)
+            && scheduledEventFilter.allows(isScheduled: isScheduled)
+    }
+
+    /// Include check for non-conversation items (reports, inbox, search) — ignores scheduled filter.
     func includes(projectId: String?, timestamp: UInt64, now: UInt64) -> Bool {
         let matchesProject: Bool
         if projectIds.isEmpty {

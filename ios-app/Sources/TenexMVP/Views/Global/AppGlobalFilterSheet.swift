@@ -8,6 +8,7 @@ struct AppGlobalFilterToolbarButton: View {
         #if os(macOS)
         Menu {
             timeSubmenu
+            scheduledEventsSubmenu
             projectsSubmenu
             if !coreManager.isAppFilterDefault {
                 Divider()
@@ -38,7 +39,8 @@ struct AppGlobalFilterToolbarButton: View {
         .sheet(isPresented: $isPresented) {
             AppGlobalFilterSheet(
                 selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
+                selectedTimeWindow: coreManager.appFilterTimeWindow,
+                selectedScheduledEvent: coreManager.appFilterScheduledEvent
             )
             .environment(coreManager)
         }
@@ -70,6 +72,26 @@ struct AppGlobalFilterToolbarButton: View {
             }
         } label: {
             Label("Time", systemImage: "clock")
+        }
+    }
+
+    @ViewBuilder
+    private var scheduledEventsSubmenu: some View {
+        Picker(selection: Binding(
+            get: { coreManager.appFilterScheduledEvent },
+            set: { newValue in
+                coreManager.updateAppFilter(
+                    projectIds: coreManager.appFilterProjectIds,
+                    timeWindow: coreManager.appFilterTimeWindow,
+                    scheduledEvent: newValue
+                )
+            }
+        )) {
+            ForEach(ScheduledEventFilter.allCases, id: \.self) { filter in
+                Text(filter.label).tag(filter)
+            }
+        } label: {
+            Label("Scheduled Events", systemImage: "calendar.badge.clock")
         }
     }
 
@@ -146,10 +168,16 @@ struct AppGlobalFilterSheet: View {
 
     @State private var draftProjectIds: Set<String>
     @State private var draftTimeWindow: AppTimeWindow
+    @State private var draftScheduledEvent: ScheduledEventFilter
 
-    init(selectedProjectIds: Set<String>, selectedTimeWindow: AppTimeWindow) {
+    init(
+        selectedProjectIds: Set<String>,
+        selectedTimeWindow: AppTimeWindow,
+        selectedScheduledEvent: ScheduledEventFilter
+    ) {
         _draftProjectIds = State(initialValue: selectedProjectIds)
         _draftTimeWindow = State(initialValue: selectedTimeWindow)
+        _draftScheduledEvent = State(initialValue: selectedScheduledEvent)
     }
 
     var body: some View {
@@ -170,6 +198,25 @@ struct AppGlobalFilterSheet: View {
                             }
                         }
                         .accessibilityIdentifier("global_filter_time_\(window.rawValue)")
+                        .buttonStyle(.borderless)
+                    }
+                }
+
+                Section("Scheduled Events") {
+                    ForEach(ScheduledEventFilter.allCases, id: \.self) { filter in
+                        Button {
+                            draftScheduledEvent = filter
+                        } label: {
+                            HStack {
+                                Text(filter.label)
+                                Spacer()
+                                if draftScheduledEvent == filter {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color.agentBrand)
+                                }
+                            }
+                        }
+                        .accessibilityIdentifier("global_filter_scheduled_\(filter.rawValue)")
                         .buttonStyle(.borderless)
                     }
                 }
@@ -291,10 +338,15 @@ struct AppGlobalFilterSheet: View {
     private func resetToDefaults() {
         draftProjectIds = []
         draftTimeWindow = .defaultValue
+        draftScheduledEvent = .showAll
     }
 
     private func applyAndDismiss() {
-        coreManager.updateAppFilter(projectIds: draftProjectIds, timeWindow: draftTimeWindow)
+        coreManager.updateAppFilter(
+            projectIds: draftProjectIds,
+            timeWindow: draftTimeWindow,
+            scheduledEvent: draftScheduledEvent
+        )
         dismiss()
     }
 }
