@@ -213,13 +213,12 @@ struct MessageComposerView: View {
         #endif
     }
 
-    /// Hide scheduled conversations preference (synced with ConversationsTabView)
-    @AppStorage("hideScheduled") var hideScheduled = true
-
-    /// Find the project with the most recent conversation activity
-    /// Respects hideScheduled preference to match prior behavior
+    /// Find the project with the most recent conversation activity.
+    /// Respects the global scheduled event filter.
     func projectWithMostRecentActivity() -> Project? {
-        composerViewModel.projectWithMostRecentActivity(hideScheduled: hideScheduled)
+        composerViewModel.projectWithMostRecentActivity(
+            scheduledFilter: coreManager.appFilterScheduledEvent
+        )
     }
 
     // MARK: - Initialization
