@@ -77,6 +77,38 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
 
+    // MARK: - Bunker (NIP-46)
+
+    func startBunker() throws -> String {
+        try profiler.measureFFI("startBunker") {
+            do {
+                return try core.startBunker()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func stopBunker() throws {
+        try profiler.measureFFI("stopBunker") {
+            do {
+                try core.stopBunker()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func respondToBunkerRequest(requestId: String, approved: Bool) throws {
+        try profiler.measureFFI("respondToBunkerRequest") {
+            do {
+                try core.respondToBunkerRequest(requestId: requestId, approved: approved)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Projects
 
     /// Get all projects.
@@ -387,6 +419,27 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         try profiler.measureFFI("deleteAgentDefinition") {
             do {
                 try core.deleteAgentDefinition(agentId: agentId)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Create a new project (kind:31933 replaceable event).
+    func createProject(
+        name: String,
+        description: String,
+        agentDefinitionIds: [String],
+        mcpToolIds: [String]
+    ) throws {
+        try profiler.measureFFI("createProject") {
+            do {
+                try core.createProject(
+                    name: name,
+                    description: description,
+                    agentDefinitionIds: agentDefinitionIds,
+                    mcpToolIds: mcpToolIds
+                )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

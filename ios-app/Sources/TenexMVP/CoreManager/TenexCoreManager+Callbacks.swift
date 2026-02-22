@@ -458,4 +458,27 @@ extension TenexCoreManager {
     func signalGeneralUpdate() {
         bumpDiagnosticsVersion()
     }
+
+    // MARK: - Bunker (NIP-46)
+
+    @MainActor
+    func handleBunkerSignRequest(_ request: FfiBunkerSignRequest) {
+        pendingBunkerRequests.append(request)
+    }
+
+    @MainActor
+    func approveBunkerRequest(requestId: String) {
+        pendingBunkerRequests.removeAll { $0.requestId == requestId }
+        Task {
+            try? await safeCore.respondToBunkerRequest(requestId: requestId, approved: true)
+        }
+    }
+
+    @MainActor
+    func rejectBunkerRequest(requestId: String) {
+        pendingBunkerRequests.removeAll { $0.requestId == requestId }
+        Task {
+            try? await safeCore.respondToBunkerRequest(requestId: requestId, approved: false)
+        }
+    }
 }

@@ -392,6 +392,7 @@ struct DeltaSummary {
     stats_updated: usize,
     diagnostics_updated: usize,
     general: usize,
+    bunker_sign_request: usize,
 }
 
 impl DeltaSummary {
@@ -414,12 +415,13 @@ impl DeltaSummary {
             DataChangeType::StatsUpdated => self.stats_updated += 1,
             DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
             DataChangeType::General => self.general += 1,
+            DataChangeType::BunkerSignRequest { .. } => self.bunker_sign_request += 1,
         }
     }
 
     fn compact(&self) -> String {
         format!(
-            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} stats={} diag={} general={}",
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} stats={} diag={} general={} bunker={}",
             self.total,
             self.message_appended,
             self.conversation_upsert,
@@ -434,7 +436,8 @@ impl DeltaSummary {
             self.teams_changed,
             self.stats_updated,
             self.diagnostics_updated,
-            self.general
+            self.general,
+            self.bunker_sign_request
         )
     }
 }
@@ -749,6 +752,17 @@ fn process_data_changes_with_deltas(
                 mcp_tools_changed += 1;
                 deltas.push(DataChangeType::McpToolsChanged);
             }
+            DataChange::BunkerSignRequest { request } => {
+                deltas.push(DataChangeType::BunkerSignRequest {
+                    request: FfiBunkerSignRequest {
+                        request_id: request.request_id.clone(),
+                        requester_pubkey: request.requester_pubkey.clone(),
+                        event_kind: request.event_kind,
+                        event_content: request.event_content.clone(),
+                        event_tags_json: request.event_tags_json.clone(),
+                    },
+                });
+            }
         }
     }
 
@@ -802,7 +816,7 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
                 diagnostics_changed = true;
                 stats_changed = true;
             }
-            DataChangeType::StreamChunk { .. } => {}
+            DataChangeType::StreamChunk { .. } | DataChangeType::BunkerSignRequest { .. } => {}
         }
     }
 
@@ -1536,6 +1550,16 @@ impl FfiPreferencesStorage {
 // Swift/Kotlin implements EventCallback trait to receive notifications when
 // data changes, eliminating the need for polling.
 
+/// NIP-46 bunker signing request for FFI.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiBunkerSignRequest {
+    pub request_id: String,
+    pub requester_pubkey: String,
+    pub event_kind: Option<u16>,
+    pub event_content: Option<String>,
+    pub event_tags_json: Option<String>,
+}
+
 /// Type of data change for targeted UI updates.
 /// Allows views to refresh only what changed instead of full refresh.
 #[derive(Debug, Clone, uniffi::Enum)]
@@ -1587,6 +1611,8 @@ pub enum DataChangeType {
     DiagnosticsUpdated,
     /// General data changed - legacy fallback
     General,
+    /// NIP-46 bunker signing request requires user approval
+    BunkerSignRequest { request: FfiBunkerSignRequest },
 }
 
 /// Callback interface for event notifications to Swift/Kotlin.
@@ -3591,6 +3617,32 @@ impl TenexCore {
         Ok(store.content.get_mcp_tools().into_iter().cloned().collect())
     }
 
+    /// Create a new project (kind:31933 replaceable event).
+    pub fn create_project(
+        &self,
+        name: String,
+        description: String,
+        agent_definition_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::SaveProject {
+                slug: None,
+                name,
+                description,
+                agent_definition_ids,
+                mcp_tool_ids,
+                client: Some("tenex-ios".to_string()),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send create project command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
     /// Update an existing project (kind:31933 replaceable event).
     ///
     /// Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
@@ -4928,6 +4980,80 @@ impl TenexCore {
 
         Ok(url)
     }
+
+    // =========================================================================
+    // NIP-46 BUNKER (REMOTE SIGNER)
+    // =========================================================================
+
+    /// Start the NIP-46 bunker. Returns the bunker:// URI for clients to connect.
+    pub fn start_bunker(&self) -> Result<String, TenexError> {
+        let handle = self
+            .core_handle
+            .read()
+            .map_err(|_| TenexError::LockError {
+                resource: "core_handle".to_string(),
+            })?
+            .as_ref()
+            .ok_or(TenexError::NotLoggedIn)?
+            .clone();
+
+        let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+        let _ = handle.send(NostrCommand::StartBunker { response_tx: resp_tx });
+
+        resp_rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|_| TenexError::Internal {
+                message: "Bunker start timed out".to_string(),
+            })?
+            .map_err(|e| TenexError::Internal { message: e })
+    }
+
+    /// Stop the NIP-46 bunker.
+    pub fn stop_bunker(&self) -> Result<(), TenexError> {
+        let handle = self
+            .core_handle
+            .read()
+            .map_err(|_| TenexError::LockError {
+                resource: "core_handle".to_string(),
+            })?
+            .as_ref()
+            .ok_or(TenexError::NotLoggedIn)?
+            .clone();
+
+        let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+        let _ = handle.send(NostrCommand::StopBunker { response_tx: resp_tx });
+
+        resp_rx
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|_| TenexError::Internal {
+                message: "Bunker stop timed out".to_string(),
+            })?
+            .map_err(|e| TenexError::Internal { message: e })
+    }
+
+    /// Respond to a pending bunker signing request.
+    pub fn respond_to_bunker_request(
+        &self,
+        request_id: String,
+        approved: bool,
+    ) -> Result<(), TenexError> {
+        let handle = self
+            .core_handle
+            .read()
+            .map_err(|_| TenexError::LockError {
+                resource: "core_handle".to_string(),
+            })?
+            .as_ref()
+            .ok_or(TenexError::NotLoggedIn)?
+            .clone();
+
+        let _ = handle.send(NostrCommand::BunkerResponse {
+            request_id,
+            approved,
+        });
+
+        Ok(())
+    }
 }
 
 // Standalone FFI functions — no TenexCore instance needed, bypasses actor serialization.
@@ -5256,6 +5382,7 @@ impl TenexCore {
             }
         })
     }
+
 }
 
 // Private implementation methods for TenexCore (event callback listener)

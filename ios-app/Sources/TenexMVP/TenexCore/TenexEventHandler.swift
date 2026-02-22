@@ -118,6 +118,9 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
                     textDelta: textDelta
                 )
 
+            case .bunkerSignRequest(let request):
+                coreManager.handleBunkerSignRequest(request)
+
             case .mcpToolsChanged, .teamsChanged, .statsUpdated, .diagnosticsUpdated, .general:
                 break
             }

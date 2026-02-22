@@ -523,6 +523,19 @@ pub enum NostrCommand {
         /// Optional response channel to signal when reconnection is complete
         response_tx: Option<Sender<Result<(), String>>>,
     },
+    /// Start the NIP-46 bunker (remote signer)
+    StartBunker {
+        response_tx: Sender<Result<String, String>>,
+    },
+    /// Stop the NIP-46 bunker
+    StopBunker {
+        response_tx: Sender<Result<(), String>>,
+    },
+    /// Respond to a pending bunker signing request
+    BunkerResponse {
+        request_id: String,
+        approved: bool,
+    },
     Shutdown,
 }
 
@@ -541,6 +554,10 @@ pub enum DataChange {
     ProjectStatus { json: String },
     /// MCP tools changed (kind:4200 events)
     MCPToolsChanged,
+    /// NIP-46 bunker signing request requiring user approval
+    BunkerSignRequest {
+        request: super::bunker::BunkerSignRequest,
+    },
 }
 
 pub struct NostrWorker {
@@ -563,6 +580,8 @@ pub struct NostrWorker {
     subscribed_projects: Arc<RwLock<HashSet<String>>>,
     /// Cancellation token sender - signals background tasks to stop on disconnect
     cancel_tx: Option<watch::Sender<bool>>,
+    /// NIP-46 bunker service (remote signer)
+    bunker_service: Option<super::bunker::BunkerService>,
 }
 
 impl NostrWorker {
@@ -588,6 +607,7 @@ impl NostrWorker {
             requested_profiles: Arc::new(RwLock::new(HashSet::new())),
             subscribed_projects: Arc::new(RwLock::new(HashSet::new())),
             cancel_tx: None,
+            bunker_service: None,
         }
     }
 
@@ -1020,6 +1040,10 @@ impl NostrWorker {
                     }
                     NostrCommand::Disconnect { response_tx } => {
                         debug_log("Worker: Disconnecting");
+                        // Stop bunker if running
+                        if let Some(mut service) = self.bunker_service.take() {
+                            service.stop();
+                        }
                         let result = rt.block_on(self.handle_disconnect());
                         if let Err(ref e) = result {
                             tlog!("ERROR", "Failed to disconnect: {}", e);
@@ -1052,8 +1076,62 @@ impl NostrWorker {
                             let _ = tx.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
                         }
                     }
+                    NostrCommand::StartBunker { response_tx } => {
+                        let result = if let Some(keys) = &self.keys {
+                            // Create a channel for bunker signing requests → data_tx
+                            let data_tx = self.data_tx.clone();
+                            let (req_tx, req_rx) = std::sync::mpsc::channel();
+
+                            // Spawn a forwarding thread: bunker requests → DataChange
+                            std::thread::Builder::new()
+                                .name("bunker-request-fwd".to_string())
+                                .spawn(move || {
+                                    while let Ok(request) = req_rx.recv() {
+                                        let _ = data_tx.send(DataChange::BunkerSignRequest { request });
+                                    }
+                                })
+                                .ok();
+
+                            match super::bunker::BunkerService::start(
+                                keys.clone(),
+                                req_tx,
+                            ) {
+                                Ok(service) => {
+                                    let uri = service.bunker_uri().to_string();
+                                    self.bunker_service = Some(service);
+                                    Ok(uri)
+                                }
+                                Err(e) => Err(e),
+                            }
+                        } else {
+                            Err("Not connected — no keys available".to_string())
+                        };
+                        let _ = response_tx.send(result);
+                    }
+                    NostrCommand::StopBunker { response_tx } => {
+                        if let Some(mut service) = self.bunker_service.take() {
+                            service.stop();
+                            let _ = response_tx.send(Ok(()));
+                        } else {
+                            let _ = response_tx.send(Err("Bunker not running".to_string()));
+                        }
+                    }
+                    NostrCommand::BunkerResponse {
+                        request_id,
+                        approved,
+                    } => {
+                        if let Some(ref service) = self.bunker_service {
+                            if let Err(e) = service.respond(&request_id, approved) {
+                                tlog!("ERROR", "BunkerResponse failed: {}", e);
+                            }
+                        }
+                    }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
+                        // Stop bunker if running
+                        if let Some(mut service) = self.bunker_service.take() {
+                            service.stop();
+                        }
                         if let Err(e) = rt.block_on(self.handle_disconnect()) {
                             eprintln!("[TENEX] Shutdown: disconnect failed: {}", e);
                             tlog!("ERROR", "Shutdown disconnect failed: {}", e);

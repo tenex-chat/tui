@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod blossom;
+pub mod bunker;
 pub mod worker;
 
 pub use auth::{
