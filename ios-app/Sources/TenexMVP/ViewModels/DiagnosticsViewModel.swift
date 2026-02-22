@@ -31,21 +31,26 @@ class DiagnosticsViewModel: ObservableObject {
     /// Error state for overall fetch failures (only set when we have NO snapshot)
     @Published var error: Error?
 
+    /// Bunker audit log entries
+    @Published var bunkerAuditLog: [FfiBunkerAuditEntry] = []
+
     /// Selected diagnostics subtab
     ///
     /// **Side Effect:** When switching to the `.database` tab, this property automatically
     /// triggers a lazy load of database statistics if they haven't been loaded yet.
-    /// This optimization avoids loading expensive DB stats until the user explicitly
-    /// navigates to the Database tab, improving initial load performance.
-    ///
-    /// The side effect is intentional for UX - database stats require a full LMDB scan
-    /// which can be slow on large databases, so we defer this work until needed.
+    /// When switching to `.bunker`, triggers lazy load of the audit log.
     @Published var selectedTab: DiagnosticsTab = .overview {
         didSet {
             // Lazy load database stats when user navigates to Database tab
             if selectedTab == .database && snapshot?.database == nil {
                 Task {
                     await loadDiagnostics(includeDatabaseStats: true)
+                }
+            }
+            // Lazy load bunker audit log when user navigates to Bunker tab
+            if selectedTab == .bunker && bunkerAuditLog.isEmpty {
+                Task {
+                    await loadBunkerAuditLog()
                 }
             }
         }
@@ -175,6 +180,17 @@ class DiagnosticsViewModel: ObservableObject {
         await task.value
     }
 
+    /// Load bunker audit log from Rust core
+    func loadBunkerAuditLog() async {
+        let safeCore = self.coreManager.safeCore
+        do {
+            let entries = try await safeCore.getBunkerAuditLog()
+            self.bunkerAuditLog = entries
+        } catch {
+            // Silently fail - empty log is fine
+        }
+    }
+
     /// Refresh diagnostics data (for pull-to-refresh)
     /// Always includes database stats since user is explicitly refreshing
     func refresh() async {
@@ -214,6 +230,7 @@ enum DiagnosticsTab: String, CaseIterable, Identifiable {
     case sync = "Sync"
     case subscriptions = "Subscriptions"
     case database = "Database"
+    case bunker = "Bunker"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -224,6 +241,7 @@ enum DiagnosticsTab: String, CaseIterable, Identifiable {
         case .sync: return "arrow.triangle.2.circlepath"
         case .subscriptions: return "antenna.radiowaves.left.and.right"
         case .database: return "cylinder"
+        case .bunker: return "lock.shield"
         case .settings: return "gearshape"
         }
     }

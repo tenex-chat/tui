@@ -13,8 +13,9 @@ struct DiagnosticsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Show section errors banner if any sections failed (not for Settings tab)
+            // Show section errors banner if any sections failed (not for Settings/Bunker tabs)
             if viewModel.selectedTab != .settings,
+               viewModel.selectedTab != .bunker,
                let snapshot = viewModel.snapshot,
                !snapshot.sectionErrors.isEmpty {
                 DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
@@ -34,6 +35,12 @@ struct DiagnosticsView: View {
             if viewModel.selectedTab == .settings {
                 AppSettingsView(defaultSection: .audio, isEmbedded: true)
                     .environment(coreManager)
+            } else if viewModel.selectedTab == .bunker {
+                ScrollView {
+                    DiagnosticsBunkerTab(auditEntries: viewModel.bunkerAuditLog)
+                        .environment(coreManager)
+                        .padding()
+                }
             } else {
                 ScrollView {
                     if let snapshot = viewModel.snapshot {
@@ -70,21 +77,12 @@ struct DiagnosticsTabNavigation: View {
     @Binding var selectedTab: DiagnosticsTab
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(DiagnosticsTab.allCases) { tab in
-                    DiagnosticsTabPill(
-                        tab: tab,
-                        isSelected: selectedTab == tab,
-                        action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                selectedTab = tab
-                            }
-                        }
-                    )
-                }
-            }
-        }
+        MailStyleCategoryPicker(
+            cases: DiagnosticsTab.allCases,
+            selection: $selectedTab,
+            icon: \.icon,
+            label: \.rawValue
+        )
     }
 }
 
@@ -161,6 +159,9 @@ struct DiagnosticsTabContent: View {
                         icon: "cylinder.split.1x2"
                     )
                 }
+            case .bunker:
+                // Bunker tab is handled in parent view, this case should not be reached
+                EmptyView()
             case .settings:
                 // Settings tab is handled in parent view, this case should not be reached
                 EmptyView()
