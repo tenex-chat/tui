@@ -153,12 +153,36 @@ extension Color {
     static let todoInProgress: Color = .blue
     static let todoSkipped: Color = .gray
 
-    // MARK: - Activity Heatmap (Tailwind green scale)
-    static let activityHigh: Color = Color(red: 34/255, green: 197/255, blue: 94/255)
-    static let activityMediumHigh: Color = Color(red: 74/255, green: 222/255, blue: 128/255)
-    static let activityMedium: Color = Color(red: 134/255, green: 239/255, blue: 172/255)
-    static let activityLow: Color = Color(red: 187/255, green: 247/255, blue: 208/255)
-    static let activityNone: Color = .systemGray6
+    // MARK: - Activity Heatmap (GitHub color scale, adaptive)
+
+    /// Returns a GitHub-style heatmap color for the given intensity (0.0 = none, 1.0 = max).
+    static func activityColor(intensity: Double, colorScheme: ColorScheme) -> Color {
+        if colorScheme == .dark {
+            if intensity == 0 { return Color(red: 22/255, green: 27/255, blue: 34/255) }   // #161b22
+            if intensity < 0.25 { return Color(red: 14/255, green: 68/255, blue: 41/255) } // #0e4429
+            if intensity < 0.5  { return Color(red: 0,      green: 109/255, blue: 50/255) } // #006d32
+            if intensity < 0.75 { return Color(red: 38/255, green: 166/255, blue: 65/255) } // #26a641
+            return Color(red: 57/255, green: 211/255, blue: 83/255)                         // #39d353
+        } else {
+            if intensity == 0 { return Color(red: 235/255, green: 237/255, blue: 240/255) } // #ebedf0
+            if intensity < 0.25 { return Color(red: 155/255, green: 233/255, blue: 168/255) } // #9be9a8
+            if intensity < 0.5  { return Color(red: 64/255,  green: 196/255, blue: 99/255) }  // #40c463
+            if intensity < 0.75 { return Color(red: 48/255,  green: 161/255, blue: 78/255) }  // #30a14e
+            return Color(red: 33/255, green: 110/255, blue: 57/255)                           // #216e39
+        }
+    }
+
+    static func activityGridBackground(colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 13/255, green: 17/255, blue: 23/255)    // #0d1117
+            : .white
+    }
+
+    static func activityGridBorder(colorScheme: ColorScheme) -> Color {
+        colorScheme == .dark
+            ? Color(red: 48/255, green: 54/255, blue: 61/255)     // #30363d
+            : Color(red: 208/255, green: 215/255, blue: 222/255)  // #d0d7de
+    }
 
     // MARK: - Recording
     static let recordingActive: Color = .red
