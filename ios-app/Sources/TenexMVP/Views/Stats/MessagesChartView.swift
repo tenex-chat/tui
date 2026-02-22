@@ -5,6 +5,12 @@ import Charts
 /// Matches TUI messages chart with dual-bar visualization
 struct MessagesChartView: View {
     let snapshot: StatsSnapshot
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -86,7 +92,7 @@ struct MessagesChartView: View {
     }
 
     private func dayLabel(for dayStart: UInt64) -> String {
-        StatsSnapshot.formatDayLabel(dayStart, todayStart: StatsSnapshot.todayStart)
+        Self.dayFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(dayStart)))
     }
 }
 
@@ -124,16 +130,10 @@ struct LegendItem: View {
             allCount: allCount
         )
     }
-
-    return MessagesChartView(
+    MessagesChartView(
         snapshot: StatsSnapshot(
             totalCost14Days: 0,
-            todayRuntimeMs: 0,
-            avgDailyRuntimeMs: 0,
-            activeDaysCount: 0,
-            runtimeByDay: [],
             costByProject: [],
-            topConversations: [],
             messagesByDay: sampleData,
             activityByHour: [],
             maxTokens: 0,
