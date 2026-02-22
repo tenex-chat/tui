@@ -8,6 +8,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case search
     case teams
     case agentDefinitions
+    case settings
 
     var id: String { rawValue }
 
@@ -20,6 +21,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .search: return "Search"
         case .teams: return "Teams"
         case .agentDefinitions: return "Agent Definitions"
+        case .settings: return "Settings"
         }
     }
 
@@ -32,6 +34,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .search: return "magnifyingglass"
         case .teams: return "person.2"
         case .agentDefinitions: return "person.3.sequence"
+        case .settings: return "gearshape"
         }
     }
 
@@ -54,9 +57,10 @@ struct MainTabView: View {
     #endif
 
     @State private var selectedTab = 0
-    @State private var showAISettings = false
     @State private var showDiagnostics = false
     @State private var showStats = false
+    @State private var showOnboarding = false
+    @State private var hasCheckedOnboarding = false
 
     private var useMailShellLayout: Bool {
         #if os(macOS)
@@ -73,7 +77,6 @@ struct MainTabView: View {
                     userNpub: $userNpub,
                     isLoggedIn: $isLoggedIn,
                     runtimeText: coreManager.runtimeText,
-                    onShowSettings: { showAISettings = true },
                     onShowDiagnostics: { showDiagnostics = true },
                     onShowStats: { showStats = true }
                 )
@@ -82,13 +85,6 @@ struct MainTabView: View {
             } else {
                 compactTabView
             }
-        }
-        .sheet(isPresented: $showAISettings) {
-            AppSettingsView(defaultSection: .audio)
-                .tenexModalPresentation(detents: [.large])
-                #if os(macOS)
-                .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
-                #endif
         }
         .sheet(isPresented: $showDiagnostics) {
             NavigationStack {
@@ -112,7 +108,37 @@ struct MainTabView: View {
             }
             .tenexModalPresentation(detents: [.large])
         }
+        .sheet(item: bunkerRequestBinding) { request in
+            BunkerApprovalSheet(request: request) {
+                coreManager.pendingBunkerRequests.removeAll { $0.requestId == request.requestId }
+            }
+            .environment(coreManager)
+        }
+        .sheet(isPresented: $showOnboarding) {
+            OnboardingWizardSheet()
+                .environment(coreManager)
+        }
+        .task {
+            guard !hasCheckedOnboarding else { return }
+            hasCheckedOnboarding = true
+            // Short delay to let initial fetchData populate projects
+            try? await Task.sleep(for: .seconds(2))
+            if coreManager.projects.isEmpty {
+                showOnboarding = true
+            }
+        }
         .ignoresSafeArea(.keyboard)
+    }
+
+    private var bunkerRequestBinding: Binding<FfiBunkerSignRequest?> {
+        Binding(
+            get: { coreManager.pendingBunkerRequests.first },
+            set: { newValue in
+                if newValue == nil, let first = coreManager.pendingBunkerRequests.first {
+                    coreManager.rejectBunkerRequest(requestId: first.requestId)
+                }
+            }
+        )
     }
 
     private var compactTabView: some View {
@@ -124,7 +150,7 @@ struct MainTabView: View {
             }
 
             Tab("Projects", systemImage: "folder", value: 1) {
-                ProjectsTabView()
+                ProjectsTabView(layoutMode: .adaptive)
                     .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }

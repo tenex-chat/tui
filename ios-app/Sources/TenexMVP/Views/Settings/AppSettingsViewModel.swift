@@ -4,6 +4,7 @@ import AVFoundation
 enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
     case relays
     case backends
+    case bunker
     case ai
     case audio
 
@@ -13,6 +14,7 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .relays: return "Relays"
         case .backends: return "Backends"
+        case .bunker: return "Bunker"
         case .ai: return "AI"
         case .audio: return "Audio"
         }
@@ -22,6 +24,7 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .relays: return "antenna.radiowaves.left.and.right"
         case .backends: return "shield"
+        case .bunker: return "lock.shield"
         case .ai: return "brain"
         case .audio: return "waveform"
         }
@@ -43,6 +46,10 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var relayUrls: [String] = []
     @Published var diagnosticsSnapshot: DiagnosticsSnapshot?
     @Published var backendSnapshot: BackendTrustSnapshot?
+
+    @Published var bunkerRunning = false
+    @Published var bunkerUri = ""
+    @Published var isTogglingBunker = false
 
     @Published var isLoading = true
     @Published var isLoadingVoices = false
@@ -141,6 +148,29 @@ final class AppSettingsViewModel: ObservableObject {
             await reloadBackends(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to update backend lists: \(error.localizedDescription)"
+        }
+    }
+
+    func toggleBunker(coreManager: TenexCoreManager) async {
+        isTogglingBunker = true
+        defer { isTogglingBunker = false }
+
+        if bunkerRunning {
+            do {
+                try await coreManager.safeCore.stopBunker()
+                bunkerRunning = false
+                bunkerUri = ""
+            } catch {
+                errorMessage = "Failed to stop bunker: \(error.localizedDescription)"
+            }
+        } else {
+            do {
+                let uri = try await coreManager.safeCore.startBunker()
+                bunkerUri = uri
+                bunkerRunning = true
+            } catch {
+                errorMessage = "Failed to start bunker: \(error.localizedDescription)"
+            }
         }
     }
 

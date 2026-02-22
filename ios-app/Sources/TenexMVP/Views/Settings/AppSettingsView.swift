@@ -29,7 +29,9 @@ struct AppSettingsView: View {
 
     var body: some View {
         Group {
-            if useSplitLayout {
+            if isEmbedded {
+                embeddedSettingsView
+            } else if useSplitLayout {
                 splitSettingsView
             } else {
                 phoneSettingsView
@@ -54,34 +56,79 @@ struct AppSettingsView: View {
         }
     }
 
-    private var splitSettingsView: some View {
-        NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selectedSection) { section in
-                NavigationLink(value: section) {
-                    Label(section.title, systemImage: section.icon)
-                }
+    private var settingsCategoryList: some View {
+        List(SettingsSection.allCases, selection: $selectedSection) { section in
+            NavigationLink(value: section) {
+                Label(section.title, systemImage: section.icon)
             }
-            #if os(macOS)
-            .listStyle(.sidebar)
-            #endif
-            .navigationTitle("Settings")
-        } detail: {
-            Group {
-                if let section = selectedSection {
-                    sectionContent(section)
-                } else {
-                    ContentUnavailableView("Select a Section", systemImage: "gearshape")
-                }
+        }
+        #if os(macOS)
+        .listStyle(.sidebar)
+        #endif
+    }
+
+    @ViewBuilder
+    private var settingsDetailContent: some View {
+        if let section = selectedSection {
+            sectionContent(section)
+        } else {
+            ContentUnavailableView("Select a Section", systemImage: "gearshape")
+        }
+    }
+
+    private var embeddedSettingsView: some View {
+        #if os(macOS)
+        HSplitView {
+            settingsCategoryList
+                .frame(minWidth: 160, idealWidth: 190, maxWidth: 240)
+
+            NavigationStack {
+                settingsDetailContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .navigationTitle(selectedSection?.title ?? "Settings")
+            }
+            .frame(minWidth: 400)
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+        #else
+        HStack(spacing: 0) {
+            settingsCategoryList
+                .frame(minWidth: 160, idealWidth: 190, maxWidth: 240)
+
+            Divider()
+
+            NavigationStack {
+                settingsDetailContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .navigationTitle(selectedSection?.title ?? "Settings")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .navigationTitle(selectedSection?.title ?? "Settings")
-            .toolbar {
-                if !isEmbedded {
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+        #endif
+    }
+
+    private var splitSettingsView: some View {
+        NavigationSplitView {
+            settingsCategoryList
+                .navigationTitle("Settings")
+        } detail: {
+            settingsDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .navigationTitle(selectedSection?.title ?? "Settings")
+                .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { dismiss() }
                     }
                 }
-            }
         }
         .onAppear {
             if selectedSection == nil {
@@ -103,14 +150,12 @@ struct AppSettingsView: View {
             }
             .navigationTitle("Settings")
             .toolbar {
-                if !isEmbedded {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
-                    }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
             .onAppear {
-                if !isEmbedded && phonePath.isEmpty {
+                if phonePath.isEmpty {
                     phonePath = [defaultSection]
                 }
             }
@@ -125,6 +170,9 @@ struct AppSettingsView: View {
                 .environment(coreManager)
         case .backends:
             BackendsSettingsSectionView(viewModel: viewModel)
+                .environment(coreManager)
+        case .bunker:
+            BunkerSettingsSectionView(viewModel: viewModel)
                 .environment(coreManager)
         case .ai:
             AISettingsSectionView(viewModel: viewModel)
@@ -330,6 +378,60 @@ private struct BackendsSettingsSectionView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+private struct BunkerSettingsSectionView: View {
+    @ObservedObject var viewModel: AppSettingsViewModel
+    @Environment(TenexCoreManager.self) private var coreManager
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(isOn: Binding(
+                    get: { viewModel.bunkerRunning },
+                    set: { _ in
+                        Task { await viewModel.toggleBunker(coreManager: coreManager) }
+                    }
+                )) {
+                    HStack {
+                        Text("Enable Bunker")
+                        if viewModel.isTogglingBunker {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .disabled(viewModel.isTogglingBunker)
+            } header: {
+                Text("Remote Signer (NIP-46)")
+            } footer: {
+                Text("When enabled, agents can request you to sign events. You'll be prompted to approve or reject each signing request.")
+            }
+
+            if viewModel.bunkerRunning && !viewModel.bunkerUri.isEmpty {
+                Section("Connection URI") {
+                    Text(viewModel.bunkerUri)
+                        .font(.caption)
+                        .fontDesign(.monospaced)
+                        .textSelection(.enabled)
+                        .lineLimit(nil)
+
+                    Button("Copy URI") {
+                        #if os(macOS)
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(viewModel.bunkerUri, forType: .string)
+                        #else
+                        UIPasteboard.general.string = viewModel.bunkerUri
+                        #endif
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
     }
 }
 

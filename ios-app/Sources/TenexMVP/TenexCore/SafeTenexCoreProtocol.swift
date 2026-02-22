@@ -53,6 +53,12 @@ protocol SafeTenexCoreProtocol: Actor {
         isFork: Bool
     ) throws
     func deleteAgentDefinition(agentId: String) throws
+    func createProject(
+        name: String,
+        description: String,
+        agentDefinitionIds: [String],
+        mcpToolIds: [String]
+    ) throws
     func updateProject(
         projectId: String,
         title: String,

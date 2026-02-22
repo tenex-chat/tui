@@ -1642,6 +1642,9 @@ impl App {
                 DataChange::MCPToolsChanged => {
                     // MCP tools are already updated in the store by the worker
                 }
+                DataChange::BunkerSignRequest { .. } => {
+                    // Bunker signing requests not yet handled in TUI
+                }
             }
         }
         Ok(())

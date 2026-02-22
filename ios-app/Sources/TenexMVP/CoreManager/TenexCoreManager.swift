@@ -113,6 +113,9 @@ class TenexCoreManager {
     /// Used to highlight the runtime indicator when work is happening
     var hasActiveAgents: Bool = false
 
+    /// Pending NIP-46 bunker signing requests awaiting user approval.
+    var pendingBunkerRequests: [FfiBunkerSignRequest] = []
+
     /// Formatted today's LLM runtime for statusbar display.
     var runtimeText: String = "0m"
 
