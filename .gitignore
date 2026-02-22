@@ -37,3 +37,7 @@ ios-app/Sources/TenexMVP/TenexCore/tenex_coreFFI.h
 ios-app/Sources/TenexMVP/TenexCore/tenex_coreFFI.modulemap
 ios-app/Sources/TenexMVP/TenexCoreFFI/tenex_coreFFI.h
 ios-app/Sources/TenexMVP/TenexCoreFFI/tenex_coreFFI.modulemap
+
+# Screenshots and test artifacts
+*.png
+.playwright-mcp/

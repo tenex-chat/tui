@@ -181,22 +181,16 @@ pub fn tab_inactive() -> Style {
 }
 
 pub fn tab_unread() -> Style {
+    // Unread activity (no mention) - white with bold
     Style::default()
-        .fg(ACCENT_WARNING)
+        .fg(TEXT_WHITE)
         .add_modifier(Modifier::BOLD)
 }
 
 pub fn tab_waiting_for_user() -> Style {
-    // User is mentioned - red/orange (error color) with bold
+    // User is mentioned - orange (warning color) with bold
     Style::default()
-        .fg(ACCENT_ERROR)
-        .add_modifier(Modifier::BOLD)
-}
-
-pub fn tab_agent_working() -> Style {
-    // Agent is working - blue (primary accent) with bold
-    Style::default()
-        .fg(ACCENT_PRIMARY)
+        .fg(ACCENT_WARNING)
         .add_modifier(Modifier::BOLD)
 }
 
