@@ -129,9 +129,11 @@ class TenexCoreManager {
 
     var appFilterProjectIds: Set<String>
     var appFilterTimeWindow: AppTimeWindow
+    var appFilterScheduledEvent: ScheduledEventFilter
 
     static let appFilterProjectsDefaultsKey = "app.global.filter.projectIds"
     static let appFilterTimeWindowDefaultsKey = "app.global.filter.timeWindow"
+    static let appFilterScheduledEventDefaultsKey = "app.global.filter.scheduledEvent"
 
     // MARK: - Ask Badge Support
 
@@ -225,6 +227,7 @@ class TenexCoreManager {
         let persistedFilter = Self.loadPersistedAppFilter()
         appFilterProjectIds = persistedFilter.projectIds
         appFilterTimeWindow = persistedFilter.timeWindow
+        appFilterScheduledEvent = persistedFilter.scheduledEvent
 
         // Create core immediately (lightweight)
         let tenexCore = TenexCore()

@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class ComposerViewModelTests: XCTestCase {
-    func testProjectWithMostRecentActivityRespectsHideScheduled() async {
+    func testProjectWithMostRecentActivityRespectsScheduledFilter() async {
         let core = MockCoreGateway()
         core.projects = [
             makeProject(id: "project-a"),
@@ -16,8 +16,12 @@ final class ComposerViewModelTests: XCTestCase {
 
         let viewModel = makeViewModel(core: core, drafts: MockDraftStore())
 
-        XCTAssertEqual(viewModel.projectWithMostRecentActivity(hideScheduled: true)?.id, "project-a")
-        XCTAssertEqual(viewModel.projectWithMostRecentActivity(hideScheduled: false)?.id, "project-b")
+        // Hide scheduled → prefer non-scheduled project-a
+        XCTAssertEqual(viewModel.projectWithMostRecentActivity(scheduledFilter: .hide)?.id, "project-a")
+        // Show All → prefer most-recent project-b (regardless of scheduled status)
+        XCTAssertEqual(viewModel.projectWithMostRecentActivity(scheduledFilter: .showAll)?.id, "project-b")
+        // Show Only scheduled → prefer project-b
+        XCTAssertEqual(viewModel.projectWithMostRecentActivity(scheduledFilter: .showOnly)?.id, "project-b")
     }
 
     func testDetectInlineTriggerParsesAgentAndNudgeTokens() async {

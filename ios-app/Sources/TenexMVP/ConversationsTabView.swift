@@ -13,8 +13,6 @@ struct ConversationsTabView: View {
     @State private var audioNotificationsEnabled = false
     @State private var showStats = false
     @State private var showArchived = false
-    /// Hide scheduled conversations (those with scheduled-task-id tag)
-    @AppStorage("hideScheduled") private var hideScheduled = true
     @State private var selectedConversationState: ConversationFullInfo?
     @State private var newConversationProjectIdState: String?
     @State private var projectForNewConversation: SelectedProjectForComposer?
@@ -105,7 +103,7 @@ struct ConversationsTabView: View {
     }
 
     /// Filtered conversations based on archived status and scheduled status.
-    /// Global project/time filtering is already applied centrally in TenexCoreManager.
+    /// Global project/time/scheduled filtering is already applied centrally in TenexCoreManager.
     private var filteredConversations: [ConversationFullInfo] {
         var conversations = coreManager.conversations
 
@@ -113,8 +111,12 @@ struct ConversationsTabView: View {
             conversations = conversations.filter { !$0.isArchived }
         }
 
-        if hideScheduled {
-            conversations = conversations.filter { !$0.thread.isScheduled }
+        // Apply scheduled event filter from global filter state
+        let scheduledFilter = coreManager.appFilterScheduledEvent
+        if scheduledFilter != .showAll {
+            conversations = conversations.filter {
+                scheduledFilter.allows(isScheduled: $0.thread.isScheduled)
+            }
         }
 
         return conversations
@@ -161,14 +163,14 @@ struct ConversationsTabView: View {
         .onChange(of: showArchived) { _, _ in
             rebuildHierarchy()
         }
+        .onChange(of: coreManager.appFilterScheduledEvent) { _, _ in
+            scheduleHierarchyRebuild()
+        }
         .onChange(of: coreManager.projects) { _, _ in
             rebuildProjectCaches()
         }
         .onChange(of: coreManager.projectOnlineStatus) { _, _ in
             rebuildProjectCaches()
-        }
-        .onChange(of: hideScheduled) { _, _ in
-            scheduleHierarchyRebuild()
         }
         .onChange(of: selectedConversationBinding.wrappedValue?.thread.id) { _, newId in
             guard newId != nil else { return }
@@ -513,13 +515,6 @@ struct ConversationsTabView: View {
         Menu {
             Toggle(isOn: $showArchived) {
                 Label("Show Archived", systemImage: "archivebox")
-            }
-
-            Toggle(isOn: Binding(
-                get: { !hideScheduled },
-                set: { hideScheduled = !$0 }
-            )) {
-                Label("Show Scheduled", systemImage: "calendar.badge.clock")
             }
 
             Toggle(isOn: $audioNotificationsEnabled) {
