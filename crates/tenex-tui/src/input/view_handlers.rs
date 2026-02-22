@@ -196,7 +196,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 return Ok(());
             }
             HotkeyId::ToggleHideScheduled if !app.sidebar_focused => {
-                app.toggle_hide_scheduled();
+                app.cycle_scheduled_filter();
                 return Ok(());
             }
             HotkeyId::NextHomeTab => {

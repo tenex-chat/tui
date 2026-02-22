@@ -351,8 +351,8 @@ pub struct App {
     // NOTE: chat_search is now per-tab in OpenTab.chat_search
     /// Whether to show archived items (conversations, projects, etc.) - unified global state
     pub show_archived: bool,
-    /// Whether to hide scheduled events from conversation list
-    pub hide_scheduled: bool,
+    /// Three-state filter for scheduled events in conversation list
+    pub scheduled_filter: tenex_core::models::project_draft::ScheduledFilter,
     /// Whether user explicitly selected an agent in the current conversation
     /// When true, don't auto-sync agent from conversation messages
     pub user_explicitly_selected_agent: bool,
@@ -444,7 +444,7 @@ impl App {
             // NOTE: frame_counter is now managed by notification_manager
             // NOTE: message_history is now per-tab in OpenTab
             show_archived: false,
-            hide_scheduled: false,
+            scheduled_filter: tenex_core::models::project_draft::ScheduledFilter::ShowAll,
             user_explicitly_selected_agent: false,
             last_undo_action: None,
             input_context_focus: None,
@@ -2496,8 +2496,8 @@ impl App {
             .filter(|(thread, _)| {
                 // Archive filter
                 let archive_ok = self.show_archived || !prefs.is_thread_archived(&thread.id);
-                // Scheduled filter - hide scheduled if hide_scheduled is true
-                let scheduled_ok = !self.hide_scheduled || !thread.is_scheduled;
+                // Scheduled filter - apply three-state filter
+                let scheduled_ok = self.scheduled_filter.allows(thread.is_scheduled);
                 archive_ok && scheduled_ok
             })
             .collect()
@@ -2974,7 +2974,7 @@ impl App {
 
         self.home.time_filter = prefs.time_filter();
         self.conversation.show_llm_metadata = prefs.show_llm_metadata();
-        self.hide_scheduled = prefs.hide_scheduled();
+        self.scheduled_filter = prefs.scheduled_filter();
     }
 
     /// Save selected projects to preferences
@@ -3982,18 +3982,17 @@ impl App {
 
     // ===== Scheduled Events Filter Methods =====
 
-    /// Toggle visibility of scheduled events
-    pub fn toggle_hide_scheduled(&mut self) {
-        self.hide_scheduled = !self.hide_scheduled;
-        // Persist to preferences
-        self.preferences
+    /// Cycle through scheduled event filter states: Show All → Hide → Show Only → Show All
+    pub fn cycle_scheduled_filter(&mut self) {
+        let new_filter = self
+            .preferences
             .borrow_mut()
-            .set_hide_scheduled(self.hide_scheduled);
-        if self.hide_scheduled {
-            self.notify(Notification::info("Hiding scheduled events"));
-        } else {
-            self.notify(Notification::info("Showing scheduled events"));
-        }
+            .cycle_scheduled_filter();
+        self.scheduled_filter = new_filter;
+        self.notify(Notification::info(&format!(
+            "Scheduled events: {}",
+            new_filter.label()
+        )));
     }
 
     // ===== Backend Trust Methods =====

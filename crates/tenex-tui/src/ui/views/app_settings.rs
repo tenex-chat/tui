@@ -302,17 +302,17 @@ fn render_appearance_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettin
     );
     y_offset += 3;
 
-    // 2. Hide Scheduled toggle
+    // 2. Scheduled Events filter (three-state cycle)
     let is_hide_scheduled_selected =
         state.selected_appearance_setting() == Some(AppearanceSetting::HideScheduled);
-    render_toggle_row(
+    render_select_field(
         f,
         area.x,
         y_offset,
         area.width,
-        "Hide Scheduled:",
-        "Hide scheduled/future events from lists (Enter to toggle)",
-        app.hide_scheduled,
+        "Scheduled Events:",
+        "Filter scheduled events from lists (Enter to cycle: Show All → Hide → Show Only)",
+        app.scheduled_filter.label(),
         is_hide_scheduled_selected,
     );
 }
@@ -634,7 +634,7 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
                 }
                 Some(AppearanceSetting::HideScheduled) => {
                     hints.push(Span::styled(
-                        " toggle",
+                        " cycle",
                         Style::default().fg(theme::TEXT_MUTED),
                     ));
                 }

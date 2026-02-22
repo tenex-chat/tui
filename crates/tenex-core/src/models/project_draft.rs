@@ -72,6 +72,48 @@ impl ProjectDraftStorage {
     }
 }
 
+/// Three-state filter for scheduled events in conversation lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScheduledFilter {
+    /// Show all conversations regardless of scheduled status (default)
+    #[default]
+    ShowAll,
+    /// Hide scheduled conversations from the list
+    Hide,
+    /// Show only scheduled conversations
+    ShowOnly,
+}
+
+impl ScheduledFilter {
+    /// Cycle to the next state: ShowAll → Hide → ShowOnly → ShowAll
+    pub fn next(self) -> Self {
+        match self {
+            Self::ShowAll => Self::Hide,
+            Self::Hide => Self::ShowOnly,
+            Self::ShowOnly => Self::ShowAll,
+        }
+    }
+
+    /// Human-readable label for display
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ShowAll => "Show All",
+            Self::Hide => "Hide",
+            Self::ShowOnly => "Show Only",
+        }
+    }
+
+    /// Returns true if an item with the given scheduled status passes this filter
+    pub fn allows(self, is_scheduled: bool) -> bool {
+        match self {
+            Self::ShowAll => true,
+            Self::Hide => !is_scheduled,
+            Self::ShowOnly => is_scheduled,
+        }
+    }
+}
+
 /// App preferences (persisted to JSON file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preferences {
@@ -98,9 +140,12 @@ pub struct Preferences {
     /// Stored credentials (nsec or ncryptsec)
     #[serde(default)]
     pub stored_credentials: Option<String>,
-    /// If true, hide scheduled events from conversation list (default: false = show all)
-    #[serde(default)]
+    /// Legacy: if true, hide scheduled events (migrated to scheduled_filter on load)
+    #[serde(default, skip_serializing)]
     pub hide_scheduled: bool,
+    /// Three-state filter for scheduled events (default: ShowAll)
+    #[serde(default)]
+    pub scheduled_filter: ScheduledFilter,
     /// Saved workspaces (project groups)
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
@@ -185,6 +230,7 @@ impl Default for Preferences {
             blocked_backend_pubkeys: HashSet::new(),
             stored_credentials: None,
             hide_scheduled: false,
+            scheduled_filter: ScheduledFilter::ShowAll,
             workspaces: Vec::new(),
             active_workspace_id: None,
             jaeger_endpoint: default_jaeger_endpoint(),
@@ -205,6 +251,11 @@ impl PreferencesStorage {
 
         // Migrate any existing API keys from JSON to secure storage
         Self::migrate_api_keys(&mut prefs.ai_audio_settings);
+
+        // Migrate legacy hide_scheduled boolean to the new three-state scheduled_filter
+        if prefs.hide_scheduled && prefs.scheduled_filter == ScheduledFilter::ShowAll {
+            prefs.scheduled_filter = ScheduledFilter::Hide;
+        }
 
         Self { path, prefs }
     }
@@ -411,19 +462,19 @@ impl PreferencesStorage {
 
     // ===== Scheduled Events Filter Methods =====
 
-    pub fn hide_scheduled(&self) -> bool {
-        self.prefs.hide_scheduled
+    pub fn scheduled_filter(&self) -> ScheduledFilter {
+        self.prefs.scheduled_filter
     }
 
-    pub fn set_hide_scheduled(&mut self, value: bool) {
-        self.prefs.hide_scheduled = value;
+    pub fn set_scheduled_filter(&mut self, filter: ScheduledFilter) {
+        self.prefs.scheduled_filter = filter;
         self.save_to_file();
     }
 
-    pub fn toggle_hide_scheduled(&mut self) -> bool {
-        self.prefs.hide_scheduled = !self.prefs.hide_scheduled;
+    pub fn cycle_scheduled_filter(&mut self) -> ScheduledFilter {
+        self.prefs.scheduled_filter = self.prefs.scheduled_filter.next();
         self.save_to_file();
-        self.prefs.hide_scheduled
+        self.prefs.scheduled_filter
     }
 
     // ===== Workspace Methods =====

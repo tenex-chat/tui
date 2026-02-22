@@ -34,10 +34,10 @@ final class ComposerViewModel {
         self.dependencies = dependencies
     }
 
-    func projectWithMostRecentActivity(hideScheduled: Bool) -> Project? {
+    func projectWithMostRecentActivity(scheduledFilter: ScheduledEventFilter = .showAll) -> Project? {
         var candidates = dependencies.core.conversations
-        if hideScheduled {
-            candidates = candidates.filter { !$0.thread.isScheduled }
+        if scheduledFilter != .showAll {
+            candidates = candidates.filter { scheduledFilter.allows(isScheduled: $0.thread.isScheduled) }
         }
 
         guard let mostRecent = candidates.max(by: { $0.thread.effectiveLastActivity < $1.thread.effectiveLastActivity }) else {
