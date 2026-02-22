@@ -390,8 +390,8 @@ private struct BunkerSettingsSectionView: View {
             Section {
                 Toggle(isOn: Binding(
                     get: { viewModel.bunkerRunning },
-                    set: { _ in
-                        Task { await viewModel.toggleBunker(coreManager: coreManager) }
+                    set: { enabled in
+                        Task { await viewModel.setBunkerEnabled(coreManager: coreManager, enabled: enabled) }
                     }
                 )) {
                     HStack {
@@ -439,59 +439,86 @@ private struct AISettingsSectionView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     @ObservedObject var viewModel: AppSettingsViewModel
 
-    @State private var elevenLabsKeyInput = ""
-    @State private var openRouterKeyInput = ""
-    @State private var isEditingElevenLabsKey = false
-    @State private var isEditingOpenRouterKey = false
     @State private var showModelSelector = false
+    @State private var showCredentialSheet = false
+    @State private var selectedProvider = ""
+    @State private var credentialInput = ""
+    @State private var credentialError: String?
+
+    private let providers: [(id: String, name: String, description: String)] = [
+        ("openrouter", "OpenRouter", "Required for LLM text processing"),
+        ("elevenlabs", "ElevenLabs", "Required for audio synthesis"),
+    ]
 
     var body: some View {
-        Form {
-            Section {
-                apiKeyRow(
-                    title: "ElevenLabs API Key",
-                    description: "Required for audio synthesis",
-                    hasKey: viewModel.hasElevenLabsKey,
-                    isEditing: $isEditingElevenLabsKey,
-                    keyInput: $elevenLabsKeyInput,
-                    onSave: {
-                        let key = elevenLabsKeyInput
-                        Task {
-                            await viewModel.saveElevenLabsKey(key)
-                            elevenLabsKeyInput = ""
-                            isEditingElevenLabsKey = false
-                        }
-                    },
-                    onDelete: { Task { await viewModel.deleteElevenLabsKey() } }
-                )
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Providers")
+                    .font(.headline)
+                    .padding(.horizontal, 16)
 
-                apiKeyRow(
-                    title: "OpenRouter API Key",
-                    description: "Required for LLM text processing",
-                    hasKey: viewModel.hasOpenRouterKey,
-                    isEditing: $isEditingOpenRouterKey,
-                    keyInput: $openRouterKeyInput,
-                    onSave: {
-                        let key = openRouterKeyInput
-                        Task {
-                            await viewModel.saveOpenRouterKey(key)
-                            openRouterKeyInput = ""
-                            isEditingOpenRouterKey = false
+                VStack(spacing: 0) {
+                    ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                        let hasKey = provider.id == "openrouter" ? viewModel.hasOpenRouterKey : viewModel.hasElevenLabsKey
+                        HStack(spacing: 12) {
+                            ProviderLogoView(provider.id, size: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(provider.name)
+                                        .font(.body.weight(.medium))
+                                    if hasKey {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundStyle(.green)
+                                            .font(.body)
+                                    }
+                                }
+                                Text(provider.description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button(hasKey ? "Disconnect" : "Connect") {
+                                if hasKey {
+                                    Task {
+                                        if provider.id == "openrouter" {
+                                            await viewModel.deleteOpenRouterKey()
+                                        } else {
+                                            await viewModel.deleteElevenLabsKey()
+                                        }
+                                    }
+                                } else {
+                                    credentialError = nil
+                                    credentialInput = ""
+                                    selectedProvider = provider.id
+                                    showCredentialSheet = true
+                                }
+                            }
+                            .buttonStyle(.bordered)
                         }
-                    },
-                    onDelete: { Task { await viewModel.deleteOpenRouterKey() } }
-                )
-            } header: {
-                Text("API Keys")
-            } footer: {
+                        .padding(12)
+                        if index < providers.count - 1 {
+                            Divider()
+                        }
+                    }
+                }
                 #if os(macOS)
-                Text("Keys are stored in local files on this Mac.")
+                .background(Color(nsColor: .windowBackgroundColor))
                 #else
-                Text("Keys are stored in system Keychain.")
+                .background(Color(.secondarySystemGroupedBackground))
                 #endif
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(.quaternary, lineWidth: 1)
+                )
+                .padding(.horizontal, 16)
             }
 
-            Section("Model") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Model")
+                    .font(.headline)
+                    .padding(.horizontal, 16)
+
                 Button {
                     Task {
                         if viewModel.availableModels.isEmpty {
@@ -510,13 +537,25 @@ private struct AISettingsSectionView: View {
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                     }
+                    .padding(12)
                 }
+                #if os(macOS)
+                .background(Color(nsColor: .windowBackgroundColor))
+                #else
+                .background(Color(.secondarySystemGroupedBackground))
+                #endif
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(.quaternary, lineWidth: 1)
+                )
+                .padding(.horizontal, 16)
                 .disabled(!viewModel.hasOpenRouterKey)
             }
+
+            Spacer(minLength: 0)
         }
-        #if os(macOS)
-        .formStyle(.grouped)
-        #endif
+        .padding(.top, 16)
         .sheet(isPresented: $showModelSelector) {
             ModelSelectorSheet(viewModel: viewModel)
                 .environment(coreManager)
@@ -524,64 +563,62 @@ private struct AISettingsSectionView: View {
                 .frame(minWidth: 500, idealWidth: 560, minHeight: 420, idealHeight: 560)
                 #endif
         }
+        .sheet(isPresented: $showCredentialSheet) {
+            credentialSheet
+        }
     }
 
-    @ViewBuilder
-    private func apiKeyRow(
-        title: String,
-        description: String,
-        hasKey: Bool,
-        isEditing: Binding<Bool>,
-        keyInput: Binding<String>,
-        onSave: @escaping () -> Void,
-        onDelete: @escaping () -> Void
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var credentialSheet: some View {
+        let providerName = providers.first(where: { $0.id == selectedProvider })?.name ?? selectedProvider
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Connect \(providerName)")
+                .font(.headline)
+
+            SecureField("API key", text: $credentialInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+                .autocorrectionDisabled()
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                #endif
+
+            if let credentialError {
+                Text(credentialError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
             HStack {
-                VStack(alignment: .leading) {
-                    Text(title)
-                    Text(description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Button("Cancel") {
+                    showCredentialSheet = false
                 }
                 Spacer()
-                if hasKey && !isEditing.wrappedValue {
-                    HStack(spacing: 8) {
-                        Text("••••••••")
-                            .foregroundStyle(.secondary)
-                        Button(role: .destructive, action: onDelete) {
-                            Image(systemName: "trash")
+                Button("Connect") {
+                    let trimmed = credentialInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else {
+                        credentialError = "API key is required."
+                        return
+                    }
+                    let provider = selectedProvider
+                    Task {
+                        if provider == "openrouter" {
+                            await viewModel.saveOpenRouterKey(trimmed)
+                        } else {
+                            await viewModel.saveElevenLabsKey(trimmed)
                         }
-                        .buttonStyle(.borderless)
+                        credentialInput = ""
+                        credentialError = nil
+                        showCredentialSheet = false
                     }
-                } else if !isEditing.wrappedValue {
-                    Button("Set Key") { isEditing.wrappedValue = true }
-                        .buttonStyle(.bordered)
                 }
-            }
-
-            if isEditing.wrappedValue {
-                HStack {
-                    SecureField("Enter API key", text: keyInput)
-                        .textFieldStyle(.roundedBorder)
-                        .autocorrectionDisabled()
-                        #if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        #endif
-
-                    Button("Save", action: onSave)
-                        .buttonStyle(.borderedProminent)
-                        .disabled(keyInput.wrappedValue.isEmpty || viewModel.isSavingApiKey)
-
-                    Button("Cancel") {
-                        keyInput.wrappedValue = ""
-                        isEditing.wrappedValue = false
-                    }
-                    .buttonStyle(.bordered)
-                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(credentialInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isSavingApiKey)
             }
         }
-        .padding(.vertical, 4)
+        .padding(16)
+        #if os(macOS)
+        .frame(width: 420)
+        #endif
     }
 }
 
@@ -726,16 +763,15 @@ private struct ModelSelectorSheet: View {
                                 )
                             }
                         } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 10) {
+                                let providerSlug = model.id.split(separator: "/").first.map(String.init) ?? ""
+                                ProviderLogoView(providerSlug, size: 20)
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text(model.name ?? model.id)
                                         .foregroundStyle(.primary)
-                                    if let description = model.description, !description.isEmpty {
-                                        Text(description)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
-                                    }
+                                    Text(model.id)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 if viewModel.isModelSelected(model.id) {

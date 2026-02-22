@@ -47,7 +47,7 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var diagnosticsSnapshot: DiagnosticsSnapshot?
     @Published var backendSnapshot: BackendTrustSnapshot?
 
-    @Published var bunkerRunning = false
+    @Published var bunkerRunning: Bool
     @Published var bunkerUri = ""
     @Published var isTogglingBunker = false
 
@@ -62,6 +62,11 @@ final class AppSettingsViewModel: ObservableObject {
         conversation text into natural, speakable prose. Remove code blocks, simplify technical jargon, \
         and focus on the key message being communicated.
         """
+    private static let bunkerEnabledDefaultsKey = "settings.bunker.enabled"
+
+    init() {
+        bunkerRunning = Self.loadPersistedBunkerEnabled()
+    }
 
     func load(coreManager: TenexCoreManager) async {
         isLoading = true
@@ -84,6 +89,7 @@ final class AppSettingsViewModel: ObservableObject {
             // Keep defaults if settings are not available yet.
         }
 
+        await setBunkerEnabled(coreManager: coreManager, enabled: bunkerRunning, persistPreference: false)
         await reloadRelays(coreManager: coreManager)
         await reloadBackends(coreManager: coreManager)
         isLoading = false
@@ -151,27 +157,12 @@ final class AppSettingsViewModel: ObservableObject {
         }
     }
 
-    func toggleBunker(coreManager: TenexCoreManager) async {
-        isTogglingBunker = true
-        defer { isTogglingBunker = false }
+    func setBunkerEnabled(coreManager: TenexCoreManager, enabled: Bool) async {
+        await setBunkerEnabled(coreManager: coreManager, enabled: enabled, persistPreference: true)
+    }
 
-        if bunkerRunning {
-            do {
-                try await coreManager.safeCore.stopBunker()
-                bunkerRunning = false
-                bunkerUri = ""
-            } catch {
-                errorMessage = "Failed to stop bunker: \(error.localizedDescription)"
-            }
-        } else {
-            do {
-                let uri = try await coreManager.safeCore.startBunker()
-                bunkerUri = uri
-                bunkerRunning = true
-            } catch {
-                errorMessage = "Failed to start bunker: \(error.localizedDescription)"
-            }
-        }
+    func toggleBunker(coreManager: TenexCoreManager) async {
+        await setBunkerEnabled(coreManager: coreManager, enabled: !bunkerRunning, persistPreference: true)
     }
 
     func saveElevenLabsKey(_ key: String) async {
@@ -351,6 +342,67 @@ final class AppSettingsViewModel: ObservableObject {
             selectedModelIds = previous
             errorMessage = "Failed to save model selection: \(error.localizedDescription)"
         }
+    }
+
+    private func setBunkerEnabled(
+        coreManager: TenexCoreManager,
+        enabled: Bool,
+        persistPreference: Bool
+    ) async {
+        if isTogglingBunker {
+            return
+        }
+
+        let previousRunning = bunkerRunning
+        let previousUri = bunkerUri
+
+        // Optimistically update UI so the toggle does not bounce while async work runs.
+        bunkerRunning = enabled
+        if !enabled {
+            bunkerUri = ""
+        }
+
+        isTogglingBunker = true
+        defer { isTogglingBunker = false }
+
+        do {
+            if enabled {
+                if !previousRunning || previousUri.isEmpty {
+                    bunkerUri = try await coreManager.safeCore.startBunker()
+                }
+                bunkerRunning = true
+            } else {
+                if previousRunning || !previousUri.isEmpty {
+                    try await coreManager.safeCore.stopBunker()
+                }
+                bunkerRunning = false
+                bunkerUri = ""
+            }
+
+            if persistPreference {
+                Self.persistBunkerEnabled(enabled)
+            }
+        } catch {
+            bunkerRunning = previousRunning
+            bunkerUri = previousUri
+            if persistPreference {
+                Self.persistBunkerEnabled(previousRunning)
+            }
+            let action = enabled ? "start" : "stop"
+            errorMessage = "Failed to \(action) bunker: \(error.localizedDescription)"
+        }
+    }
+
+    private static func loadPersistedBunkerEnabled() -> Bool {
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: bunkerEnabledDefaultsKey) != nil else {
+            return true
+        }
+        return defaults.bool(forKey: bunkerEnabledDefaultsKey)
+    }
+
+    private static func persistBunkerEnabled(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: bunkerEnabledDefaultsKey)
     }
 }
 
