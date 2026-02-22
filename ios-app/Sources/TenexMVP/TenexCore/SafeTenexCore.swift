@@ -109,6 +109,46 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    func getBunkerAuditLog() throws -> [FfiBunkerAuditEntry] {
+        try profiler.measureFFI("getBunkerAuditLog") {
+            do {
+                return try core.getBunkerAuditLog()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func addBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?) throws {
+        try profiler.measureFFI("addBunkerAutoApproveRule") {
+            do {
+                try core.addBunkerAutoApproveRule(requesterPubkey: requesterPubkey, eventKind: eventKind)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func removeBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?) throws {
+        try profiler.measureFFI("removeBunkerAutoApproveRule") {
+            do {
+                try core.removeBunkerAutoApproveRule(requesterPubkey: requesterPubkey, eventKind: eventKind)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func getBunkerAutoApproveRules() throws -> [FfiBunkerAutoApproveRule] {
+        try profiler.measureFFI("getBunkerAutoApproveRules") {
+            do {
+                return try core.getBunkerAutoApproveRules()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Projects
 
     /// Get all projects.

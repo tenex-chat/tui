@@ -137,6 +137,38 @@ struct AppRootSceneView: View {
         await coreManager.fetchData()
         guard !Task.isCancelled else { return }
         coreManager.updateAppBadge()
+
+        // Auto-start bunker if previously enabled
+        await autoStartBunkerIfEnabled()
+    }
+
+    private func autoStartBunkerIfEnabled() async {
+        let defaults = UserDefaults.standard
+        // Match AppSettingsViewModel.loadPersistedBunkerEnabled() logic:
+        // defaults to true when key doesn't exist
+        let enabled: Bool
+        if defaults.object(forKey: "settings.bunker.enabled") != nil {
+            enabled = defaults.bool(forKey: "settings.bunker.enabled")
+        } else {
+            enabled = true
+        }
+
+        guard enabled else { return }
+
+        do {
+            let _ = try await coreManager.safeCore.startBunker()
+
+            // Restore persisted auto-approve rules into the Rust core
+            let persistedRules = BunkerAutoApproveStorage.loadRules()
+            for rule in persistedRules {
+                try? await coreManager.safeCore.addBunkerAutoApproveRule(
+                    requesterPubkey: rule.requesterPubkey,
+                    eventKind: rule.eventKind
+                )
+            }
+        } catch {
+            // Silently fail - bunker can be started manually from Settings
+        }
     }
 
     private func handleScenePhaseTransition(_ phase: ScenePhase) async {
