@@ -139,7 +139,6 @@ pub enum HomeTab {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum StatsSubtab {
     #[default]
-    Chart,
     Rankings,
     Messages,
     Activity,
@@ -149,18 +148,16 @@ impl StatsSubtab {
     /// Get the next subtab (wraps around)
     pub fn next(self) -> Self {
         match self {
-            StatsSubtab::Chart => StatsSubtab::Rankings,
             StatsSubtab::Rankings => StatsSubtab::Messages,
             StatsSubtab::Messages => StatsSubtab::Activity,
-            StatsSubtab::Activity => StatsSubtab::Chart,
+            StatsSubtab::Activity => StatsSubtab::Rankings,
         }
     }
 
     /// Get the previous subtab (wraps around)
     pub fn prev(self) -> Self {
         match self {
-            StatsSubtab::Chart => StatsSubtab::Activity,
-            StatsSubtab::Rankings => StatsSubtab::Chart,
+            StatsSubtab::Rankings => StatsSubtab::Activity,
             StatsSubtab::Messages => StatsSubtab::Rankings,
             StatsSubtab::Activity => StatsSubtab::Messages,
         }

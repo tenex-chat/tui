@@ -616,9 +616,7 @@ fn process_note_keys_with_deltas(
     let inbox_upsert_count = inbox_items_to_upsert.len();
     for inbox_id in inbox_items_to_upsert {
         if let Some(item) = store.inbox.get_items().iter().find(|i| i.id == inbox_id) {
-            deltas.push(DataChangeType::InboxUpsert {
-                item: item.clone(),
-            });
+            deltas.push(DataChangeType::InboxUpsert { item: item.clone() });
         }
     }
 
@@ -694,12 +692,7 @@ fn process_data_changes_with_deltas(
                                     let is_online = store.is_project_online(&project_a_tag);
                                     let online_agents = store
                                         .get_online_agents(&project_a_tag)
-                                        .map(|agents| {
-                                            agents
-                                                .iter()
-                                                .cloned()
-                                                .collect()
-                                        })
+                                        .map(|agents| agents.iter().cloned().collect())
                                         .unwrap_or_default();
 
                                     deltas.push(DataChangeType::ProjectStatusChanged {
@@ -1044,15 +1037,6 @@ pub struct UserInfo {
 
 // ===== Stats Types (Full TUI Parity) =====
 
-/// A single day's runtime data (unix timestamp for day start, runtime in ms)
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct DayRuntime {
-    /// Unix timestamp (seconds) for the start of the day (UTC)
-    pub day_start: u64,
-    /// Total runtime in milliseconds for this day
-    pub runtime_ms: u64,
-}
-
 /// Cost data for a project
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProjectCost {
@@ -1062,17 +1046,6 @@ pub struct ProjectCost {
     pub name: String,
     /// Total cost in USD
     pub cost: f64,
-}
-
-/// Top conversation by runtime
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct TopConversation {
-    /// Conversation ID (event ID)
-    pub id: String,
-    /// Conversation title
-    pub title: String,
-    /// Total runtime in milliseconds
-    pub runtime_ms: u64,
 }
 
 /// Messages count for a single day (unix timestamp for day start, user count, all count)
@@ -1102,29 +1075,16 @@ pub struct HourActivity {
 }
 
 /// Complete stats snapshot with all data needed for iOS Stats tab
-/// This matches full TUI stats parity with pre-computed values
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct StatsSnapshot {
     // === Metric Cards Data ===
     /// Total cost in USD for the past 14 days (COST_WINDOW_DAYS).
     /// Note: This is NOT all-time cost. For display, show as "past 2 weeks" or similar.
     pub total_cost_14_days: f64,
-    /// 24-hour runtime in milliseconds
-    pub today_runtime_ms: u64,
-    /// 14-day average daily runtime in milliseconds (counting only non-zero days)
-    pub avg_daily_runtime_ms: u64,
-    /// Number of active days in the 14-day window (days with non-zero runtime)
-    pub active_days_count: u32,
-
-    // === Runtime Chart Data (14 days) ===
-    /// Last 14 days of runtime data (newest first)
-    pub runtime_by_day: Vec<DayRuntime>,
 
     // === Rankings Data ===
     /// Cost by project (sorted descending)
     pub cost_by_project: Vec<ProjectCost>,
-    /// Top 20 conversations by runtime (sorted descending)
-    pub top_conversations: Vec<TopConversation>,
 
     // === Messages Chart Data (14 days) ===
     /// Last 14 days of message counts (user vs all, newest first)
@@ -1558,6 +1518,32 @@ pub struct FfiBunkerSignRequest {
     pub event_kind: Option<u16>,
     pub event_content: Option<String>,
     pub event_tags_json: Option<String>,
+}
+
+/// NIP-46 bunker audit log entry for FFI.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiBunkerAuditEntry {
+    pub timestamp_ms: u64,
+    pub completed_at_ms: u64,
+    pub request_id: String,
+    pub source_event_id: String,
+    pub requester_pubkey: String,
+    pub request_type: String,
+    pub event_kind: Option<u16>,
+    pub event_content_preview: Option<String>,
+    pub event_content_full: Option<String>,
+    pub event_tags_json: Option<String>,
+    pub request_payload_json: Option<String>,
+    pub response_payload_json: Option<String>,
+    pub decision: String,
+    pub response_time_ms: u64,
+}
+
+/// NIP-46 bunker auto-approve rule for FFI.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FfiBunkerAutoApproveRule {
+    pub requester_pubkey: String,
+    pub event_kind: Option<u16>,
 }
 
 /// Type of data change for targeted UI updates.
@@ -2032,12 +2018,18 @@ impl TenexCore {
     pub fn generate_keypair(&self) -> Result<GeneratedKeypair, TenexError> {
         let keys = Keys::generate();
 
-        let nsec = keys.secret_key().to_bech32().map_err(|e| TenexError::Internal {
-            message: format!("Failed to encode nsec: {}", e),
-        })?;
-        let npub = keys.public_key().to_bech32().map_err(|e| TenexError::Internal {
-            message: format!("Failed to encode npub: {}", e),
-        })?;
+        let nsec = keys
+            .secret_key()
+            .to_bech32()
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to encode nsec: {}", e),
+            })?;
+        let npub = keys
+            .public_key()
+            .to_bech32()
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to encode npub: {}", e),
+            })?;
         let pubkey_hex = keys.public_key().to_hex();
 
         Ok(GeneratedKeypair {
@@ -2051,7 +2043,11 @@ impl TenexCore {
     ///
     /// Sets the user's display name and optionally a profile picture URL.
     /// Fire-and-forget — does not wait for relay confirmation.
-    pub fn publish_profile(&self, name: String, picture_url: Option<String>) -> Result<(), TenexError> {
+    pub fn publish_profile(
+        &self,
+        name: String,
+        picture_url: Option<String>,
+    ) -> Result<(), TenexError> {
         let keys_guard = self.keys.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire keys lock: {}", e),
         })?;
@@ -2724,7 +2720,10 @@ impl TenexCore {
         conversations.sort_by(|a, b| match (a.is_active, b.is_active) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => b.thread.effective_last_activity.cmp(&a.thread.effective_last_activity),
+            _ => b
+                .thread
+                .effective_last_activity
+                .cmp(&a.thread.effective_last_activity),
         });
         let sort_elapsed_ms = sort_started_at.elapsed().as_millis();
 
@@ -3336,10 +3335,7 @@ impl TenexCore {
     /// can be used for profile picture lookups and p-tags.
     ///
     /// Returns empty if project not found or project is offline.
-    pub fn get_online_agents(
-        &self,
-        project_id: String,
-    ) -> Result<Vec<ProjectAgent>, TenexError> {
+    pub fn get_online_agents(&self, project_id: String) -> Result<Vec<ProjectAgent>, TenexError> {
         use crate::tlog;
         tlog!(
             "FFI",
@@ -4106,7 +4102,7 @@ impl TenexCore {
         }
     }
 
-    /// Get comprehensive stats snapshot with full TUI parity.
+    /// Get comprehensive stats snapshot with all data needed for iOS Stats tab.
     /// This is a single batched FFI call that returns all stats data pre-computed.
     ///
     /// Returns Result to distinguish "no data" from "core error".
@@ -4119,7 +4115,7 @@ impl TenexCore {
 
         // ===== 1. Metric Cards Data =====
         // Total cost for the past COST_WINDOW_DAYS (shared constant with TUI stats page)
-        use crate::constants::COST_WINDOW_DAYS;
+        use crate::constants::{CHART_WINDOW_DAYS, COST_WINDOW_DAYS};
         const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -4129,75 +4125,14 @@ impl TenexCore {
         let cost_window_start = now.saturating_sub(COST_WINDOW_DAYS * SECONDS_PER_DAY);
         let total_cost = store.get_total_cost_since(cost_window_start);
 
-        // Get today's runtime (requires mutable borrow, so we do it separately)
-        drop(store_guard);
-        let today_runtime_ms = {
-            let mut store_guard = self.store.write().map_err(|_| TenexError::LockError {
-                resource: "store".to_string(),
-            })?;
-            let store = store_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
-            store.statistics.get_today_unique_runtime()
-        };
-
-        // Re-acquire read lock for remaining data
-        let store_guard = self.store.read().map_err(|_| TenexError::LockError {
-            resource: "store".to_string(),
-        })?;
-        let store = store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
-
-        // ===== 2. Runtime Chart Data (CHART_WINDOW_DAYS) =====
-        // Use shared constant for chart window (same as TUI stats view)
-        use crate::constants::CHART_WINDOW_DAYS;
-        let runtime_by_day_raw = store.statistics.get_runtime_by_day(CHART_WINDOW_DAYS);
-        let runtime_by_day: Vec<DayRuntime> = runtime_by_day_raw
-            .into_iter()
-            .map(|(day_start, runtime_ms)| DayRuntime {
-                day_start,
-                runtime_ms,
-            })
-            .collect();
-
-        // Calculate average daily runtime (counting only non-zero days)
-        let non_zero_runtimes: Vec<u64> = runtime_by_day
-            .iter()
-            .map(|d| d.runtime_ms)
-            .filter(|r| *r > 0)
-            .collect();
-        let (avg_daily_runtime_ms, active_days_count) = if non_zero_runtimes.is_empty() {
-            (0, 0)
-        } else {
-            let total: u64 = non_zero_runtimes.iter().sum();
-            (
-                total / non_zero_runtimes.len() as u64,
-                non_zero_runtimes.len() as u32,
-            )
-        };
-
-        // ===== 3. Rankings Data =====
+        // ===== 2. Rankings Data =====
         let cost_by_project_raw = store.get_cost_by_project();
         let cost_by_project: Vec<ProjectCost> = cost_by_project_raw
             .into_iter()
             .map(|(a_tag, name, cost)| ProjectCost { a_tag, name, cost })
             .collect();
 
-        const RANKINGS_TABLE_ROWS: usize = 20;
-        let top_conversations_raw = store.get_top_conversations_by_runtime(RANKINGS_TABLE_ROWS);
-        let top_conversations: Vec<TopConversation> = top_conversations_raw
-            .into_iter()
-            .map(|(id, runtime_ms)| {
-                let title = store
-                    .get_thread_by_id(&id)
-                    .map(|t| t.title.clone())
-                    .unwrap_or_else(|| format!("{}...", &id[..12.min(id.len())]));
-                TopConversation {
-                    id,
-                    title,
-                    runtime_ms,
-                }
-            })
-            .collect();
-
-        // ===== 4. Messages Chart Data (CHART_WINDOW_DAYS) =====
+        // ===== 3. Messages Chart Data (CHART_WINDOW_DAYS) =====
         let (user_messages_raw, all_messages_raw) = store.get_messages_by_day(CHART_WINDOW_DAYS);
 
         // Combine into single vector with day_start as key
@@ -4284,12 +4219,7 @@ impl TenexCore {
         // ===== Return Complete Snapshot =====
         Ok(StatsSnapshot {
             total_cost_14_days: total_cost,
-            today_runtime_ms,
-            avg_daily_runtime_ms,
-            active_days_count,
-            runtime_by_day,
             cost_by_project,
-            top_conversations,
             messages_by_day,
             activity_by_hour,
             max_tokens,
@@ -4998,7 +4928,9 @@ impl TenexCore {
             .clone();
 
         let (resp_tx, resp_rx) = std::sync::mpsc::channel();
-        let _ = handle.send(NostrCommand::StartBunker { response_tx: resp_tx });
+        let _ = handle.send(NostrCommand::StartBunker {
+            response_tx: resp_tx,
+        });
 
         resp_rx
             .recv_timeout(Duration::from_secs(10))
@@ -5021,7 +4953,9 @@ impl TenexCore {
             .clone();
 
         let (resp_tx, resp_rx) = std::sync::mpsc::channel();
-        let _ = handle.send(NostrCommand::StopBunker { response_tx: resp_tx });
+        let _ = handle.send(NostrCommand::StopBunker {
+            response_tx: resp_tx,
+        });
 
         resp_rx
             .recv_timeout(Duration::from_secs(5))
@@ -5053,6 +4987,134 @@ impl TenexCore {
         });
 
         Ok(())
+    }
+
+    /// Get the NIP-46 bunker audit log.
+    pub fn get_bunker_audit_log(&self) -> Result<Vec<FfiBunkerAuditEntry>, TenexError> {
+        let handle = self
+            .core_handle
+            .read()
+            .map_err(|_| TenexError::LockError {
+                resource: "core_handle".to_string(),
+            })?
+            .as_ref()
+            .ok_or(TenexError::NotLoggedIn)?
+            .clone();
+
+        let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+        let _ = handle.send(NostrCommand::GetBunkerAuditLog {
+            response_tx: resp_tx,
+        });
+
+        let entries =
+            resp_rx
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|_| TenexError::Internal {
+                    message: "Bunker audit log timed out".to_string(),
+                })?;
+
+        Ok(entries
+            .into_iter()
+            .map(|e| FfiBunkerAuditEntry {
+                timestamp_ms: e.timestamp_ms,
+                completed_at_ms: e.completed_at_ms,
+                request_id: e.request_id,
+                source_event_id: e.source_event_id,
+                requester_pubkey: e.requester_pubkey,
+                request_type: e.request_type,
+                event_kind: e.event_kind,
+                event_content_preview: e.event_content_preview,
+                event_content_full: e.event_content_full,
+                event_tags_json: e.event_tags_json,
+                request_payload_json: e.request_payload_json,
+                response_payload_json: e.response_payload_json,
+                decision: e.decision,
+                response_time_ms: e.response_time_ms,
+            })
+            .collect())
+    }
+
+    /// Add a bunker auto-approve rule.
+    pub fn add_bunker_auto_approve_rule(
+        &self,
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    ) -> Result<(), TenexError> {
+        let handle = self
+            .core_handle
+            .read()
+            .map_err(|_| TenexError::LockError {
+                resource: "core_handle".to_string(),
+            })?
+            .as_ref()
+            .ok_or(TenexError::NotLoggedIn)?
+            .clone();
+
+        let _ = handle.send(NostrCommand::AddBunkerAutoApproveRule {
+            requester_pubkey,
+            event_kind,
+        });
+
+        Ok(())
+    }
+
+    /// Remove a bunker auto-approve rule.
+    pub fn remove_bunker_auto_approve_rule(
+        &self,
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    ) -> Result<(), TenexError> {
+        let handle = self
+            .core_handle
+            .read()
+            .map_err(|_| TenexError::LockError {
+                resource: "core_handle".to_string(),
+            })?
+            .as_ref()
+            .ok_or(TenexError::NotLoggedIn)?
+            .clone();
+
+        let _ = handle.send(NostrCommand::RemoveBunkerAutoApproveRule {
+            requester_pubkey,
+            event_kind,
+        });
+
+        Ok(())
+    }
+
+    /// Get all bunker auto-approve rules.
+    pub fn get_bunker_auto_approve_rules(
+        &self,
+    ) -> Result<Vec<FfiBunkerAutoApproveRule>, TenexError> {
+        let handle = self
+            .core_handle
+            .read()
+            .map_err(|_| TenexError::LockError {
+                resource: "core_handle".to_string(),
+            })?
+            .as_ref()
+            .ok_or(TenexError::NotLoggedIn)?
+            .clone();
+
+        let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+        let _ = handle.send(NostrCommand::GetBunkerAutoApproveRules {
+            response_tx: resp_tx,
+        });
+
+        let rules =
+            resp_rx
+                .recv_timeout(Duration::from_secs(5))
+                .map_err(|_| TenexError::Internal {
+                    message: "Bunker auto-approve rules timed out".to_string(),
+                })?;
+
+        Ok(rules
+            .into_iter()
+            .map(|r| FfiBunkerAutoApproveRule {
+                requester_pubkey: r.requester_pubkey,
+                event_kind: r.event_kind,
+            })
+            .collect())
     }
 }
 
@@ -5382,7 +5444,6 @@ impl TenexCore {
             }
         })
     }
-
 }
 
 // Private implementation methods for TenexCore (event callback listener)
