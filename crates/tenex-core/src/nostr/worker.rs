@@ -536,6 +536,24 @@ pub enum NostrCommand {
         request_id: String,
         approved: bool,
     },
+    /// Get the bunker audit log
+    GetBunkerAuditLog {
+        response_tx: Sender<Vec<super::bunker::BunkerAuditEntry>>,
+    },
+    /// Add an auto-approve rule for bunker signing
+    AddBunkerAutoApproveRule {
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    },
+    /// Remove an auto-approve rule for bunker signing
+    RemoveBunkerAutoApproveRule {
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    },
+    /// Get all bunker auto-approve rules
+    GetBunkerAutoApproveRules {
+        response_tx: Sender<Vec<super::bunker::BunkerAutoApproveRule>>,
+    },
     Shutdown,
 }
 
@@ -1125,6 +1143,44 @@ impl NostrWorker {
                                 tlog!("ERROR", "BunkerResponse failed: {}", e);
                             }
                         }
+                    }
+                    NostrCommand::GetBunkerAuditLog { response_tx } => {
+                        let entries = self
+                            .bunker_service
+                            .as_ref()
+                            .map(|s| s.audit_log())
+                            .unwrap_or_default();
+                        let _ = response_tx.send(entries);
+                    }
+                    NostrCommand::AddBunkerAutoApproveRule {
+                        requester_pubkey,
+                        event_kind,
+                    } => {
+                        if let Some(ref service) = self.bunker_service {
+                            service.add_auto_approve_rule(
+                                super::bunker::BunkerAutoApproveRule {
+                                    requester_pubkey,
+                                    event_kind,
+                                },
+                            );
+                        }
+                    }
+                    NostrCommand::RemoveBunkerAutoApproveRule {
+                        requester_pubkey,
+                        event_kind,
+                    } => {
+                        if let Some(ref service) = self.bunker_service {
+                            service
+                                .remove_auto_approve_rule(&requester_pubkey, event_kind);
+                        }
+                    }
+                    NostrCommand::GetBunkerAutoApproveRules { response_tx } => {
+                        let rules = self
+                            .bunker_service
+                            .as_ref()
+                            .map(|s| s.auto_approve_rules())
+                            .unwrap_or_default();
+                        let _ = response_tx.send(rules);
                     }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");

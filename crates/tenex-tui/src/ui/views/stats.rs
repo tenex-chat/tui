@@ -1,14 +1,11 @@
 //! Stats tab view - displays LLM usage statistics including:
-//! - Per-day runtime bar chart with proper Unicode bars
 //! - Total running cost with metric cards
 //! - Cost per project table
-//! - Top conversations by runtime
 //! - Per-day message counts (user vs all) bar chart
 //! - Activity grid (GitHub-style) showing LLM activity by hour
 //!
-//! The Stats view has four subtabs:
-//! - Chart: Shows the 14-day LLM runtime chart (full height)
-//! - Rankings: Shows Cost by Project and Top Conversations tables side-by-side
+//! The Stats view has three subtabs:
+//! - Rankings: Shows Cost by Project table
 //! - Messages: Shows message counts per day (current user vs all project messages)
 //! - Activity: Shows GitHub-style activity grid for LLM usage per hour
 //!
@@ -35,8 +32,7 @@ const BAR_QUARTER: char = '▎';
 const BAR_EIGHTH: char = '▏';
 
 // Layout constants for consistent width calculations
-const CHART_LABEL_WIDTH: u16 = 22; // Space needed for date label + runtime display
-const MIN_CHART_WIDTH: u16 = CHART_LABEL_WIDTH; // Minimum width for chart to render
+const CHART_LABEL_WIDTH: u16 = 22; // Space needed for date label + count display
 
 // Messages chart needs extra space for "user/all" counts (e.g., "123/456")
 const MESSAGES_COUNTS_WIDTH: u16 = 8; // Extra width for dual count display
@@ -44,8 +40,7 @@ const MESSAGES_LABEL_WIDTH: u16 = CHART_LABEL_WIDTH + MESSAGES_COUNTS_WIDTH; // 
 const MIN_MESSAGES_CHART_WIDTH: u16 = MESSAGES_LABEL_WIDTH; // Minimum width before falling back to empty state
 
 const TABLE_INSET: u16 = 2; // Padding inside table blocks
-const TABLE_COST_COL_WIDTH: u16 = 10; // Width for cost/runtime columns
-const TABLE_RUNTIME_COL_WIDTH: u16 = 12; // Width for runtime column
+const TABLE_COST_COL_WIDTH: u16 = 10; // Width for cost columns
 
 // Import shared constants for cost and chart windows
 // COST_WINDOW_DAYS is used for cost calculations (shared with FFI)
@@ -95,44 +90,19 @@ pub enum ActivityVisualization {
 
 /// Render the Stats tab content with a dashboard layout featuring subtabs
 pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
-    // Get today's runtime first (requires mutable borrow)
-    let today_runtime = app
-        .data_store
-        .borrow_mut()
-        .statistics
-        .get_today_unique_runtime();
-
-    // Get stats data from the data store (immutable borrow)
+    // Get stats data from the data store
     let data_store = app.data_store.borrow();
 
-    // 1. Runtime by day (last STATS_WINDOW_DAYS days)
-    let runtime_by_day = data_store.statistics.get_runtime_by_day(STATS_WINDOW_DAYS);
-
-    // 2. Total cost (past COST_WINDOW_DAYS)
+    // 1. Total cost (past COST_WINDOW_DAYS)
     // Use saturating_sub for safe arithmetic in case of clock skew
     let now_secs = Utc::now().timestamp() as u64;
     let cost_window_start = now_secs.saturating_sub(COST_WINDOW_DAYS * 24 * 60 * 60);
     let total_cost = data_store.get_total_cost_since(cost_window_start);
 
-    // 3. Cost by project
+    // 2. Cost by project
     let cost_by_project = data_store.get_cost_by_project();
 
-    // 4. Top conversations by runtime (expanded for Rankings view)
-    let top_conversations = data_store.get_top_conversations_by_runtime(RANKINGS_TABLE_ROWS);
-
-    // Get thread titles for the top conversations
-    let top_conv_with_titles: Vec<(String, String, u64)> = top_conversations
-        .iter()
-        .map(|(id, runtime)| {
-            let title = data_store
-                .get_thread_by_id(id)
-                .map(|t| t.title.clone())
-                .unwrap_or_else(|| truncate_with_ellipsis(id, 12));
-            (id.clone(), title, *runtime)
-        })
-        .collect();
-
-    // 5. Messages by day (user vs all)
+    // 3. Messages by day (user vs all)
     let (user_messages_by_day, all_messages_by_day) =
         data_store.get_messages_by_day(STATS_WINDOW_DAYS);
 
@@ -140,9 +110,9 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
 
     // Dashboard Layout with Subtabs:
     // ┌─────────────────────────────────────────────────────────────┐
-    // │  [Total Cost]  [24h Runtime]  [Avg (14d)]                  │ <- Metric Cards Row
+    // │  [Total Cost]                                               │ <- Metric Cards Row
     // ├─────────────────────────────────────────────────────────────┤
-    // │  [Chart] [Rankings]                                         │ <- Subtab Navigation
+    // │  [Rankings] [Messages] [Activity]                           │ <- Subtab Navigation
     // ├─────────────────────────────────────────────────────────────┤
     // │                                                             │
     // │  Content Area (changes based on active subtab)              │
@@ -164,31 +134,15 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     .split(area);
 
     // 1. Render Metric Cards Row (always visible)
-    render_metric_cards(
-        f,
-        total_cost,
-        today_runtime,
-        &runtime_by_day,
-        vertical_chunks[0],
-    );
+    render_metric_cards(f, total_cost, vertical_chunks[0]);
 
     // 2. Render Subtab Navigation
     render_subtab_navigation(f, app.stats_subtab, vertical_chunks[1]);
 
     // 3. Render Content based on active subtab
     match app.stats_subtab {
-        StatsSubtab::Chart => {
-            // Full-height chart view
-            render_runtime_chart(f, &runtime_by_day, vertical_chunks[2]);
-        }
         StatsSubtab::Rankings => {
-            // Side-by-side tables view
-            let table_chunks =
-                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                    .split(vertical_chunks[2]);
-
-            render_cost_by_project_table(f, &cost_by_project, table_chunks[0]);
-            render_top_conversations_table(f, &top_conv_with_titles, table_chunks[1]);
+            render_cost_by_project_table(f, &cost_by_project, vertical_chunks[2]);
         }
         StatsSubtab::Messages => {
             // Messages per day bar chart (user vs all)
@@ -228,32 +182,11 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
     }
 
     // Build the subtab pills
-    let chart_active = active_subtab == StatsSubtab::Chart;
     let rankings_active = active_subtab == StatsSubtab::Rankings;
     let messages_active = active_subtab == StatsSubtab::Messages;
     let activity_active = active_subtab == StatsSubtab::Activity;
 
     let mut spans = vec![Span::raw(" ")];
-
-    // Chart tab
-    if chart_active {
-        spans.push(Span::styled(
-            " Chart ",
-            Style::default()
-                .fg(theme::TEXT_PRIMARY)
-                .bg(theme::BG_TAB_ACTIVE)
-                .add_modifier(Modifier::BOLD),
-        ));
-    } else {
-        spans.push(Span::styled(
-            " Chart ",
-            Style::default()
-                .fg(theme::TEXT_MUTED)
-                .bg(theme::BG_SECONDARY),
-        ));
-    }
-
-    spans.push(Span::raw("  "));
 
     // Rankings tab
     if rankings_active {
@@ -325,62 +258,14 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
 }
 
 /// Render the top metric cards row
-fn render_metric_cards(
-    f: &mut Frame,
-    total_cost: f64,
-    today_runtime: u64,
-    runtime_by_day: &[(u64, u64)],
-    area: Rect,
-) {
-    // Calculate average daily runtime counting only non-zero days
-    let non_zero_days: Vec<u64> = runtime_by_day
-        .iter()
-        .map(|(_, r)| *r)
-        .filter(|r| *r > 0)
-        .collect();
-
-    let (avg_daily_runtime, active_days_count) = if non_zero_days.is_empty() {
-        (0, 0)
-    } else {
-        let total: u64 = non_zero_days.iter().sum();
-        (total / non_zero_days.len() as u64, non_zero_days.len())
-    };
-
-    let card_chunks = Layout::horizontal([
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
-    ])
-    .split(area);
-
-    // Card 1: Total Cost (past 2 weeks)
+fn render_metric_cards(f: &mut Frame, total_cost: f64, area: Rect) {
     render_metric_card(
         f,
         "Total Cost",
         &format!("${:.2}", total_cost),
         "past 2 weeks",
         theme::ACCENT_SUCCESS,
-        card_chunks[0],
-    );
-
-    // Card 2: 24h Runtime
-    render_metric_card(
-        f,
-        "24h Runtime",
-        &format_runtime(today_runtime),
-        "today",
-        theme::ACCENT_PRIMARY,
-        card_chunks[1],
-    );
-
-    // Card 3: Average Daily Runtime (counting only non-zero days)
-    render_metric_card(
-        f,
-        &format!("Avg ({}d)", active_days_count),
-        &format_runtime(avg_daily_runtime),
-        "per day",
-        theme::ACCENT_SPECIAL,
-        card_chunks[2],
+        area,
     );
 }
 
@@ -421,101 +306,6 @@ fn render_metric_card(
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
     f.render_widget(paragraph, inner);
-}
-
-/// Render the runtime bar chart using Unicode block characters
-fn render_runtime_chart(f: &mut Frame, runtime_by_day: &[(u64, u64)], area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-        .title(format!(" LLM Runtime (Last {} Days) ", STATS_WINDOW_DAYS))
-        .title_style(
-            Style::default()
-                .fg(theme::TEXT_PRIMARY)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    // Width guard aligned with bar_max_width calculation
-    if inner.height < 3 || inner.width < MIN_CHART_WIDTH {
-        render_empty_state(f, "Insufficient space for chart", inner);
-        return;
-    }
-
-    if runtime_by_day.is_empty() {
-        render_empty_state(f, "No runtime data available", inner);
-        return;
-    }
-
-    // Find max runtime for scaling
-    let max_runtime = runtime_by_day.iter().map(|(_, r)| *r).max().unwrap_or(1);
-    let bar_max_width = inner.width.saturating_sub(CHART_LABEL_WIDTH) as usize;
-
-    // Build the chart data for last STATS_WINDOW_DAYS days
-    let seconds_per_day: u64 = 86400;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let today_start = (now / seconds_per_day) * seconds_per_day;
-
-    // Create a map for quick lookup
-    let runtime_map: std::collections::HashMap<u64, u64> = runtime_by_day.iter().cloned().collect();
-
-    // Generate last STATS_WINDOW_DAYS days with proper date labels
-    // Order: newest (today) first, oldest last - ensures today is always visible
-    // even if the chart area is too small to fit all days
-    let mut lines: Vec<Line> = Vec::new();
-
-    for i in 0..STATS_WINDOW_DAYS {
-        let day_start = today_start - i as u64 * seconds_per_day;
-        let runtime = runtime_map.get(&day_start).copied().unwrap_or(0);
-
-        // Format date label using chrono for correct date calculation
-        let day_label = format_day_label_from_timestamp(day_start, today_start);
-
-        if runtime > 0 {
-            let bar = create_unicode_bar(runtime, max_runtime, bar_max_width);
-            let runtime_str = format_runtime(runtime);
-
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{:>7} ", day_label),
-                    Style::default().fg(theme::TEXT_MUTED),
-                ),
-                Span::styled(bar, Style::default().fg(theme::ACCENT_PRIMARY)),
-                Span::styled(
-                    format!(" {}", runtime_str),
-                    Style::default().fg(theme::TEXT_PRIMARY),
-                ),
-            ]));
-        } else {
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{:>7} ", day_label),
-                    Style::default().fg(theme::TEXT_MUTED),
-                ),
-                Span::styled(
-                    format!("{} ", card::LIST_BULLET_GLYPH),
-                    Style::default().fg(theme::TEXT_DIM),
-                ),
-                Span::styled("—", Style::default().fg(theme::TEXT_DIM)),
-            ]));
-        }
-    }
-
-    // Add padding at top if we have space
-    let chart_area = Rect::new(
-        inner.x + 1,
-        inner.y + 1,
-        inner.width.saturating_sub(2),
-        inner.height.saturating_sub(2),
-    );
-
-    let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, chart_area);
 }
 
 /// Render the messages bar chart showing user messages vs all messages per day
@@ -821,91 +611,6 @@ fn render_cost_by_project_table(
     f.render_widget(table, table_area);
 }
 
-/// Render the top conversations section as a proper table
-fn render_top_conversations_table(
-    f: &mut Frame,
-    conversations: &[(String, String, u64)],
-    area: Rect,
-) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER_INACTIVE))
-        .title(" Top Conversations ")
-        .title_style(
-            Style::default()
-                .fg(theme::TEXT_PRIMARY)
-                .add_modifier(Modifier::BOLD),
-        );
-
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    if conversations.is_empty() {
-        render_empty_state(f, "No conversation data available", inner);
-        return;
-    }
-
-    // Calculate available width for title column
-    // Total width - insets - runtime column - column spacing
-    let title_col_max_width = (inner.width as usize)
-        .saturating_sub(TABLE_INSET as usize)
-        .saturating_sub(TABLE_RUNTIME_COL_WIDTH as usize)
-        .saturating_sub(1); // column spacing
-
-    // Create table rows
-    let rows: Vec<Row> = conversations
-        .iter()
-        .enumerate()
-        .map(|(idx, (_id, title, runtime))| {
-            let truncated_title = truncate_with_ellipsis(title, title_col_max_width);
-            let runtime_str = format_runtime(*runtime);
-            let bg = if idx % 2 == 0 {
-                theme::BG_APP
-            } else {
-                theme::BG_SECONDARY
-            };
-
-            Row::new(vec![
-                Cell::from(truncated_title).style(Style::default().fg(theme::TEXT_PRIMARY)),
-                Cell::from(runtime_str).style(Style::default().fg(theme::ACCENT_PRIMARY)),
-            ])
-            .style(Style::default().bg(bg))
-        })
-        .collect();
-
-    let header = Row::new(vec![
-        Cell::from("Conversation").style(
-            Style::default()
-                .fg(theme::TEXT_MUTED)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Cell::from("Runtime").style(
-            Style::default()
-                .fg(theme::TEXT_MUTED)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ])
-    .style(Style::default().bg(theme::BG_SECONDARY))
-    .height(1);
-
-    let widths = [
-        Constraint::Min(10),
-        Constraint::Length(TABLE_RUNTIME_COL_WIDTH),
-    ];
-
-    let table = Table::new(rows, widths).header(header).column_spacing(1);
-
-    // Use consistent inset calculation
-    let table_area = Rect::new(
-        inner.x + (TABLE_INSET / 2),
-        inner.y,
-        inner.width.saturating_sub(TABLE_INSET),
-        inner.height,
-    );
-
-    f.render_widget(table, table_area);
-}
-
 /// Render an empty state message centered in the area
 fn render_empty_state(f: &mut Frame, message: &str, area: Rect) {
     if area.height < 1 || area.width < message.len() as u16 {
@@ -922,34 +627,6 @@ fn render_empty_state(f: &mut Frame, message: &str, area: Rect) {
     .alignment(Alignment::Center);
 
     f.render_widget(paragraph, centered_area);
-}
-
-/// Format runtime in milliseconds to human-readable string
-fn format_runtime(ms: u64) -> String {
-    let seconds = ms / 1000;
-    if seconds == 0 && ms > 0 {
-        format!("{}ms", ms)
-    } else if seconds == 0 {
-        "0s".to_string()
-    } else if seconds < 60 {
-        format!("{}s", seconds)
-    } else if seconds < 3600 {
-        let mins = seconds / 60;
-        let secs = seconds % 60;
-        if secs > 0 {
-            format!("{}m {}s", mins, secs)
-        } else {
-            format!("{}m", mins)
-        }
-    } else {
-        let hours = seconds / 3600;
-        let mins = (seconds % 3600) / 60;
-        if mins > 0 {
-            format!("{}h {}m", hours, mins)
-        } else {
-            format!("{}h", hours)
-        }
-    }
 }
 
 /// Render the activity grid (GitHub-style contribution graph)
@@ -1141,18 +818,6 @@ fn get_activity_color(value: u64, max_value: u64) -> ratatui::style::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_format_runtime() {
-        assert_eq!(format_runtime(0), "0s");
-        assert_eq!(format_runtime(500), "500ms");
-        assert_eq!(format_runtime(1000), "1s");
-        assert_eq!(format_runtime(30000), "30s");
-        assert_eq!(format_runtime(60000), "1m");
-        assert_eq!(format_runtime(90000), "1m 30s");
-        assert_eq!(format_runtime(3600000), "1h");
-        assert_eq!(format_runtime(5400000), "1h 30m");
-    }
 
     #[test]
     fn test_create_unicode_bar() {

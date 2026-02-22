@@ -1,4 +1,3 @@
-use crate::ui::card;
 use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::{theme, App, HomeTab};
 use ratatui::{
@@ -886,11 +885,12 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_focused = selected_project_index == Some(i);
         let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
+        let is_visible = app.visible_projects.contains(&a_tag);
 
-        let focus_indicator = if is_focused {
-            card::COLLAPSE_CLOSED
+        let (leading_icon, icon_color) = if is_visible {
+            ("● ", theme::ACCENT_PRIMARY)
         } else {
-            card::SPACER
+            ("○ ", theme::TEXT_MUTED)
         };
 
         let name_max = match (is_busy, is_archived) {
@@ -910,7 +910,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let mut spans = vec![
-            Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
+            Span::styled(leading_icon, Style::default().fg(icon_color)),
             Span::styled(name, name_style),
         ];
 
@@ -953,11 +953,14 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_focused = selected_project_index == Some(online_count + i);
         let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
+        let is_visible = app.visible_projects.contains(&a_tag);
 
-        let focus_indicator = if is_focused {
-            card::COLLAPSE_CLOSED
+        let offline_color = ratatui::style::Color::Rgb(56, 56, 56);
+
+        let (leading_icon, icon_color) = if is_visible {
+            ("● ", theme::ACCENT_PRIMARY)
         } else {
-            card::SPACER
+            ("○ ", offline_color)
         };
 
         let name_max = match (is_busy, is_archived) {
@@ -968,7 +971,6 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         };
         let name = truncate_with_ellipsis(&project.title, name_max);
 
-        let offline_color = ratatui::style::Color::Rgb(56, 56, 56);
         let name_style = if is_focused {
             Style::default()
                 .fg(theme::TEXT_PRIMARY)
@@ -978,7 +980,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let mut spans = vec![
-            Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
+            Span::styled(leading_icon, Style::default().fg(icon_color)),
             Span::styled(name, name_style),
         ];
 
