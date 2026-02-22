@@ -59,21 +59,26 @@ pub fn build_thread_root_index(
         index.insert(a_tag.clone(), HashSet::new());
     }
 
-    // Query all kind:1 events for all projects at once
-    // Build a filter with all project a_tags
-    for a_tag in project_a_tags {
-        let filter = Filter::new().kinds([1]).tags([a_tag.as_str()], 'a').build();
-
-        // Query with high limit to get all events
-        let results = ndb.query(&txn, &[filter], 100_000)?;
+    // Single OR-query for all projects — nostrdb ORs multiple tag values in one filter.
+    // 500_000 limit provides safe margin to cover all kind:1 events across all projects.
+    if !project_a_tags.is_empty() {
+        let a_tag_strs: Vec<&str> = project_a_tags.iter().map(|s| s.as_str()).collect();
+        let filter = Filter::new().kinds([1]).tags(a_tag_strs, 'a').build();
+        let results = ndb.query(&txn, &[filter], 500_000)?;
 
         for result in results {
             if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
-                // Check if this is a thread root (no e-tags)
-                if Thread::from_note(&note).is_some() {
-                    let event_id = hex::encode(note.id());
-                    if let Some(set) = index.get_mut(a_tag) {
-                        set.insert(event_id);
+                if Thread::from_note(&note).is_none() {
+                    continue;
+                }
+                let event_id = hex::encode(note.id());
+                for tag in note.tags() {
+                    if tag.get(0).and_then(|t| t.variant().str()) == Some("a") {
+                        if let Some(a_val) = tag.get(1).and_then(|t| t.variant().str()) {
+                            if let Some(set) = index.get_mut(a_val) {
+                                set.insert(event_id.clone());
+                            }
+                        }
                     }
                 }
             }
