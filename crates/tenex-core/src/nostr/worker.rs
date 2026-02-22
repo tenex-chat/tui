@@ -1286,7 +1286,7 @@ impl NostrWorker {
         tlog!("CONN", "Starting subscriptions...");
         let sub_start = std::time::Instant::now();
 
-        // 1. User's projects (kind:31933) - only owned projects
+        // 1a. User's projects (kind:31933) - authored by user
         let project_filter_owned = Filter::new()
             .kind(Kind::Custom(KIND_PROJECT_DRAFT))
             .author(pubkey);
@@ -1294,12 +1294,32 @@ impl NostrWorker {
         let output = client.subscribe(project_filter_owned.clone(), None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects".to_string(), vec![KIND_PROJECT_DRAFT], None)
+            SubscriptionInfo::new("User projects (authored)".to_string(), vec![KIND_PROJECT_DRAFT], None)
                 .with_raw_filter(project_filter_json.unwrap_or_default()),
         );
         tlog!(
             "CONN",
-            "Subscribed to projects (kind:{}) - owned by user",
+            "Subscribed to projects (kind:{}) - authored by user",
+            KIND_PROJECT_DRAFT
+        );
+
+        // 1b. Projects where user is a participant (kind:31933) - via p-tag
+        let project_filter_participant = Filter::new()
+            .kind(Kind::Custom(KIND_PROJECT_DRAFT))
+            .custom_tag(
+                SingleLetterTag::lowercase(Alphabet::P),
+                pubkey.to_hex(),
+            );
+        let project_p_filter_json = serde_json::to_string(&project_filter_participant).ok();
+        let output = client.subscribe(project_filter_participant.clone(), None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("User projects (participant)".to_string(), vec![KIND_PROJECT_DRAFT], None)
+                .with_raw_filter(project_p_filter_json.unwrap_or_default()),
+        );
+        tlog!(
+            "CONN",
+            "Subscribed to projects (kind:{}) - p-tagged user",
             KIND_PROJECT_DRAFT
         );
 
