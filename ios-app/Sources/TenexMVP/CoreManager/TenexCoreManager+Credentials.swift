@@ -57,9 +57,45 @@ extension TenexCoreManager {
         }
     }
 
-    /// Clears stored credentials.
+    /// Clears stored credentials and resets all session state.
     /// - Returns: Optional error message if clear failed
     func clearCredentials() async -> String? {
+        // Reset Rust core state first — this stops NDK subscriptions and clears
+        // internal caches so stale data from the old account cannot leak into
+        // the next login session.
+        // Run logout at utility priority: the Rust path blocks on worker-thread
+        // disconnect confirmation, which can trigger QoS inversion warnings when
+        // called from user-initiated UI tasks.
+        do {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, Error>) in
+                Task.detached(priority: .utility) { [safeCore] in
+                    do {
+                        try await safeCore.logout()
+                        continuation.resume(returning: ())
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+        } catch {
+            profiler.logEvent(
+                "clearCredentials logout failed error=\(error.localizedDescription)",
+                category: .general,
+                level: .error
+            )
+        }
+
+        // Clear Swift-side session data immediately so the UI shows nothing
+        // while the next fetchData() runs.
+        projects = []
+        conversations = []
+        inboxItems = []
+        reports = []
+        messagesByConversation = [:]
+        projectOnlineStatus = [:]
+        onlineAgents = [:]
+
         // Clear profile picture cache on logout to prevent stale data
         profilePictureCache.clear()
 

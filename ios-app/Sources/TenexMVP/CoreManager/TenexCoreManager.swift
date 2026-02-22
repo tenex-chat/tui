@@ -243,10 +243,21 @@ class TenexCoreManager {
 
         // Initialize asynchronously off the main thread
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            print("[TENEX PERF] core.init starting")
             let startedAt = CFAbsoluteTimeGetCurrent()
             let success = tenexCore.`init`()
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+            print("[TENEX PERF] core.init finished success=\(success) totalMs=\(String(format: "%.0f", elapsedMs))")
+
+            // Read the Rust sub-step timings from tenex.log and forward them so they
+            // appear in the Xcode console and Swift perf log alongside the Swift timings.
+            let rustLines = Self.readRustInitTimings()
+
             DispatchQueue.main.async {
+                for line in rustLines {
+                    print("[TENEX PERF] rust: \(line)")
+                    self?.profiler.logEvent("rust-init: \(line)", category: .general)
+                }
                 self?.profiler.logEvent(
                     "core.init completed success=\(success) elapsedMs=\(String(format: "%.2f", elapsedMs))",
                     category: .general,
@@ -302,6 +313,46 @@ class TenexCoreManager {
         let parts = aTag.split(separator: ":")
         guard parts.count >= 3 else { return "" }
         return parts.dropFirst(2).joined(separator: ":")
+    }
+
+    /// Reads the last ffi.init timing block from the Rust log file and returns the lines.
+    /// Rust writes detailed per-step PERF logs to tenex.log during init; this surfaces them
+    /// to the Swift profiler so they appear in the Xcode console and perf log.
+    private static func readRustInitTimings() -> [String] {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return ["error: no Application Support directory found"]
+        }
+        let logURL = base.appendingPathComponent("tenex/nostrdb/tenex.log")
+        guard let handle = try? FileHandle(forReadingFrom: logURL) else {
+            return ["tenex.log not found at \(logURL.path)"]
+        }
+        defer { handle.closeFile() }
+
+        // Read only the last 8 KB — ffi.init logs are small and always at the tail.
+        let fileSize = handle.seekToEndOfFile()
+        let offset = fileSize > 8192 ? fileSize - 8192 : 0
+        handle.seek(toFileOffset: offset)
+        let data = handle.readDataToEndOfFile()
+        guard let tail = String(data: data, encoding: .utf8) else {
+            return ["failed to decode tenex.log"]
+        }
+
+        // Extract the most recent ffi.init block (start → complete).
+        // If we see a second "ffi.init start" we reset, keeping only the latest session.
+        var capturing = false
+        var block: [String] = []
+        for line in tail.components(separatedBy: "\n") {
+            if line.contains("ffi.init start") {
+                capturing = true
+                block = [line]
+            } else if capturing {
+                block.append(line)
+                if line.contains("ffi.init complete") {
+                    capturing = false
+                }
+            }
+        }
+        return block.filter { !$0.isEmpty }
     }
 
     /// Refresh `runtimeText` from the Rust FFI.
