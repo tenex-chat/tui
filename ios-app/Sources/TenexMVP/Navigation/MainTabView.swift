@@ -6,6 +6,8 @@ enum AppSection: String, CaseIterable, Identifiable {
     case reports
     case inbox
     case search
+    case stats
+    case diagnostics
     case teams
     case agentDefinitions
     case settings
@@ -19,6 +21,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .reports: return "Reports"
         case .inbox: return "Inbox"
         case .search: return "Search"
+        case .stats: return "LLM Runtime"
+        case .diagnostics: return "Diagnostics"
         case .teams: return "Teams"
         case .agentDefinitions: return "Agent Definitions"
         case .settings: return "Settings"
@@ -32,6 +36,8 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .reports: return "doc.richtext"
         case .inbox: return "tray"
         case .search: return "magnifyingglass"
+        case .stats: return "clock"
+        case .diagnostics: return "gauge.with.needle"
         case .teams: return "person.2"
         case .agentDefinitions: return "person.3.sequence"
         case .settings: return "gearshape"
@@ -57,8 +63,6 @@ struct MainTabView: View {
     #endif
 
     @State private var selectedTab = 0
-    @State private var showDiagnostics = false
-    @State private var showStats = false
     @State private var showOnboarding = false
     @State private var hasCheckedOnboarding = false
 
@@ -76,37 +80,13 @@ struct MainTabView: View {
                 MainShellView(
                     userNpub: $userNpub,
                     isLoggedIn: $isLoggedIn,
-                    runtimeText: coreManager.runtimeText,
-                    onShowDiagnostics: { showDiagnostics = true },
-                    onShowStats: { showStats = true }
+                    runtimeText: coreManager.runtimeText
                 )
                 .environment(coreManager)
                 .nowPlayingInset(coreManager: coreManager)
             } else {
                 compactTabView
             }
-        }
-        .sheet(isPresented: $showDiagnostics) {
-            NavigationStack {
-                DiagnosticsView(coreManager: coreManager)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showDiagnostics = false }
-                        }
-                    }
-            }
-            .tenexModalPresentation(detents: [.large])
-        }
-        .sheet(isPresented: $showStats) {
-            NavigationStack {
-                StatsView(coreManager: coreManager)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showStats = false }
-                        }
-                    }
-            }
-            .tenexModalPresentation(detents: [.large])
         }
         .sheet(item: bunkerRequestBinding) { request in
             BunkerApprovalSheet(request: request) {

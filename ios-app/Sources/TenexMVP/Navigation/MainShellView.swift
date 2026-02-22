@@ -4,9 +4,6 @@ struct MainShellView: View {
     @Binding var userNpub: String
     @Binding var isLoggedIn: Bool
     let runtimeText: String
-    let onShowSettings: () -> Void
-    let onShowDiagnostics: () -> Void
-    let onShowStats: () -> Void
 
     @Environment(TenexCoreManager.self) private var coreManager
 
@@ -56,7 +53,7 @@ struct MainShellView: View {
     private var appSidebar: some View {
         List {
             Section {
-                ForEach(AppSection.allCases.filter { $0 != .teams && $0 != .agentDefinitions }) { section in
+                ForEach(AppSection.allCases.filter { $0 != .teams && $0 != .agentDefinitions && $0 != .settings && $0 != .diagnostics }) { section in
                     shellSidebarRowButton(for: section)
                 }
             }
@@ -67,10 +64,7 @@ struct MainShellView: View {
             }
 
             Section {
-                Button(action: onShowSettings) {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .buttonStyle(.plain)
+                shellSidebarRowButton(for: .settings)
 
                 Menu {
                     if !userNpub.isEmpty {
@@ -81,12 +75,10 @@ struct MainShellView: View {
 
                     Divider()
 
-                    Button(action: onShowDiagnostics) {
+                    Button {
+                        selectedSection = .diagnostics
+                    } label: {
                         Label("Diagnostics", systemImage: "gauge.with.needle")
-                    }
-
-                    Button(action: onShowStats) {
-                        Label("LLM Runtime", systemImage: "clock")
                     }
 
                     Divider()
@@ -105,27 +97,20 @@ struct MainShellView: View {
                         AgentAvatarView(
                             agentName: currentUserDisplayName,
                             pubkey: currentUserPubkey,
-                            size: 18,
+                            size: 20,
                             showBorder: false
                         )
                         Text(currentUserDisplayName)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 6)
                     }
-                }
-                #if os(macOS)
-                .menuStyle(.borderlessButton)
-                #endif
-
-                Button(action: onShowStats) {
-                    HStack(spacing: 8) {
-                        Label("LLM Runtime", systemImage: "clock")
-                        Spacer(minLength: 8)
-                        Text(runtimeText)
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(coreManager.hasActiveAgents ? Color.presenceOnline : .secondary)
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("sidebar_user_menu")
+
             }
         }
         .listStyle(.sidebar)
@@ -203,6 +188,14 @@ struct MainShellView: View {
                     .background((projectsOnlineCount > 0 ? Color.presenceOnline : .secondary).opacity(0.16))
                     .foregroundStyle(projectsOnlineCount > 0 ? Color.presenceOnline : .secondary)
                     .clipShape(Capsule())
+            } else if section == .stats {
+                Text(runtimeText)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background((coreManager.hasActiveAgents ? Color.presenceOnline : .secondary).opacity(0.16))
+                    .foregroundStyle(coreManager.hasActiveAgents ? Color.presenceOnline : .secondary)
+                    .clipShape(Capsule())
             }
         }
     }
@@ -212,18 +205,22 @@ struct MainShellView: View {
         let resolvedPubkey = currentUser?.pubkey
             ?? Bech32.npubToHex(userNpub)
 
-        let fallbackName: String
-        if let displayName = currentUser?.displayName.trimmingCharacters(in: .whitespacesAndNewlines),
-           !displayName.isEmpty {
-            fallbackName = displayName
-        } else if !userNpub.isEmpty {
-            fallbackName = shortUserDisplay(userNpub)
-        } else {
-            fallbackName = "You"
-        }
+        let currentUserName = currentUser?.displayName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasCurrentUserName = (currentUserName?.isEmpty == false)
+
+        let fallbackName: String = {
+            if let currentUserName, !currentUserName.isEmpty {
+                return currentUserName
+            }
+            if !userNpub.isEmpty {
+                return shortUserDisplay(userNpub)
+            }
+            return "You"
+        }()
 
         var resolvedName = fallbackName
-        if let pubkey = resolvedPubkey {
+        if !hasCurrentUserName, let pubkey = resolvedPubkey {
             let profileName = await coreManager.safeCore
                 .getProfileName(pubkey: pubkey)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -249,7 +246,8 @@ struct MainShellView: View {
             ConversationsTabView(
                 layoutMode: .shellComposite,
                 selectedConversation: $selectedConversation,
-                newConversationProjectId: $newConversationProjectId
+                newConversationProjectId: $newConversationProjectId,
+                onShowDiagnosticsInApp: { selectedSection = .diagnostics }
             )
             .accessibilityIdentifier(AppSection.chats.accessibilityContentID)
             #else
@@ -261,8 +259,11 @@ struct MainShellView: View {
             .accessibilityIdentifier(AppSection.chats.accessibilityContentID)
             #endif
         case .projects:
-            ProjectsSectionContainer(selectedProjectId: $selectedProjectId)
-                .accessibilityIdentifier(AppSection.projects.accessibilityContentID)
+            ProjectsTabView(
+                layoutMode: .shellComposite,
+                selectedProjectId: $selectedProjectId
+            )
+            .accessibilityIdentifier(AppSection.projects.accessibilityContentID)
         case .reports:
             ReportsTabView(layoutMode: .adaptive, selectedReport: $selectedReport)
                 .accessibilityIdentifier(AppSection.reports.accessibilityContentID)
@@ -277,6 +278,13 @@ struct MainShellView: View {
         case .search:
             SearchView(layoutMode: .adaptive, selectedConversation: $selectedSearchConversation)
                 .accessibilityIdentifier(AppSection.search.accessibilityContentID)
+        case .stats:
+            StatsView()
+                .accessibilityIdentifier(AppSection.stats.accessibilityContentID)
+        case .diagnostics:
+            DiagnosticsView(coreManager: coreManager)
+                .environment(coreManager)
+                .accessibilityIdentifier(AppSection.diagnostics.accessibilityContentID)
         case .teams:
             TeamsTabView(
                 layoutMode: .adaptive,
@@ -289,6 +297,9 @@ struct MainShellView: View {
                 selectedAgent: $selectedAgentDefinition
             )
             .accessibilityIdentifier(AppSection.agentDefinitions.accessibilityContentID)
+        case .settings:
+            AppSettingsView(defaultSection: .relays, isEmbedded: true)
+                .accessibilityIdentifier(AppSection.settings.accessibilityContentID)
         }
     }
 }

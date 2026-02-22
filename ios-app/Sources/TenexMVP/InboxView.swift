@@ -57,10 +57,20 @@ extension InboxItem {
 
 // MARK: - Inbox Filter Tab
 
-enum InboxFilter: String, CaseIterable {
+enum InboxFilter: String, CaseIterable, Identifiable {
     case all = "All"
     case questions = "Questions"
     case mentions = "Mentions"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .all: return "tray"
+        case .questions: return "questionmark.circle"
+        case .mentions: return "at"
+        }
+    }
 
     func matches(_ eventType: InboxEventType) -> Bool {
         switch self {
@@ -374,21 +384,14 @@ struct InboxView: View {
     // MARK: - Filter Tab Bar
 
     private func filterTabBar(now: UInt64) -> some View {
-        VStack(spacing: 0) {
-            Picker("Inbox Filter", selection: selectedFilterBinding) {
-                ForEach(InboxFilter.allCases, id: \.self) { filter in
-                    let count = unreadCount(for: filter, now: now)
-                    if count > 0 {
-                        Text("\(filter.rawValue) (\(count))").tag(filter)
-                    } else {
-                        Text(filter.rawValue).tag(filter)
-                    }
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-        }
+        MailStyleCategoryPicker(
+            cases: InboxFilter.allCases,
+            selection: selectedFilterBinding,
+            icon: \.icon,
+            label: \.rawValue
+        )
+        .padding(.horizontal)
+        .padding(.vertical, 8)
         .background(.bar)
     }
 

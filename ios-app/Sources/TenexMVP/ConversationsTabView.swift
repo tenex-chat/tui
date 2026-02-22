@@ -6,6 +6,7 @@ struct ConversationsTabView: View {
     let layoutMode: ConversationsLayoutMode
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
     private let newConversationProjectIdBindingOverride: Binding<String?>?
+    private let onShowDiagnosticsInApp: (() -> Void)?
 
     @State private var showDiagnostics = false
     @State private var showAISettings = false
@@ -32,11 +33,13 @@ struct ConversationsTabView: View {
     init(
         layoutMode: ConversationsLayoutMode = .adaptive,
         selectedConversation: Binding<ConversationFullInfo?>? = nil,
-        newConversationProjectId: Binding<String?>? = nil
+        newConversationProjectId: Binding<String?>? = nil,
+        onShowDiagnosticsInApp: (() -> Void)? = nil
     ) {
         self.layoutMode = layoutMode
         self.selectedConversationBindingOverride = selectedConversation
         self.newConversationProjectIdBindingOverride = newConversationProjectId
+        self.onShowDiagnosticsInApp = onShowDiagnosticsInApp
     }
 
     private var selectedConversationBinding: Binding<ConversationFullInfo?> {
@@ -176,6 +179,15 @@ struct ConversationsTabView: View {
             pendingCreatedConversationId = nil
         }
         .sheet(isPresented: $showDiagnostics) {
+            #if os(macOS)
+            DiagnosticsView(coreManager: coreManager)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { showDiagnostics = false }
+                    }
+                }
+                .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
+            #else
             NavigationStack {
                 DiagnosticsView(coreManager: coreManager)
                     .toolbar {
@@ -185,6 +197,7 @@ struct ConversationsTabView: View {
                     }
             }
             .tenexModalPresentation(detents: [.large])
+            #endif
         }
         .sheet(isPresented: $showAudioQueue) {
             AudioQueueSheet()
@@ -199,7 +212,8 @@ struct ConversationsTabView: View {
         }
         .sheet(isPresented: $showStats) {
             NavigationStack {
-                StatsView(coreManager: coreManager)
+                StatsView()
+                    .environment(coreManager)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Done") { showStats = false }
@@ -541,7 +555,17 @@ struct ConversationsTabView: View {
                 Label("Settings", systemImage: "gearshape")
             }
 
-            Button(action: { showDiagnostics = true }) {
+            Button {
+                #if os(macOS)
+                if let onShowDiagnosticsInApp {
+                    onShowDiagnosticsInApp()
+                } else {
+                    showDiagnostics = true
+                }
+                #else
+                showDiagnostics = true
+                #endif
+            } label: {
                 Label("Diagnostics", systemImage: "gauge.with.needle")
             }
         } label: {
