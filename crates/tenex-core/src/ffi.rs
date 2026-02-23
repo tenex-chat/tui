@@ -3408,6 +3408,87 @@ impl TenexCore {
         Ok(store.content.get_nudges().into_iter().cloned().collect())
     }
 
+    /// Create a new nudge (kind:4201).
+    pub fn create_nudge(
+        &self,
+        title: String,
+        description: String,
+        content: String,
+        hashtags: Vec<String>,
+        allow_tools: Vec<String>,
+        deny_tools: Vec<String>,
+        only_tools: Vec<String>,
+    ) -> Result<(), TenexError> {
+        if title.trim().is_empty() {
+            return Err(TenexError::Internal {
+                message: "Nudge title cannot be empty".to_string(),
+            });
+        }
+
+        if content.trim().is_empty() {
+            return Err(TenexError::Internal {
+                message: "Nudge content cannot be empty".to_string(),
+            });
+        }
+
+        let core_handle = get_core_handle(&self.core_handle)?;
+        core_handle
+            .send(NostrCommand::CreateNudge {
+                title,
+                description,
+                content,
+                hashtags,
+                allow_tools,
+                deny_tools,
+                only_tools,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send create nudge command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Delete a nudge (kind:4201) via NIP-09 kind:5 deletion.
+    ///
+    /// Only the nudge author can delete it.
+    pub fn delete_nudge(&self, nudge_id: String) -> Result<(), TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let nudge = store
+            .content
+            .get_nudge(&nudge_id)
+            .ok_or_else(|| TenexError::Internal {
+                message: format!("Nudge not found: {}", nudge_id),
+            })?;
+
+        let current_user = self
+            .get_current_user()
+            .ok_or_else(|| TenexError::Internal {
+                message: "No logged-in user".to_string(),
+            })?;
+
+        if !nudge.pubkey.eq_ignore_ascii_case(&current_user.pubkey) {
+            return Err(TenexError::Internal {
+                message: "Only the author can delete this nudge".to_string(),
+            });
+        }
+
+        let core_handle = get_core_handle(&self.core_handle)?;
+        core_handle
+            .send(NostrCommand::DeleteNudge { nudge_id })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send delete nudge command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
     /// Get all skills (kind:4202 events).
     ///
     /// Returns all skills sorted by created_at descending (most recent first).
@@ -6198,6 +6279,135 @@ mod tests {
         assert_eq!(lookup.ask_event.title.as_deref(), Some("Scope Question"));
         assert_eq!(lookup.ask_event.context, "Please confirm scope");
         assert_eq!(lookup.ask_event.questions.len(), 1);
+    }
+
+    #[test]
+    fn test_create_nudge_rejects_empty_title() {
+        let core = TenexCore::new();
+        let result = core.create_nudge(
+            "   ".to_string(),
+            "desc".to_string(),
+            "content".to_string(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert!(result.is_err());
+        match result {
+            Err(TenexError::Internal { message }) => {
+                assert!(message.contains("title cannot be empty"));
+            }
+            other => panic!("Expected Internal error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_create_nudge_rejects_empty_content() {
+        let core = TenexCore::new();
+        let result = core.create_nudge(
+            "My Nudge".to_string(),
+            "desc".to_string(),
+            " \n ".to_string(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
+
+        assert!(result.is_err());
+        match result {
+            Err(TenexError::Internal { message }) => {
+                assert!(message.contains("content cannot be empty"));
+            }
+            other => panic!("Expected Internal error, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_delete_nudge_rejects_non_author() {
+        let core = TenexCore::new();
+        assert!(core.init());
+
+        let current_keys = Keys::generate();
+        let current_pubkey = current_keys.public_key().to_hex();
+        {
+            let mut keys_guard = core.keys.write().expect("keys lock");
+            *keys_guard = Some(current_keys);
+        }
+
+        let nudge_id = "a".repeat(64);
+        {
+            let mut store_guard = core.store.write().expect("store lock");
+            let store = store_guard.as_mut().expect("store initialized");
+            store.content.nudges.insert(
+                nudge_id.clone(),
+                Nudge {
+                    id: nudge_id.clone(),
+                    pubkey: "b".repeat(64),
+                    title: "Owned by someone else".to_string(),
+                    description: String::new(),
+                    content: "content".to_string(),
+                    hashtags: vec![],
+                    created_at: 1,
+                    allowed_tools: vec![],
+                    denied_tools: vec![],
+                    only_tools: vec![],
+                    supersedes: None,
+                },
+            );
+        }
+
+        let result = core.delete_nudge(nudge_id);
+        assert!(result.is_err());
+        match result {
+            Err(TenexError::Internal { message }) => {
+                assert!(message.contains("Only the author can delete this nudge"));
+            }
+            other => panic!("Expected Internal error, got {:?}", other),
+        }
+
+        // Sanity check this test's setup really used different authors.
+        assert_ne!(current_pubkey, "b".repeat(64));
+    }
+
+    #[test]
+    fn test_delete_nudge_succeeds_for_author() {
+        let core = TenexCore::new();
+        assert!(core.init());
+
+        let current_keys = Keys::generate();
+        let current_pubkey = current_keys.public_key().to_hex();
+        {
+            let mut keys_guard = core.keys.write().expect("keys lock");
+            *keys_guard = Some(current_keys);
+        }
+
+        let nudge_id = "c".repeat(64);
+        {
+            let mut store_guard = core.store.write().expect("store lock");
+            let store = store_guard.as_mut().expect("store initialized");
+            store.content.nudges.insert(
+                nudge_id.clone(),
+                Nudge {
+                    id: nudge_id.clone(),
+                    pubkey: current_pubkey,
+                    title: "Mine".to_string(),
+                    description: String::new(),
+                    content: "content".to_string(),
+                    hashtags: vec![],
+                    created_at: 1,
+                    allowed_tools: vec![],
+                    denied_tools: vec![],
+                    only_tools: vec![],
+                    supersedes: None,
+                },
+            );
+        }
+
+        let result = core.delete_nudge(nudge_id);
+        assert!(result.is_ok());
     }
 
     fn make_status(project_coordinate: &str, last_seen_at: u64) -> ProjectStatus {
