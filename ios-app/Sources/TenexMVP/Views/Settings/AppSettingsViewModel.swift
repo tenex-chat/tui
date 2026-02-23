@@ -50,6 +50,8 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var bunkerRunning: Bool
     @Published var bunkerUri = ""
     @Published var isTogglingBunker = false
+    @Published var bunkerAutoApproveRules: [FfiBunkerAutoApproveRule] = []
+    @Published var bunkerAuditLog: [FfiBunkerAuditEntry] = []
 
     @Published var isLoading = true
     @Published var isLoadingVoices = false
@@ -163,6 +165,39 @@ final class AppSettingsViewModel: ObservableObject {
 
     func toggleBunker(coreManager: TenexCoreManager) async {
         await setBunkerEnabled(coreManager: coreManager, enabled: !bunkerRunning, persistPreference: true)
+    }
+
+    func loadBunkerRulesAndLog(coreManager: TenexCoreManager) async {
+        do {
+            bunkerAutoApproveRules = try await coreManager.safeCore.getBunkerAutoApproveRules()
+        } catch {
+            bunkerAutoApproveRules = []
+        }
+        do {
+            bunkerAuditLog = try await coreManager.safeCore.getBunkerAuditLog()
+        } catch {
+            bunkerAuditLog = []
+        }
+    }
+
+    func removeBunkerAutoApproveRule(coreManager: TenexCoreManager, rule: FfiBunkerAutoApproveRule) async {
+        do {
+            try await coreManager.safeCore.removeBunkerAutoApproveRule(
+                requesterPubkey: rule.requesterPubkey,
+                eventKind: rule.eventKind
+            )
+            if let kind = rule.eventKind {
+                BunkerAutoApproveStorage.removeRule(
+                    requesterPubkey: rule.requesterPubkey,
+                    eventKind: kind
+                )
+            }
+            bunkerAutoApproveRules.removeAll {
+                $0.requesterPubkey == rule.requesterPubkey && $0.eventKind == rule.eventKind
+            }
+        } catch {
+            errorMessage = "Failed to remove rule: \(error.localizedDescription)"
+        }
     }
 
     func saveElevenLabsKey(_ key: String) async {
@@ -369,6 +404,14 @@ final class AppSettingsViewModel: ObservableObject {
             if enabled {
                 if !previousRunning || previousUri.isEmpty {
                     bunkerUri = try await coreManager.safeCore.startBunker()
+
+                    // Sync persisted auto-approve rules to the Rust core
+                    for rule in BunkerAutoApproveStorage.loadRules() {
+                        try? await coreManager.safeCore.addBunkerAutoApproveRule(
+                            requesterPubkey: rule.requesterPubkey,
+                            eventKind: rule.eventKind
+                        )
+                    }
                 }
                 bunkerRunning = true
             } else {

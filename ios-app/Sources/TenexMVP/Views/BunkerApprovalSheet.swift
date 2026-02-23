@@ -4,6 +4,12 @@ extension FfiBunkerSignRequest: @retroactive Identifiable {
     public var id: String { requestId }
 }
 
+extension FfiBunkerAutoApproveRule {
+    var ruleId: String {
+        "\(requesterPubkey):\(eventKind.map { String($0) } ?? "any")"
+    }
+}
+
 struct BunkerApprovalSheet: View {
     @Environment(TenexCoreManager.self) private var coreManager
     let request: FfiBunkerSignRequest

@@ -428,10 +428,144 @@ private struct BunkerSettingsSectionView: View {
                     .buttonStyle(.bordered)
                 }
             }
+
+            if viewModel.bunkerRunning {
+                Section("Auto-Approve Rules") {
+                    if viewModel.bunkerAutoApproveRules.isEmpty {
+                        Text("No auto-approve rules")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.bunkerAutoApproveRules, id: \.ruleId) { rule in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(bunkerKindName(rule.eventKind))
+                                        .font(.body)
+                                    Text(truncatedPubkey(rule.requesterPubkey))
+                                        .font(.caption)
+                                        .fontDesign(.monospaced)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "checkmark.shield.fill")
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                        .onDelete { offsets in
+                            let rulesToRemove = offsets.map { viewModel.bunkerAutoApproveRules[$0] }
+                            for rule in rulesToRemove {
+                                Task {
+                                    await viewModel.removeBunkerAutoApproveRule(
+                                        coreManager: coreManager,
+                                        rule: rule
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Section {
+                    if viewModel.bunkerAuditLog.isEmpty {
+                        Text("No requests this session")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.bunkerAuditLog.reversed(), id: \.requestId) { entry in
+                            HStack(spacing: 10) {
+                                Image(systemName: auditOutcomeIcon(entry.decision))
+                                    .foregroundStyle(auditOutcomeColor(entry.decision))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 4) {
+                                        Text(entry.requestType)
+                                            .font(.body)
+                                        if let kind = entry.eventKind {
+                                            Text("(\(bunkerKindName(kind)))")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Text(truncatedPubkey(entry.requesterPubkey))
+                                        .font(.caption)
+                                        .fontDesign(.monospaced)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("\(entry.responseTimeMs)ms")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Request Log")
+                        Spacer()
+                        Button("Refresh") {
+                            Task { await viewModel.loadBunkerRulesAndLog(coreManager: coreManager) }
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
         }
         #if os(macOS)
         .formStyle(.grouped)
         #endif
+        .task {
+            if viewModel.bunkerRunning {
+                await viewModel.loadBunkerRulesAndLog(coreManager: coreManager)
+            }
+        }
+    }
+
+    private func truncatedPubkey(_ pk: String) -> String {
+        if pk.count > 16 {
+            return "\(pk.prefix(8))...\(pk.suffix(8))"
+        }
+        return pk
+    }
+
+    private func bunkerKindName(_ kind: UInt16?) -> String {
+        guard let kind else { return "Any Kind" }
+        switch kind {
+        case 0: return "Metadata"
+        case 1: return "Text Note"
+        case 4: return "DM"
+        case 7: return "Reaction"
+        case 1111: return "Comment"
+        case 4199: return "Agent Definition"
+        case 4200: return "MCP Tool"
+        case 4201: return "Nudge"
+        case 14199: return "Sealed Agent Def"
+        case 24010: return "Status"
+        case 24020: return "Agent Config"
+        case 24133: return "Active Conversations"
+        case 24134: return "Stop Operations"
+        case 30023: return "Article"
+        case 31933: return "Project"
+        case 34199: return "Team"
+        default: return "Kind \(kind)"
+        }
+    }
+
+    private func auditOutcomeIcon(_ decision: String) -> String {
+        switch decision {
+        case "auto-approved": return "checkmark.shield.fill"
+        case "approved": return "checkmark.circle.fill"
+        case "rejected": return "xmark.circle.fill"
+        case "timed-out": return "clock.badge.exclamationmark"
+        default: return "questionmark.circle"
+        }
+    }
+
+    private func auditOutcomeColor(_ decision: String) -> Color {
+        switch decision {
+        case "auto-approved": return .green
+        case "approved": return .green
+        case "rejected": return .red
+        case "timed-out": return .orange
+        default: return .secondary
+        }
     }
 }
 
