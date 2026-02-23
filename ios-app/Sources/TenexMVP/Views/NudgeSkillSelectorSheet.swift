@@ -213,9 +213,15 @@ struct NudgeSkillSelectorSheet: View {
                     .keyboardShortcut(.defaultAction)
                 }
 
+                #if os(iOS)
                 ToolbarItem(placement: .topBarLeading) {
                     bookmarkFilterButton
                 }
+                #else
+                ToolbarItem(placement: .automatic) {
+                    bookmarkFilterButton
+                }
+                #endif
             }
             .onAppear {
                 localSelectedNudgeIds = selectedNudgeIds
