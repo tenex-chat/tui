@@ -1234,6 +1234,11 @@ pub(super) fn handle_normal_mode(
     _login_step: &mut crate::ui::views::login::LoginStep,
     _pending_nsec: &mut Option<String>,
 ) -> Result<()> {
+    if matches!(app.modal_state, ModalState::CreateProject(_)) {
+        handle_create_project_key(app, key);
+        return Ok(());
+    }
+
     let code = key.code;
 
     match code {
@@ -1433,6 +1438,8 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
                 );
             }
         }
+    } else if c == 'C' && app.view == View::AgentBrowser {
+        open_create_project_from_agent_browser(app);
     } else if c == 'n' && app.view == View::AgentBrowser && !app.home.in_agent_detail() {
         app.modal_state = ui::modal::ModalState::CreateAgent(ui::modal::CreateAgentState::new());
     } else if app.view == View::AgentBrowser && !app.home.in_agent_detail() && c != 'q' && c != 'n'
@@ -1451,6 +1458,29 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn open_create_project_from_agent_browser(app: &mut App) {
+    let selected_agent = if app.home.in_agent_detail() {
+        app.home.viewing_agent_id.as_ref().and_then(|agent_id| {
+            app.data_store
+                .borrow()
+                .content
+                .get_agent_definition(agent_id)
+                .cloned()
+        })
+    } else {
+        let agents = app.filtered_agent_definitions();
+        agents.get(app.home.agent_browser_index).cloned()
+    };
+
+    let mut state = ui::modal::CreateProjectState::new();
+    if let Some(agent) = selected_agent {
+        state.agent_definition_ids.push(agent.id);
+        state.name = format!("{} Team", agent.name);
+    }
+
+    app.modal_state = ui::modal::ModalState::CreateProject(state);
 }
 
 fn handle_chat_enter(app: &mut App) -> Result<()> {

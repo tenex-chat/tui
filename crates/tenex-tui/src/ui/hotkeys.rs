@@ -441,7 +441,11 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::shift(
         HotkeyId::CreateProject,
         KeyCode::Char('C'),
-        &[HotkeyContext::HomeConversations],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::AgentBrowserList,
+            HotkeyContext::AgentBrowserDetail,
+        ],
     ),
     HotkeyBinding::shift(
         HotkeyId::NewConversation,
