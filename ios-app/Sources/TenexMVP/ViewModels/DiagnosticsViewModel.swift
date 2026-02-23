@@ -231,7 +231,6 @@ enum DiagnosticsTab: String, CaseIterable, Identifiable {
     case subscriptions = "Subscriptions"
     case database = "Database"
     case bunker = "Bunker"
-    case settings = "Settings"
 
     var id: String { rawValue }
 
@@ -242,7 +241,6 @@ enum DiagnosticsTab: String, CaseIterable, Identifiable {
         case .subscriptions: return "antenna.radiowaves.left.and.right"
         case .database: return "cylinder"
         case .bunker: return "lock.shield"
-        case .settings: return "gearshape"
         }
     }
 }

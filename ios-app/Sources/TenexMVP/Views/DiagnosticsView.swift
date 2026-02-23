@@ -1,56 +1,48 @@
 import SwiftUI
 
 /// Main Diagnostics view showing system internals
-/// 5 tabs: Overview, Sync, Subscriptions, Database, Settings
+/// Uses section navigation (sidebar/list) for Overview, Sync, Subscriptions, Database, and Bunker.
 struct DiagnosticsView: View {
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: DiagnosticsViewModel
     private let coreManager: TenexCoreManager
+    @State private var selectedSection: DiagnosticsTab?
+    @State private var phonePath: [DiagnosticsTab] = []
+    let defaultSection: DiagnosticsTab
+    let isEmbedded: Bool
 
-    init(coreManager: TenexCoreManager) {
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
+    init(
+        coreManager: TenexCoreManager,
+        defaultSection: DiagnosticsTab = .overview,
+        isEmbedded: Bool = false
+    ) {
         self.coreManager = coreManager
+        self.defaultSection = defaultSection
+        self.isEmbedded = isEmbedded
         _viewModel = StateObject(wrappedValue: DiagnosticsViewModel(coreManager: coreManager))
+        _selectedSection = State(initialValue: defaultSection)
+    }
+
+    private var useSplitLayout: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return horizontalSizeClass == .regular
+        #endif
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Show section errors banner if any sections failed (not for Settings/Bunker tabs)
-            if viewModel.selectedTab != .settings,
-               viewModel.selectedTab != .bunker,
-               let snapshot = viewModel.snapshot,
-               !snapshot.sectionErrors.isEmpty {
-                DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-            }
-
-            // Tab Navigation - always visible
-            DiagnosticsTabNavigation(selectedTab: $viewModel.selectedTab)
-                .padding(.horizontal)
-                .padding(.top, 8)
-
-            Divider()
-                .padding(.top, 8)
-
-            // Tab Content
-            if viewModel.selectedTab == .settings {
-                AppSettingsView(defaultSection: .audio, isEmbedded: true)
-                    .environment(coreManager)
-            } else if viewModel.selectedTab == .bunker {
-                ScrollView {
-                    DiagnosticsBunkerTab(auditEntries: viewModel.bunkerAuditLog)
-                        .environment(coreManager)
-                        .padding()
-                }
+        Group {
+            if isEmbedded {
+                embeddedDiagnosticsView
+            } else if useSplitLayout {
+                splitDiagnosticsView
             } else {
-                ScrollView {
-                    if let snapshot = viewModel.snapshot {
-                        DiagnosticsTabContent(
-                            snapshot: snapshot,
-                            selectedTab: viewModel.selectedTab
-                        )
-                        .padding()
-                    }
-                }
+                phoneDiagnosticsView
             }
         }
         .navigationTitle("Diagnostics")
@@ -60,7 +52,10 @@ struct DiagnosticsView: View {
         .toolbarTitleDisplayMode(.inline)
         #endif
         .task {
-            await viewModel.loadDiagnostics()
+            if let selectedSection {
+                viewModel.selectedTab = selectedSection
+            }
+            await viewModel.loadDiagnostics(includeDatabaseStats: viewModel.selectedTab == .database)
         }
         .onDisappear {
             viewModel.cancelFetch()
@@ -68,50 +63,165 @@ struct DiagnosticsView: View {
         .onChange(of: coreManager.diagnosticsVersion) { _, _ in
             Task { await viewModel.loadDiagnostics() }
         }
+        .onChange(of: selectedSection) { _, section in
+            guard let section, viewModel.selectedTab != section else { return }
+            viewModel.selectedTab = section
+        }
+        .onChange(of: viewModel.selectedTab) { _, tab in
+            if selectedSection != tab {
+                selectedSection = tab
+            }
+        }
     }
-}
 
-// MARK: - Tab Navigation View
-
-struct DiagnosticsTabNavigation: View {
-    @Binding var selectedTab: DiagnosticsTab
-
-    var body: some View {
-        MailStyleCategoryPicker(
-            cases: DiagnosticsTab.allCases,
-            selection: $selectedTab,
-            icon: \.icon,
-            label: \.rawValue
+    private var sectionListSelection: Binding<DiagnosticsTab?> {
+        Binding(
+            get: { selectedSection },
+            set: { selectedSection = $0 }
         )
     }
-}
 
-struct DiagnosticsTabPill: View {
-    let tab: DiagnosticsTab
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: tab.icon)
-                    .font(.caption)
-                Text(tab.rawValue)
-                    .font(.subheadline)
-                    .fontWeight(isSelected ? .semibold : .regular)
+    private var diagnosticsCategoryList: some View {
+        List(DiagnosticsTab.allCases, selection: sectionListSelection) { section in
+            NavigationLink(value: section) {
+                Label(section.rawValue, systemImage: section.icon)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(
-                isSelected
-                    ? Color.agentBrand
-                    : Color.systemGray5
-            )
-            .foregroundColor(isSelected ? .white : .primary)
-            .clipShape(Capsule())
         }
-        .accessibilityLabel("\(tab.rawValue) tab")
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        #if os(macOS)
+        .listStyle(.sidebar)
+        #endif
+    }
+
+    @ViewBuilder
+    private var diagnosticsDetailContent: some View {
+        if let section = selectedSection {
+            sectionContent(section)
+        } else {
+            ContentUnavailableView("Select a Section", systemImage: "gauge.with.needle")
+        }
+    }
+
+    private var embeddedDiagnosticsView: some View {
+        #if os(macOS)
+        HSplitView {
+            diagnosticsCategoryList
+                .frame(minWidth: 160, idealWidth: 190, maxWidth: 240)
+
+            diagnosticsDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+        #else
+        HStack(spacing: 0) {
+            diagnosticsCategoryList
+                .frame(minWidth: 160, idealWidth: 190, maxWidth: 240)
+            Divider()
+            diagnosticsDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+        #endif
+    }
+
+    private var splitDiagnosticsView: some View {
+        NavigationSplitView {
+            diagnosticsCategoryList
+        } detail: {
+            diagnosticsDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+    }
+
+    private var phoneDiagnosticsView: some View {
+        NavigationStack(path: $phonePath) {
+            List(DiagnosticsTab.allCases) { section in
+                NavigationLink(value: section) {
+                    Label(section.rawValue, systemImage: section.icon)
+                }
+            }
+            .navigationDestination(for: DiagnosticsTab.self) { section in
+                sectionContent(section)
+                    .navigationTitle(section.rawValue)
+                    .onAppear {
+                        selectedSection = section
+                    }
+            }
+            .onAppear {
+                if phonePath.isEmpty {
+                    phonePath = [defaultSection]
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionContent(_ section: DiagnosticsTab) -> some View {
+        switch section {
+        case .bunker:
+            ScrollView {
+                DiagnosticsBunkerTab(auditEntries: viewModel.bunkerAuditLog)
+                    .environment(coreManager)
+                    .padding()
+            }
+        default:
+            ScrollView {
+                VStack(spacing: 0) {
+                    if let snapshot = viewModel.snapshot,
+                       !snapshot.sectionErrors.isEmpty {
+                        DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                    }
+
+                    if let snapshot = viewModel.snapshot {
+                        DiagnosticsTabContent(
+                            snapshot: snapshot,
+                            selectedTab: section
+                        )
+                        .padding()
+                    } else if let error = viewModel.error {
+                        DiagnosticsErrorView(error: error) {
+                            Task {
+                                await viewModel.loadDiagnostics(includeDatabaseStats: section == .database)
+                            }
+                        }
+                    } else if viewModel.isLoading {
+                        ProgressView("Loading diagnostics...")
+                            .frame(maxWidth: .infinity, minHeight: 220)
+                            .padding()
+                    } else {
+                        DiagnosticsEmptyView {
+                            Task {
+                                await viewModel.loadDiagnostics(includeDatabaseStats: section == .database)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -161,9 +271,6 @@ struct DiagnosticsTabContent: View {
                 }
             case .bunker:
                 // Bunker tab is handled in parent view, this case should not be reached
-                EmptyView()
-            case .settings:
-                // Settings tab is handled in parent view, this case should not be reached
                 EmptyView()
             }
         }
