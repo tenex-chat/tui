@@ -1,5 +1,11 @@
 import SwiftUI
 
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
+
 /// Adaptive conversation destination:
 /// - macOS: always workspace layout
 /// - iPad (regular width): workspace layout
@@ -80,6 +86,13 @@ private struct SelectedReportDestination: Identifiable, Hashable {
     var id: String { "\(report.projectATag):\(report.slug)" }
 }
 
+private struct RawEventDestination: Identifiable, Hashable {
+    let eventId: String
+    let json: String
+
+    var id: String { eventId }
+}
+
 enum ConversationWorkspaceSource {
     case existing(conversation: ConversationFullInfo)
     case newThread(project: Project)
@@ -152,6 +165,7 @@ struct ConversationWorkspaceView: View {
     @State private var cachedLastAgentPubkey: String?
     @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var navigationErrorMessage: String?
+    @State private var rawEventDestination: RawEventDestination?
     private let profiler = PerformanceProfiler.shared
 
     private let bottomAnchorId = "workspace-bottom-anchor"
@@ -343,6 +357,12 @@ struct ConversationWorkspaceView: View {
         .onChange(of: viewModel.messages.count) { _, _ in
             recomputeLastAgentPubkey()
         }
+        .sheet(item: $rawEventDestination) { destination in
+            RawEventInspectorSheet(
+                eventId: destination.eventId,
+                json: destination.json
+            )
+        }
         .alert("Navigation Error", isPresented: Binding(
             get: { navigationErrorMessage != nil },
             set: { newValue in
@@ -443,6 +463,9 @@ struct ConversationWorkspaceView: View {
                                     .joined(separator: ", "),
                                 onDelegationTap: { delegationId in
                                     openDelegation(byId: delegationId)
+                                },
+                                onViewRawEvent: { messageId in
+                                    viewRawEvent(for: messageId)
                                 }
                             )
                             .equatable()
@@ -758,6 +781,36 @@ struct ConversationWorkspaceView: View {
         }
     }
 
+    private func viewRawEvent(for messageId: String) {
+        Task {
+            let startedAt = CFAbsoluteTimeGetCurrent()
+            let rawEvent = await coreManager.safeCore.getRawEventJson(eventId: messageId)
+
+            await MainActor.run {
+                if let rawEvent, !rawEvent.isEmpty {
+                    rawEventDestination = RawEventDestination(
+                        eventId: messageId,
+                        json: rawEvent
+                    )
+                } else {
+                    navigationErrorMessage = "Unable to load raw event for message \(shortId(messageId))."
+                }
+
+                let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+                profiler.logEvent(
+                    "raw event lookup message=\(shortId(messageId)) found=\(rawEvent != nil) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+                    category: .general,
+                    level: elapsedMs >= 120 ? .error : .info
+                )
+            }
+        }
+    }
+
+    private func shortId(_ value: String, prefix: Int = 8, suffix: Int = 6) -> String {
+        guard value.count > prefix + suffix else { return value }
+        return "\(value.prefix(prefix))...\(value.suffix(suffix))"
+    }
+
     private func openDelegation(byId delegationId: String) {
         if let cached = coreManager.conversationById[delegationId] {
             selectedDelegationConversation = cached
@@ -932,5 +985,150 @@ private struct WorkspaceWidthKey: PreferenceKey {
     static let defaultValue: CGFloat = .infinity
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+private struct RawEventInspectorSheet: View {
+    let eventId: String
+    let json: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var copyFeedbackMessage: String?
+    @State private var highlightedJson: AttributedString
+
+    init(eventId: String, json: String) {
+        self.eventId = eventId
+        self.json = json
+        _highlightedJson = State(initialValue: JsonSyntaxHighlighter.highlight(json))
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Event ID")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(eventId)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+
+                ScrollView([.vertical, .horizontal], showsIndicators: true) {
+                    Text(highlightedJson)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .background(Color.systemGray6)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .padding()
+            .navigationTitle("Raw Event")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        copyToClipboard(json)
+                        copyFeedbackMessage = "Raw event JSON copied."
+                    } label: {
+                        Label("Copy JSON", systemImage: "doc.on.doc")
+                    }
+                }
+            }
+            .alert(
+                "Raw Event",
+                isPresented: Binding(
+                    get: { copyFeedbackMessage != nil },
+                    set: { shown in
+                        if !shown {
+                            copyFeedbackMessage = nil
+                        }
+                    }
+                )
+            ) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(copyFeedbackMessage ?? "")
+            }
+        }
+        .frame(minWidth: 680, minHeight: 460)
+    }
+
+    private func copyToClipboard(_ text: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #elseif os(iOS)
+        UIPasteboard.general.string = text
+        #endif
+    }
+}
+
+private enum JsonSyntaxHighlighter {
+    static func highlight(_ source: String) -> AttributedString {
+        var highlighted = AttributedString(source)
+        highlighted.font = .caption.monospaced()
+        highlighted.foregroundColor = .primary
+
+        apply(pattern: #"[{}\[\],:]"#, color: .secondary, to: &highlighted, source: source)
+        apply(pattern: #"\b(?:true|false|null)\b"#, color: .purple, to: &highlighted, source: source)
+        apply(
+            pattern: #"-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?"#,
+            color: .orange,
+            to: &highlighted,
+            source: source
+        )
+        apply(pattern: #""(?:\\.|[^"\\])*""#, color: .green, to: &highlighted, source: source)
+        apply(pattern: #""(?:\\.|[^"\\])*"(?=\s*:)"#, color: .blue, to: &highlighted, source: source)
+
+        return highlighted
+    }
+
+    private static func apply(
+        pattern: String,
+        color: Color,
+        to highlighted: inout AttributedString,
+        source: String
+    ) {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return
+        }
+
+        let fullRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        for match in regex.matches(in: source, range: fullRange) {
+            guard let sourceRange = Range(match.range, in: source),
+                  let highlightedRange = attributedRange(
+                      for: sourceRange,
+                      in: highlighted,
+                      source: source
+                  )
+            else {
+                continue
+            }
+            highlighted[highlightedRange].foregroundColor = color
+        }
+    }
+
+    private static func attributedRange(
+        for sourceRange: Range<String.Index>,
+        in highlighted: AttributedString,
+        source: String
+    ) -> Range<AttributedString.Index>? {
+        let startOffset = source.distance(from: source.startIndex, to: sourceRange.lowerBound)
+        let endOffset = source.distance(from: source.startIndex, to: sourceRange.upperBound)
+        let start = highlighted.index(highlighted.startIndex, offsetByCharacters: startOffset)
+        let end = highlighted.index(highlighted.startIndex, offsetByCharacters: endOffset)
+        return start..<end
     }
 }

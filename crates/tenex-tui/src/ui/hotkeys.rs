@@ -247,11 +247,7 @@ pub struct HotkeyBinding {
 
 impl HotkeyBinding {
     /// Create a new hotkey binding with no modifiers
-    pub const fn new(
-        id: HotkeyId,
-        key: KeyCode,
-        contexts: &'static [HotkeyContext],
-    ) -> Self {
+    pub const fn new(id: HotkeyId, key: KeyCode, contexts: &'static [HotkeyContext]) -> Self {
         Self {
             id,
             key,
@@ -278,29 +274,17 @@ impl HotkeyBinding {
     }
 
     /// Create with Ctrl modifier
-    pub const fn ctrl(
-        id: HotkeyId,
-        key: KeyCode,
-        contexts: &'static [HotkeyContext],
-    ) -> Self {
+    pub const fn ctrl(id: HotkeyId, key: KeyCode, contexts: &'static [HotkeyContext]) -> Self {
         Self::with_modifiers(id, key, KeyModifiers::CONTROL, contexts)
     }
 
     /// Create with Alt modifier
-    pub const fn alt(
-        id: HotkeyId,
-        key: KeyCode,
-        contexts: &'static [HotkeyContext],
-    ) -> Self {
+    pub const fn alt(id: HotkeyId, key: KeyCode, contexts: &'static [HotkeyContext]) -> Self {
         Self::with_modifiers(id, key, KeyModifiers::ALT, contexts)
     }
 
     /// Create with Shift modifier
-    pub const fn shift(
-        id: HotkeyId,
-        key: KeyCode,
-        contexts: &'static [HotkeyContext],
-    ) -> Self {
+    pub const fn shift(id: HotkeyId, key: KeyCode, contexts: &'static [HotkeyContext]) -> Self {
         Self::with_modifiers(id, key, KeyModifiers::SHIFT, contexts)
     }
 
@@ -319,7 +303,6 @@ impl HotkeyBinding {
     pub fn is_active_in(&self, context: HotkeyContext) -> bool {
         self.contexts.contains(&HotkeyContext::Global) || self.contexts.contains(&context)
     }
-
 }
 
 // ============================================================================
@@ -342,11 +325,7 @@ impl HotkeyBinding {
 /// All hotkey bindings in the application
 pub static HOTKEYS: &[HotkeyBinding] = &[
     // === Global Actions ===
-    HotkeyBinding::new(
-        HotkeyId::Quit,
-        KeyCode::Char('q'),
-        &[HotkeyContext::Global],
-    ),
+    HotkeyBinding::new(HotkeyId::Quit, KeyCode::Char('q'), &[HotkeyContext::Global]),
     HotkeyBinding::ctrl(
         HotkeyId::CommandPalette,
         KeyCode::Char('t'),
@@ -358,11 +337,7 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('1'),
         &[HotkeyContext::Global],
     ),
-    HotkeyBinding::new(
-        HotkeyId::Help,
-        KeyCode::Char('?'),
-        &[HotkeyContext::Global],
-    ),
+    HotkeyBinding::new(HotkeyId::Help, KeyCode::Char('?'), &[HotkeyContext::Global]),
     HotkeyBinding::alt(
         HotkeyId::JumpToNotification,
         KeyCode::Char('m'),
@@ -376,11 +351,7 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     )
     .with_priority(95), // High priority - opens workspace manager
     // === Navigation (Universal) ===
-    HotkeyBinding::new(
-        HotkeyId::NavigateUp,
-        KeyCode::Up,
-        &[HotkeyContext::Global],
-    ),
+    HotkeyBinding::new(HotkeyId::NavigateUp, KeyCode::Up, &[HotkeyContext::Global]),
     HotkeyBinding::new(
         HotkeyId::NavigateDown,
         KeyCode::Down,
@@ -409,16 +380,8 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::End,
         &[HotkeyContext::ChatNormal],
     ),
-    HotkeyBinding::new(
-        HotkeyId::Select,
-        KeyCode::Enter,
-        &[HotkeyContext::Global],
-    ),
-    HotkeyBinding::new(
-        HotkeyId::Back,
-        KeyCode::Esc,
-        &[HotkeyContext::Global],
-    ),
+    HotkeyBinding::new(HotkeyId::Select, KeyCode::Enter, &[HotkeyContext::Global]),
+    HotkeyBinding::new(HotkeyId::Back, KeyCode::Esc, &[HotkeyContext::Global]),
     // === Tab Management ===
     // Tab navigation is done via Ctrl+T + Left/Right (handled in command palette)
     // These are documented here but not used for direct key resolution
@@ -752,7 +715,6 @@ impl HotkeyResolver {
         }
         None
     }
-
 }
 
 /// Global resolver instance (lazy initialized)
@@ -804,11 +766,8 @@ mod tests {
 
     #[test]
     fn test_global_context() {
-        let binding = HotkeyBinding::new(
-            HotkeyId::Quit,
-            KeyCode::Char('q'),
-            &[HotkeyContext::Global],
-        );
+        let binding =
+            HotkeyBinding::new(HotkeyId::Quit, KeyCode::Char('q'), &[HotkeyContext::Global]);
 
         // Global hotkeys should be active in any context
         assert!(binding.is_active_in(HotkeyContext::HomeConversations));

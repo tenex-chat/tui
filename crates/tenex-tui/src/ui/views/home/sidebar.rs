@@ -1024,4 +1024,3 @@ pub(super) fn render_bottom_padding(f: &mut Frame, area: Rect) {
     let padding = Paragraph::new("").style(Style::default().bg(theme::BG_APP));
     f.render_widget(padding, area);
 }
-

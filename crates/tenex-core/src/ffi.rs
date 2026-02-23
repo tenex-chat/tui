@@ -774,6 +774,65 @@ fn process_data_changes_with_deltas(
     deltas
 }
 
+/// Collect project a-tags that already emitted explicit ProjectStatusChanged deltas.
+/// Used to avoid duplicate status callbacks in the same processing cycle.
+fn emitted_project_status_tags(deltas: &[DataChangeType]) -> std::collections::HashSet<String> {
+    deltas
+        .iter()
+        .filter_map(|delta| match delta {
+            DataChangeType::ProjectStatusChanged { project_a_tag, .. } => {
+                Some(project_a_tag.clone())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Detect implicit project online/offline transitions caused by status staleness.
+///
+/// This handles the case where no new kind:24010 events arrive:
+/// when an existing status crosses the staleness threshold, emit a single
+/// ProjectStatusChanged delta to transition online -> offline.
+fn collect_project_status_staleness_deltas(
+    store: &AppDataStore,
+    last_known_online: &mut HashMap<String, bool>,
+    skip_project_tags: &std::collections::HashSet<String>,
+) -> Vec<DataChangeType> {
+    // Drop cached state for projects that no longer have any status.
+    last_known_online.retain(|project_a_tag, _| store.project_statuses.contains_key(project_a_tag));
+
+    let mut deltas = Vec::new();
+
+    for (project_a_tag, status) in &store.project_statuses {
+        let is_online = status.is_online();
+        let previous = last_known_online.get(project_a_tag).copied();
+        last_known_online.insert(project_a_tag.clone(), is_online);
+
+        if previous == Some(is_online)
+            || previous.is_none()
+            || skip_project_tags.contains(project_a_tag)
+        {
+            continue;
+        }
+
+        let project_id = project_id_from_a_tag(store, project_a_tag).unwrap_or_default();
+        let online_agents = if is_online {
+            status.agents.clone()
+        } else {
+            Vec::new()
+        };
+
+        deltas.push(DataChangeType::ProjectStatusChanged {
+            project_id,
+            project_a_tag: project_a_tag.clone(),
+            is_online,
+            online_agents,
+        });
+    }
+
+    deltas
+}
+
 /// Append stats/diagnostics update signals based on the accumulated deltas.
 /// Ensures snapshots refresh only when relevant data changes, and only once per batch.
 fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
@@ -2432,6 +2491,20 @@ impl TenexCore {
         );
 
         messages
+    }
+
+    /// Get raw Nostr event JSON by event ID.
+    /// Returns a pretty-printed JSON payload matching the TUI raw event inspector.
+    pub fn get_raw_event_json(&self, event_id: String) -> Option<String> {
+        // Serialize transaction creation with refresh()/diagnostics paths.
+        let _tx_guard = self.ndb_transaction_lock.lock().ok()?;
+
+        let ndb = {
+            let ndb_guard = self.ndb.read().ok()?;
+            ndb_guard.as_ref()?.clone()
+        };
+
+        crate::store::get_raw_event_json(ndb.as_ref(), &event_id)
     }
 
     /// Resolve an ask event by event ID.
@@ -5464,6 +5537,8 @@ impl TenexCore {
 
         let handle = std::thread::spawn(move || {
             tlog!("PERF", "callback_listener thread started");
+            let mut last_known_project_online: HashMap<String, bool> = HashMap::new();
+
             while running.load(Ordering::Relaxed) {
                 let cycle_started_at = Instant::now();
                 let mut data_changes: Vec<DataChange> = Vec::new();
@@ -5484,10 +5559,57 @@ impl TenexCore {
                     }
                 }
 
+                // No incoming events: still run staleness transition checks so projects can
+                // move online -> offline when kind:24010 heartbeats stop arriving.
                 if data_changes.is_empty() && note_batches.is_empty() {
-                    std::thread::sleep(Duration::from_millis(50));
+                    let process_started_at = Instant::now();
+                    let mut deltas: Vec<DataChangeType> = Vec::new();
+
+                    if let Ok(store_guard) = store.read() {
+                        if let Some(store_ref) = store_guard.as_ref() {
+                            deltas.extend(collect_project_status_staleness_deltas(
+                                store_ref,
+                                &mut last_known_project_online,
+                                &std::collections::HashSet::new(),
+                            ));
+                        }
+                    }
+
+                    if deltas.is_empty() {
+                        std::thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
+
+                    append_snapshot_update_deltas(&mut deltas);
+                    let delta_summary = summarize_deltas(&deltas);
+                    let process_elapsed_ms = process_started_at.elapsed().as_millis();
+                    let mut callback_count = 0usize;
+                    let callback_started_at = Instant::now();
+
+                    if let Ok(cb_guard) = callback_ref.read() {
+                        if let Some(cb) = cb_guard.as_ref() {
+                            callback_count = deltas.len();
+                            for delta in deltas {
+                                cb.on_data_changed(delta);
+                            }
+                        }
+                    }
+                    let callback_elapsed_ms = callback_started_at.elapsed().as_millis();
+                    tlog!(
+                        "PERF",
+                        "callback_listener cycle dataChanges={} noteBatches={} noteKeys={} processMs={} callbackCount={} callbackMs={} deltas=[{}] totalMs={}",
+                        0,
+                        0,
+                        0,
+                        process_elapsed_ms,
+                        callback_count,
+                        callback_elapsed_ms,
+                        delta_summary.compact(),
+                        cycle_started_at.elapsed().as_millis()
+                    );
                     continue;
                 }
+
                 let data_change_count = data_changes.len();
                 let note_batch_count = note_batches.len();
                 let note_key_count: usize = note_batches.iter().map(|batch| batch.len()).sum();
@@ -5545,6 +5667,13 @@ impl TenexCore {
                         ));
                     }
                 }
+
+                let emitted_status_tags = emitted_project_status_tags(&deltas);
+                deltas.extend(collect_project_status_staleness_deltas(
+                    store_ref,
+                    &mut last_known_project_online,
+                    &emitted_status_tags,
+                ));
 
                 // Update lock-free runtime cache while we still hold the store write lock
                 let (runtime_ms, _, _) = store_ref.get_statusbar_runtime_ms();
@@ -5656,6 +5785,8 @@ mod tests {
     use super::*;
     use crate::store::{events::ingest_events, AppDataStore, Database};
     use nostr_sdk::{EventBuilder, Keys, Kind, Tag, TagKind};
+    use std::collections::HashSet;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use tempfile::tempdir;
 
     #[test]
@@ -5903,5 +6034,106 @@ mod tests {
         assert_eq!(lookup.ask_event.title.as_deref(), Some("Scope Question"));
         assert_eq!(lookup.ask_event.context, "Please confirm scope");
         assert_eq!(lookup.ask_event.questions.len(), 1);
+    }
+
+    fn make_status(project_coordinate: &str, last_seen_at: u64) -> ProjectStatus {
+        ProjectStatus {
+            project_coordinate: project_coordinate.to_string(),
+            agents: vec![ProjectAgent {
+                pubkey: "agent_pubkey".to_string(),
+                name: "pm".to_string(),
+                is_pm: true,
+                model: Some("gpt-5".to_string()),
+                tools: vec!["shell".to_string()],
+            }],
+            branches: vec!["master".to_string()],
+            all_models: vec!["gpt-5".to_string()],
+            all_tools: vec!["shell".to_string()],
+            created_at: last_seen_at,
+            backend_pubkey: "backend_pubkey".to_string(),
+            last_seen_at,
+        }
+    }
+
+    #[test]
+    fn test_collect_project_status_staleness_deltas_emits_offline_transition_once() {
+        let dir = tempdir().expect("temp dir");
+        let db = Database::new(dir.path()).expect("database");
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_secs();
+        let project_a_tag = "31933:owner:project";
+        store
+            .project_statuses
+            .insert(project_a_tag.to_string(), make_status(project_a_tag, now));
+
+        let mut last_known_online = HashMap::new();
+        let skip = HashSet::new();
+
+        // Baseline capture should not emit transitions.
+        let first = collect_project_status_staleness_deltas(&store, &mut last_known_online, &skip);
+        assert!(first.is_empty());
+
+        // Cross staleness threshold -> should emit exactly one offline transition.
+        if let Some(status) = store.project_statuses.get_mut(project_a_tag) {
+            status.last_seen_at = now.saturating_sub(46);
+        }
+        let second = collect_project_status_staleness_deltas(&store, &mut last_known_online, &skip);
+        assert_eq!(second.len(), 1);
+        match &second[0] {
+            DataChangeType::ProjectStatusChanged {
+                project_a_tag,
+                is_online,
+                online_agents,
+                ..
+            } => {
+                assert_eq!(project_a_tag, "31933:owner:project");
+                assert!(!is_online);
+                assert!(online_agents.is_empty());
+            }
+            other => panic!("Expected ProjectStatusChanged, got {:?}", other),
+        }
+
+        // Re-running without further changes should not re-emit.
+        let third = collect_project_status_staleness_deltas(&store, &mut last_known_online, &skip);
+        assert!(third.is_empty());
+    }
+
+    #[test]
+    fn test_collect_project_status_staleness_deltas_skips_duplicate_when_tag_explicitly_emitted() {
+        let dir = tempdir().expect("temp dir");
+        let db = Database::new(dir.path()).expect("database");
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_secs();
+        let project_a_tag = "31933:owner:project";
+
+        // Start stale/offline and record baseline.
+        store.project_statuses.insert(
+            project_a_tag.to_string(),
+            make_status(project_a_tag, now.saturating_sub(46)),
+        );
+        let mut last_known_online = HashMap::new();
+        let skip = HashSet::new();
+        let baseline =
+            collect_project_status_staleness_deltas(&store, &mut last_known_online, &skip);
+        assert!(baseline.is_empty());
+
+        // Move status to online, but simulate explicit status delta already emitted this cycle.
+        if let Some(status) = store.project_statuses.get_mut(project_a_tag) {
+            status.last_seen_at = now;
+        }
+        let mut skip = HashSet::new();
+        skip.insert(project_a_tag.to_string());
+
+        let deltas = collect_project_status_staleness_deltas(&store, &mut last_known_online, &skip);
+        assert!(deltas.is_empty());
+        assert_eq!(last_known_online.get(project_a_tag), Some(&true));
     }
 }

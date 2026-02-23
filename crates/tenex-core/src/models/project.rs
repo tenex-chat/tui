@@ -11,7 +11,7 @@ pub struct Project {
     pub pubkey: String,
     pub participants: Vec<String>,
     pub agent_definition_ids: Vec<String>, // Agent definition event IDs (kind 4199)
-    pub mcp_tool_ids: Vec<String>, // MCP tool event IDs (kind 4200)
+    pub mcp_tool_ids: Vec<String>,         // MCP tool event IDs (kind 4200)
     pub created_at: u64,
 }
 

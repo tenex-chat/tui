@@ -39,7 +39,6 @@ impl NotificationManager {
     pub fn current(&self) -> Option<&Notification> {
         self.notifications.current()
     }
-
 }
 
 impl Default for NotificationManager {

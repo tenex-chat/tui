@@ -3984,10 +3984,7 @@ impl App {
 
     /// Cycle through scheduled event filter states: Show All → Hide → Show Only → Show All
     pub fn cycle_scheduled_filter(&mut self) {
-        let new_filter = self
-            .preferences
-            .borrow_mut()
-            .cycle_scheduled_filter();
+        let new_filter = self.preferences.borrow_mut().cycle_scheduled_filter();
         self.scheduled_filter = new_filter;
         self.notify(Notification::info(&format!(
             "Scheduled events: {}",
@@ -4012,8 +4009,7 @@ impl App {
     /// Show the backend approval modal for a pending approval
     pub fn show_backend_approval_modal(&mut self, backend_pubkey: String) {
         use crate::ui::modal::BackendApprovalState;
-        self.modal_state =
-            ModalState::BackendApproval(BackendApprovalState::new(backend_pubkey));
+        self.modal_state = ModalState::BackendApproval(BackendApprovalState::new(backend_pubkey));
     }
 
     /// Initialize trusted backends from preferences (called on app init)

@@ -280,5 +280,4 @@ mod tests {
         assert!(!perms.is_denied("Read")); // In allow, not deny
         assert!(!perms.is_denied("NotAdded"));
     }
-
 }

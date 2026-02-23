@@ -298,9 +298,7 @@ mod tests {
 
         // Second should be DelegationPreview (Q-tag reference)
         match &display_items[1] {
-            DisplayItem::DelegationPreview {
-                thread_id, ..
-            } => {
+            DisplayItem::DelegationPreview { thread_id, .. } => {
                 assert_eq!(thread_id, "child-conversation-id");
             }
             _ => panic!("Second item should be DelegationPreview"),
