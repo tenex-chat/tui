@@ -21,6 +21,8 @@ pub struct Thread {
     pub status_current_activity: Option<String>,
     /// Summary from kind:513 metadata (brief description of the conversation)
     pub summary: Option<String>,
+    /// Hashtags from kind:513 metadata (repeated t-tags)
+    pub hashtags: Vec<String>,
     /// Parent conversation ID from "delegation" tag (for hierarchical nesting)
     pub parent_conversation_id: Option<String>,
     /// Pubkeys mentioned in p-tags of the root event
@@ -128,6 +130,7 @@ impl Thread {
             status_label: None,
             status_current_activity: None,
             summary: None,
+            hashtags: Vec::new(),
             parent_conversation_id,
             p_tags,
             ask_event,

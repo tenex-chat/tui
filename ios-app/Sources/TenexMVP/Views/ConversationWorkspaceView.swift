@@ -109,6 +109,7 @@ enum ConversationWorkspaceSource {
                 statusLabel: "draft",
                 statusCurrentActivity: nil,
                 summary: nil,
+                hashtags: [],
                 parentConversationId: nil,
                 pTags: [],
                 askEvent: nil,

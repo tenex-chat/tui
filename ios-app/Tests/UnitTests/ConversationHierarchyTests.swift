@@ -295,6 +295,7 @@ final class ConversationHierarchyTests: XCTestCase {
             statusLabel: nil,
             statusCurrentActivity: nil,
             summary: nil,
+            hashtags: [],
             parentConversationId: parentId,
             pTags: [],
             askEvent: nil,

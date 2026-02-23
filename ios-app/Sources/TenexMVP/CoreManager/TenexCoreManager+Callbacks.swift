@@ -82,28 +82,38 @@ extension TenexCoreManager {
 
     @MainActor
     func applyConversationUpsert(_ conversation: ConversationFullInfo) {
-        var updated = conversations
-        guard conversationMatchesAppFilter(conversation) else {
-            let initialCount = updated.count
-            updated.removeAll { $0.thread.id == conversation.thread.id }
-            guard updated.count != initialCount else {
+        let snapshot = appFilterSnapshot
+        let now = UInt64(Date().timeIntervalSince1970)
+        let projectId = Self.projectId(fromATag: conversation.projectATag)
+        let isInBaseScope = snapshot.includes(
+            projectId: projectId,
+            timestamp: conversation.thread.effectiveLastActivity,
+            now: now
+        )
+
+        var updatedScope = appFilterConversationScope
+        if let index = updatedScope.firstIndex(where: { $0.thread.id == conversation.thread.id }) {
+            if !isInBaseScope {
+                updatedScope.remove(at: index)
+            } else if updatedScope[index] == conversation {
                 return
+            } else {
+                updatedScope[index] = conversation
             }
-            conversations = sortedConversations(updated)
-            updateActiveAgentsState()
+        } else if isInBaseScope {
+            updatedScope.append(conversation)
+        } else {
             return
         }
-        if let index = updated.firstIndex(where: { $0.thread.id == conversation.thread.id }) {
-            if updated[index] == conversation {
-                return
+
+        appFilterConversationScope = sortedConversations(updatedScope)
+        let filtered = sortedConversations(
+            appFilterConversationScope.filter { candidate in
+                conversationMatchesAppFilter(candidate, now: now, snapshot: snapshot)
             }
-            updated[index] = conversation
-        } else {
-            updated.append(conversation)
-        }
-        let sorted = sortedConversations(updated)
-        if sorted != conversations {
-            conversations = sorted
+        )
+        if filtered != conversations {
+            conversations = filtered
             updateActiveAgentsState()
         }
     }
@@ -282,7 +292,7 @@ extension TenexCoreManager {
         }
 
         let activeConversationIdSet = Set(activeConversationIds)
-        var updated = conversations
+        var updated = appFilterConversationScope
         var didChange = false
 
         for index in updated.indices {
@@ -301,7 +311,14 @@ extension TenexCoreManager {
         }
 
         if didChange {
-            conversations = sortedConversations(updated)
+            appFilterConversationScope = sortedConversations(updated)
+            let now = UInt64(Date().timeIntervalSince1970)
+            let snapshot = appFilterSnapshot
+            conversations = sortedConversations(
+                appFilterConversationScope.filter { conversation in
+                    conversationMatchesAppFilter(conversation, now: now, snapshot: snapshot)
+                }
+            )
             updateActiveAgentsState()
             refreshRuntimeText()
         }

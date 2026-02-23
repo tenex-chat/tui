@@ -292,6 +292,7 @@ final class ConversationActivityMetricsTests: XCTestCase {
             statusLabel: nil,
             statusCurrentActivity: nil,
             summary: nil,
+            hashtags: [],
             parentConversationId: parentId,
             pTags: [],
             askEvent: nil,

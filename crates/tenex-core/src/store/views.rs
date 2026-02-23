@@ -128,6 +128,7 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
             thread.status_label = metadata.status_label.clone();
             thread.status_current_activity = metadata.status_current_activity.clone();
             thread.summary = metadata.summary.clone();
+            thread.hashtags = metadata.hashtags.clone();
             // Only update last_activity if metadata is newer to avoid regressing timestamps
             if metadata.created_at > thread.last_activity {
                 thread.last_activity = metadata.created_at;

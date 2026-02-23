@@ -105,21 +105,13 @@ struct ConversationsTabView: View {
         projectMenuState = ProjectMenuState(booted: booted, unbooted: unbooted)
     }
 
-    /// Filtered conversations based on archived status and scheduled status.
-    /// Global project/time/scheduled filtering is already applied centrally in TenexCoreManager.
+    /// Filtered conversations based on archived status.
+    /// Global app filtering (project/time/scheduled/status/hashtags) is applied centrally in TenexCoreManager.
     private var filteredConversations: [ConversationFullInfo] {
         var conversations = coreManager.conversations
 
         if !showArchived {
             conversations = conversations.filter { !$0.isArchived }
-        }
-
-        // Apply scheduled event filter from global filter state
-        let scheduledFilter = coreManager.appFilterScheduledEvent
-        if scheduledFilter != .showAll {
-            conversations = conversations.filter {
-                scheduledFilter.allows(isScheduled: $0.thread.isScheduled)
-            }
         }
 
         return conversations
@@ -165,9 +157,6 @@ struct ConversationsTabView: View {
         }
         .onChange(of: showArchived) { _, _ in
             rebuildHierarchy()
-        }
-        .onChange(of: coreManager.appFilterScheduledEvent) { _, _ in
-            scheduleHierarchyRebuild()
         }
         .onChange(of: coreManager.projects) { _, _ in
             rebuildProjectCaches()

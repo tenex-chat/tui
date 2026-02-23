@@ -8,6 +8,7 @@ pub struct ConversationMetadata {
     pub status_label: Option<String>,
     pub status_current_activity: Option<String>,
     pub summary: Option<String>,
+    pub hashtags: Vec<String>,
 }
 
 impl ConversationMetadata {
@@ -23,6 +24,7 @@ impl ConversationMetadata {
         let mut status_label: Option<String> = None;
         let mut status_current_activity: Option<String> = None;
         let mut summary: Option<String> = None;
+        let mut hashtags: Vec<String> = Vec::new();
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -58,6 +60,11 @@ impl ConversationMetadata {
                         .and_then(|t| t.variant().str())
                         .map(|s| s.to_string());
                 }
+                Some("t") => {
+                    if let Some(hashtag) = tag.get(1).and_then(|t| t.variant().str()) {
+                        hashtags.push(hashtag.to_string());
+                    }
+                }
                 _ => {}
             }
         }
@@ -71,6 +78,7 @@ impl ConversationMetadata {
             status_label,
             status_current_activity,
             summary,
+            hashtags,
         })
     }
 }
@@ -127,6 +135,7 @@ mod tests {
         assert_eq!(metadata.title, Some("Test Thread".to_string()));
         assert_eq!(metadata.status_label, Some("In Progress".to_string()));
         assert_eq!(metadata.status_current_activity, None);
+        assert!(metadata.hashtags.is_empty());
     }
 
     #[test]
@@ -167,6 +176,7 @@ mod tests {
             metadata.status_current_activity,
             Some("Writing integration tests...".to_string())
         );
+        assert!(metadata.hashtags.is_empty());
     }
 
     #[test]
@@ -193,6 +203,14 @@ mod tests {
                 TagKind::Custom(std::borrow::Cow::Borrowed("status-current-activity")),
                 vec!["Refactoring data models".to_string()],
             ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::T)),
+                vec!["feature".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::T)),
+                vec!["frontend".to_string()],
+            ))
             .sign_with_keys(&keys)
             .unwrap();
 
@@ -216,6 +234,10 @@ mod tests {
         assert_eq!(
             metadata.status_current_activity,
             Some("Refactoring data models".to_string())
+        );
+        assert_eq!(
+            metadata.hashtags,
+            vec!["feature".to_string(), "frontend".to_string()]
         );
     }
 
@@ -256,5 +278,6 @@ mod tests {
         assert_eq!(metadata.title, Some("Simple Thread".to_string()));
         assert_eq!(metadata.status_label, None);
         assert_eq!(metadata.status_current_activity, None);
+        assert!(metadata.hashtags.is_empty());
     }
 }

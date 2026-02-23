@@ -82,6 +82,9 @@ class TenexCoreManager {
     var conversations: [ConversationFullInfo] = [] {
         didSet { rebuildConversationById() }
     }
+    /// App-filter base conversation scope (project/time constrained) used to derive
+    /// status/hashtag facets and apply local refinements without extra FFI calls.
+    var appFilterConversationScope: [ConversationFullInfo] = []
 
     /// O(1) lookup by thread ID. Rebuilt automatically when `conversations` changes.
     @ObservationIgnored private(set) var conversationById: [String: ConversationFullInfo] = [:]
@@ -133,10 +136,14 @@ class TenexCoreManager {
     var appFilterProjectIds: Set<String>
     var appFilterTimeWindow: AppTimeWindow
     var appFilterScheduledEvent: ScheduledEventFilter
+    var appFilterStatus: ConversationStatusFilter
+    var appFilterHashtags: Set<String>
 
     static let appFilterProjectsDefaultsKey = "app.global.filter.projectIds"
     static let appFilterTimeWindowDefaultsKey = "app.global.filter.timeWindow"
     static let appFilterScheduledEventDefaultsKey = "app.global.filter.scheduledEvent"
+    static let appFilterStatusDefaultsKey = "app.global.filter.statusLabel"
+    static let appFilterHashtagsDefaultsKey = "app.global.filter.hashtags"
 
     // MARK: - Ask Badge Support
 
@@ -231,6 +238,8 @@ class TenexCoreManager {
         appFilterProjectIds = persistedFilter.projectIds
         appFilterTimeWindow = persistedFilter.timeWindow
         appFilterScheduledEvent = persistedFilter.scheduledEvent
+        appFilterStatus = persistedFilter.status
+        appFilterHashtags = persistedFilter.hashtags
 
         // Create core immediately (lightweight)
         let tenexCore = TenexCore()

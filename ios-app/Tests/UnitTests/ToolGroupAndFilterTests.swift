@@ -263,4 +263,80 @@ final class AppGlobalFilterTests: XCTestCase {
         let snapshot = AppGlobalFilterSnapshot(projectIds: Set(), timeWindow: .days7)
         XCTAssertFalse(snapshot.isDefault)
     }
+
+    func testConversationIncludesMatchesStatusFilter() {
+        let snapshot = AppGlobalFilterSnapshot(
+            projectIds: Set(),
+            timeWindow: .all,
+            statusFilter: .label("In Progress")
+        )
+
+        XCTAssertTrue(
+            snapshot.includesConversation(
+                projectId: "proj-a",
+                timestamp: 1_000,
+                now: 2_000,
+                isScheduled: false,
+                statusLabel: "In Progress",
+                hashtags: []
+            )
+        )
+        XCTAssertFalse(
+            snapshot.includesConversation(
+                projectId: "proj-a",
+                timestamp: 1_000,
+                now: 2_000,
+                isScheduled: false,
+                statusLabel: "Completed",
+                hashtags: []
+            )
+        )
+    }
+
+    func testConversationIncludesMatchesHashtagFilterCaseInsensitive() {
+        let snapshot = AppGlobalFilterSnapshot(
+            projectIds: Set(),
+            timeWindow: .all,
+            hashtagFilter: ["Feature", "Planning"]
+        )
+
+        XCTAssertTrue(
+            snapshot.includesConversation(
+                projectId: "proj-a",
+                timestamp: 1_000,
+                now: 2_000,
+                isScheduled: false,
+                statusLabel: nil,
+                hashtags: ["#feature"]
+            )
+        )
+        XCTAssertFalse(
+            snapshot.includesConversation(
+                projectId: "proj-a",
+                timestamp: 1_000,
+                now: 2_000,
+                isScheduled: false,
+                statusLabel: nil,
+                hashtags: ["maintenance"]
+            )
+        )
+    }
+
+    func testSnapshotIsNotDefaultWhenStatusFilterSet() {
+        let snapshot = AppGlobalFilterSnapshot(
+            projectIds: Set(),
+            timeWindow: .defaultValue,
+            statusFilter: .label("Blocked")
+        )
+        XCTAssertFalse(snapshot.isDefault)
+    }
+
+    func testSnapshotIsNotDefaultWhenHashtagFilterSet() {
+        let snapshot = AppGlobalFilterSnapshot(
+            projectIds: Set(),
+            timeWindow: .defaultValue,
+            hashtagFilter: ["frontend"]
+        )
+        XCTAssertFalse(snapshot.isDefault)
+    }
 }

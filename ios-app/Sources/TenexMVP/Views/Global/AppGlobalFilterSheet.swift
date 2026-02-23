@@ -10,6 +10,8 @@ struct AppGlobalFilterToolbarButton: View {
             timeSubmenu
             scheduledEventsSubmenu
             projectsSubmenu
+            statusSubmenu
+            hashtagsSubmenu
             if !coreManager.isAppFilterDefault {
                 Divider()
                 Button {
@@ -24,7 +26,7 @@ struct AppGlobalFilterToolbarButton: View {
         .accessibilityIdentifier("global_filter_button")
         .accessibilityLabel("Global Filter")
         .accessibilityValue(coreManager.appFilterSummaryLabel)
-        .help("Filter by time and project")
+        .help("Filter by time, schedule, projects, status, and hashtags")
         #else
         Button {
             isPresented = true
@@ -35,12 +37,14 @@ struct AppGlobalFilterToolbarButton: View {
         .accessibilityIdentifier("global_filter_button")
         .accessibilityLabel("Global Filter")
         .accessibilityValue(coreManager.appFilterSummaryLabel)
-        .help("Filter by time and project")
+        .help("Filter by time, schedule, projects, status, and hashtags")
         .sheet(isPresented: $isPresented) {
             AppGlobalFilterSheet(
                 selectedProjectIds: coreManager.appFilterProjectIds,
                 selectedTimeWindow: coreManager.appFilterTimeWindow,
-                selectedScheduledEvent: coreManager.appFilterScheduledEvent
+                selectedScheduledEvent: coreManager.appFilterScheduledEvent,
+                selectedStatus: coreManager.appFilterStatus,
+                selectedHashtags: coreManager.appFilterHashtags
             )
             .environment(coreManager)
         }
@@ -138,6 +142,76 @@ struct AppGlobalFilterToolbarButton: View {
         }
     }
 
+    @ViewBuilder
+    private var statusSubmenu: some View {
+        Menu {
+            Button {
+                updateStatus(.all)
+            } label: {
+                if coreManager.appFilterStatus == .all {
+                    Label("All Statuses", systemImage: "checkmark")
+                } else {
+                    Text("All Statuses")
+                }
+            }
+
+            if coreManager.appFilterAvailableStatusLabels.isEmpty {
+                Divider()
+                Text("No statuses in current scope")
+                    .foregroundStyle(.secondary)
+            } else {
+                Divider()
+                ForEach(coreManager.appFilterAvailableStatusLabels, id: \.self) { status in
+                    Button {
+                        updateStatus(.label(status))
+                    } label: {
+                        if coreManager.appFilterStatus != .all,
+                           coreManager.appFilterStatus.allows(statusLabel: status) {
+                            Label(status, systemImage: "checkmark")
+                        } else {
+                            Text(status)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label("Status", systemImage: "flag")
+        }
+    }
+
+    @ViewBuilder
+    private var hashtagsSubmenu: some View {
+        Menu {
+            Button {
+                updateHashtags(Set<String>())
+            } label: {
+                if coreManager.appFilterHashtags.isEmpty {
+                    Label("Any Hashtag", systemImage: "checkmark")
+                } else {
+                    Text("Any Hashtag")
+                }
+            }
+
+            if coreManager.appFilterAvailableHashtags.isEmpty {
+                Divider()
+                Text("No hashtags in current scope")
+                    .foregroundStyle(.secondary)
+            } else {
+                Divider()
+                ForEach(coreManager.appFilterAvailableHashtags, id: \.self) { hashtag in
+                    Toggle(isOn: Binding(
+                        get: { coreManager.appFilterHashtags.contains(hashtag) },
+                        set: { _ in toggleHashtag(hashtag) }
+                    )) {
+                        Text("#\(hashtag)")
+                    }
+                }
+            }
+        } label: {
+            Label("Hashtag", systemImage: "number")
+        }
+    }
+
     private var bootedProjects: [Project] {
         coreManager.projects
             .filter { coreManager.projectOnlineStatus[$0.id] == true }
@@ -159,6 +233,32 @@ struct AppGlobalFilterToolbarButton: View {
         }
         coreManager.updateAppFilter(projectIds: ids, timeWindow: coreManager.appFilterTimeWindow)
     }
+
+    private func updateStatus(_ status: ConversationStatusFilter) {
+        coreManager.updateAppFilter(
+            projectIds: coreManager.appFilterProjectIds,
+            timeWindow: coreManager.appFilterTimeWindow,
+            status: status
+        )
+    }
+
+    private func updateHashtags(_ hashtags: Set<String>) {
+        coreManager.updateAppFilter(
+            projectIds: coreManager.appFilterProjectIds,
+            timeWindow: coreManager.appFilterTimeWindow,
+            hashtags: hashtags
+        )
+    }
+
+    private func toggleHashtag(_ hashtag: String) {
+        var hashtags = coreManager.appFilterHashtags
+        if hashtags.contains(hashtag) {
+            hashtags.remove(hashtag)
+        } else {
+            hashtags.insert(hashtag)
+        }
+        updateHashtags(hashtags)
+    }
     #endif
 }
 
@@ -169,15 +269,21 @@ struct AppGlobalFilterSheet: View {
     @State private var draftProjectIds: Set<String>
     @State private var draftTimeWindow: AppTimeWindow
     @State private var draftScheduledEvent: ScheduledEventFilter
+    @State private var draftStatus: ConversationStatusFilter
+    @State private var draftHashtags: Set<String>
 
     init(
         selectedProjectIds: Set<String>,
         selectedTimeWindow: AppTimeWindow,
-        selectedScheduledEvent: ScheduledEventFilter
+        selectedScheduledEvent: ScheduledEventFilter,
+        selectedStatus: ConversationStatusFilter,
+        selectedHashtags: Set<String>
     ) {
         _draftProjectIds = State(initialValue: selectedProjectIds)
         _draftTimeWindow = State(initialValue: selectedTimeWindow)
         _draftScheduledEvent = State(initialValue: selectedScheduledEvent)
+        _draftStatus = State(initialValue: selectedStatus)
+        _draftHashtags = State(initialValue: selectedHashtags)
     }
 
     var body: some View {
@@ -275,6 +381,81 @@ struct AppGlobalFilterSheet: View {
                     }
                 }
 
+                Section("Status") {
+                    Button {
+                        draftStatus = .all
+                    } label: {
+                        HStack {
+                            Text("All Statuses")
+                            Spacer()
+                            if draftStatus == .all {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.agentBrand)
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderless)
+
+                    if coreManager.appFilterAvailableStatusLabels.isEmpty {
+                        Text("No statuses in current scope")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(coreManager.appFilterAvailableStatusLabels, id: \.self) { status in
+                            Button {
+                                draftStatus = .label(status)
+                            } label: {
+                                HStack {
+                                    Text(status)
+                                    Spacer()
+                                    if draftStatus != .all,
+                                       draftStatus.allows(statusLabel: status) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.agentBrand)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+
+                Section("Hashtags") {
+                    Button {
+                        draftHashtags.removeAll()
+                    } label: {
+                        HStack {
+                            Text("Any Hashtag")
+                            Spacer()
+                            if draftHashtags.isEmpty {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(Color.agentBrand)
+                            }
+                        }
+                    }
+                    .buttonStyle(.borderless)
+
+                    if coreManager.appFilterAvailableHashtags.isEmpty {
+                        Text("No hashtags in current scope")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(coreManager.appFilterAvailableHashtags, id: \.self) { hashtag in
+                            Button {
+                                toggleHashtag(hashtag)
+                            } label: {
+                                HStack {
+                                    Text("#\(hashtag)")
+                                    Spacer()
+                                    if draftHashtags.contains(hashtag) {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(Color.agentBrand)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+
                 Section {
                     Button(role: .none) {
                         resetToDefaults()
@@ -338,14 +519,26 @@ struct AppGlobalFilterSheet: View {
     private func resetToDefaults() {
         draftProjectIds = []
         draftTimeWindow = .defaultValue
-        draftScheduledEvent = .showAll
+        draftScheduledEvent = .defaultValue
+        draftStatus = .defaultValue
+        draftHashtags.removeAll()
+    }
+
+    private func toggleHashtag(_ hashtag: String) {
+        if draftHashtags.contains(hashtag) {
+            draftHashtags.remove(hashtag)
+        } else {
+            draftHashtags.insert(hashtag)
+        }
     }
 
     private func applyAndDismiss() {
         coreManager.updateAppFilter(
             projectIds: draftProjectIds,
             timeWindow: draftTimeWindow,
-            scheduledEvent: draftScheduledEvent
+            scheduledEvent: draftScheduledEvent,
+            status: draftStatus,
+            hashtags: draftHashtags
         )
         dismiss()
     }
