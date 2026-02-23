@@ -29,6 +29,7 @@ let project = Project(
                 .glob("Sources/TenexMVP/**/*.swift")
             ],
             resources: ["Sources/TenexMVP/Resources/**"],
+            entitlements: .file(path: "TenexMVP.entitlements"),
             scripts: [
                 .pre(
                     script: "bash \"${SRCROOT}/../scripts/generate-swift-bindings.sh\"",

@@ -127,7 +127,12 @@ struct AppRootSceneView: View {
 
         switch result {
         case .granted:
-            break
+            // Register for remote (APNs) notifications now that permission is granted.
+            // iOS will call AppDelegate.didRegisterForRemoteNotificationsWithDeviceToken
+            // on success; TenexCoreManager observes that and publishes kind:25000.
+            #if os(iOS)
+            coreManager.registerForRemoteNotifications()
+            #endif
         case .denied, .previouslyDenied:
             showNotificationDeniedAlert = true
         case .error:

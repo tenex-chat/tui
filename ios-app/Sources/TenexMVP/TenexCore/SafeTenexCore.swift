@@ -994,6 +994,31 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    // MARK: - Push Notifications
+
+    /// Register or deregister an APNs device token for remote push notifications.
+    ///
+    /// Publishes a kind:25000 event with NIP-44 encrypted payload to the backend.
+    /// - Parameters:
+    ///   - deviceToken: Hex-encoded APNs token. Pass empty string when `enable` is `false`.
+    ///   - enable: `true` to register (enable), `false` to deregister (disable).
+    ///   - backendPubkey: Hex pubkey of the TENEX backend that handles APNs delivery.
+    ///   - deviceId: Stable device identifier (UIDevice.identifierForVendor on iOS).
+    func registerApnsToken(deviceToken: String, enable: Bool, backendPubkey: String, deviceId: String) throws {
+        try profiler.measureFFI("registerApnsToken") {
+            do {
+                try core.registerApnsToken(
+                    deviceToken: deviceToken,
+                    enable: enable,
+                    backendPubkey: backendPubkey,
+                    deviceId: deviceId
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Misc
 
     /// Get version string.

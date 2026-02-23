@@ -192,6 +192,43 @@ final class NotificationService: NSObject, ObservableObject {
         notificationCenter.removeAllDeliveredNotifications()
         Self.logger.debug("Removed all notifications")
     }
+
+    // MARK: - Remote Notification Handling
+
+    /// Process a remote notification payload delivered by APNs.
+    ///
+    /// Called from `AppDelegate.application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`
+    /// for background/silent pushes.  User-visible pushes that the user *taps* are
+    /// handled by `userNotificationCenter(_:didReceive:)` below.
+    ///
+    /// Expected APNs payload structure:
+    /// ```json
+    /// {
+    ///   "aps": { "alert": { "title": "…", "body": "…" }, "sound": "default", "badge": 1 },
+    ///   "conversation_id": "<hex>",
+    ///   "event_id": "<hex>"
+    /// }
+    /// ```
+    @MainActor
+    func handleRemoteNotification(userInfo: [AnyHashable: Any]) {
+        Self.logger.info("Processing remote notification payload")
+
+        // Extract deep-link identifiers from the payload
+        if let conversationId = userInfo["conversation_id"] as? String {
+            Self.logger.info("Remote notification references conversation: \(conversationId.prefix(12))...")
+            NotificationCenter.default.post(
+                name: .askNotificationTapped,
+                object: nil,
+                userInfo: ["conversationId": conversationId]
+            )
+        }
+
+        // Update badge count if provided
+        if let aps = userInfo["aps"] as? [String: Any],
+           let badge = aps["badge"] as? Int {
+            Task { await self.updateBadge(count: badge) }
+        }
+    }
 }
 
 // MARK: - UNUserNotificationCenterDelegate
@@ -208,25 +245,39 @@ extension NotificationService: UNUserNotificationCenterDelegate {
     }
 
     /// Handle notification tap (deep linking).
+    ///
+    /// Handles both:
+    /// - **Local ask notifications** (type == "ask", scheduled by `scheduleAskNotification`)
+    /// - **Remote APNs push notifications** (contain "conversation_id" in the payload)
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
         let userInfo = response.notification.request.content.userInfo
 
-        // Extract navigation info for deep linking
-        if let type = userInfo["type"] as? String, type == "ask" {
-            if let conversationId = userInfo["conversationId"] as? String {
-                Self.logger.info("User tapped notification for conversation: \(conversationId.prefix(12))...")
-                // Deep linking can be handled via a shared navigation state manager
-                // For now, just log - UI layer will handle navigation
-                await MainActor.run {
-                    NotificationCenter.default.post(
-                        name: .askNotificationTapped,
-                        object: nil,
-                        userInfo: ["conversationId": conversationId]
-                    )
-                }
+        // Local ask notification (scheduled by scheduleAskNotification)
+        if let type = userInfo["type"] as? String, type == "ask",
+           let conversationId = userInfo["conversationId"] as? String {
+            Self.logger.info("User tapped ask notification for conversation: \(conversationId.prefix(12))...")
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: .askNotificationTapped,
+                    object: nil,
+                    userInfo: ["conversationId": conversationId]
+                )
+            }
+            return
+        }
+
+        // Remote APNs push notification (delivered by TENEX backend)
+        if let conversationId = userInfo["conversation_id"] as? String {
+            Self.logger.info("User tapped remote notification for conversation: \(conversationId.prefix(12))...")
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: .askNotificationTapped,
+                    object: nil,
+                    userInfo: ["conversationId": conversationId]
+                )
             }
         }
     }
