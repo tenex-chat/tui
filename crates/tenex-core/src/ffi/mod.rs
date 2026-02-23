@@ -62,6 +62,8 @@ use crate::stats::{
 use crate::store::AppDataStore;
 use std::collections::HashMap;
 
+// Keep UniFFI exports split by domain. Add new exported methods to *_api.rs modules
+// unless they are core lifecycle/auth methods that must stay in mod.rs.
 mod agents_api;
 mod audio_settings_api;
 mod bunker_api;
@@ -2306,6 +2308,43 @@ mod tests {
     use crate::store::{events::ingest_events, AppDataStore, Database};
     use nostr_sdk::{EventBuilder, Keys, Kind, Tag, TagKind};
     use tempfile::tempdir;
+
+    #[test]
+    fn test_ffi_layout_guardrails() {
+        let ffi_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ffi");
+
+        assert!(ffi_dir.join("mod.rs").exists(), "src/ffi/mod.rs must exist");
+        assert!(
+            !ffi_dir.join("ffi.rs").exists(),
+            "legacy src/ffi.rs should not be reintroduced"
+        );
+
+        let mod_source =
+            std::fs::read_to_string(ffi_dir.join("mod.rs")).expect("failed to read src/ffi/mod.rs");
+        let mod_lines = mod_source.lines().count();
+        assert!(
+            mod_lines <= 3000,
+            "src/ffi/mod.rs grew too large ({} lines); move API methods into *_api.rs modules",
+            mod_lines
+        );
+
+        let api_file_count = std::fs::read_dir(&ffi_dir)
+            .expect("failed to read src/ffi directory")
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .to_string()
+                    .ends_with("_api.rs")
+            })
+            .count();
+        assert!(
+            api_file_count >= 8,
+            "expected domain-split API modules in src/ffi (found {} *_api.rs files)",
+            api_file_count
+        );
+    }
 
     #[test]
     fn test_tenex_core_new() {
