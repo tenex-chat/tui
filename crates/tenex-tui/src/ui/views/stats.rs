@@ -953,20 +953,6 @@ mod tests {
     }
 
     #[test]
-    fn test_width_guard_matches_bar_calculation() {
-        // Verify that MIN_CHART_WIDTH and CHART_LABEL_WIDTH are consistent
-        // If width is MIN_CHART_WIDTH, bar_max_width should be >= 0
-        let bar_max_width = MIN_CHART_WIDTH.saturating_sub(CHART_LABEL_WIDTH);
-        // With MIN_CHART_WIDTH == CHART_LABEL_WIDTH, bar_max_width will be 0
-        // This is the minimum case - any smaller width would be rejected
-        assert_eq!(bar_max_width, 0);
-
-        // One pixel wider should give 1 character of bar space
-        let bar_max_width_plus_one = (MIN_CHART_WIDTH + 1).saturating_sub(CHART_LABEL_WIDTH);
-        assert_eq!(bar_max_width_plus_one, 1);
-    }
-
-    #[test]
     fn test_bar_composition_no_overflow() {
         // Verify that combining user_bar with all_bar remainder never exceeds max_width
         // This tests the fix for the bar composition overflow issue

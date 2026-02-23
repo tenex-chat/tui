@@ -289,7 +289,10 @@ impl StatisticsStore {
         for messages in messages_by_thread.values() {
             for msg in messages {
                 let day_start = (msg.created_at / seconds_per_day) * seconds_per_day;
-                let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+                let entry = self
+                    .messages_by_day_counts
+                    .entry(day_start)
+                    .or_insert((0, 0));
                 entry.1 += 1;
                 if user_pubkey.as_deref() == Some(msg.pubkey.as_str()) {
                     entry.0 += 1;
@@ -591,7 +594,8 @@ mod tests {
                 "test",
                 timestamp,
             );
-            msg.llm_metadata = HashMap::from([("total-tokens".to_string(), format!("{}", (i + 1) * 100))]);
+            msg.llm_metadata =
+                HashMap::from([("total-tokens".to_string(), format!("{}", (i + 1) * 100))]);
             messages_by_thread
                 .entry("thread1".to_string())
                 .or_default()

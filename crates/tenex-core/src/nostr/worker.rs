@@ -1052,7 +1052,8 @@ impl NostrWorker {
                     }
                     NostrCommand::PublishProfile { name, picture_url } => {
                         debug_log(&format!("Worker: Publishing user profile '{}'", name));
-                        if let Err(e) = rt.block_on(self.handle_publish_profile(name, picture_url)) {
+                        if let Err(e) = rt.block_on(self.handle_publish_profile(name, picture_url))
+                        {
                             tlog!("ERROR", "Failed to publish profile: {}", e);
                         }
                     }
@@ -1105,15 +1106,13 @@ impl NostrWorker {
                                 .name("bunker-request-fwd".to_string())
                                 .spawn(move || {
                                     while let Ok(request) = req_rx.recv() {
-                                        let _ = data_tx.send(DataChange::BunkerSignRequest { request });
+                                        let _ =
+                                            data_tx.send(DataChange::BunkerSignRequest { request });
                                     }
                                 })
                                 .ok();
 
-                            match super::bunker::BunkerService::start(
-                                keys.clone(),
-                                req_tx,
-                            ) {
+                            match super::bunker::BunkerService::start(keys.clone(), req_tx) {
                                 Ok(service) => {
                                     let uri = service.bunker_uri().to_string();
                                     self.bunker_service = Some(service);
@@ -1157,12 +1156,10 @@ impl NostrWorker {
                         event_kind,
                     } => {
                         if let Some(ref service) = self.bunker_service {
-                            service.add_auto_approve_rule(
-                                super::bunker::BunkerAutoApproveRule {
-                                    requester_pubkey,
-                                    event_kind,
-                                },
-                            );
+                            service.add_auto_approve_rule(super::bunker::BunkerAutoApproveRule {
+                                requester_pubkey,
+                                event_kind,
+                            });
                         }
                     }
                     NostrCommand::RemoveBunkerAutoApproveRule {
@@ -1170,8 +1167,7 @@ impl NostrWorker {
                         event_kind,
                     } => {
                         if let Some(ref service) = self.bunker_service {
-                            service
-                                .remove_auto_approve_rule(&requester_pubkey, event_kind);
+                            service.remove_auto_approve_rule(&requester_pubkey, event_kind);
                         }
                     }
                     NostrCommand::GetBunkerAutoApproveRules { response_tx } => {
@@ -1350,8 +1346,12 @@ impl NostrWorker {
         let output = client.subscribe(project_filter_owned.clone(), None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects (authored)".to_string(), vec![KIND_PROJECT_DRAFT], None)
-                .with_raw_filter(project_filter_json.unwrap_or_default()),
+            SubscriptionInfo::new(
+                "User projects (authored)".to_string(),
+                vec![KIND_PROJECT_DRAFT],
+                None,
+            )
+            .with_raw_filter(project_filter_json.unwrap_or_default()),
         );
         tlog!(
             "CONN",
@@ -1362,16 +1362,19 @@ impl NostrWorker {
         // 1b. Projects where user is a participant (kind:31933) - via p-tag
         let project_filter_participant = Filter::new()
             .kind(Kind::Custom(KIND_PROJECT_DRAFT))
-            .custom_tag(
-                SingleLetterTag::lowercase(Alphabet::P),
-                pubkey.to_hex(),
-            );
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex());
         let project_p_filter_json = serde_json::to_string(&project_filter_participant).ok();
-        let output = client.subscribe(project_filter_participant.clone(), None).await?;
+        let output = client
+            .subscribe(project_filter_participant.clone(), None)
+            .await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects (participant)".to_string(), vec![KIND_PROJECT_DRAFT], None)
-                .with_raw_filter(project_p_filter_json.unwrap_or_default()),
+            SubscriptionInfo::new(
+                "User projects (participant)".to_string(),
+                vec![KIND_PROJECT_DRAFT],
+                None,
+            )
+            .with_raw_filter(project_p_filter_json.unwrap_or_default()),
         );
         tlog!(
             "CONN",
@@ -2592,9 +2595,19 @@ impl NostrWorker {
         self.subscribe_to_project_with_dedup(project_a_tag).await
     }
 
-    async fn handle_publish_profile(&self, name: String, picture_url: Option<String>) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+    async fn handle_publish_profile(
+        &self,
+        name: String,
+        picture_url: Option<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         let mut metadata = Metadata::new().name(name);
         if let Some(url) = picture_url {
@@ -2605,10 +2618,9 @@ impl NostrWorker {
 
         let event = EventBuilder::metadata(&metadata).sign_with_keys(keys)?;
 
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.send_event(&event)
-        ).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), client.send_event(&event))
+            .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Published profile: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to publish profile to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout publishing profile to relay"),

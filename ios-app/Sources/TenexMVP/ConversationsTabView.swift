@@ -676,6 +676,14 @@ private struct ConversationRowFull: View, Equatable {
         Color.conversationStatus(for: conversation.thread.statusLabel, isActive: isHierarchicallyActive)
     }
 
+    private func shouldShowStatusBadge(_ status: String) -> Bool {
+        let normalizedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if conversation.isActive && (normalizedStatus == "waiting" || normalizedStatus == "blocked") {
+            return false
+        }
+        return true
+    }
+
     private var rowContent: some View {
         HStack(spacing: 12) {
             // Status indicator with activity pulse (shows pulse if hierarchically active)
@@ -809,7 +817,7 @@ private struct ConversationRowFull: View, Equatable {
                     }
 
                     // Status badge
-                    if let status = conversation.thread.statusLabel {
+                    if let status = conversation.thread.statusLabel, shouldShowStatusBadge(status) {
                         Text(status)
                             .font(.caption2)
                             .padding(.horizontal, 6)

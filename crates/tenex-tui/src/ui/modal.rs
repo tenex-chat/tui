@@ -697,7 +697,11 @@ impl CreateProjectState {
     }
 
     pub fn toggle_agent(&mut self, agent_id: String) {
-        if let Some(pos) = self.agent_definition_ids.iter().position(|id| id == &agent_id) {
+        if let Some(pos) = self
+            .agent_definition_ids
+            .iter()
+            .position(|id| id == &agent_id)
+        {
             self.agent_definition_ids.remove(pos);
         } else {
             self.agent_definition_ids.push(agent_id);
@@ -917,7 +921,9 @@ impl ProjectSettingsState {
     pub fn remove_agent(&mut self, index: usize) {
         if index < self.pending_agent_definition_ids.len() {
             self.pending_agent_definition_ids.remove(index);
-            if self.selector_index >= self.pending_agent_definition_ids.len() && self.selector_index > 0 {
+            if self.selector_index >= self.pending_agent_definition_ids.len()
+                && self.selector_index > 0
+            {
                 self.selector_index -= 1;
             }
         }

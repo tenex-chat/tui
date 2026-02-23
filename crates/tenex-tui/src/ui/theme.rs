@@ -147,7 +147,6 @@ pub fn text_muted() -> Style {
     Style::default().fg(TEXT_MUTED)
 }
 
-
 // -----------------------------------------------------------------------------
 // Status Styles
 // -----------------------------------------------------------------------------
@@ -163,7 +162,6 @@ pub fn status_warning() -> Style {
 pub fn status_error() -> Style {
     Style::default().fg(ACCENT_ERROR)
 }
-
 
 // -----------------------------------------------------------------------------
 // Tab/Navigation Styles
@@ -182,9 +180,7 @@ pub fn tab_inactive() -> Style {
 
 pub fn tab_unread() -> Style {
     // Unread activity (no mention) - white with bold
-    Style::default()
-        .fg(TEXT_WHITE)
-        .add_modifier(Modifier::BOLD)
+    Style::default().fg(TEXT_WHITE).add_modifier(Modifier::BOLD)
 }
 
 pub fn tab_waiting_for_user() -> Style {
@@ -221,7 +217,6 @@ pub fn todo_skipped() -> Style {
 // -----------------------------------------------------------------------------
 // Project/Agent Styles
 // -----------------------------------------------------------------------------
-
 
 // -----------------------------------------------------------------------------
 // Modal Styles - Consistent command palette / popup modal styling
@@ -284,4 +279,3 @@ pub fn modal_item_shortcut() -> Style {
 pub fn modal_item_shortcut_selected() -> Style {
     Style::default().fg(Color::Black).bg(ACCENT_WARNING)
 }
-

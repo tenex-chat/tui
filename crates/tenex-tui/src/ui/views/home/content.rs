@@ -306,8 +306,11 @@ fn render_card_content(
 
         let total_width = area.width as usize;
         let indent_len = indent.len();
-        let indicator_width = if thread.is_scheduled { " ⏰".width() } else { 0 }
-            + if is_archived { " [arc]".width() } else { 0 }
+        let indicator_width = if thread.is_scheduled {
+            " ⏰".width()
+        } else {
+            0
+        } + if is_archived { " [arc]".width() } else { 0 }
             + if has_draft { " ✎".width() } else { 0 }
             + if spinner_char.is_some() { 2 } else { 0 };
         let title_max = total_width
@@ -329,9 +332,7 @@ fn render_card_content(
         if is_archived {
             line1.push(Span::styled(
                 " [arc]",
-                Style::default()
-                    .fg(agent_color)
-                    .add_modifier(Modifier::DIM),
+                Style::default().fg(agent_color).add_modifier(Modifier::DIM),
             ));
         }
         if has_draft {
@@ -387,9 +388,7 @@ fn render_card_content(
         let collapse_padding = collapse_col_width.saturating_sub(collapse_len);
 
         // Spinner suffix
-        let spinner_suffix = spinner_char
-            .map(|c| format!(" {}", c))
-            .unwrap_or_default();
+        let spinner_suffix = spinner_char.map(|c| format!(" {}", c)).unwrap_or_default();
 
         // Fixed right columns: [Project]  [@Recipient]  [time]
         let project_text = truncate_with_ellipsis(&project_name, RIGHT_PROJECT_W);
@@ -442,10 +441,7 @@ fn render_card_content(
         if has_draft {
             let s = " ✎";
             extras_width += s.width();
-            line1.push(Span::styled(
-                s,
-                Style::default().fg(theme::ACCENT_WARNING),
-            ));
+            line1.push(Span::styled(s, Style::default().fg(theme::ACCENT_WARNING)));
         }
         if !spinner_suffix.is_empty() {
             extras_width += spinner_suffix.width();
@@ -466,7 +462,10 @@ fn render_card_content(
             Style::default().fg(theme::project_color(a_tag)),
         ));
         line1.push(Span::styled("  ", Style::default()));
-        line1.push(Span::styled(recip_col, Style::default().fg(theme::TEXT_DIM)));
+        line1.push(Span::styled(
+            recip_col,
+            Style::default().fg(theme::TEXT_DIM),
+        ));
         line1.push(Span::styled("  ", Style::default()));
         line1.push(Span::styled(
             time_col,
@@ -503,10 +502,7 @@ fn render_card_content(
                         summary_line.push(Span::styled("● ", dot_style));
                     }
                 } else {
-                    summary_line.push(Span::styled(
-                        " ".repeat(summary_indent),
-                        Style::default(),
-                    ));
+                    summary_line.push(Span::styled(" ".repeat(summary_indent), Style::default()));
                 }
                 summary_line.push(Span::styled(
                     line_text.clone(),

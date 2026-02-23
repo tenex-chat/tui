@@ -153,7 +153,9 @@ pub fn build_thread_hierarchy(
                 .parent_conversation_id
                 .as_deref()
                 .or_else(|| q_tag_child_to_parent.get(t.id.as_str()).copied());
-            !parent_id.map(|pid| thread_ids.contains(pid)).unwrap_or(false)
+            !parent_id
+                .map(|pid| thread_ids.contains(pid))
+                .unwrap_or(false)
         })
         .map(|(t, a)| (t, a))
         .collect();

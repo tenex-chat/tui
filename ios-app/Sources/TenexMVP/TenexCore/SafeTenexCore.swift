@@ -260,6 +260,14 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Get raw Nostr event JSON for an event ID.
+    /// Note: Internal `try!` in FFI - can crash on error.
+    func getRawEventJson(eventId: String) -> String? {
+        profiler.measureFFI("getRawEventJson") {
+            core.getRawEventJson(eventId: eventId)
+        }
+    }
+
     /// Resolve ask-event details for an event ID (used by q-tag inline rendering).
     /// Note: Internal `try!` in FFI - can crash on error.
     func getAskEventById(eventId: String) -> AskEventLookupInfo? {

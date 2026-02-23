@@ -71,7 +71,6 @@ impl SelectorState {
         self.index = 0;
         self.scroll_offset = 0;
     }
-
 }
 
 /// Result of handling a key in selector mode

@@ -196,7 +196,10 @@ fn render_single_pane_layout(
 
     // Show pane indicator at the top
     let indicator_text = if agents_focused {
-        format!("◀ Agents ({}) ▶ Tools", state.pending_agent_definition_ids.len())
+        format!(
+            "◀ Agents ({}) ▶ Tools",
+            state.pending_agent_definition_ids.len()
+        )
     } else {
         format!("◀ Agents   ▶ Tools ({})", state.pending_mcp_tool_ids.len())
     };

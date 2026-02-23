@@ -52,7 +52,6 @@ const WAVE_WAVELENGTH: f32 = 0.8;
 /// Wave period - used in the sine wave calculation
 const WAVE_PERIOD: f32 = 12.0;
 
-
 /// Format the full runtime label string (e.g., "Today: 05:32 ")
 fn format_today_label(cumulative_runtime_ms: u64) -> String {
     format!("{}{} ", TODAY_LABEL, format_runtime(cumulative_runtime_ms))

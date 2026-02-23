@@ -22,6 +22,8 @@ struct SlackMessageRow: View, Equatable {
 
     /// Callback when a delegation card is tapped
     var onDelegationTap: ((String) -> Void)?
+    /// Callback to inspect the backing raw Nostr event for this message.
+    var onViewRawEvent: ((String) -> Void)?
 
     static func == (lhs: SlackMessageRow, rhs: SlackMessageRow) -> Bool {
         lhs.message == rhs.message &&
@@ -35,6 +37,7 @@ struct SlackMessageRow: View, Equatable {
     /// State for expanded/collapsed content
     @State private var isExpanded = false
     @State private var contentHeight: CGFloat = 0
+    @State private var isHovered = false
 
     /// Avatar size
     private let avatarSize: CGFloat = 20
@@ -157,6 +160,30 @@ struct SlackMessageRow: View, Equatable {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, isConsecutive ? 5 : 14)
+        .overlay(alignment: .topTrailing) {
+            #if os(macOS)
+            if let onViewRawEvent {
+                messageActionsMenu(onViewRawEvent: onViewRawEvent)
+                    .padding(.top, shouldShowHeader ? 0 : 2)
+                    .opacity(isHovered ? 1.0 : 0.32)
+                    .animation(.easeInOut(duration: 0.14), value: isHovered)
+            }
+            #endif
+        }
+        #if os(macOS)
+        .onHover { isHovering in
+            isHovered = isHovering
+        }
+        #endif
+        .contextMenu {
+            if let onViewRawEvent {
+                Button {
+                    onViewRawEvent(message.id)
+                } label: {
+                    Label("View Raw Event", systemImage: "doc.text.magnifyingglass")
+                }
+            }
+        }
         #if os(macOS)
         // Large transcripts can trigger expensive accessibility tree traversals on every host update.
         // Keep a compact per-row accessibility representation to avoid deep subtree recomputation.
@@ -258,6 +285,28 @@ struct SlackMessageRow: View, Equatable {
     // MARK: - Helpers
 
     #if os(macOS)
+    @ViewBuilder
+    private func messageActionsMenu(onViewRawEvent: @escaping (String) -> Void) -> some View {
+        Menu {
+            Button {
+                onViewRawEvent(message.id)
+            } label: {
+                Label("View Raw Event", systemImage: "doc.text.magnifyingglass")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+    }
+    #endif
+
+    #if os(macOS)
     private var accessibilitySummary: String {
         var parts: [String] = []
         if !message.pubkey.isEmpty {
@@ -356,7 +405,8 @@ private struct QTagReferenceRow: View {
             conversationId: "test",
             projectId: "test",
             authorDisplayName: "Test Agent",
-            directedRecipientsText: ""
+            directedRecipientsText: "",
+            onViewRawEvent: nil
         )
 
         SlackMessageRow(
@@ -382,7 +432,8 @@ private struct QTagReferenceRow: View {
             conversationId: "test",
             projectId: "test",
             authorDisplayName: "Test Agent",
-            directedRecipientsText: ""
+            directedRecipientsText: "",
+            onViewRawEvent: nil
         )
     }
     .padding()

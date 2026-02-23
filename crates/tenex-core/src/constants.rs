@@ -23,7 +23,7 @@ pub const DEFAULT_NUDGE_TITLE: &str = "Untitled";
 pub const DEFAULT_SKILL_TITLE: &str = "Untitled";
 
 /// Staleness threshold in seconds - status older than this is considered offline
-pub const STALENESS_THRESHOLD_SECS: u64 = 5 * 60; // 5 minutes
+pub const STALENESS_THRESHOLD_SECS: u64 = 45; // 45 seconds
 
 // Inbox filtering constants
 /// Hard cap for inbox items: 48 hours in seconds (48 * 60 * 60 = 172,800).
