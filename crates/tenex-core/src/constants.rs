@@ -79,4 +79,6 @@ pub mod kinds {
     pub const TEAM_PACK: u16 = 34199;
     /// Blossom upload authorization
     pub const BLOSSOM_AUTH: u16 = 24242;
+    /// Push notification registration (APNs/FCM device token)
+    pub const PUSH_NOTIFICATION_REGISTRATION: u16 = 25000;
 }

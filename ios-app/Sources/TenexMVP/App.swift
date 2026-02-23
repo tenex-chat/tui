@@ -18,6 +18,13 @@ import SwiftUI
 
 @main
 struct TenexMVPApp: App {
+    #if os(iOS)
+    /// Connects the UIApplicationDelegate for APNs token handling and background
+    /// remote notification delivery.  Must be declared before other stored properties
+    /// so it is initialized by the time the SwiftUI lifecycle fires.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    #endif
+
     @State private var coreManager = TenexCoreManager()
     @StateObject private var sessionStore = AppSessionStore()
     private let notificationScheduler: NotificationScheduling = NotificationService.shared
