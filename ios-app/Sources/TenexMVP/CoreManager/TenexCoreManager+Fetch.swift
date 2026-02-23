@@ -31,8 +31,10 @@ extension TenexCoreManager {
             async let fetchedProjects = safeCore.getProjects()
             async let fetchedConversations = try fetchConversations(for: filterSnapshot)
             async let fetchedInbox = safeCore.getInbox()
+            async let fetchedBookmarkedIds = try? safeCore.getBookmarkedIds()
 
             let (p, c, i) = try await (fetchedProjects, fetchedConversations, fetchedInbox)
+            let bIds = await fetchedBookmarkedIds
             let loadMs = (CFAbsoluteTimeGetCurrent() - loadStartedAt) * 1000
             profiler.logEvent(
                 "fetchData concurrent loads projects=\(p.count) conversations=\(c.count) inbox=\(i.count) elapsedMs=\(String(format: "%.2f", loadMs))",
@@ -53,6 +55,7 @@ extension TenexCoreManager {
                 }
             )
             inboxItems = i
+            bookmarkedIds = Set(bIds ?? [])
 
             let validProjectIds = Set(p.map(\.id))
             let prunedProjectIds = appFilterProjectIds.intersection(validProjectIds)

@@ -406,12 +406,18 @@ struct MessageComposerView: View {
                 skills: availableSkills,
                 selectedNudgeIds: $draft.selectedNudgeIds,
                 selectedSkillIds: $draft.selectedSkillIds,
+                bookmarkedIds: coreManager.bookmarkedIds,
                 initialMode: nudgeSkillSelectorInitialMode,
                 initialSearchQuery: nudgeSkillSelectorInitialQuery,
                 onDone: {
                     isDirty = true // Mark as dirty when user selects nudges/skills
                     persistSelectedNudgeIds()
                     persistSelectedSkillIds()
+                },
+                onToggleBookmark: { itemId in
+                    Task {
+                        _ = try? await coreManager.safeCore.toggleBookmark(itemId: itemId)
+                    }
                 }
             )
         }

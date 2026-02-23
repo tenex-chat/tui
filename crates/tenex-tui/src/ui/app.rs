@@ -1642,6 +1642,9 @@ impl App {
                 DataChange::BunkerSignRequest { .. } => {
                     // Bunker signing requests not yet handled in TUI
                 }
+                DataChange::BookmarkListChanged { bookmarked_ids: _ } => {
+                    // Bookmarks are already updated in the store by the worker
+                }
             }
         }
         Ok(())
@@ -3435,8 +3438,9 @@ impl App {
     // ===== Unified Nudge/Skill Selector Methods =====
 
     /// Open the unified nudge/skill selector modal.
+    /// Defaults to BookmarkedOnly filter so users see their curated list first.
     pub fn open_nudge_skill_selector(&mut self) {
-        use crate::ui::modal::NudgeSkillSelectorState;
+        use crate::ui::modal::{BookmarkFilter, NudgeSkillSelectorState};
         use crate::ui::selector::SelectorState;
 
         let current_nudges = self
@@ -3454,19 +3458,49 @@ impl App {
             selector: SelectorState::new(),
             selected_nudge_ids: current_nudges,
             selected_skill_ids: current_skills,
+            bookmark_filter: BookmarkFilter::BookmarkedOnly,
         });
     }
 
     /// Get filtered items for the unified selector.
+    ///
+    /// Applies both the text search filter and the bookmark filter:
+    /// - In `BookmarkedOnly` mode, only items whose IDs are in the user's bookmark list are shown.
+    /// - In `All` mode, all items are shown (text search still applies).
     pub fn filtered_nudge_skill_items(&self) -> Vec<NudgeSkillSelectorItem> {
+        use crate::ui::modal::BookmarkFilter;
+
         let filter = self.nudge_skill_selector_filter();
+        let bookmark_filter = self.nudge_skill_bookmark_filter();
         let store = self.data_store.borrow();
+
+        // Get the user's bookmarked IDs for filtering (if in BookmarkedOnly mode)
+        let bookmarked_ids: Option<std::collections::HashSet<&str>> =
+            if bookmark_filter == BookmarkFilter::BookmarkedOnly {
+                let user_pubkey = store.user_pubkey.as_deref().unwrap_or("");
+                let ids = store
+                    .get_bookmarks(user_pubkey)
+                    .map(|bl| bl.bookmarked_ids.iter().map(|s| s.as_str()).collect())
+                    .unwrap_or_default();
+                Some(ids)
+            } else {
+                None
+            };
 
         let mut items: Vec<NudgeSkillSelectorItem> = store
             .content
             .get_nudges()
             .into_iter()
-            .filter(|n| fuzzy_matches(&n.title, filter) || fuzzy_matches(&n.description, filter))
+            .filter(|n| {
+                // Apply bookmark filter
+                if let Some(ref ids) = bookmarked_ids {
+                    if !ids.contains(n.id.as_str()) {
+                        return false;
+                    }
+                }
+                // Apply text search filter
+                fuzzy_matches(&n.title, filter) || fuzzy_matches(&n.description, filter)
+            })
             .cloned()
             .map(NudgeSkillSelectorItem::Nudge)
             .collect();
@@ -3477,6 +3511,13 @@ impl App {
                 .get_skills()
                 .into_iter()
                 .filter(|s| {
+                    // Apply bookmark filter
+                    if let Some(ref ids) = bookmarked_ids {
+                        if !ids.contains(s.id.as_str()) {
+                            return false;
+                        }
+                    }
+                    // Apply text search filter
                     fuzzy_matches(&s.title, filter) || fuzzy_matches(&s.description, filter)
                 })
                 .cloned()
@@ -3499,6 +3540,21 @@ impl App {
             ModalState::NudgeSkillSelector(state) => &state.selector.filter,
             _ => "",
         }
+    }
+
+    /// Get the current bookmark filter mode for the nudge/skill selector.
+    pub fn nudge_skill_bookmark_filter(&self) -> crate::ui::modal::BookmarkFilter {
+        match &self.modal_state {
+            ModalState::NudgeSkillSelector(state) => state.bookmark_filter.clone(),
+            _ => crate::ui::modal::BookmarkFilter::All,
+        }
+    }
+
+    /// Check if a nudge or skill ID is bookmarked by the current user.
+    pub fn is_bookmarked(&self, item_id: &str) -> bool {
+        let store = self.data_store.borrow();
+        let user_pubkey = store.user_pubkey.as_deref().unwrap_or("");
+        store.is_bookmarked(user_pubkey, item_id)
     }
 
     // ===== History Search Methods (Ctrl+R) =====

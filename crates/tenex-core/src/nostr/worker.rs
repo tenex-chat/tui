@@ -35,6 +35,7 @@ const KIND_AGENT: u16 = 4199;
 const KIND_MCP_TOOL: u16 = 4200;
 const KIND_NUDGE: u16 = 4201;
 const KIND_SKILL: u16 = 4202;
+const KIND_BOOKMARK_LIST: u16 = 14202;
 const KIND_PROJECT_STATUS: u16 = 24010;
 const KIND_PROJECT_DRAFT: u16 = 31933;
 const KIND_TEAM_PACK: u16 = 34199;
@@ -483,6 +484,12 @@ pub enum NostrCommand {
     DeleteNudge {
         nudge_id: String,
     },
+    /// Publish or update the user's bookmark list (kind:14202 replaceable event).
+    /// The full list is published each time (not incremental) since it is replaceable.
+    /// Empty vec clears the bookmark list.
+    PublishBookmarkList {
+        bookmarked_ids: Vec<String>,
+    },
     /// React to a team pack (kind:7 NIP-25).
     ReactToTeam {
         team_coordinate: String,
@@ -584,6 +591,8 @@ pub enum DataChange {
     BunkerSignRequest {
         request: super::bunker::BunkerSignRequest,
     },
+    /// Bookmark list was published (kind:14202) - optimistic update notification
+    BookmarkListChanged { bookmarked_ids: Vec<String> },
 }
 
 pub struct NostrWorker {
@@ -1002,6 +1011,21 @@ impl NostrWorker {
                         if let Err(e) = rt.block_on(self.handle_delete_nudge(nudge_id)) {
                             tlog!("ERROR", "Failed to delete nudge: {}", e);
                         }
+                    }
+                    NostrCommand::PublishBookmarkList { bookmarked_ids } => {
+                        debug_log(&format!(
+                            "Worker: Publishing bookmark list ({} items)",
+                            bookmarked_ids.len()
+                        ));
+                        if let Err(e) =
+                            rt.block_on(self.handle_publish_bookmark_list(bookmarked_ids.clone()))
+                        {
+                            tlog!("ERROR", "Failed to publish bookmark list: {}", e);
+                        }
+                        // Notify via DataChange so the FFI callback notifies the UI layer.
+                        let _ = self.data_tx.send(DataChange::BookmarkListChanged {
+                            bookmarked_ids,
+                        });
                     }
                     NostrCommand::ReactToTeam {
                         team_coordinate,
@@ -1460,6 +1484,27 @@ impl NostrWorker {
             "Subscribed to status events (kind:{}, kind:{})",
             KIND_PROJECT_STATUS,
             KIND_AGENT_STATUS
+        );
+
+        // 2c. User's bookmark list (kind:14202) - authored by current user
+        let bookmark_filter = Filter::new()
+            .kind(Kind::Custom(KIND_BOOKMARK_LIST))
+            .author(pubkey);
+        let bookmark_filter_json = serde_json::to_string(&bookmark_filter).ok();
+        let output = client.subscribe(bookmark_filter.clone(), None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new(
+                "User bookmark list".to_string(),
+                vec![KIND_BOOKMARK_LIST],
+                None,
+            )
+            .with_raw_filter(bookmark_filter_json.unwrap_or_default()),
+        );
+        tlog!(
+            "CONN",
+            "Subscribed to bookmark list (kind:{}) - authored by user",
+            KIND_BOOKMARK_LIST
         );
 
         // 3. Global definitions/social (kind:34199, 4199, 4200, 4201, 4202, 1111, 7)
@@ -2979,6 +3024,56 @@ impl NostrWorker {
             Err(_) => tlog!(
                 "ERROR",
                 "Timeout sending updated nudge to relay (saved locally)"
+            ),
+        }
+
+        Ok(())
+    }
+
+    /// Publish the user's bookmark list as a kind:14202 replaceable event.
+    ///
+    /// Each bookmarked nudge/skill ID becomes an `["e", "<id>"]` tag.
+    /// Publishing replaces any previous bookmark list from the same author.
+    async fn handle_publish_bookmark_list(&self, bookmarked_ids: Vec<String>) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Build kind:14202 event with empty content and ["e", "<id>"] tags
+        let mut event = EventBuilder::new(Kind::Custom(14202), "");
+
+        for id in &bookmarked_ids {
+            let event_id = EventId::parse(id)
+                .map_err(|e| anyhow::anyhow!("Invalid bookmark event ID '{}': {}", id, e))?;
+            event = event.tag(Tag::event(event_id));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally so the nostrdb subscription stream fires and AppDataStore updates
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+
+        // Publish to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => debug_log(&format!(
+                "Published bookmark list ({} items): {}",
+                bookmarked_ids.len(),
+                output.id()
+            )),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send bookmark list to relay: {}", e),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending bookmark list to relay (saved locally)"
             ),
         }
 

@@ -92,6 +92,11 @@ protocol SafeTenexCoreProtocol: Actor {
     func getNudges() throws -> [Nudge]
     func getSkills() throws -> [Skill]
 
+    // MARK: - Bookmarks (kind:14202)
+    func isBookmarked(itemId: String) -> Bool
+    func getBookmarkedIds() throws -> [String]
+    func toggleBookmark(itemId: String) throws -> [String]
+
 
     // MARK: - Backend Trust
     func setTrustedBackends(approved: [String], blocked: [String]) throws

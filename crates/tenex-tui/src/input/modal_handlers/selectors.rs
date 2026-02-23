@@ -1,5 +1,7 @@
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tenex_core::models::BookmarkList;
+use tenex_core::nostr::NostrCommand;
 
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::{App, ModalState, View};
@@ -229,6 +231,76 @@ pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
             KeyCode::Down => {
                 if item_count > 0 && state.selector.index < item_count - 1 {
                     state.selector.index += 1;
+                }
+            }
+            KeyCode::Tab => {
+                // Toggle between BookmarkedOnly and All filter modes
+                let new_filter = state.bookmark_filter.toggle();
+                state.bookmark_filter = new_filter;
+                // Reset index when filter changes to avoid out-of-bounds
+                state.selector.index = 0;
+            }
+            KeyCode::Char('b') if key.modifiers == KeyModifiers::NONE => {
+                // Toggle bookmark for the currently highlighted item
+                if let Some(item) = items.get(state.selector.index) {
+                    let item_id = item.id().to_string();
+
+                    // Get the current user's pubkey
+                    let user_pubkey = {
+                        let store = app.data_store.borrow();
+                        store.user_pubkey.clone().unwrap_or_default()
+                    };
+
+                    if user_pubkey.is_empty() {
+                        return;
+                    }
+
+                    // Skip the bookmark toggle if there is no core handle to publish with.
+                    // Applying an optimistic update without being able to persist it would
+                    // cause UI state to diverge from the relay and reset on next reload.
+                    let Some(ref core_handle) = app.core_handle else {
+                        return;
+                    };
+
+                    // Compute the new bookmark set.
+                    let updated_bookmark_list = {
+                        let store = app.data_store.borrow();
+                        let existing = store.get_bookmarks(&user_pubkey).cloned();
+
+                        let mut bookmarked_ids: std::collections::HashSet<String> = existing
+                            .map(|bl| bl.bookmarked_ids.clone())
+                            .unwrap_or_default();
+
+                        if bookmarked_ids.contains(&item_id) {
+                            bookmarked_ids.remove(&item_id);
+                        } else {
+                            bookmarked_ids.insert(item_id.clone());
+                        }
+
+                        BookmarkList {
+                            pubkey: user_pubkey.clone(),
+                            bookmarked_ids,
+                            last_updated: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64,
+                        }
+                    };
+
+                    // Publish first; apply the optimistic update only on success so
+                    // that UI state never diverges from what the relay will persist.
+                    let bookmarked_ids_vec: Vec<String> =
+                        updated_bookmark_list.bookmarked_ids.iter().cloned().collect();
+                    if core_handle
+                        .send(NostrCommand::PublishBookmarkList {
+                            bookmarked_ids: bookmarked_ids_vec,
+                        })
+                        .is_ok()
+                    {
+                        app.data_store
+                            .borrow_mut()
+                            .set_bookmarks(&user_pubkey, updated_bookmark_list);
+                    }
                 }
             }
             KeyCode::Char(' ') => {
