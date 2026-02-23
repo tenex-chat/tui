@@ -23,6 +23,7 @@ struct AgentDefinitionsTabView: View {
     @State private var navigationPath: [AgentDefinitionListItem] = []
     @State private var assignmentTarget: AgentDefinitionListItem?
     @State private var assignmentResult: AgentAssignmentResult?
+    @State private var teamCreationTarget: AgentDefinitionListItem?
     @State private var showNewAgentDefinitionModal = false
 
     init(
@@ -58,6 +59,12 @@ struct AgentDefinitionsTabView: View {
         }
         .sheet(item: $assignmentTarget) { item in
             AgentDefinitionProjectAssignmentSheet(item: item) { result in
+                assignmentResult = result
+            }
+            .environment(coreManager)
+        }
+        .sheet(item: $teamCreationTarget) { item in
+            AgentDefinitionTeamCreationSheet(item: item) { result in
                 assignmentResult = result
             }
             .environment(coreManager)
@@ -115,6 +122,9 @@ struct AgentDefinitionsTabView: View {
                         canDelete: viewModel.canDelete(item),
                         onAssign: {
                             presentAssignmentSheet(for: item)
+                        },
+                        onCreateTeam: {
+                            presentTeamCreationSheet(for: item)
                         },
                         onDelete: {
                             let deleted = await viewModel.deleteAgentDefinition(id: item.id)
@@ -235,6 +245,12 @@ struct AgentDefinitionsTabView: View {
                         } label: {
                             Label("Add to Projects", systemImage: "plus")
                         }
+
+                        Button {
+                            presentTeamCreationSheet(for: item)
+                        } label: {
+                            Label("Create Team", systemImage: "person.3")
+                        }
                     }
                 }
             }
@@ -253,6 +269,18 @@ struct AgentDefinitionsTabView: View {
         assignmentTarget = item
     }
 
+    private func presentTeamCreationSheet(for item: AgentDefinitionListItem) {
+        if teamCreationTarget?.id == item.id {
+            teamCreationTarget = nil
+            DispatchQueue.main.async {
+                teamCreationTarget = item
+            }
+            return
+        }
+
+        teamCreationTarget = item
+    }
+
     private var emptyState: some View {
         ContentUnavailableView(
             "No Agent Definitions",
@@ -269,6 +297,7 @@ private struct AgentDefinitionDetailView: View {
     let item: AgentDefinitionListItem
     let canDelete: Bool
     let onAssign: () -> Void
+    let onCreateTeam: () -> Void
     let onDelete: () async -> Bool
 
     @State private var showDeleteConfirmation = false
@@ -365,8 +394,14 @@ private struct AgentDefinitionDetailView: View {
                 Button(action: onAssign) {
                     Label("Add to Projects", systemImage: "plus")
                 }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Add to Projects")
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Add to Projects")
+
+                Button(action: onCreateTeam) {
+                    Label("Create Team", systemImage: "person.3")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Create Team")
 
                 if canDelete {
                     Button(role: .destructive) {
@@ -740,6 +775,151 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
 
         onFinished(result)
         dismiss()
+    }
+}
+
+private struct AgentDefinitionTeamCreationSheet: View {
+    @Environment(TenexCoreManager.self) private var coreManager
+    @Environment(\.dismiss) private var dismiss
+
+    let item: AgentDefinitionListItem
+    let onFinished: (AgentAssignmentResult) -> Void
+
+    @State private var teamName: String = ""
+    @State private var teamDescription: String = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var showError = false
+
+    private var displayName: String {
+        let trimmed = item.agent.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Unnamed Agent" : trimmed
+    }
+
+    private var defaultTeamName: String {
+        let base = item.agent.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return base.isEmpty ? "New Team" : "\(base) Team"
+    }
+
+    private var trimmedTeamName: String {
+        teamName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedDescription: String {
+        teamDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Team") {
+                    TextField("Name", text: $teamName)
+#if os(iOS)
+                        .textInputAutocapitalization(.words)
+#endif
+
+                    TextField("Description", text: $teamDescription, axis: .vertical)
+                        .lineLimit(3...8)
+                }
+
+                Section("Includes Agent") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(displayName)
+                            .font(.body.weight(.medium))
+                        if !item.agent.description.isEmpty {
+                            Text(item.agent.description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Text(item.agent.id)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            #if os(iOS)
+            .listStyle(.insetGrouped)
+            #else
+            .listStyle(.inset)
+            #endif
+            .navigationTitle("Create Team")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .disabled(isSaving)
+                }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await createTeam() }
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text("Create")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(trimmedTeamName.isEmpty || isSaving)
+                }
+            }
+            .alert("Unable to Create Team", isPresented: $showError) {
+                Button("OK") {
+                    errorMessage = nil
+                }
+            } message: {
+                Text(errorMessage ?? "Unknown error")
+            }
+        }
+        .onAppear {
+            if teamName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                teamName = defaultTeamName
+            }
+        }
+        #if os(iOS)
+        .tenexModalPresentation(detents: [.medium, .large])
+        #else
+        .frame(minWidth: 520, idealWidth: 620, minHeight: 380, idealHeight: 480)
+        #endif
+    }
+
+    @MainActor
+    private func createTeam() async {
+        guard !trimmedTeamName.isEmpty else { return }
+
+        isSaving = true
+        defer { isSaving = false }
+
+        do {
+            try await coreManager.safeCore.createProject(
+                name: trimmedTeamName,
+                description: trimmedDescription,
+                agentDefinitionIds: [item.agent.id],
+                mcpToolIds: item.agent.mcpServers
+            )
+
+            await coreManager.fetchData()
+
+            onFinished(
+                AgentAssignmentResult(
+                    title: "Team Created",
+                    message: "Created \(trimmedTeamName) with \(displayName)."
+                )
+            )
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+        }
     }
 }
 
