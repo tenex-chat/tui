@@ -1,4 +1,5 @@
 pub mod agent_definition;
+pub mod bookmark;
 pub mod conversation_metadata;
 pub mod draft;
 pub mod inbox;
@@ -18,6 +19,7 @@ pub mod thread;
 pub mod time_filter;
 
 pub use agent_definition::AgentDefinition;
+pub use bookmark::BookmarkList;
 pub use conversation_metadata::ConversationMetadata;
 pub use draft::{
     ChatDraft, DraftImageAttachment, DraftPasteAttachment, DraftStorage, DraftStorageError,

@@ -480,6 +480,13 @@ extension TenexCoreManager {
         bumpDiagnosticsVersion()
     }
 
+    // MARK: - Bookmarks (kind:14202)
+
+    @MainActor
+    func applyBookmarkListChanged(bookmarkedIds: [String]) {
+        self.bookmarkedIds = Set(bookmarkedIds)
+    }
+
     // MARK: - Bunker (NIP-46)
 
     @MainActor

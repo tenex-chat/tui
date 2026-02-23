@@ -506,12 +506,41 @@ pub struct AskModalState {
     pub ask_author_pubkey: String,
 }
 
+/// Filter mode for the nudge/skill selector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BookmarkFilter {
+    /// Show only bookmarked items (default when opened from compose area).
+    BookmarkedOnly,
+    /// Show all items regardless of bookmark status.
+    All,
+}
+
+impl BookmarkFilter {
+    /// Toggle between BookmarkedOnly and All.
+    pub fn toggle(&self) -> Self {
+        match self {
+            BookmarkFilter::BookmarkedOnly => BookmarkFilter::All,
+            BookmarkFilter::All => BookmarkFilter::BookmarkedOnly,
+        }
+    }
+
+    /// Short display label for the selector header.
+    pub fn label(&self) -> &'static str {
+        match self {
+            BookmarkFilter::BookmarkedOnly => "★ Bookmarked",
+            BookmarkFilter::All => "All",
+        }
+    }
+}
+
 /// State for unified nudge/skill selector modal (multi-select for messages)
 #[derive(Debug, Clone)]
 pub struct NudgeSkillSelectorState {
     pub selector: SelectorState,
     pub selected_nudge_ids: Vec<String>, // Multi-select
     pub selected_skill_ids: Vec<String>, // Multi-select
+    /// Whether to show only bookmarked items or all items.
+    pub bookmark_filter: BookmarkFilter,
 }
 
 /// State for nudge list view (browse/manage nudges)

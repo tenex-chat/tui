@@ -400,6 +400,37 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    // MARK: - Bookmarks (kind:14202)
+
+    /// Check if a nudge or skill is bookmarked by the current user.
+    func isBookmarked(itemId: String) -> Bool {
+        profiler.measureFFI("isBookmarked") {
+            core.isBookmarked(itemId: itemId)
+        }
+    }
+
+    /// Get all bookmarked nudge/skill IDs for the current user.
+    func getBookmarkedIds() throws -> [String] {
+        try profiler.measureFFI("getBookmarkedIds") {
+            do {
+                return try core.getBookmarkedIds()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Toggle bookmark status for a nudge or skill.
+    /// Returns the updated list of bookmarked IDs.
+    func toggleBookmark(itemId: String) throws -> [String] {
+        try profiler.measureFFI("toggleBookmark") {
+            do {
+                return try core.toggleBookmark(itemId: itemId)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
 
     /// Get available configuration options for a project.
     /// Returns all available models and tools from the project status.
