@@ -226,7 +226,7 @@ fn render_card_content(
     app: &App,
     thread: &Thread,
     a_tag: &str,
-    _parent_a_tag: Option<&str>,
+    parent_a_tag: Option<&str>,
     is_selected: bool,
     is_multi_selected: bool,
     _next_is_selected: bool,
@@ -286,7 +286,15 @@ fn render_card_content(
             Style::default().fg(title_color)
         };
 
-        // Fixed right columns: [project_blank]  [@recipient]  [time]
+        // Fixed right columns: [project?]  [@recipient]  [time]
+        // Show project name only when this delegation crosses into a different project.
+        let cross_project = parent_a_tag.map_or(true, |p| p != a_tag);
+        let project_text = if cross_project {
+            truncate_with_ellipsis(&project_name, RIGHT_PROJECT_W)
+        } else {
+            String::new()
+        };
+
         let recip_text = if let Some((name, _)) = first_recipient.as_ref() {
             format!("@{}", truncate_with_ellipsis(name, RIGHT_RECIP_W - 1))
         } else {
@@ -294,7 +302,7 @@ fn render_card_content(
         };
         let time_text = truncate_with_ellipsis(&time_str, RIGHT_TIME_W);
 
-        let project_col = format!("{:<w$}", "", w = RIGHT_PROJECT_W);
+        let project_col = format!("{:<w$}", project_text, w = RIGHT_PROJECT_W);
         let recip_col = format!("{:<w$}", recip_text, w = RIGHT_RECIP_W);
         let time_col = format!("{:>w$}", time_text, w = RIGHT_TIME_W);
 
@@ -355,7 +363,10 @@ fn render_card_content(
         }
         line1.push(Span::styled(" ".repeat(filler), Style::default()));
         line1.push(Span::styled("  ", Style::default()));
-        line1.push(Span::styled(project_col, Style::default()));
+        line1.push(Span::styled(
+            project_col,
+            Style::default().fg(theme::project_color(a_tag)),
+        ));
         line1.push(Span::styled("  ", Style::default()));
         line1.push(Span::styled(recip_col, Style::default().fg(agent_color)));
         line1.push(Span::styled("  ", Style::default()));
