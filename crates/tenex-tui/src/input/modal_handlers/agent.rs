@@ -275,11 +275,9 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        KeyCode::Char('a') => {
-            if state.focus == AgentConfigFocus::Tools {
-                if let Some(settings) = state.settings.as_mut() {
-                    settings.toggle_group_all();
-                }
+        KeyCode::Char('a') if state.focus == AgentConfigFocus::Tools => {
+            if let Some(settings) = state.settings.as_mut() {
+                settings.toggle_group_all();
             }
         }
         // Ctrl+G: toggle save scope (project vs global)
