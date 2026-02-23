@@ -47,8 +47,8 @@ class DiagnosticsViewModel: ObservableObject {
                     await loadDiagnostics(includeDatabaseStats: true)
                 }
             }
-            // Lazy load bunker audit log when user navigates to Bunker tab
-            if selectedTab == .bunker && bunkerAuditLog.isEmpty {
+            // Load bunker audit log whenever user navigates to the Bunker tab.
+            if selectedTab == .bunker {
                 Task {
                     await loadBunkerAuditLog()
                 }
@@ -188,6 +188,16 @@ class DiagnosticsViewModel: ObservableObject {
             self.bunkerAuditLog = entries
         } catch {
             // Silently fail - empty log is fine
+        }
+    }
+
+    /// Handle Diagnostics-version bumps from the core.
+    /// When Bunker is active we refresh bunker audit log directly; other tabs refresh diagnostics snapshot.
+    func handleDiagnosticsVersionUpdate() async {
+        if selectedTab == .bunker {
+            await loadBunkerAuditLog()
+        } else {
+            await loadDiagnostics()
         }
     }
 
