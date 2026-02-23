@@ -554,6 +554,14 @@ pub enum NostrCommand {
     GetBunkerAutoApproveRules {
         response_tx: Sender<Vec<super::bunker::BunkerAutoApproveRule>>,
     },
+    /// Register APNs device token for push notifications (kind:25000)
+    /// Publishes a NIP-44 encrypted event to the backend with device token info.
+    RegisterApnsToken {
+        device_token: String,
+        enable: bool,
+        backend_pubkey: String,
+        device_id: String,
+    },
     Shutdown,
 }
 
@@ -1181,6 +1189,26 @@ impl NostrWorker {
                             .map(|s| s.auto_approve_rules())
                             .unwrap_or_default();
                         let _ = response_tx.send(rules);
+                    }
+                    NostrCommand::RegisterApnsToken {
+                        device_token,
+                        enable,
+                        backend_pubkey,
+                        device_id,
+                    } => {
+                        tlog!(
+                            "PUSH",
+                            "Worker: Registering APNs token (enable={})",
+                            enable
+                        );
+                        if let Err(e) = rt.block_on(self.handle_register_apns_token(
+                            device_token,
+                            enable,
+                            backend_pubkey,
+                            device_id,
+                        )) {
+                            tlog!("ERROR", "Failed to register APNs token: {}", e);
+                        }
                     }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
@@ -1967,6 +1995,78 @@ impl NostrWorker {
             Ok(Ok(output)) => debug_log(&format!("Sent boot request: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send boot request to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout sending boot request to relay"),
+        }
+
+        Ok(())
+    }
+
+    /// Publish a kind:25000 push notification registration event.
+    ///
+    /// The payload is NIP-44 encrypted to the backend's public key so only the
+    /// backend can decrypt the device token.  The event carries:
+    /// - `p` tag pointing to the backend pubkey (for relay routing)
+    /// - Encrypted content containing `{ "notifications": { "enable": <bool>,
+    ///   "apn_token": "<hex>", "device_id": "<uuid>" } }`
+    async fn handle_register_apns_token(
+        &self,
+        device_token: String,
+        enable: bool,
+        backend_pubkey: String,
+        device_id: String,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client - not connected"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys - not logged in"))?;
+
+        // Parse the backend public key
+        let backend_pk = PublicKey::parse(&backend_pubkey)
+            .map_err(|e| anyhow::anyhow!("Invalid backend pubkey '{}': {}", &backend_pubkey[..8.min(backend_pubkey.len())], e))?;
+
+        // Build JSON payload
+        let payload = serde_json::json!({
+            "notifications": {
+                "enable": enable,
+                "apn_token": device_token,
+                "device_id": device_id
+            }
+        });
+        let payload_str = serde_json::to_string(&payload)?;
+
+        // NIP-44 encrypt to the backend's pubkey
+        let encrypted = nip44::encrypt(
+            keys.secret_key(),
+            &backend_pk,
+            &payload_str,
+            nip44::Version::default(),
+        )
+        .map_err(|e| anyhow::anyhow!("NIP-44 encryption failed: {}", e))?;
+
+        // Build kind:25000 event with p-tag for backend routing
+        let event = EventBuilder::new(Kind::Custom(25000), &encrypted)
+            .tag(Tag::public_key(backend_pk));
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Publish to relay (no local ingest - this is a service registration, not UI data)
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => tlog!(
+                "PUSH",
+                "APNs registration published: {} enable={}",
+                output.id(),
+                enable
+            ),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send APNs registration to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending APNs registration to relay"),
         }
 
         Ok(())

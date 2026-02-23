@@ -17,11 +17,15 @@ extension TenexCoreManager {
             "event callback registered sessionStart=\(sessionStartTimestamp)",
             category: .general
         )
+        // Start observing APNs token delivery so we can publish kind:25000 events.
+        registerApnsObserver()
     }
 
     /// Unregister the event callback.
     /// Call this on logout to clean up resources.
     func unregisterEventCallback() {
+        // Stop APNs observer and publish deregistration event before clearing core state.
+        unregisterApnsObserver()
         core.clearEventCallback()
         eventHandler = nil
         projectStatusUpdateTask?.cancel()

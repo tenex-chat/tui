@@ -137,6 +137,9 @@ protocol SafeTenexCoreProtocol: Actor {
     func setSelectedVoiceIds(voiceIds: [String]) throws
     func generateAudioNotification(agentPubkey: String, conversationTitle: String, messageText: String, elevenlabsApiKey: String, openrouterApiKey: String) throws -> AudioNotificationInfo
 
+    // MARK: - Push Notifications
+    func registerApnsToken(deviceToken: String, enable: Bool, backendPubkey: String, deviceId: String) throws
+
     // MARK: - Misc
     func version() -> String
 
