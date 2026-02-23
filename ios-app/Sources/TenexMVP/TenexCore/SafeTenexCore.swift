@@ -388,6 +388,44 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Create a new nudge (kind:4201 event).
+    func createNudge(
+        title: String,
+        description: String,
+        content: String,
+        hashtags: [String],
+        allowTools: [String],
+        denyTools: [String],
+        onlyTools: [String]
+    ) throws {
+        try profiler.measureFFI("createNudge") {
+            do {
+                try core.createNudge(
+                    title: title,
+                    description: description,
+                    content: content,
+                    hashtags: hashtags,
+                    allowTools: allowTools,
+                    denyTools: denyTools,
+                    onlyTools: onlyTools
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Delete an existing nudge by publishing a NIP-09 kind:5 deletion.
+    func deleteNudge(nudgeId: String) throws {
+        try profiler.measureFFI("deleteNudge") {
+            do {
+                try core.deleteNudge(nudgeId: nudgeId)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     /// Get all skills (kind:4202 events).
     /// Returns skills sorted by created_at descending (most recent first).
     func getSkills() throws -> [Skill] {
