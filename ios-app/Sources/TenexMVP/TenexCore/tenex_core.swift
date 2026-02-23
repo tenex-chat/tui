@@ -660,6 +660,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func createAgentDefinition(name: String, description: String, role: String, instructions: String, version: String, sourceId: String?, isFork: Bool) throws 
     
     /**
+     * Create a new nudge (kind:4201).
+     */
+    func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String]) throws 
+    
+    /**
      * Create a new project (kind:31933 replaceable event).
      */
     func createProject(name: String, description: String, agentDefinitionIds: [String], mcpToolIds: [String]) throws 
@@ -668,6 +673,13 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Delete an agent definition (kind:4199) via NIP-09 kind:5 deletion.
      */
     func deleteAgentDefinition(agentId: String) throws 
+    
+    /**
+     * Delete a nudge (kind:4201) via NIP-09 kind:5 deletion.
+     *
+     * Only the nudge author can delete it.
+     */
+    func deleteNudge(nudgeId: String) throws 
     
     /**
      * Tombstone-delete a project by republishing it with ["deleted"] tag.
@@ -914,6 +926,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Queries nostrdb for kind 31933 events and returns them as Project.
      */
     func getProjects()  -> [Project]
+    
+    /**
+     * Get raw Nostr event JSON by event ID.
+     * Returns a pretty-printed JSON payload matching the TUI raw event inspector.
+     */
+    func getRawEventJson(eventId: String)  -> String?
     
     /**
      * Get reports for a project.
@@ -1431,6 +1449,22 @@ open func createAgentDefinition(name: String, description: String, role: String,
 }
     
     /**
+     * Create a new nudge (kind:4201).
+     */
+open func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_create_nudge(self.uniffiClonePointer(),
+        FfiConverterString.lower(title),
+        FfiConverterString.lower(description),
+        FfiConverterString.lower(content),
+        FfiConverterSequenceString.lower(hashtags),
+        FfiConverterSequenceString.lower(allowTools),
+        FfiConverterSequenceString.lower(denyTools),
+        FfiConverterSequenceString.lower(onlyTools),$0
+    )
+}
+}
+    
+    /**
      * Create a new project (kind:31933 replaceable event).
      */
 open func createProject(name: String, description: String, agentDefinitionIds: [String], mcpToolIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -1449,6 +1483,18 @@ open func createProject(name: String, description: String, agentDefinitionIds: [
 open func deleteAgentDefinition(agentId: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_delete_agent_definition(self.uniffiClonePointer(),
         FfiConverterString.lower(agentId),$0
+    )
+}
+}
+    
+    /**
+     * Delete a nudge (kind:4201) via NIP-09 kind:5 deletion.
+     *
+     * Only the nudge author can delete it.
+     */
+open func deleteNudge(nudgeId: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_delete_nudge(self.uniffiClonePointer(),
+        FfiConverterString.lower(nudgeId),$0
     )
 }
 }
@@ -1882,6 +1928,18 @@ open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
 open func getProjects() -> [Project]  {
     return try!  FfiConverterSequenceTypeProject.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_projects(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get raw Nostr event JSON by event ID.
+     * Returns a pretty-printed JSON payload matching the TUI raw event inspector.
+     */
+open func getRawEventJson(eventId: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_raw_event_json(self.uniffiClonePointer(),
+        FfiConverterString.lower(eventId),$0
     )
 })
 }
@@ -7873,6 +7931,10 @@ public struct Thread {
      */
     public var summary: String?
     /**
+     * Hashtags from kind:513 metadata (repeated t-tags)
+     */
+    public var hashtags: [String]
+    /**
      * Parent conversation ID from "delegation" tag (for hierarchical nesting)
      */
     public var parentConversationId: String?
@@ -7910,6 +7972,9 @@ public struct Thread {
          * Summary from kind:513 metadata (brief description of the conversation)
          */summary: String?, 
         /**
+         * Hashtags from kind:513 metadata (repeated t-tags)
+         */hashtags: [String], 
+        /**
          * Parent conversation ID from "delegation" tag (for hierarchical nesting)
          */parentConversationId: String?, 
         /**
@@ -7930,6 +7995,7 @@ public struct Thread {
         self.statusLabel = statusLabel
         self.statusCurrentActivity = statusCurrentActivity
         self.summary = summary
+        self.hashtags = hashtags
         self.parentConversationId = parentConversationId
         self.pTags = pTags
         self.askEvent = askEvent
@@ -7971,6 +8037,9 @@ extension Thread: Equatable, Hashable {
         if lhs.summary != rhs.summary {
             return false
         }
+        if lhs.hashtags != rhs.hashtags {
+            return false
+        }
         if lhs.parentConversationId != rhs.parentConversationId {
             return false
         }
@@ -7996,6 +8065,7 @@ extension Thread: Equatable, Hashable {
         hasher.combine(statusLabel)
         hasher.combine(statusCurrentActivity)
         hasher.combine(summary)
+        hasher.combine(hashtags)
         hasher.combine(parentConversationId)
         hasher.combine(pTags)
         hasher.combine(askEvent)
@@ -8021,6 +8091,7 @@ public struct FfiConverterTypeThread: FfiConverterRustBuffer {
                 statusLabel: FfiConverterOptionString.read(from: &buf), 
                 statusCurrentActivity: FfiConverterOptionString.read(from: &buf), 
                 summary: FfiConverterOptionString.read(from: &buf), 
+                hashtags: FfiConverterSequenceString.read(from: &buf), 
                 parentConversationId: FfiConverterOptionString.read(from: &buf), 
                 pTags: FfiConverterSequenceString.read(from: &buf), 
                 askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf), 
@@ -8038,6 +8109,7 @@ public struct FfiConverterTypeThread: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.statusLabel, into: &buf)
         FfiConverterOptionString.write(value.statusCurrentActivity, into: &buf)
         FfiConverterOptionString.write(value.summary, into: &buf)
+        FfiConverterSequenceString.write(value.hashtags, into: &buf)
         FfiConverterOptionString.write(value.parentConversationId, into: &buf)
         FfiConverterSequenceString.write(value.pTags, into: &buf)
         FfiConverterOptionTypeAskEvent.write(value.askEvent, into: &buf)
@@ -10235,10 +10307,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_create_agent_definition() != 9741) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_create_nudge() != 53846) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_create_project() != 59641) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_delete_agent_definition() != 49759) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_delete_nudge() != 29434) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_delete_project() != 53093) {
@@ -10341,6 +10419,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 30921) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_raw_event_json() != 42462) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_reports() != 65463) {

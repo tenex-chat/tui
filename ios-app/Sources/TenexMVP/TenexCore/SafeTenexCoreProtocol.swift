@@ -90,6 +90,16 @@ protocol SafeTenexCoreProtocol: Actor {
 
     // MARK: - Nudges
     func getNudges() throws -> [Nudge]
+    func createNudge(
+        title: String,
+        description: String,
+        content: String,
+        hashtags: [String],
+        allowTools: [String],
+        denyTools: [String],
+        onlyTools: [String]
+    ) throws
+    func deleteNudge(nudgeId: String) throws
     func getSkills() throws -> [Skill]
 
 
