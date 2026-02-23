@@ -1642,6 +1642,9 @@ impl App {
                 DataChange::BunkerSignRequest { .. } => {
                     // Bunker signing requests not yet handled in TUI
                 }
+                DataChange::BookmarkListChanged { bookmarked_ids: _ } => {
+                    // Bookmarks are already updated in the store by the worker
+                }
             }
         }
         Ok(())
