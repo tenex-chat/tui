@@ -1,35 +1,42 @@
 import SwiftUI
 
 /// Main Stats view with full TUI parity
-/// Shows metric cards, charts, rankings, and activity grid
+/// Uses section navigation (sidebar/list) with metric cards + section detail content.
 struct StatsView: View {
     @Environment(TenexCoreManager.self) private var coreManager
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = StatsViewModel()
+    @State private var selectedSection: StatsTab?
+    @State private var phonePath: [StatsTab] = []
+    let defaultSection: StatsTab
+    let isEmbedded: Bool
+
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
+    init(defaultSection: StatsTab = .rankings, isEmbedded: Bool = false) {
+        self.defaultSection = defaultSection
+        self.isEmbedded = isEmbedded
+        _selectedSection = State(initialValue: defaultSection)
+    }
+
+    private var useSplitLayout: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return horizontalSizeClass == .regular
+        #endif
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if let snapshot = viewModel.snapshot {
-                    MetricCardsView(snapshot: snapshot)
-                        .padding()
-
-                    Divider()
-                }
-
-                StatsTabNavigationView(selectedTab: $viewModel.selectedTab)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-
-                Divider()
-                    .padding(.top, 8)
-
-                if let snapshot = viewModel.snapshot {
-                    TabContentView(
-                        snapshot: snapshot,
-                        selectedTab: viewModel.selectedTab
-                    )
-                    .padding()
-                }
+        Group {
+            if isEmbedded {
+                embeddedStatsView
+            } else if useSplitLayout {
+                splitStatsView
+            } else {
+                phoneStatsView
             }
         }
         .navigationTitle("LLM Runtime")
@@ -40,27 +47,160 @@ struct StatsView: View {
         #endif
         .task {
             viewModel.configure(with: coreManager)
+            if let selectedSection {
+                viewModel.selectedTab = selectedSection
+            }
             await viewModel.loadStats()
         }
         .onChange(of: coreManager.statsVersion) { _, _ in
             Task { await viewModel.loadStats() }
         }
+        .onChange(of: selectedSection) { _, section in
+            guard let section, viewModel.selectedTab != section else { return }
+            viewModel.selectedTab = section
+        }
+        .onChange(of: viewModel.selectedTab) { _, tab in
+            if selectedSection != tab {
+                selectedSection = tab
+            }
+        }
     }
-}
 
-// MARK: - Mail.app-style Tab Navigation
-
-struct StatsTabNavigationView: View {
-    @Binding var selectedTab: StatsTab
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-
-    var body: some View {
-        MailStyleCategoryPicker(
-            cases: StatsTab.allCases,
-            selection: $selectedTab,
-            icon: \.icon,
-            label: \.rawValue
+    private var sectionListSelection: Binding<StatsTab?> {
+        Binding(
+            get: { selectedSection },
+            set: { selectedSection = $0 }
         )
+    }
+
+    private var statsCategoryList: some View {
+        List(StatsTab.allCases, selection: sectionListSelection) { section in
+            NavigationLink(value: section) {
+                Label(section.rawValue, systemImage: section.icon)
+            }
+        }
+        #if os(macOS)
+        .listStyle(.sidebar)
+        #endif
+    }
+
+    @ViewBuilder
+    private var statsDetailContent: some View {
+        if let section = selectedSection {
+            sectionContent(section)
+        } else {
+            ContentUnavailableView("Select a Section", systemImage: "clock")
+        }
+    }
+
+    private var embeddedStatsView: some View {
+        #if os(macOS)
+        HSplitView {
+            statsCategoryList
+                .frame(minWidth: 160, idealWidth: 190, maxWidth: 240)
+
+            statsDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+        #else
+        HStack(spacing: 0) {
+            statsCategoryList
+                .frame(minWidth: 160, idealWidth: 190, maxWidth: 240)
+            Divider()
+            statsDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+        #endif
+    }
+
+    private var splitStatsView: some View {
+        NavigationSplitView {
+            statsCategoryList
+        } detail: {
+            statsDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+        }
+        .onAppear {
+            if selectedSection == nil {
+                selectedSection = defaultSection
+            }
+        }
+    }
+
+    private var phoneStatsView: some View {
+        NavigationStack(path: $phonePath) {
+            List(StatsTab.allCases) { section in
+                NavigationLink(value: section) {
+                    Label(section.rawValue, systemImage: section.icon)
+                }
+            }
+            .navigationDestination(for: StatsTab.self) { section in
+                sectionContent(section)
+                    .navigationTitle(section.rawValue)
+                    .onAppear {
+                        selectedSection = section
+                    }
+            }
+            .onAppear {
+                if phonePath.isEmpty {
+                    phonePath = [defaultSection]
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionContent(_ section: StatsTab) -> some View {
+        ScrollView {
+            if let snapshot = viewModel.snapshot {
+                VStack(spacing: 0) {
+                    if section == .rankings {
+                        MetricCardsView(snapshot: snapshot)
+                            .padding()
+
+                        Divider()
+                    }
+
+                    TabContentView(
+                        snapshot: snapshot,
+                        selectedTab: section
+                    )
+                    .padding()
+                }
+            } else if let error = viewModel.error {
+                ErrorView(error: error) {
+                    Task { await viewModel.loadStats() }
+                }
+            } else if viewModel.isLoading {
+                ProgressView("Loading stats...")
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .padding()
+            } else {
+                EmptyStatsView {
+                    Task { await viewModel.loadStats() }
+                }
+            }
+        }
     }
 }
 
