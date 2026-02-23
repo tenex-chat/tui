@@ -121,6 +121,9 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
             case .bunkerSignRequest(let request):
                 coreManager.handleBunkerSignRequest(request)
 
+            case .bookmarkListChanged(let bookmarkedIds):
+                coreManager.applyBookmarkListChanged(bookmarkedIds: bookmarkedIds)
+
             case .mcpToolsChanged, .teamsChanged, .statsUpdated, .diagnosticsUpdated, .general:
                 break
             }

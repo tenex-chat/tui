@@ -1,10 +1,10 @@
 use crate::ui::app::NudgeSkillSelectorItem;
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::modal::NudgeSkillSelectorState;
+use crate::ui::modal::{BookmarkFilter, NudgeSkillSelectorState};
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem, Paragraph},
     Frame,
@@ -18,15 +18,19 @@ pub fn render_nudge_skill_selector(
     state: &NudgeSkillSelectorState,
 ) {
     let selected_count = state.selected_nudge_ids.len() + state.selected_skill_ids.len();
+    let filter_label = state.bookmark_filter.label();
     let title = if selected_count > 0 {
-        format!("Select Nudges/Skills ({} selected)", selected_count)
+        format!(
+            "Select Nudges/Skills [{}] ({} selected)",
+            filter_label, selected_count
+        )
     } else {
-        "Select Nudges/Skills".to_string()
+        format!("Select Nudges/Skills [{}]", filter_label)
     };
 
     let (popup_area, content_area) = Modal::new(&title)
         .size(ModalSize {
-            max_width: 78,
+            max_width: 82,
             height_percent: 0.72,
         })
         .search(&state.selector.filter, "Search nudges and skills...")
@@ -42,7 +46,11 @@ pub fn render_nudge_skill_selector(
     );
 
     if items.is_empty() {
-        let msg = if state.selector.filter.is_empty() {
+        let msg = if state.bookmark_filter == BookmarkFilter::BookmarkedOnly
+            && state.selector.filter.is_empty()
+        {
+            "No bookmarked nudges or skills. Press Tab to show all, or 'b' on an item to bookmark."
+        } else if state.selector.filter.is_empty() {
             "No nudges or skills available."
         } else {
             "No nudges or skills match your search."
@@ -67,6 +75,7 @@ pub fn render_nudge_skill_selector(
             .map(|(i, item)| {
                 let is_cursor = i == selected_index;
                 let is_selected = is_item_selected(state, item);
+                let is_bookmarked = app.is_bookmarked(item.id());
                 let border_color = theme::user_color(item.pubkey());
 
                 let mut spans = Vec::new();
@@ -78,6 +87,18 @@ pub fn render_nudge_skill_selector(
                     Style::default().fg(theme::TEXT_MUTED)
                 };
                 spans.push(Span::styled(checkbox, checkbox_style));
+
+                // Bookmark star indicator
+                if is_bookmarked {
+                    spans.push(Span::styled(
+                        "★ ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                } else {
+                    spans.push(Span::styled("  ", Style::default()));
+                }
 
                 if is_cursor {
                     spans.push(Span::styled("▌", Style::default().fg(border_color)));
@@ -152,6 +173,12 @@ pub fn render_nudge_skill_selector(
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("b", Style::default().fg(Color::Yellow)),
+        Span::styled(" bookmark", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("Tab", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" filter", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS)),
         Span::styled(" confirm", Style::default().fg(theme::TEXT_MUTED)),
