@@ -1,6 +1,6 @@
 import SwiftUI
 
-extension FfiBunkerSignRequest: @retroactive Identifiable {
+extension FfiBunkerSignRequest: Identifiable {
     public var id: String { requestId }
 }
 
