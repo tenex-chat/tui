@@ -338,6 +338,7 @@ extension TenexCoreManager {
         Task {
             do {
                 try await safeCore.approveBackend(pubkey: backendPubkey)
+                await republishCachedApnsRegistrationNow()
             } catch {
                 return
             }

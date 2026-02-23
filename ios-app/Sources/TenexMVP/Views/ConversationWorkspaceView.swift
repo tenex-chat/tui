@@ -12,18 +12,33 @@ import UIKit
 /// - iPhone (compact): existing overview-first detail layout
 struct ConversationAdaptiveDetailView: View {
     let conversation: ConversationFullInfo
+    let onOpenConversationId: ((String) -> Void)?
     @Environment(TenexCoreManager.self) private var coreManager
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
+    init(
+        conversation: ConversationFullInfo,
+        onOpenConversationId: ((String) -> Void)? = nil
+    ) {
+        self.conversation = conversation
+        self.onOpenConversationId = onOpenConversationId
+    }
+
     var body: some View {
         #if os(macOS)
-        ConversationWorkspaceView(source: .existing(conversation: conversation))
+        ConversationWorkspaceView(
+            source: .existing(conversation: conversation),
+            onOpenConversationId: onOpenConversationId
+        )
             .environment(coreManager)
         #else
         if horizontalSizeClass == .regular {
-            ConversationWorkspaceView(source: .existing(conversation: conversation))
+            ConversationWorkspaceView(
+                source: .existing(conversation: conversation),
+                onOpenConversationId: onOpenConversationId
+            )
                 .environment(coreManager)
         } else {
             ConversationDetailView(conversation: conversation)
@@ -37,15 +52,27 @@ struct ConversationAdaptiveDetailView: View {
 /// Useful for entry points that only carry conversation IDs (e.g. inbox items).
 struct ConversationByIdAdaptiveDetailView: View {
     let conversationId: String
+    let onOpenConversationId: ((String) -> Void)?
     @Environment(TenexCoreManager.self) private var coreManager
 
     @State private var conversation: ConversationFullInfo?
     @State private var isLoading = true
 
+    init(
+        conversationId: String,
+        onOpenConversationId: ((String) -> Void)? = nil
+    ) {
+        self.conversationId = conversationId
+        self.onOpenConversationId = onOpenConversationId
+    }
+
     var body: some View {
         Group {
             if let conversation {
-                ConversationAdaptiveDetailView(conversation: conversation)
+                ConversationAdaptiveDetailView(
+                    conversation: conversation,
+                    onOpenConversationId: onOpenConversationId
+                )
                     .environment(coreManager)
             } else if isLoading {
                 ProgressView("Loading conversation...")
@@ -147,6 +174,7 @@ enum ConversationWorkspaceSource {
 struct ConversationWorkspaceView: View {
     let source: ConversationWorkspaceSource
     let onThreadCreated: ((String) -> Void)?
+    let onOpenConversationId: ((String) -> Void)?
 
     @Environment(TenexCoreManager.self) private var coreManager
 
@@ -170,15 +198,26 @@ struct ConversationWorkspaceView: View {
 
     private let bottomAnchorId = "workspace-bottom-anchor"
 
-    init(source: ConversationWorkspaceSource, onThreadCreated: ((String) -> Void)? = nil) {
+    init(
+        source: ConversationWorkspaceSource,
+        onThreadCreated: ((String) -> Void)? = nil,
+        onOpenConversationId: ((String) -> Void)? = nil
+    ) {
         self.source = source
         self.onThreadCreated = onThreadCreated
+        self.onOpenConversationId = onOpenConversationId
         self.seedConversation = source.seedConversation
         _viewModel = StateObject(wrappedValue: ConversationDetailViewModel(conversation: source.seedConversation))
     }
 
-    init(conversation: ConversationFullInfo) {
-        self.init(source: .existing(conversation: conversation))
+    init(
+        conversation: ConversationFullInfo,
+        onOpenConversationId: ((String) -> Void)? = nil
+    ) {
+        self.init(
+            source: .existing(conversation: conversation),
+            onOpenConversationId: onOpenConversationId
+        )
     }
 
     /// Minimum workspace width to show both transcript and inspector side-by-side.
@@ -652,22 +691,12 @@ struct ConversationWorkspaceView: View {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(viewModel.delegations) { delegation in
                     let isWorking = viewModel.delegationActivityByConversationId[delegation.conversationId] ?? false
-                    if let delegatedConversation = delegationConversation(for: delegation) {
-                        NavigationLink {
-                            ConversationAdaptiveDetailView(conversation: delegatedConversation)
-                                .environment(coreManager)
-                        } label: {
-                            delegationRowLabel(delegation, isWorking: isWorking)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            openDelegation(byId: delegation.conversationId)
-                        } label: {
-                            delegationRowLabel(delegation, isWorking: isWorking)
-                        }
-                        .buttonStyle(.plain)
+                    Button {
+                        openDelegation(byId: delegation.conversationId)
+                    } label: {
+                        delegationRowLabel(delegation, isWorking: isWorking)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -813,7 +842,7 @@ struct ConversationWorkspaceView: View {
 
     private func openDelegation(byId delegationId: String) {
         if let cached = coreManager.conversationById[delegationId] {
-            selectedDelegationConversation = cached
+            navigateToDelegation(cached)
             profiler.logEvent(
                 "delegation navigation cache-hit id=\(delegationId)",
                 category: .general,
@@ -823,7 +852,7 @@ struct ConversationWorkspaceView: View {
         }
 
         if let child = viewModel.childConversation(for: delegationId) {
-            selectedDelegationConversation = child
+            navigateToDelegation(child)
             profiler.logEvent(
                 "delegation navigation child-cache-hit id=\(delegationId)",
                 category: .general,
@@ -837,7 +866,7 @@ struct ConversationWorkspaceView: View {
             let convs = await coreManager.safeCore.getConversationsByIds(conversationIds: [delegationId])
             await MainActor.run {
                 if let conv = convs.first {
-                    selectedDelegationConversation = conv
+                    navigateToDelegation(conv)
                 } else {
                     navigationErrorMessage = "Unable to load the selected delegated conversation."
                 }
@@ -848,6 +877,14 @@ struct ConversationWorkspaceView: View {
                     level: elapsedMs >= 120 ? .error : .info
                 )
             }
+        }
+    }
+
+    private func navigateToDelegation(_ conversation: ConversationFullInfo) {
+        if let onOpenConversationId {
+            onOpenConversationId(conversation.thread.id)
+        } else {
+            selectedDelegationConversation = conversation
         }
     }
 
@@ -863,13 +900,6 @@ struct ConversationWorkspaceView: View {
         coreManager.reports.first { report in
             "30023:\(report.author):\(report.slug)" == aTag
         }
-    }
-
-    private func delegationConversation(for delegation: DelegationItem) -> ConversationFullInfo? {
-        if let child = viewModel.childConversation(for: delegation.conversationId) {
-            return child
-        }
-        return coreManager.conversationById[delegation.conversationId]
     }
 
     @ViewBuilder

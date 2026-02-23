@@ -43,7 +43,7 @@ struct AppSettingsView: View {
         .onChange(of: coreManager.diagnosticsVersion) { _, _ in
             Task {
                 await viewModel.reloadRelays(coreManager: coreManager)
-                await viewModel.reloadBackends(coreManager: coreManager)
+                await viewModel.reloadPush(coreManager: coreManager)
             }
         }
         .alert("Error", isPresented: Binding(
@@ -154,11 +154,6 @@ struct AppSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .onAppear {
-                if phonePath.isEmpty {
-                    phonePath = [defaultSection]
-                }
-            }
         }
     }
 
@@ -170,6 +165,9 @@ struct AppSettingsView: View {
                 .environment(coreManager)
         case .backends:
             BackendsSettingsSectionView(viewModel: viewModel)
+                .environment(coreManager)
+        case .push:
+            PushSettingsSectionView(viewModel: viewModel)
                 .environment(coreManager)
         case .bunker:
             BunkerSettingsSectionView(viewModel: viewModel)
@@ -378,6 +376,163 @@ private struct BackendsSettingsSectionView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+private struct PushSettingsSectionView: View {
+    @ObservedObject var viewModel: AppSettingsViewModel
+    @Environment(TenexCoreManager.self) private var coreManager
+
+    var body: some View {
+        Form {
+            Section("Actions") {
+                Button("Re-register Device") {
+                    Task { await viewModel.reRegisterPush(coreManager: coreManager) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(viewModel.isReRegisteringPush)
+
+                Button("Republish Cached Token") {
+                    Task { await viewModel.republishCachedPush(coreManager: coreManager) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(viewModel.isReRegisteringPush)
+
+                Button("Refresh Push Info") {
+                    Task { await viewModel.reloadPush(coreManager: coreManager) }
+                }
+                .buttonStyle(.bordered)
+
+                if viewModel.isReRegisteringPush {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Publishing push registration...")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Section("Authorization") {
+                HStack {
+                    Text("Status")
+                    Spacer()
+                    Text(viewModel.pushAuthorizationStatusDescription)
+                        .foregroundStyle(viewModel.pushAuthorizationAllowed ? .green : .secondary)
+                }
+                HStack {
+                    Text("Delivery Allowed")
+                    Spacer()
+                    Text(viewModel.pushAuthorizationAllowed ? "Yes" : "No")
+                        .foregroundStyle(viewModel.pushAuthorizationAllowed ? .green : .secondary)
+                }
+            }
+
+            if let debug = viewModel.pushDebugInfo {
+                Section("Device") {
+                    HStack {
+                        Text("Device ID")
+                        Spacer()
+                        Text(debug.deviceId)
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                            .textSelection(.enabled)
+                    }
+                }
+
+                Section("APNs Token") {
+                    HStack {
+                        Text("Cached Token")
+                        Spacer()
+                        Text(debug.tokenPreview)
+                            .font(.caption)
+                            .fontDesign(.monospaced)
+                            .textSelection(.enabled)
+                    }
+                    HStack {
+                        Text("Token Length")
+                        Spacer()
+                        Text("\(debug.tokenLength)")
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Updated")
+                        Spacer()
+                        Text(timestampText(debug.tokenUpdatedAt))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Last Publish") {
+                    HStack {
+                        Text("Mode")
+                        Spacer()
+                        Text(lastModeText(debug.lastPublishEnable))
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("When")
+                        Spacer()
+                        Text(timestampText(debug.lastPublishAt))
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("Target Backends")
+                        Spacer()
+                        Text("\(debug.lastPublishBackends.count)")
+                            .foregroundStyle(.secondary)
+                    }
+                    if !debug.lastPublishBackends.isEmpty {
+                        ForEach(debug.lastPublishBackends, id: \.self) { backend in
+                            Text(backend)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    if let error = debug.lastPublishError, !error.isEmpty {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section("Approved Backends") {
+                    if debug.approvedBackends.isEmpty {
+                        Text("No approved backends")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(debug.approvedBackends, id: \.self) { backend in
+                            Text(backend)
+                                .font(.caption)
+                                .fontDesign(.monospaced)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            } else {
+                Section {
+                    Text("No push diagnostics available")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
+        .task {
+            await viewModel.reloadPush(coreManager: coreManager)
+        }
+    }
+
+    private func timestampText(_ seconds: UInt64?) -> String {
+        guard let seconds else { return "Never" }
+        return Date(timeIntervalSince1970: TimeInterval(seconds)).formatted(date: .abbreviated, time: .standard)
+    }
+
+    private func lastModeText(_ enable: Bool?) -> String {
+        guard let enable else { return "Never" }
+        return enable ? "Register" : "Deregister"
     }
 }
 

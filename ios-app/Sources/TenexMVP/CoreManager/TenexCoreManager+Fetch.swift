@@ -12,7 +12,11 @@ extension TenexCoreManager {
         // macOS uses manual approval from Settings > Backends.
         let approveStartedAt = CFAbsoluteTimeGetCurrent()
         do {
-            _ = try await safeCore.approveAllPendingBackends()
+            let approvedCount = try await safeCore.approveAllPendingBackends()
+            if approvedCount > 0 {
+                // New trusted backends should receive current APNs registration immediately.
+                await republishCachedApnsRegistrationNow()
+            }
         } catch {
         }
         let approveMs = (CFAbsoluteTimeGetCurrent() - approveStartedAt) * 1000
