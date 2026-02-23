@@ -18,6 +18,6 @@ Generated files here are ignored by git and overwritten on regeneration.
 ```
 
 **When to regenerate:**
-- After changing `#[uniffi::export]` functions in `crates/tenex-core/src/ffi.rs`
+- After changing `#[uniffi::export]` functions in `crates/tenex-core/src/ffi/mod.rs` or `crates/tenex-core/src/ffi/*_api.rs`
 - After adding/removing UniFFI types or enums
 - When Swift compilation errors suggest FFI mismatch
