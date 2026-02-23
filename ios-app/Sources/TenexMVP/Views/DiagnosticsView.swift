@@ -61,7 +61,7 @@ struct DiagnosticsView: View {
             viewModel.cancelFetch()
         }
         .onChange(of: coreManager.diagnosticsVersion) { _, _ in
-            Task { await viewModel.loadDiagnostics() }
+            Task { await viewModel.handleDiagnosticsVersionUpdate() }
         }
         .onChange(of: selectedSection) { _, section in
             guard let section, viewModel.selectedTab != section else { return }
