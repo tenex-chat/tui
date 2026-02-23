@@ -32,7 +32,7 @@ extension TenexCoreManager {
     ///       is finalised.  For now the owner's pubkey is used as a default.
     static let tenexBackendPubkey = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7"
 
-    private static let pushLogger = Logger(subsystem: "com.tenex.mvp", category: "PushNotifications")
+    private nonisolated static let pushLogger = Logger(subsystem: "com.tenex.mvp", category: "PushNotifications")
 
     // MARK: - Observer Lifecycle
 
