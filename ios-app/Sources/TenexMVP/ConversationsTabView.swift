@@ -16,6 +16,7 @@ struct ConversationsTabView: View {
     @State private var showArchived = false
     @State private var selectedConversationState: ConversationFullInfo?
     @State private var newConversationProjectIdState: String?
+    @State private var detailNavigationPath: [String] = []
     @State private var projectForNewConversation: SelectedProjectForComposer?
     @State private var pendingCreatedConversationId: String?
     @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
@@ -164,7 +165,10 @@ struct ConversationsTabView: View {
         .onChange(of: coreManager.projectOnlineStatus) { _, _ in
             rebuildProjectCaches()
         }
-        .onChange(of: selectedConversationBinding.wrappedValue?.thread.id) { _, newId in
+        .onChange(of: selectedConversationBinding.wrappedValue?.thread.id) { oldId, newId in
+            if oldId != newId {
+                detailNavigationPath.removeAll()
+            }
             guard newId != nil else { return }
             newConversationProjectIdBinding.wrappedValue = nil
             pendingCreatedConversationId = nil
@@ -267,7 +271,10 @@ struct ConversationsTabView: View {
     @ViewBuilder
     private var conversationDetailContent: some View {
         if let conversation = selectedConversationBinding.wrappedValue {
-            ConversationAdaptiveDetailView(conversation: conversation)
+            ConversationAdaptiveDetailView(
+                conversation: conversation,
+                onOpenConversationId: pushConversationInDetailStack
+            )
                 .environment(coreManager)
             .id(conversation.thread.id)
         } else if let newProjectId = newConversationProjectIdBinding.wrappedValue,
@@ -295,9 +302,17 @@ struct ConversationsTabView: View {
     }
 
     private var shellDetailLayout: some View {
-        NavigationStack {
+        NavigationStack(path: $detailNavigationPath) {
             conversationDetailContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .navigationDestination(for: String.self) { conversationId in
+            ConversationByIdAdaptiveDetailView(
+                conversationId: conversationId,
+                onOpenConversationId: pushConversationInDetailStack
+            )
+            .environment(coreManager)
+            .id("delegated-\(conversationId)")
         }
         .accessibilityIdentifier("detail_column")
     }
@@ -587,6 +602,13 @@ struct ConversationsTabView: View {
         selectedConversationBinding.wrappedValue = canonical
         newConversationProjectIdBinding.wrappedValue = nil
         pendingCreatedConversationId = nil
+    }
+
+    private func pushConversationInDetailStack(_ conversationId: String) {
+        guard !conversationId.isEmpty else { return }
+        guard selectedConversationBinding.wrappedValue != nil else { return }
+        if detailNavigationPath.last == conversationId { return }
+        detailNavigationPath.append(conversationId)
     }
 
     private func projectTitle(for conversation: ConversationFullInfo) -> String? {

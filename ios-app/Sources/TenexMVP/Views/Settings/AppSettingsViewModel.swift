@@ -4,6 +4,7 @@ import AVFoundation
 enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
     case relays
     case backends
+    case push
     case bunker
     case ai
     case audio
@@ -14,6 +15,7 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .relays: return "Relays"
         case .backends: return "Backends"
+        case .push: return "Push"
         case .bunker: return "Bunker"
         case .ai: return "AI"
         case .audio: return "Audio"
@@ -24,6 +26,7 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .relays: return "antenna.radiowaves.left.and.right"
         case .backends: return "shield"
+        case .push: return "bell.badge"
         case .bunker: return "lock.shield"
         case .ai: return "brain"
         case .audio: return "waveform"
@@ -46,6 +49,10 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var relayUrls: [String] = []
     @Published var diagnosticsSnapshot: DiagnosticsSnapshot?
     @Published var backendSnapshot: BackendTrustSnapshot?
+    @Published var pushDebugInfo: PushRegistrationDebugInfo?
+    @Published var pushAuthorizationStatusDescription = "notDetermined"
+    @Published var pushAuthorizationAllowed = false
+    @Published var isReRegisteringPush = false
 
     @Published var bunkerRunning: Bool
     @Published var bunkerUri = ""
@@ -94,6 +101,7 @@ final class AppSettingsViewModel: ObservableObject {
         await setBunkerEnabled(coreManager: coreManager, enabled: bunkerRunning, persistPreference: false)
         await reloadRelays(coreManager: coreManager)
         await reloadBackends(coreManager: coreManager)
+        await reloadPush(coreManager: coreManager)
         isLoading = false
     }
 
@@ -125,11 +133,36 @@ final class AppSettingsViewModel: ObservableObject {
         }
     }
 
+    func reloadPush(coreManager: TenexCoreManager) async {
+        await NotificationService.shared.checkAuthorizationStatus()
+        pushAuthorizationStatusDescription = NotificationService.shared.authorizationStatus.description
+        pushAuthorizationAllowed = NotificationService.shared.authorizationStatus.allowsLocalNotifications
+        await reloadBackends(coreManager: coreManager)
+        pushDebugInfo = coreManager.currentPushRegistrationDebugInfo(
+            approvedBackends: backendSnapshot?.approved ?? []
+        )
+    }
+
+    func reRegisterPush(coreManager: TenexCoreManager) async {
+        isReRegisteringPush = true
+        defer { isReRegisteringPush = false }
+        await coreManager.reregisterPushDeviceNow()
+        await reloadPush(coreManager: coreManager)
+    }
+
+    func republishCachedPush(coreManager: TenexCoreManager) async {
+        isReRegisteringPush = true
+        defer { isReRegisteringPush = false }
+        await coreManager.republishCachedApnsRegistrationNow()
+        await reloadPush(coreManager: coreManager)
+    }
+
     func approveBackend(coreManager: TenexCoreManager, pubkey: String) async {
         do {
             try await coreManager.safeCore.approveBackend(pubkey: pubkey)
+            await coreManager.republishCachedApnsRegistrationNow()
             await coreManager.fetchData()
-            await reloadBackends(coreManager: coreManager)
+            await reloadPush(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to approve backend: \(error.localizedDescription)"
         }
@@ -139,7 +172,7 @@ final class AppSettingsViewModel: ObservableObject {
         do {
             try await coreManager.safeCore.blockBackend(pubkey: pubkey)
             await coreManager.fetchData()
-            await reloadBackends(coreManager: coreManager)
+            await reloadPush(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to block backend: \(error.localizedDescription)"
         }
@@ -153,7 +186,7 @@ final class AppSettingsViewModel: ObservableObject {
         do {
             try await coreManager.safeCore.setTrustedBackends(approved: approved, blocked: blocked)
             await coreManager.fetchData()
-            await reloadBackends(coreManager: coreManager)
+            await reloadPush(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to update backend lists: \(error.localizedDescription)"
         }

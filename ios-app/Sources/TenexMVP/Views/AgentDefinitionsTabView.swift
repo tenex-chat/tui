@@ -120,11 +120,8 @@ struct AgentDefinitionsTabView: View {
                     AgentDefinitionDetailView(
                         item: item,
                         canDelete: viewModel.canDelete(item),
-                        onAssign: {
-                            presentAssignmentSheet(for: item)
-                        },
-                        onCreateTeam: {
-                            presentTeamCreationSheet(for: item)
+                        onAssignmentResult: { result in
+                            assignmentResult = result
                         },
                         onDelete: {
                             let deleted = await viewModel.deleteAgentDefinition(id: item.id)
@@ -292,16 +289,18 @@ struct AgentDefinitionsTabView: View {
 }
 
 private struct AgentDefinitionDetailView: View {
+    @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.openURL) private var openURL
 
     let item: AgentDefinitionListItem
     let canDelete: Bool
-    let onAssign: () -> Void
-    let onCreateTeam: () -> Void
+    let onAssignmentResult: (AgentAssignmentResult) -> Void
     let onDelete: () async -> Bool
 
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
+    @State private var showAssignmentSheet = false
+    @State private var showTeamCreationSheet = false
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -367,6 +366,18 @@ private struct AgentDefinitionDetailView: View {
         } message: {
             Text("This publishes a NIP-09 kind:5 deletion for this definition event.")
         }
+        .sheet(isPresented: $showAssignmentSheet) {
+            AgentDefinitionProjectAssignmentSheet(item: item) { result in
+                onAssignmentResult(result)
+            }
+            .environment(coreManager)
+        }
+        .sheet(isPresented: $showTeamCreationSheet) {
+            AgentDefinitionTeamCreationSheet(item: item) { result in
+                onAssignmentResult(result)
+            }
+            .environment(coreManager)
+        }
     }
 
     private var header: some View {
@@ -391,13 +402,17 @@ private struct AgentDefinitionDetailView: View {
 
                 Spacer(minLength: 0)
 
-                Button(action: onAssign) {
+                Button {
+                    showAssignmentSheet = true
+                } label: {
                     Label("Add to Projects", systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel("Add to Projects")
 
-                Button(action: onCreateTeam) {
+                Button {
+                    showTeamCreationSheet = true
+                } label: {
                     Label("Create Team", systemImage: "person.3")
                 }
                 .buttonStyle(.borderedProminent)

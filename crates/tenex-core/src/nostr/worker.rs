@@ -2094,9 +2094,11 @@ impl NostrWorker {
         )
         .map_err(|e| anyhow::anyhow!("NIP-44 encryption failed: {}", e))?;
 
-        // Build kind:25000 event with p-tag for backend routing
-        let event = EventBuilder::new(Kind::Custom(25000), &encrypted)
-            .tag(Tag::public_key(backend_pk));
+        // Build kind:25000 event with an explicit lowercase p-tag for backend routing.
+        let event = EventBuilder::new(Kind::Custom(25000), &encrypted).tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("p")),
+            vec![backend_pk.to_hex()],
+        ));
 
         let signed_event = event.sign_with_keys(keys)?;
 
