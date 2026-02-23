@@ -393,6 +393,7 @@ struct DeltaSummary {
     diagnostics_updated: usize,
     general: usize,
     bunker_sign_request: usize,
+    bookmark_list_changed: usize,
 }
 
 impl DeltaSummary {
@@ -416,12 +417,13 @@ impl DeltaSummary {
             DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
             DataChangeType::General => self.general += 1,
             DataChangeType::BunkerSignRequest { .. } => self.bunker_sign_request += 1,
+            DataChangeType::BookmarkListChanged { .. } => self.bookmark_list_changed += 1,
         }
     }
 
     fn compact(&self) -> String {
         format!(
-            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} stats={} diag={} general={} bunker={}",
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} stats={} diag={} general={} bunker={} bookmark={}",
             self.total,
             self.message_appended,
             self.conversation_upsert,
@@ -437,7 +439,8 @@ impl DeltaSummary {
             self.stats_updated,
             self.diagnostics_updated,
             self.general,
-            self.bunker_sign_request
+            self.bunker_sign_request,
+            self.bookmark_list_changed
         )
     }
 }
@@ -501,6 +504,7 @@ fn process_note_keys_with_deltas(
                     teams_changed = true;
                 }
                 30023 => kind_30023 += 1,
+                14202 => other_kinds += 1,
                 _ => other_kinds += 1,
             }
 
@@ -508,6 +512,16 @@ fn process_note_keys_with_deltas(
             store.handle_event(kind, &note);
 
             match kind {
+                14202 => {
+                    // Bookmark list updated - emit changed IDs for the current user
+                    if let Some(user_pubkey) = &store.user_pubkey.clone() {
+                        let bookmarked_ids = store
+                            .get_bookmarks(user_pubkey)
+                            .map(|bl| bl.bookmarked_ids.iter().cloned().collect())
+                            .unwrap_or_default();
+                        deltas.push(DataChangeType::BookmarkListChanged { bookmarked_ids });
+                    }
+                }
                 31933 => {
                     if let Some(project) = Project::from_note(&note) {
                         deltas.push(DataChangeType::ProjectUpsert {
@@ -756,6 +770,11 @@ fn process_data_changes_with_deltas(
                     },
                 });
             }
+            DataChange::BookmarkListChanged { bookmarked_ids } => {
+                deltas.push(DataChangeType::BookmarkListChanged {
+                    bookmarked_ids: bookmarked_ids.clone(),
+                });
+            }
         }
     }
 
@@ -868,7 +887,9 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
                 diagnostics_changed = true;
                 stats_changed = true;
             }
-            DataChangeType::StreamChunk { .. } | DataChangeType::BunkerSignRequest { .. } => {}
+            DataChangeType::StreamChunk { .. }
+            | DataChangeType::BunkerSignRequest { .. }
+            | DataChangeType::BookmarkListChanged { .. } => {}
         }
     }
 
@@ -1658,6 +1679,8 @@ pub enum DataChangeType {
     General,
     /// NIP-46 bunker signing request requires user approval
     BunkerSignRequest { request: FfiBunkerSignRequest },
+    /// Bookmark list changed (user bookmarked/unbookmarked a nudge or skill, kind:14202)
+    BookmarkListChanged { bookmarked_ids: Vec<String> },
 }
 
 /// Callback interface for event notifications to Swift/Kotlin.
@@ -3399,6 +3422,112 @@ impl TenexCore {
         })?;
 
         Ok(store.content.get_skills().into_iter().cloned().collect())
+    }
+
+    // MARK: - Bookmark Methods (kind:14202)
+
+    /// Check if a nudge or skill is bookmarked by the current user.
+    ///
+    /// Returns `false` if not logged in or the item is not bookmarked.
+    pub fn is_bookmarked(&self, item_id: String) -> bool {
+        let user_pubkey = match self.get_current_user() {
+            Some(u) => u.pubkey,
+            None => return false,
+        };
+
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+
+        store_guard
+            .as_ref()
+            .map(|s| s.is_bookmarked(&user_pubkey, &item_id))
+            .unwrap_or(false)
+    }
+
+    /// Get all bookmarked nudge/skill IDs for the current user.
+    ///
+    /// Returns an empty list if not logged in or no bookmarks exist.
+    pub fn get_bookmarked_ids(&self) -> Result<Vec<String>, TenexError> {
+        let user_pubkey = self
+            .get_current_user()
+            .ok_or_else(|| TenexError::Internal {
+                message: "Not logged in".to_string(),
+            })?
+            .pubkey;
+
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store
+            .get_bookmarks(&user_pubkey)
+            .map(|bl| bl.bookmarked_ids.iter().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    /// Toggle bookmark status for a nudge or skill.
+    ///
+    /// Performs an optimistic local update, publishes a kind:14202 event, and returns
+    /// the updated list of bookmarked IDs.
+    pub fn toggle_bookmark(&self, item_id: String) -> Result<Vec<String>, TenexError> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let user_pubkey = self
+            .get_current_user()
+            .ok_or_else(|| TenexError::Internal {
+                message: "Not logged in".to_string(),
+            })?
+            .pubkey;
+
+        // Compute new bookmark set and perform optimistic store update.
+        let new_ids: Vec<String> = {
+            let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
+                message: format!("Failed to acquire store lock: {}", e),
+            })?;
+
+            let store = store_guard.as_mut().ok_or_else(|| TenexError::Internal {
+                message: "Store not initialized - call init() first".to_string(),
+            })?;
+
+            let mut bookmarked_ids: std::collections::HashSet<String> = store
+                .get_bookmarks(&user_pubkey)
+                .map(|bl| bl.bookmarked_ids.clone())
+                .unwrap_or_default();
+
+            if bookmarked_ids.contains(&item_id) {
+                bookmarked_ids.remove(&item_id);
+            } else {
+                bookmarked_ids.insert(item_id.clone());
+            }
+
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+
+            let updated_list = crate::models::BookmarkList {
+                pubkey: user_pubkey.clone(),
+                bookmarked_ids: bookmarked_ids.clone(),
+                last_updated: now,
+            };
+            store.set_bookmarks(&user_pubkey, updated_list);
+
+            bookmarked_ids.into_iter().collect()
+        };
+
+        // Send publish command (fire-and-forget via async worker).
+        let core_handle = get_core_handle(&self.core_handle)?;
+        let _ = core_handle.send(NostrCommand::PublishBookmarkList {
+            bookmarked_ids: new_ids.clone(),
+        });
+
+        Ok(new_ids)
     }
 
     /// Get online agents for a project from the project status (kind:24010).

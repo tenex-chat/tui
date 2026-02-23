@@ -18,21 +18,31 @@ enum NudgeSkillSelectorMode: String, CaseIterable, Identifiable {
 }
 
 /// Unified sheet for selecting both nudges and skills.
+/// Supports bookmarking items and filtering to show only bookmarked items.
 struct NudgeSkillSelectorSheet: View {
     let nudges: [Nudge]
     let skills: [Skill]
     @Binding var selectedNudgeIds: Set<String>
     @Binding var selectedSkillIds: Set<String>
+    /// Current bookmark set from TenexCoreManager.bookmarkedIds — used to seed the local copy.
+    var bookmarkedIds: Set<String> = []
     var initialMode: NudgeSkillSelectorMode = .all
     var initialSearchQuery: String = ""
     var onDone: (() -> Void)?
+    /// Called with the base item ID when the user toggles a bookmark. Caller is responsible for
+    /// persisting the change via FFI; this sheet applies the toggle optimistically.
+    var onToggleBookmark: ((String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var localSelectedNudgeIds: Set<String> = []
     @State private var localSelectedSkillIds: Set<String> = []
+    /// Optimistic local bookmark state — seeded from `bookmarkedIds` on appear.
+    @State private var localBookmarkedIds: Set<String> = []
     @State private var searchText = ""
     @State private var mode: NudgeSkillSelectorMode = .all
+    /// When true, only bookmarked items are shown. Defaults to true.
+    @State private var showBookmarkedOnly: Bool = true
 
     fileprivate enum SelectorItem: Identifiable {
         case nudge(Nudge)
@@ -42,6 +52,14 @@ struct NudgeSkillSelectorSheet: View {
             switch self {
             case .nudge(let nudge): return "nudge:\(nudge.id)"
             case .skill(let skill): return "skill:\(skill.id)"
+            }
+        }
+
+        /// The raw Nostr event ID used for bookmark lookups.
+        var baseId: String {
+            switch self {
+            case .nudge(let nudge): return nudge.id
+            case .skill(let skill): return skill.id
             }
         }
 
@@ -73,15 +91,22 @@ struct NudgeSkillSelectorSheet: View {
         }
     }
 
-    private var items: [SelectorItem] {
-        var base: [SelectorItem]
+    private var allItems: [SelectorItem] {
         switch mode {
         case .all:
-            base = nudges.map { .nudge($0) } + skills.map { .skill($0) }
+            return nudges.map { .nudge($0) } + skills.map { .skill($0) }
         case .nudges:
-            base = nudges.map { .nudge($0) }
+            return nudges.map { .nudge($0) }
         case .skills:
-            base = skills.map { .skill($0) }
+            return skills.map { .skill($0) }
+        }
+    }
+
+    private var items: [SelectorItem] {
+        var base = allItems
+
+        if showBookmarkedOnly {
+            base = base.filter { localBookmarkedIds.contains($0.baseId) }
         }
 
         if !searchText.isEmpty {
@@ -135,8 +160,24 @@ struct NudgeSkillSelectorSheet: View {
                         emptyStateView
                     } else {
                         ForEach(items) { item in
-                            NudgeSkillSelectorRow(item: item, isSelected: isSelected(item: item)) {
-                                toggle(item: item)
+                            NudgeSkillSelectorRow(
+                                item: item,
+                                isSelected: isSelected(item: item),
+                                isBookmarked: localBookmarkedIds.contains(item.baseId),
+                                onTap: { toggle(item: item) },
+                                onToggleBookmark: { toggleBookmark(item: item) }
+                            )
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                let isItemBookmarked = localBookmarkedIds.contains(item.baseId)
+                                Button {
+                                    toggleBookmark(item: item)
+                                } label: {
+                                    Label(
+                                        isItemBookmarked ? "Unbookmark" : "Bookmark",
+                                        systemImage: isItemBookmarked ? "star.slash" : "star"
+                                    )
+                                }
+                                .tint(isItemBookmarked ? .orange : .yellow)
                             }
                         }
                     }
@@ -171,10 +212,15 @@ struct NudgeSkillSelectorSheet: View {
                     .fontWeight(.semibold)
                     .keyboardShortcut(.defaultAction)
                 }
+
+                ToolbarItem(placement: .topBarLeading) {
+                    bookmarkFilterButton
+                }
             }
             .onAppear {
                 localSelectedNudgeIds = selectedNudgeIds
                 localSelectedSkillIds = selectedSkillIds
+                localBookmarkedIds = bookmarkedIds
                 mode = initialMode
                 if !initialSearchQuery.isEmpty {
                     searchText = initialSearchQuery
@@ -187,6 +233,21 @@ struct NudgeSkillSelectorSheet: View {
         .frame(minWidth: 520, idealWidth: 580, minHeight: 460, idealHeight: 560)
         #endif
     }
+
+    // MARK: - Bookmark Filter Button
+
+    private var bookmarkFilterButton: some View {
+        Button {
+            showBookmarkedOnly.toggle()
+        } label: {
+            Image(systemName: showBookmarkedOnly ? "bookmark.fill" : "bookmark")
+                .symbolEffect(.bounce, value: showBookmarkedOnly)
+        }
+        .help(showBookmarkedOnly ? "Showing bookmarked only — tap to show all" : "Tap to show bookmarked only")
+        .accessibilityLabel(showBookmarkedOnly ? "Show all items" : "Show bookmarked only")
+    }
+
+    // MARK: - Selected Items Bar
 
     private var selectedItemsBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -232,24 +293,45 @@ struct NudgeSkillSelectorSheet: View {
         )
     }
 
+    // MARK: - Empty State
+
     private var emptyStateView: some View {
         VStack(spacing: 16) {
-            Image(systemName: searchText.isEmpty ? "bolt.slash" : "magnifyingglass")
-                .font(.system(.largeTitle))
-                .foregroundStyle(.secondary)
-
-            if searchText.isEmpty {
-                Text("No Nudges or Skills")
+            if showBookmarkedOnly && localBookmarkedIds.isEmpty && searchText.isEmpty {
+                Image(systemName: "star")
+                    .font(.system(.largeTitle))
+                    .foregroundStyle(.secondary)
+                Text("No Bookmarks Yet")
                     .font(.headline)
-                Text("No nudges or skills are available yet.")
+                Text("Tap ★ next to any item to bookmark it.\nBookmarked items appear here for quick access.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    showBookmarkedOnly = false
+                } label: {
+                    Label("Show All Items", systemImage: "list.bullet")
+                }
+                .buttonStyle(.bordered)
+                .padding(.top, 4)
             } else {
-                Text("No Results")
-                    .font(.headline)
-                Text("No items match \"\(searchText)\"")
-                    .font(.subheadline)
+                Image(systemName: searchText.isEmpty ? "bolt.slash" : "magnifyingglass")
+                    .font(.system(.largeTitle))
                     .foregroundStyle(.secondary)
+
+                if searchText.isEmpty {
+                    Text("No Nudges or Skills")
+                        .font(.headline)
+                    Text("No nudges or skills are available yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No Results")
+                        .font(.headline)
+                    Text("No items match \"\(searchText)\"")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -257,6 +339,8 @@ struct NudgeSkillSelectorSheet: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
+
+    // MARK: - Helpers
 
     private func isSelected(item: SelectorItem) -> Bool {
         switch item {
@@ -283,12 +367,28 @@ struct NudgeSkillSelectorSheet: View {
             }
         }
     }
+
+    private func toggleBookmark(item: SelectorItem) {
+        let itemId = item.baseId
+        // Optimistic local update so the UI responds immediately.
+        if localBookmarkedIds.contains(itemId) {
+            localBookmarkedIds.remove(itemId)
+        } else {
+            localBookmarkedIds.insert(itemId)
+        }
+        // Persist via FFI (fire-and-forget; Rust will emit BookmarkListChanged callback).
+        onToggleBookmark?(itemId)
+    }
 }
+
+// MARK: - Row View
 
 private struct NudgeSkillSelectorRow: View {
     let item: NudgeSkillSelectorSheet.SelectorItem
     let isSelected: Bool
+    let isBookmarked: Bool
     let onTap: () -> Void
+    let onToggleBookmark: () -> Void
 
     private var iconName: String {
         switch item {
@@ -356,6 +456,18 @@ private struct NudgeSkillSelectorRow: View {
 
             Spacer()
 
+            // Bookmark star button — tappable, does not trigger row selection.
+            Button(action: onToggleBookmark) {
+                Image(systemName: isBookmarked ? "star.fill" : "star")
+                    .font(.body)
+                    .foregroundStyle(isBookmarked ? Color.yellow : Color.secondary.opacity(0.5))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel(isBookmarked ? "Remove bookmark" : "Add bookmark")
+
+            // Selection checkbox
             Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                 .font(.title2)
                 .foregroundStyle(isSelected ? Color.accentColor : .secondary)

@@ -33,6 +33,7 @@ const BAR_EIGHTH: char = '▏';
 
 // Layout constants for consistent width calculations
 const CHART_LABEL_WIDTH: u16 = 22; // Space needed for date label + count display
+const MIN_CHART_WIDTH: u16 = CHART_LABEL_WIDTH; // Minimum width needed to render chart bars
 
 // Messages chart needs extra space for "user/all" counts (e.g., "123/456")
 const MESSAGES_COUNTS_WIDTH: u16 = 8; // Extra width for dual count display

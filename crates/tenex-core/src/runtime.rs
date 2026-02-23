@@ -137,8 +137,9 @@ impl CoreRuntime {
         // NOTE: Ephemeral kinds (24010, 24133) are intentionally excluded
         // They are processed directly via DataChange channel, not through nostrdb
         // Kind 30023 = NIP-23 long-form content (reports/articles)
+        // Kind 14202 = bookmark list (regular replaceable event)
         let ndb_filter = FilterBuilder::new()
-            .kinds([31933, 1, 0, 4199, 513, 4129, 4201, 30023])
+            .kinds([31933, 1, 0, 4199, 513, 4129, 4201, 30023, 14202])
             .build();
         let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
         let ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);
