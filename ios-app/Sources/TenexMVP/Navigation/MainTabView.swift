@@ -10,6 +10,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case diagnostics
     case teams
     case agentDefinitions
+    case nudges
     case settings
 
     var id: String { rawValue }
@@ -25,6 +26,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .diagnostics: return "Diagnostics"
         case .teams: return "Teams"
         case .agentDefinitions: return "Agent Definitions"
+        case .nudges: return "Nudges"
         case .settings: return "Settings"
         }
     }
@@ -40,6 +42,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .diagnostics: return "gauge.with.needle"
         case .teams: return "person.2"
         case .agentDefinitions: return "person.3.sequence"
+        case .nudges: return "forward.circle"
         case .settings: return "gearshape"
         }
     }
