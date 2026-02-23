@@ -812,6 +812,7 @@ impl AppDataStore {
                     thread.status_label = metadata.status_label.clone();
                     thread.status_current_activity = metadata.status_current_activity.clone();
                     thread.summary = metadata.summary.clone();
+                    thread.hashtags = metadata.hashtags.clone();
                     // Only update last_activity if metadata is newer than current
                     // to avoid regressing timestamps when metadata is older than newest message
                     if metadata.created_at > thread.last_activity {
@@ -1357,6 +1358,7 @@ impl AppDataStore {
             let status_label = metadata.status_label;
             let status_current_activity = metadata.status_current_activity;
             let summary = metadata.summary;
+            let hashtags = metadata.hashtags;
             let created_at = metadata.created_at;
 
             let _ = thread_id_short; // For debugging
@@ -1372,6 +1374,7 @@ impl AppDataStore {
                     thread.status_label = status_label;
                     thread.status_current_activity = status_current_activity;
                     thread.summary = summary;
+                    thread.hashtags = hashtags;
                     // Update last_activity
                     if created_at > thread.last_activity {
                         thread.last_activity = created_at;
@@ -1637,6 +1640,7 @@ impl AppDataStore {
                 thread.status_label = metadata.status_label.clone();
                 thread.status_current_activity = metadata.status_current_activity.clone();
                 thread.summary = metadata.summary.clone();
+                thread.hashtags = metadata.hashtags.clone();
                 // Only update last_activity if metadata is newer
                 if metadata.created_at > thread.last_activity {
                     thread.last_activity = metadata.created_at;
@@ -3500,7 +3504,8 @@ mod tests {
                 "test",
                 timestamp,
             );
-            msg.llm_metadata = HashMap::from([("total-tokens".to_string(), format!("{}", (i + 1) * 100))]);
+            msg.llm_metadata =
+                HashMap::from([("total-tokens".to_string(), format!("{}", (i + 1) * 100))]);
 
             store
                 .messages_by_thread
@@ -4084,6 +4089,7 @@ mod tests {
             status_label: None,
             status_current_activity: None,
             summary: None,
+            hashtags: vec![],
             parent_conversation_id: None,
             p_tags: vec![],
             ask_event: None,

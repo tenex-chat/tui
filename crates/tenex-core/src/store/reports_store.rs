@@ -186,6 +186,7 @@ mod tests {
             status_label: None,
             status_current_activity: None,
             summary: None,
+            hashtags: vec![],
             parent_conversation_id: None,
             p_tags: vec![],
             ask_event: None,

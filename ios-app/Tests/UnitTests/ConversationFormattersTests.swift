@@ -304,6 +304,7 @@ final class ConversationFormattersTests: XCTestCase {
             statusLabel: nil,
             statusCurrentActivity: nil,
             summary: nil,
+            hashtags: [],
             parentConversationId: nil,
             pTags: [],
             askEvent: nil,

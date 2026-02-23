@@ -90,6 +90,7 @@ extension TenexCoreManager {
         // while the next fetchData() runs.
         projects = []
         conversations = []
+        appFilterConversationScope = []
         inboxItems = []
         reports = []
         messagesByConversation = [:]

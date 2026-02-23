@@ -213,6 +213,7 @@ final class ComposerViewModelTests: XCTestCase {
             statusLabel: nil,
             statusCurrentActivity: nil,
             summary: nil,
+            hashtags: [],
             parentConversationId: nil,
             pTags: [],
             askEvent: nil,

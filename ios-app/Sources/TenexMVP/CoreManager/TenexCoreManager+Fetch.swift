@@ -41,7 +41,17 @@ extension TenexCoreManager {
             )
 
             projects = p
-            conversations = sortedConversations(c)
+            appFilterConversationScope = sortedConversations(c)
+            let now = UInt64(Date().timeIntervalSince1970)
+            conversations = sortedConversations(
+                appFilterConversationScope.filter { conversation in
+                    conversationMatchesAppFilter(
+                        conversation,
+                        now: now,
+                        snapshot: filterSnapshot
+                    )
+                }
+            )
             inboxItems = i
 
             let validProjectIds = Set(p.map(\.id))
@@ -337,7 +347,7 @@ extension TenexCoreManager {
 
         conversationRefreshTask?.cancel()
         profiler.logEvent(
-            "refreshConversationsForActiveFilter start projectIds=\(snapshot.projectIds.count) timeWindow=\(snapshot.timeWindow.rawValue)",
+            "refreshConversationsForActiveFilter start projectIds=\(snapshot.projectIds.count) timeWindow=\(snapshot.timeWindow.rawValue) scheduled=\(snapshot.scheduledEventFilter.rawValue)",
             category: .general,
             level: .debug
         )
@@ -350,11 +360,20 @@ extension TenexCoreManager {
 
             await MainActor.run {
                 guard self.appFilterSnapshot == snapshot else { return }
-                self.conversations = self.sortedConversations(refreshed)
+                self.appFilterConversationScope = self.sortedConversations(refreshed)
+                let now = UInt64(Date().timeIntervalSince1970)
+                let filtered = self.appFilterConversationScope.filter { conversation in
+                    self.conversationMatchesAppFilter(
+                        conversation,
+                        now: now,
+                        snapshot: snapshot
+                    )
+                }
+                self.conversations = self.sortedConversations(filtered)
                 self.updateActiveAgentsState()
                 let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
                 self.profiler.logEvent(
-                    "refreshConversationsForActiveFilter complete results=\(refreshed.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+                    "refreshConversationsForActiveFilter complete base=\(refreshed.count) filtered=\(filtered.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
                     category: .general,
                     level: elapsedMs >= 180 ? .error : .info
                 )
@@ -373,16 +392,16 @@ extension TenexCoreManager {
         let fetched = try await safeCore.getAllConversations(filter: filter)
         guard !Task.isCancelled else { return [] }
         let now = UInt64(Date().timeIntervalSince1970)
-        let filtered = fetched.filter { conversation in
+        let baseFiltered = fetched.filter { conversation in
             let projectId = Self.projectId(fromATag: conversation.projectATag)
             return snapshot.includes(projectId: projectId, timestamp: conversation.thread.effectiveLastActivity, now: now)
         }
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
         profiler.logEvent(
-            "fetchConversations projectIds=\(snapshot.projectIds.count) fetched=\(fetched.count) filtered=\(filtered.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+            "fetchConversations projectIds=\(snapshot.projectIds.count) fetched=\(fetched.count) baseFiltered=\(baseFiltered.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
             category: .general,
             level: elapsedMs >= 180 ? .error : .info
         )
-        return filtered
+        return baseFiltered
     }
 }

@@ -687,6 +687,7 @@ extension ConversationFullInfo {
             statusLabel: "In Progress",
             statusCurrentActivity: "Reviewing security requirements",
             summary: "Add OAuth2 authentication flow with Google and GitHub providers",
+            hashtags: [],
             parentConversationId: nil,
             pTags: [],
             askEvent: nil,
