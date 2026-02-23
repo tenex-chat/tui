@@ -124,12 +124,17 @@ struct BunkerApprovalSheet: View {
     private var autoApproveToggle: some View {
         Group {
             if let kind = request.eventKind {
+                #if os(macOS)
                 Toggle(isOn: $alwaysApprove) {
                     Text("Always approve \(kindName(kind)) from \(displayName)")
                         .font(.caption)
                 }
-                #if os(macOS)
                 .toggleStyle(.checkbox)
+                #else
+                Toggle(isOn: $alwaysApprove) {
+                    Text("Always approve \(kindName(kind)) from \(displayName)")
+                        .font(.caption)
+                }
                 #endif
             }
         }
@@ -231,11 +236,10 @@ struct BunkerApprovalSheet: View {
             }
         }
 
-        Task {
-            try? await coreManager.safeCore.respondToBunkerRequest(
-                requestId: request.requestId,
-                approved: approved
-            )
+        if approved {
+            coreManager.approveBunkerRequest(requestId: request.requestId)
+        } else {
+            coreManager.rejectBunkerRequest(requestId: request.requestId)
         }
         onDismiss()
     }

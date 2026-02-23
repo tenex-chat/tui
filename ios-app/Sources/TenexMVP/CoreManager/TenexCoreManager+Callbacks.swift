@@ -492,21 +492,30 @@ extension TenexCoreManager {
     @MainActor
     func handleBunkerSignRequest(_ request: FfiBunkerSignRequest) {
         pendingBunkerRequests.append(request)
+        signalDiagnosticsUpdate()
     }
 
     @MainActor
     func approveBunkerRequest(requestId: String) {
         pendingBunkerRequests.removeAll { $0.requestId == requestId }
+        signalDiagnosticsUpdate()
         Task {
             try? await safeCore.respondToBunkerRequest(requestId: requestId, approved: true)
+            await MainActor.run {
+                self.signalDiagnosticsUpdate()
+            }
         }
     }
 
     @MainActor
     func rejectBunkerRequest(requestId: String) {
         pendingBunkerRequests.removeAll { $0.requestId == requestId }
+        signalDiagnosticsUpdate()
         Task {
             try? await safeCore.respondToBunkerRequest(requestId: requestId, approved: false)
+            await MainActor.run {
+                self.signalDiagnosticsUpdate()
+            }
         }
     }
 }
