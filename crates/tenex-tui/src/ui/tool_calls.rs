@@ -305,9 +305,27 @@ pub fn render_tool_line(
                 }
             }
 
-            // Default: use content fallback if available, otherwise verb + target
+            // Default: use description from tool-args if available, then content fallback
             _ => {
-                // If we have a meaningful content fallback, use it
+                // Prefer description from tool-args JSON
+                if let Some(desc) = tool_call
+                    .parameters
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
+                    return Line::from(vec![
+                        Span::styled("│", Style::default().fg(indicator_color)),
+                        Span::raw("  "),
+                        Span::styled(
+                            truncate_with_ellipsis(desc, 80),
+                            Style::default().fg(theme::TEXT_MUTED),
+                        ),
+                    ]);
+                }
+
+                // Fall back to content if available
                 if let Some(content) = content_fallback {
                     let trimmed = content.trim();
                     if !trimmed.is_empty() {

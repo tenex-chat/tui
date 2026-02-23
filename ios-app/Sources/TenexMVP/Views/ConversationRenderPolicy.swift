@@ -72,7 +72,9 @@ enum ConversationRenderPolicy {
                 text = "📜 \(conversationDisplay)"
             }
         default:
-            if let fallback = contentFallback?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if let description = nonEmptyString(args["description"] as? String) {
+                text = truncate(description, max: 80)
+            } else if let fallback = contentFallback?.trimmingCharacters(in: .whitespacesAndNewlines),
                !fallback.isEmpty {
                 text = truncate(fallback, max: 80)
             } else {
