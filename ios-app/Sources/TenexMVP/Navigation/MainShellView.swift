@@ -279,10 +279,10 @@ struct MainShellView: View {
             SearchView(layoutMode: .adaptive, selectedConversation: $selectedSearchConversation)
                 .accessibilityIdentifier(AppSection.search.accessibilityContentID)
         case .stats:
-            StatsView()
+            StatsView(isEmbedded: true)
                 .accessibilityIdentifier(AppSection.stats.accessibilityContentID)
         case .diagnostics:
-            DiagnosticsView(coreManager: coreManager)
+            DiagnosticsView(coreManager: coreManager, isEmbedded: true)
                 .environment(coreManager)
                 .accessibilityIdentifier(AppSection.diagnostics.accessibilityContentID)
         case .teams:

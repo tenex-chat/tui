@@ -179,15 +179,8 @@ struct ConversationsTabView: View {
                 }
                 .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
             #else
-            NavigationStack {
-                DiagnosticsView(coreManager: coreManager)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showDiagnostics = false }
-                        }
-                    }
-            }
-            .tenexModalPresentation(detents: [.large])
+            DiagnosticsView(coreManager: coreManager)
+                .tenexModalPresentation(detents: [.large])
             #endif
         }
         .sheet(isPresented: $showAudioQueue) {
@@ -202,16 +195,9 @@ struct ConversationsTabView: View {
                 #endif
         }
         .sheet(isPresented: $showStats) {
-            NavigationStack {
-                StatsView()
-                    .environment(coreManager)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") { showStats = false }
-                        }
-                    }
-            }
-            .tenexModalPresentation(detents: [.large])
+            StatsView()
+                .environment(coreManager)
+                .tenexModalPresentation(detents: [.large])
         }
         .sheet(item: $projectForNewConversation) { selectedProject in
             MessageComposerView(project: selectedProject.project)
