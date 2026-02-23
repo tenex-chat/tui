@@ -333,7 +333,7 @@ class TenexCoreManager {
     /// Reads the last ffi.init timing block from the Rust log file and returns the lines.
     /// Rust writes detailed per-step PERF logs to tenex.log during init; this surfaces them
     /// to the Swift profiler so they appear in the Xcode console and perf log.
-    private static func readRustInitTimings() -> [String] {
+    private nonisolated static func readRustInitTimings() -> [String] {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return ["error: no Application Support directory found"]
         }
