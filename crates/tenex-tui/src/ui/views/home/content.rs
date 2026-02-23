@@ -306,12 +306,17 @@ fn render_card_content(
 
         let total_width = area.width as usize;
         let indent_len = indent.len();
-        let title_max =
-            total_width.saturating_sub(RIGHT_TOTAL_W + indent_len + nested_suffix.width());
+        let indicator_width = if thread.is_scheduled { " ⏰".width() } else { 0 }
+            + if is_archived { " [arc]".width() } else { 0 }
+            + if has_draft { " ✎".width() } else { 0 }
+            + if spinner_char.is_some() { 2 } else { 0 };
+        let title_max = total_width
+            .saturating_sub(RIGHT_TOTAL_W + indent_len + nested_suffix.width() + indicator_width);
         let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
         let title_len = title_truncated.width();
-        let filler = total_width
-            .saturating_sub(indent_len + title_len + nested_suffix.width() + RIGHT_TOTAL_W);
+        let filler = total_width.saturating_sub(
+            indent_len + title_len + nested_suffix.width() + RIGHT_TOTAL_W + indicator_width,
+        );
 
         let mut line1 = Vec::new();
         if !indent.is_empty() {

@@ -137,10 +137,24 @@ pub fn build_thread_hierarchy(
         }
     }
 
-    // Start with root threads (those that have no parent in our list)
+    // Build set of all thread IDs in the visible list so we can detect cross-project parents
+    let thread_ids: HashSet<&str> = threads.iter().map(|(t, _)| t.id.as_str()).collect();
+
+    // Start with root threads: those with no parent, OR whose parent is not in this visible list
+    // (cross-project delegations: the child lives in Project B but its parent is in Project A)
     let root_threads: Vec<(&Thread, &String)> = threads
         .iter()
-        .filter(|(t, _)| !child_ids.contains(t.id.as_str()))
+        .filter(|(t, _)| {
+            if !child_ids.contains(t.id.as_str()) {
+                return true;
+            }
+            // Thread has a parent — only nest it if the parent is actually visible here
+            let parent_id = t
+                .parent_conversation_id
+                .as_deref()
+                .or_else(|| q_tag_child_to_parent.get(t.id.as_str()).copied());
+            !parent_id.map(|pid| thread_ids.contains(pid)).unwrap_or(false)
+        })
         .map(|(t, a)| (t, a))
         .collect();
 
