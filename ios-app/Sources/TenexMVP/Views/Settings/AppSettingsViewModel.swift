@@ -195,6 +195,7 @@ final class AppSettingsViewModel: ObservableObject {
             bunkerAutoApproveRules.removeAll {
                 $0.requesterPubkey == rule.requesterPubkey && $0.eventKind == rule.eventKind
             }
+            await loadBunkerRulesAndLog(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to remove rule: \(error.localizedDescription)"
         }
@@ -390,6 +391,8 @@ final class AppSettingsViewModel: ObservableObject {
 
         let previousRunning = bunkerRunning
         let previousUri = bunkerUri
+        let previousAutoApproveRules = bunkerAutoApproveRules
+        let previousAuditLog = bunkerAuditLog
 
         // Optimistically update UI so the toggle does not bounce while async work runs.
         bunkerRunning = enabled
@@ -414,12 +417,15 @@ final class AppSettingsViewModel: ObservableObject {
                     }
                 }
                 bunkerRunning = true
+                await loadBunkerRulesAndLog(coreManager: coreManager)
             } else {
                 if previousRunning || !previousUri.isEmpty {
                     try await coreManager.safeCore.stopBunker()
                 }
                 bunkerRunning = false
                 bunkerUri = ""
+                bunkerAutoApproveRules = []
+                bunkerAuditLog = []
             }
 
             if persistPreference {
@@ -428,6 +434,8 @@ final class AppSettingsViewModel: ObservableObject {
         } catch {
             bunkerRunning = previousRunning
             bunkerUri = previousUri
+            bunkerAutoApproveRules = previousAutoApproveRules
+            bunkerAuditLog = previousAuditLog
             if persistPreference {
                 Self.persistBunkerEnabled(previousRunning)
             }
