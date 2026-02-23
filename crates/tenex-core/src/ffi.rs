@@ -3836,6 +3836,41 @@ impl TenexCore {
     }
 
     // =========================================================================
+    // Push Notification Registration
+    // =========================================================================
+
+    /// Register or deregister an APNs device token for push notifications.
+    ///
+    /// Publishes a kind:25000 event with NIP-44 encrypted payload containing
+    /// the device token and registration intent.  The backend decrypts this and
+    /// registers/deregisters the device in its APNs notification pipeline.
+    ///
+    /// - `device_token`: Hex-encoded APNs device token (empty string when `enable` is false)
+    /// - `enable`: `true` to register, `false` to deregister
+    /// - `backend_pubkey`: Hex-encoded public key of the TENEX backend
+    /// - `device_id`: Stable device identifier (UIDevice.identifierForVendor on iOS)
+    pub fn register_apns_token(
+        &self,
+        device_token: String,
+        enable: bool,
+        backend_pubkey: String,
+        device_id: String,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+        core_handle
+            .send(NostrCommand::RegisterApnsToken {
+                device_token,
+                enable,
+                backend_pubkey,
+                device_id,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send RegisterApnsToken command: {}", e),
+            })?;
+        Ok(())
+    }
+
+    // =========================================================================
     // Backend Trust Management
     // =========================================================================
 
