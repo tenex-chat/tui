@@ -54,6 +54,12 @@ protocol SafeTenexCoreProtocol: Actor {
         isFork: Bool
     ) throws
     func deleteAgentDefinition(agentId: String) throws
+    /// Publish a kind:24030 event to delete (decommission) an agent.
+    /// - `agentPubkey`: Hex pubkey of the agent instance to delete.
+    /// - `projectATag`: Optional project a-tag (`31933:<pubkey>:<d_tag>`).
+    ///   Pass `nil` for global deletion (removes from all projects).
+    /// - `reason`: Optional reason text.
+    func deleteAgent(agentPubkey: String, projectATag: String?, reason: String?) throws
     func createProject(
         name: String,
         description: String,
