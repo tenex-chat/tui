@@ -60,7 +60,6 @@ struct MainShellView: View {
             }
 
             Section("Browse") {
-                shellSidebarRowButton(for: .teams)
                 shellSidebarRowButton(for: .agentDefinitions)
                 shellSidebarRowButton(for: .nudges)
             }
@@ -296,7 +295,10 @@ struct MainShellView: View {
         case .agentDefinitions:
             AgentDefinitionsTabView(
                 layoutMode: .adaptive,
-                selectedAgent: $selectedAgentDefinition
+                selectedAgent: $selectedAgentDefinition,
+                onShowAllTeams: {
+                    selectedSection = .teams
+                }
             )
             .accessibilityIdentifier(AppSection.agentDefinitions.accessibilityContentID)
         case .nudges:
