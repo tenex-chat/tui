@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
+use std::{collections::HashSet, io};
 
 use anyhow::{Context, Result};
 
@@ -16,6 +17,18 @@ const POLL_INTERVAL_MS: u64 = 100;
 const BOOT_WAIT_TIMEOUT_SECS: u64 = 60;
 const BOOT_POLL_INTERVAL_MS: u64 = 500;
 const REPLY_POLL_INTERVAL_MS: u64 = 500;
+const BUNKER_WATCH_POLL_INTERVAL_MS: u64 = 500;
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct PendingBunkerRequest {
+    request_id: String,
+    requester_pubkey: String,
+    event_kind: Option<u16>,
+    #[serde(default)]
+    event_content: Option<String>,
+    #[serde(default)]
+    received_at_ms: Option<u64>,
+}
 
 /// Connect to the daemon, auto-spawning if needed
 fn connect_to_daemon(data_dir: &Path, config: Option<&CliConfig>) -> Result<UnixStream> {
@@ -203,6 +216,10 @@ pub fn send_command(
     data_dir: &Path,
     config: Option<CliConfig>,
 ) -> Result<()> {
+    if let CliCommand::BunkerWatch = command {
+        return watch_bunker_requests(data_dir, config.as_ref());
+    }
+
     // Handle boot-project --wait specially
     if let CliCommand::BootProject {
         ref project_slug,
@@ -331,6 +348,156 @@ pub fn send_command(
         }
     }
 
+    Ok(())
+}
+
+fn watch_bunker_requests(data_dir: &Path, config: Option<&CliConfig>) -> Result<()> {
+    let status_response = send_command_raw(&CliCommand::BunkerStatus, data_dir, config)?;
+    if let Some(error) = status_response.error {
+        anyhow::bail!("Error [{}]: {}", error.code, error.message);
+    }
+    let is_running = status_response
+        .result
+        .as_ref()
+        .and_then(|r| r.get("running"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !is_running {
+        anyhow::bail!("Bunker is not running. Start it with `tenex-cli bunker start`.");
+    }
+
+    eprintln!("Watching bunker requests. Actions: a=approve, A=approve+rule, r=reject, s=skip, q=quit");
+
+    let mut seen_request_ids = HashSet::new();
+    loop {
+        let response = send_command_raw(&CliCommand::BunkerListPending, data_dir, config)?;
+        if let Some(error) = response.error {
+            anyhow::bail!("Error [{}]: {}", error.code, error.message);
+        }
+        let pending = parse_pending_requests(response.result);
+
+        for request in pending {
+            if seen_request_ids.contains(&request.request_id) {
+                continue;
+            }
+            seen_request_ids.insert(request.request_id.clone());
+
+            println!();
+            println!("Request ID: {}", request.request_id);
+            println!("Requester: {}", request.requester_pubkey);
+            println!(
+                "Event kind: {}",
+                request
+                    .event_kind
+                    .map(|k| k.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            );
+            if let Some(received_at_ms) = request.received_at_ms {
+                println!("Received at (ms): {}", received_at_ms);
+            }
+            if let Some(content) = request.event_content.as_deref() {
+                let preview: String = content.chars().take(160).collect();
+                if content.chars().count() > 160 {
+                    println!("Content: {}...", preview);
+                } else {
+                    println!("Content: {}", preview);
+                }
+            }
+
+            loop {
+                print!("[a/A/r/s/q] > ");
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let action = input.trim().chars().next();
+
+                match action {
+                    Some('a') => {
+                        send_bunker_response(data_dir, config, &request.request_id, true)?;
+                        println!("Approved");
+                        break;
+                    }
+                    Some('A') => {
+                        send_bunker_response(data_dir, config, &request.request_id, true)?;
+                        send_bunker_rule_add(
+                            data_dir,
+                            config,
+                            &request.requester_pubkey,
+                            request.event_kind,
+                        )?;
+                        println!("Approved and persisted auto-approve rule");
+                        break;
+                    }
+                    Some('r') => {
+                        send_bunker_response(data_dir, config, &request.request_id, false)?;
+                        println!("Rejected");
+                        break;
+                    }
+                    Some('s') => {
+                        println!("Skipped");
+                        break;
+                    }
+                    Some('q') => return Ok(()),
+                    _ => {
+                        println!("Invalid action. Use a, A, r, s, or q.");
+                    }
+                }
+            }
+        }
+
+        thread::sleep(Duration::from_millis(BUNKER_WATCH_POLL_INTERVAL_MS));
+    }
+}
+
+fn parse_pending_requests(result: Option<serde_json::Value>) -> Vec<PendingBunkerRequest> {
+    let Some(result) = result else {
+        return Vec::new();
+    };
+
+    let pending_value = result.get("pending").cloned().unwrap_or(result);
+    serde_json::from_value::<Vec<PendingBunkerRequest>>(pending_value).unwrap_or_default()
+}
+
+fn send_bunker_response(
+    data_dir: &Path,
+    config: Option<&CliConfig>,
+    request_id: &str,
+    approved: bool,
+) -> Result<()> {
+    let response = send_command_raw(
+        &CliCommand::BunkerRespond {
+            request_id: request_id.to_string(),
+            approved,
+        },
+        data_dir,
+        config,
+    )?;
+
+    if let Some(error) = response.error {
+        anyhow::bail!("Error [{}]: {}", error.code, error.message);
+    }
+    Ok(())
+}
+
+fn send_bunker_rule_add(
+    data_dir: &Path,
+    config: Option<&CliConfig>,
+    requester_pubkey: &str,
+    event_kind: Option<u16>,
+) -> Result<()> {
+    let response = send_command_raw(
+        &CliCommand::BunkerRulesAdd {
+            requester_pubkey: requester_pubkey.to_string(),
+            event_kind,
+        },
+        data_dir,
+        config,
+    )?;
+
+    if let Some(error) = response.error {
+        anyhow::bail!("Error [{}]: {}", error.code, error.message);
+    }
     Ok(())
 }
 

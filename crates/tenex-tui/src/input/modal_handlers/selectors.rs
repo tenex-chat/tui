@@ -289,8 +289,11 @@ pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
 
                     // Publish first; apply the optimistic update only on success so
                     // that UI state never diverges from what the relay will persist.
-                    let bookmarked_ids_vec: Vec<String> =
-                        updated_bookmark_list.bookmarked_ids.iter().cloned().collect();
+                    let bookmarked_ids_vec: Vec<String> = updated_bookmark_list
+                        .bookmarked_ids
+                        .iter()
+                        .cloned()
+                        .collect();
                     if core_handle
                         .send(NostrCommand::PublishBookmarkList {
                             bookmarked_ids: bookmarked_ids_vec,
