@@ -16,22 +16,29 @@ struct AgentDefinitionsTabView: View {
 
     let layoutMode: AgentDefinitionsLayoutMode
     private let selectedAgentBindingOverride: Binding<AgentDefinition?>?
+    private let onShowAllTeams: (() -> Void)?
 
     @StateObject private var viewModel = AgentDefinitionsViewModel()
+    @StateObject private var teamsViewModel = TeamsViewModel()
     @State private var selectedAgentState: AgentDefinition?
     @State private var hasConfiguredViewModel = false
+    @State private var hasConfiguredTeamsViewModel = false
     @State private var navigationPath: [AgentDefinitionListItem] = []
     @State private var assignmentTarget: AgentDefinitionListItem?
     @State private var assignmentResult: AgentAssignmentResult?
     @State private var teamCreationTarget: AgentDefinitionListItem?
+    @State private var selectedFeaturedTeam: TeamListItem?
     @State private var showNewAgentDefinitionModal = false
+    @State private var showAllTeamsSheet = false
 
     init(
         layoutMode: AgentDefinitionsLayoutMode = .adaptive,
-        selectedAgent: Binding<AgentDefinition?>? = nil
+        selectedAgent: Binding<AgentDefinition?>? = nil,
+        onShowAllTeams: (() -> Void)? = nil
     ) {
         self.layoutMode = layoutMode
         self.selectedAgentBindingOverride = selectedAgent
+        self.onShowAllTeams = onShowAllTeams
     }
 
     private var selectedAgentBinding: Binding<AgentDefinition?> {
@@ -52,14 +59,30 @@ struct AgentDefinitionsTabView: View {
                 viewModel.configure(with: coreManager)
                 hasConfiguredViewModel = true
             }
-            await viewModel.loadIfNeeded()
+            if !hasConfiguredTeamsViewModel {
+                teamsViewModel.configure(with: coreManager)
+                hasConfiguredTeamsViewModel = true
+            }
+
+            async let agentLoad: Void = viewModel.loadIfNeeded()
+            async let teamLoad: Void = teamsViewModel.loadIfNeeded()
+            _ = await (agentLoad, teamLoad)
         }
         .onChange(of: coreManager.diagnosticsVersion) { _, _ in
             Task { await viewModel.refresh() }
         }
+        .onChange(of: coreManager.teamsVersion) { _, _ in
+            Task { await teamsViewModel.refresh() }
+        }
         .sheet(item: $assignmentTarget) { item in
             AgentDefinitionProjectAssignmentSheet(item: item) { result in
                 assignmentResult = result
+            }
+            .environment(coreManager)
+        }
+        .sheet(item: $selectedFeaturedTeam) { item in
+            NavigationStack {
+                TeamDetailView(teamId: item.id, viewModel: teamsViewModel)
             }
             .environment(coreManager)
         }
@@ -68,6 +91,10 @@ struct AgentDefinitionsTabView: View {
                 assignmentResult = result
             }
             .environment(coreManager)
+        }
+        .sheet(isPresented: $showAllTeamsSheet) {
+            TeamsTabView(layoutMode: .adaptive)
+                .environment(coreManager)
         }
         .sheet(isPresented: $showNewAgentDefinitionModal) {
             NewAgentDefinitionSheet {
@@ -180,6 +207,8 @@ struct AgentDefinitionsTabView: View {
                     communityCount: viewModel.filteredCommunity.count
                 )
 
+                featuredTeamsMicroSection
+
                 if viewModel.filteredMine.isEmpty, viewModel.filteredCommunity.isEmpty {
                     emptyState
                 } else {
@@ -208,9 +237,71 @@ struct AgentDefinitionsTabView: View {
         .background(Color.systemBackground.ignoresSafeArea())
         #if os(iOS)
         .refreshable {
-            await viewModel.refresh()
+            async let refreshAgents: Void = viewModel.refresh()
+            async let refreshTeams: Void = teamsViewModel.refresh()
+            _ = await (refreshAgents, refreshTeams)
         }
         #endif
+    }
+
+    private var featuredTeamsMicroSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Featured Teams")
+                        .font(.title3.weight(.bold))
+                    Text("Discover ready-to-hire squads built by the community.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                Button(action: showAllTeams) {
+                    HStack(spacing: 5) {
+                        Text("Show all")
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.agentBrand)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if teamsViewModel.isLoading, teamsViewModel.featuredTeams.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading featured teams...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+            } else if teamsViewModel.featuredTeams.isEmpty {
+                ContentUnavailableView(
+                    "No Featured Teams Yet",
+                    systemImage: "person.2.slash",
+                    description: Text("Teams will appear here as soon as they are discovered.")
+                )
+                .frame(maxWidth: .infinity, minHeight: 150)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(teamsViewModel.featuredTeams.prefix(10)) { item in
+                            Button {
+                                selectedFeaturedTeam = item
+                            } label: {
+                                TeamFeaturedCard(item: item)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+        }
     }
 
     private func cardSection(
@@ -218,7 +309,10 @@ struct AgentDefinitionsTabView: View {
         subtitle: String,
         items: [AgentDefinitionListItem]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let imageItems = items.filter(hasDefinitionImage)
+        let compactItems = items.filter { !hasDefinitionImage($0) }
+
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
@@ -227,31 +321,102 @@ struct AgentDefinitionsTabView: View {
                     .foregroundStyle(.secondary)
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 14)], spacing: 14) {
-                ForEach(items) { item in
-                    Button {
-                        selectedAgentBinding.wrappedValue = item.agent
-                        navigationPath.append(item)
-                    } label: {
-                        AgentDefinitionVisualCard(item: item)
+            if !imageItems.isEmpty {
+                LazyVGrid(columns: imageCardColumns, alignment: .leading, spacing: 14) {
+                    ForEach(imageItems) { item in
+                        agentDefinitionButton(for: item, style: .visual)
                     }
-                    .buttonStyle(.plain)
-                    .contextMenu {
-                        Button {
-                            presentAssignmentSheet(for: item)
-                        } label: {
-                            Label("Add to Projects", systemImage: "plus")
-                        }
+                }
+            }
 
-                        Button {
-                            presentTeamCreationSheet(for: item)
-                        } label: {
-                            Label("Create Team", systemImage: "person.3")
-                        }
+            if !compactItems.isEmpty {
+                LazyVGrid(columns: compactCardColumns, alignment: .leading, spacing: 12) {
+                    ForEach(compactItems) { item in
+                        agentDefinitionButton(for: item, style: .compact)
                     }
                 }
             }
         }
+    }
+
+    private enum AgentDefinitionCardStyle {
+        case visual
+        case compact
+    }
+
+    private var imageCardColumns: [GridItem] {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        return Array(
+            repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 14, alignment: .top),
+            count: 4
+        )
+        #else
+        return [
+            GridItem(
+                .adaptive(
+                    minimum: AgentDefinitionVisualCard.gridMinimumWidth,
+                    maximum: AgentDefinitionVisualCard.gridMaximumWidth
+                ),
+                spacing: 14,
+                alignment: .top
+            )
+        ]
+        #endif
+    }
+
+    private var compactCardColumns: [GridItem] {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        return Array(
+            repeating: GridItem(.flexible(minimum: 0, maximum: .infinity), spacing: 14, alignment: .top),
+            count: 2
+        )
+        #else
+        return [GridItem(.adaptive(minimum: 320, maximum: .infinity), spacing: 12, alignment: .top)]
+        #endif
+    }
+
+    @ViewBuilder
+    private func agentDefinitionCard(for item: AgentDefinitionListItem, style: AgentDefinitionCardStyle) -> some View {
+        switch style {
+        case .visual:
+            AgentDefinitionVisualCard(item: item)
+        case .compact:
+            AgentDefinitionCompactCard(item: item)
+        }
+    }
+
+    private func agentDefinitionButton(for item: AgentDefinitionListItem, style: AgentDefinitionCardStyle) -> some View {
+        Button {
+            selectedAgentBinding.wrappedValue = item.agent
+            navigationPath.append(item)
+        } label: {
+            agentDefinitionCard(for: item, style: style)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                presentAssignmentSheet(for: item)
+            } label: {
+                Label("Add to Projects", systemImage: "plus")
+            }
+
+            Button {
+                presentTeamCreationSheet(for: item)
+            } label: {
+                Label("Create Team", systemImage: "person.3")
+            }
+        }
+    }
+
+    private func hasDefinitionImage(_ item: AgentDefinitionListItem) -> Bool {
+        guard
+            let raw = item.agent.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !raw.isEmpty
+        else {
+            return false
+        }
+
+        return URL(string: raw) != nil
     }
 
     private func presentAssignmentSheet(for item: AgentDefinitionListItem) {
@@ -276,6 +441,14 @@ struct AgentDefinitionsTabView: View {
         }
 
         teamCreationTarget = item
+    }
+
+    private func showAllTeams() {
+        if let onShowAllTeams {
+            onShowAllTeams()
+        } else {
+            showAllTeamsSheet = true
+        }
     }
 
     private var emptyState: some View {
@@ -317,31 +490,75 @@ private struct AgentDefinitionDetailView: View {
         awesomeAgentsProfileURL(for: item.agent.pubkey)
     }
 
+    private var contentText: String {
+        item.agent.content.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var instructionsText: String {
+        item.agent.instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasDistinctInstructions: Bool {
+        !instructionsText.isEmpty && instructionsText != contentText
+    }
+
+    private var agentImageURL: URL? {
+        guard
+            let rawValue = item.agent.picture?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !rawValue.isEmpty,
+            let url = URL(string: rawValue)
+        else {
+            return nil
+        }
+        return url
+    }
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                header
-                metadataSection
-                descriptionSection
-                instructionsSection
+            VStack(alignment: .leading, spacing: 0) {
+                heroSection
 
-                if !item.agent.useCriteria.isEmpty {
-                    useCriteriaSection
+                VStack(alignment: .leading, spacing: 24) {
+                    if !contentText.isEmpty {
+                        MarkdownView(content: contentText)
+                    }
+
+                    if hasDistinctInstructions {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Instructions")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            MarkdownView(content: instructionsText)
+                        }
+                    }
+
+                    if !item.agent.useCriteria.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Use Criteria")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(item.agent.useCriteria, id: \.self) { criteria in
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Text("\u{2022}")
+                                            .foregroundStyle(.secondary)
+                                        Text(criteria)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    technicalDetailsSection
+
+                    metadataFooter
                 }
-                if !item.agent.tools.isEmpty {
-                    toolsSection
-                }
-                if !item.agent.mcpServers.isEmpty {
-                    mcpServersSection
-                }
-                if !item.agent.fileIds.isEmpty {
-                    fileReferencesSection
-                }
+                .frame(maxWidth: 800, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
             }
-            .frame(maxWidth: 800, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 24)
         }
         .background(Color.systemBackground.ignoresSafeArea())
         .navigationTitle(displayName)
@@ -378,47 +595,9 @@ private struct AgentDefinitionDetailView: View {
             }
             .environment(coreManager)
         }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(displayName)
-                        .font(.title2.weight(.bold))
-
-                    HStack(spacing: 8) {
-                        if !item.agent.role.isEmpty {
-                            chip(text: item.agent.role, foreground: .primary, background: Color.systemGray6)
-                        }
-                        if let model = item.agent.model, !model.isEmpty {
-                            chip(text: model, foreground: Color.agentBrand, background: Color.agentBrand.opacity(0.15))
-                        }
-                        if let version = item.agent.version, !version.isEmpty {
-                            chip(text: "v\(version)", foreground: .secondary, background: Color.systemGray6)
-                        }
-                    }
-                }
-
-                Spacer(minLength: 0)
-
-                Button {
-                    showAssignmentSheet = true
-                } label: {
-                    Label("Add to Projects", systemImage: "plus")
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("Add to Projects")
-
-                Button {
-                    showTeamCreationSheet = true
-                } label: {
-                    Label("Create Team", systemImage: "person.3")
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityLabel("Create Team")
-
-                if canDelete {
+        .toolbar {
+            if canDelete {
+                ToolbarItem(placement: .destructiveAction) {
                     Button(role: .destructive) {
                         showDeleteConfirmation = true
                     } label: {
@@ -428,127 +607,215 @@ private struct AgentDefinitionDetailView: View {
                             Label("Delete", systemImage: "trash")
                         }
                     }
-                    .buttonStyle(.bordered)
                     .disabled(isDeleting)
                 }
             }
-
-            Divider()
         }
     }
 
-    private var metadataSection: some View {
-        section(title: "Metadata") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .center, spacing: 10) {
-                    Text("Author")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 110, alignment: .leading)
+    // MARK: - Hero
 
-                    Button(action: openAuthorProfile) {
-                        Text(item.authorDisplayName)
-                            .font(.caption)
-                            .foregroundStyle(Color.agentBrand)
-                            .underline()
-                            .lineLimit(1)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(authorProfileURL == nil)
-
-                    Spacer(minLength: 0)
-                }
-                metadataRow(title: "Created", value: formatDate(item.agent.createdAt))
-                metadataRow(title: "Event ID", value: shortHex(item.agent.id))
-
-                if !item.agent.dTag.isEmpty {
-                    metadataRow(title: "d-tag", value: item.agent.dTag)
+    @ViewBuilder
+    private var heroSection: some View {
+        if let imageURL = agentImageURL {
+            AsyncImage(url: imageURL) { phase in
+                switch phase {
+                case let .success(image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                case .failure:
+                    Rectangle()
+                        .fill(Color.systemGray6)
+                        .overlay {
+                            Image(systemName: "photo")
+                                .font(.largeTitle)
+                                .foregroundStyle(.quaternary)
+                        }
+                case .empty:
+                    Rectangle()
+                        .fill(Color.systemGray6)
+                        .overlay { ProgressView().controlSize(.small) }
+                @unknown default:
+                    EmptyView()
                 }
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: 420)
+            .clipped()
+            .overlay(alignment: .leading) {
+                GeometryReader { geo in
+                    heroOverlayContent
+                        .padding(24)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .frame(width: geo.size.width * 0.5)
+                }
+                .background(
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color.systemBackground, location: 0),
+                                .init(color: Color.systemBackground.opacity(0.85), location: 0.55),
+                                .init(color: Color.systemBackground.opacity(0.3), location: 0.75),
+                                .init(color: .clear, location: 1.0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+            }
+        } else {
+            heroOverlayContent
+                .padding(.horizontal, 20)
+                .padding(.top, 24)
+                .padding(.bottom, 8)
         }
     }
 
-    private var descriptionSection: some View {
-        section(title: "Description") {
-            Text(item.agent.description.isEmpty ? "No description provided" : item.agent.description)
-                .font(.body)
-                .foregroundStyle(item.agent.description.isEmpty ? .secondary : .primary)
-        }
-    }
+    private var heroOverlayContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                if !item.agent.role.isEmpty {
+                    chip(text: item.agent.role, foreground: .primary, background: Color.white.opacity(0.15))
+                }
+                if let model = item.agent.model, !model.isEmpty {
+                    chip(text: model, foreground: Color.agentBrand, background: Color.agentBrand.opacity(0.15))
+                }
+                if let version = item.agent.version, !version.isEmpty {
+                    chip(text: "v\(version)", foreground: .secondary, background: Color.white.opacity(0.1))
+                }
+            }
 
-    private var instructionsSection: some View {
-        section(title: "Instructions") {
-            if item.agent.instructions.isEmpty {
-                Text("No instructions provided")
+            Text(displayName)
+                .font(.largeTitle.weight(.bold))
+
+            if !item.agent.description.isEmpty {
+                Text(item.agent.description)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-            } else {
-                MarkdownView(content: item.agent.instructions)
+                    .lineLimit(3)
             }
-        }
-    }
 
-    private var useCriteriaSection: some View {
-        section(title: "Use Criteria") {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(item.agent.useCriteria, id: \.self) { criteria in
-                    HStack(alignment: .top, spacing: 6) {
-                        Text("•")
-                            .foregroundStyle(.secondary)
-                        Text(criteria)
-                            .foregroundStyle(.primary)
-                    }
+            HStack(spacing: 12) {
+                Button {
+                    showAssignmentSheet = true
+                } label: {
+                    Label("Hire", systemImage: "play.fill")
                 }
-            }
-        }
-    }
+                .buttonStyle(.borderedProminent)
 
-    private var toolsSection: some View {
-        section(title: "Tools") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 6)], alignment: .leading, spacing: 6) {
-                ForEach(item.agent.tools, id: \.self) { tool in
-                    chip(text: tool, foreground: Color.skillBrand, background: Color.skillBrandBackground)
+                Button {
+                    showTeamCreationSheet = true
+                } label: {
+                    Label("Create Team", systemImage: "plus")
                 }
+                .buttonStyle(.bordered)
             }
+            .controlSize(.large)
+            .padding(.top, 4)
         }
     }
 
-    private var mcpServersSection: some View {
-        section(title: "MCP Servers") {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(item.agent.mcpServers, id: \.self) { serverId in
-                    Text(serverId)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
+    private var metadataFooter: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+
+            HStack(spacing: 4) {
+                Text("by")
+                    .foregroundStyle(.tertiary)
+                Button(action: openAuthorProfile) {
+                    Text(item.authorDisplayName)
+                        .foregroundStyle(Color.agentBrand)
+                }
+                .buttonStyle(.plain)
+                .disabled(authorProfileURL == nil)
+
+                Text("\u{00B7}")
+                    .foregroundStyle(.tertiary)
+                Text(formatDate(item.agent.createdAt))
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 4) {
+                Text(shortHex(item.agent.id))
+                    .textSelection(.enabled)
+                if !item.agent.dTag.isEmpty {
+                    Text("\u{00B7}")
+                        .foregroundStyle(.tertiary)
+                    Text(item.agent.dTag)
                         .textSelection(.enabled)
                 }
             }
+            .font(.caption2.monospaced())
+            .foregroundStyle(.tertiary)
         }
     }
 
-    private var fileReferencesSection: some View {
-        section(title: "File References (NIP-94 kind:1063)") {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(item.agent.fileIds, id: \.self) { fileId in
-                    HStack(spacing: 8) {
-                        Image(systemName: "paperclip")
-                            .foregroundStyle(Color.skillBrand)
-                        Text(fileId)
-                            .font(.caption.monospaced())
+    // MARK: - Technical Details
+
+    @ViewBuilder
+    private var technicalDetailsSection: some View {
+        let hasTools = !item.agent.tools.isEmpty
+        let hasMcp = !item.agent.mcpServers.isEmpty
+        let hasFiles = !item.agent.fileIds.isEmpty
+
+        if hasTools || hasMcp || hasFiles {
+            VStack(alignment: .leading, spacing: 16) {
+                if hasTools {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tools")
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 6)], alignment: .leading, spacing: 6) {
+                            ForEach(item.agent.tools, id: \.self) { tool in
+                                chip(text: tool, foreground: Color.skillBrand, background: Color.skillBrandBackground)
+                            }
+                        }
+                    }
+                }
+
+                if hasMcp {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("MCP Servers")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(item.agent.mcpServers, id: \.self) { serverId in
+                                Text(serverId)
+                                    .font(.caption.monospaced())
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+
+                if hasFiles {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Files")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(item.agent.fileIds, id: \.self) { fileId in
+                                HStack(spacing: 8) {
+                                    Image(systemName: "paperclip")
+                                        .foregroundStyle(Color.skillBrand)
+                                    Text(fileId)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
                     }
                 }
             }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.systemGray6.opacity(0.5))
+            )
         }
-    }
-
-    private func section<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline)
-            content()
-        }
-        .padding(.bottom, 2)
     }
 
     private func chip(text: String, foreground: Color, background: Color) -> some View {
@@ -558,20 +825,6 @@ private struct AgentDefinitionDetailView: View {
             .padding(.vertical, 3)
             .background(background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .foregroundStyle(foreground)
-    }
-
-    private func metadataRow(title: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 110, alignment: .leading)
-            Text(value)
-                .font(.caption)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
-            Spacer(minLength: 0)
-        }
     }
 
     private func formatDate(_ timestamp: UInt64) -> String {
