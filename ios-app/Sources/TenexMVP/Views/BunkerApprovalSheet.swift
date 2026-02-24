@@ -289,7 +289,6 @@ struct BunkerApprovalSheet: View {
     private var autoApproveToggle: some View {
         Group {
             if let kind = request.eventKind {
-                #if os(macOS)
                 Toggle(isOn: $alwaysApprove) {
                     Text("Always approve \(kindName(kind)) from \(displayName)")
                         .font(.caption)

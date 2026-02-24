@@ -659,15 +659,23 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      */
     func createAgentDefinition(name: String, description: String, role: String, instructions: String, version: String, sourceId: String?, isFork: Bool) throws 
     
-    /**
-     * Create a new nudge (kind:4201).
-     */
     func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String]) throws 
     
     /**
      * Create a new project (kind:31933 replaceable event).
      */
     func createProject(name: String, description: String, agentDefinitionIds: [String], mcpToolIds: [String]) throws 
+    
+    /**
+     * Delete an agent from a project or globally by publishing a kind:24030 event.
+     *
+     * - `agent_pubkey`: Hex pubkey of the agent to delete.
+     * - `project_a_tag`: Optional project coordinate (`31933:<pubkey>:<d_tag>`).
+     * - `Some(a_tag)` → scope is "project", event includes the `a` tag.
+     * - `None` → scope is "global", no `a` tag (backend removes agent from all projects).
+     * - `reason`: Optional reason text placed in event content.
+     */
+    func deleteAgent(agentPubkey: String, projectATag: String?, reason: String?) throws 
     
     /**
      * Delete an agent definition (kind:4199) via NIP-09 kind:5 deletion.
@@ -790,8 +798,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     
     /**
      * Get all bookmarked nudge/skill IDs for the current user.
-     *
-     * Returns an empty list if not logged in or no bookmarks exist.
      */
     func getBookmarkedIds() throws  -> [String]
     
@@ -935,8 +941,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getProjects()  -> [Project]
     
     /**
-     * Get raw Nostr event JSON by event ID.
-     * Returns a pretty-printed JSON payload matching the TUI raw event inspector.
+     * Get raw Nostr event JSON for an event ID.
      */
     func getRawEventJson(eventId: String)  -> String?
     
@@ -987,8 +992,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     
     /**
      * Check if a nudge or skill is bookmarked by the current user.
-     *
-     * Returns `false` if not logged in or the item is not bookmarked.
      */
     func isBookmarked(itemId: String)  -> Bool
     
@@ -1083,16 +1086,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func refresh()  -> Bool
     
     /**
-     * Register or deregister an APNs device token for push notifications.
-     *
-     * Publishes a kind:25000 event with NIP-44 encrypted payload containing
-     * the device token and registration intent.  The backend decrypts this and
-     * registers/deregisters the device in its APNs notification pipeline.
-     *
-     * - `device_token`: Hex-encoded APNs device token (empty string when `enable` is false)
-     * - `enable`: `true` to register, `false` to deregister
-     * - `backend_pubkey`: Hex-encoded public key of the TENEX backend
-     * - `device_id`: Stable device identifier (UIDevice.identifierForVendor on iOS)
+     * Register or deregister an APNs push-notification token with the backend.
      */
     func registerApnsToken(deviceToken: String, enable: Bool, backendPubkey: String, deviceId: String) throws 
     
@@ -1213,9 +1207,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     
     /**
      * Toggle bookmark status for a nudge or skill.
-     *
-     * Performs an optimistic local update, publishes a kind:14202 event, and returns
-     * the updated list of bookmarked IDs.
      */
     func toggleBookmark(itemId: String) throws  -> [String]
     
@@ -1470,9 +1461,6 @@ open func createAgentDefinition(name: String, description: String, role: String,
 }
 }
     
-    /**
-     * Create a new nudge (kind:4201).
-     */
 open func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_create_nudge(self.uniffiClonePointer(),
         FfiConverterString.lower(title),
@@ -1495,6 +1483,24 @@ open func createProject(name: String, description: String, agentDefinitionIds: [
         FfiConverterString.lower(description),
         FfiConverterSequenceString.lower(agentDefinitionIds),
         FfiConverterSequenceString.lower(mcpToolIds),$0
+    )
+}
+}
+    
+    /**
+     * Delete an agent from a project or globally by publishing a kind:24030 event.
+     *
+     * - `agent_pubkey`: Hex pubkey of the agent to delete.
+     * - `project_a_tag`: Optional project coordinate (`31933:<pubkey>:<d_tag>`).
+     * - `Some(a_tag)` → scope is "project", event includes the `a` tag.
+     * - `None` → scope is "global", no `a` tag (backend removes agent from all projects).
+     * - `reason`: Optional reason text placed in event content.
+     */
+open func deleteAgent(agentPubkey: String, projectATag: String?, reason: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_delete_agent(self.uniffiClonePointer(),
+        FfiConverterString.lower(agentPubkey),
+        FfiConverterOptionString.lower(projectATag),
+        FfiConverterOptionString.lower(reason),$0
     )
 }
 }
@@ -1707,8 +1713,6 @@ open func getBackendTrustSnapshot()throws  -> BackendTrustSnapshot  {
     
     /**
      * Get all bookmarked nudge/skill IDs for the current user.
-     *
-     * Returns an empty list if not logged in or no bookmarks exist.
      */
 open func getBookmarkedIds()throws  -> [String]  {
     return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -1967,8 +1971,7 @@ open func getProjects() -> [Project]  {
 }
     
     /**
-     * Get raw Nostr event JSON by event ID.
-     * Returns a pretty-printed JSON payload matching the TUI raw event inspector.
+     * Get raw Nostr event JSON for an event ID.
      */
 open func getRawEventJson(eventId: String) -> String?  {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
@@ -2058,8 +2061,6 @@ open func `init`() -> Bool  {
     
     /**
      * Check if a nudge or skill is bookmarked by the current user.
-     *
-     * Returns `false` if not logged in or the item is not bookmarked.
      */
 open func isBookmarked(itemId: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -2235,16 +2236,7 @@ open func refresh() -> Bool  {
 }
     
     /**
-     * Register or deregister an APNs device token for push notifications.
-     *
-     * Publishes a kind:25000 event with NIP-44 encrypted payload containing
-     * the device token and registration intent.  The backend decrypts this and
-     * registers/deregisters the device in its APNs notification pipeline.
-     *
-     * - `device_token`: Hex-encoded APNs device token (empty string when `enable` is false)
-     * - `enable`: `true` to register, `false` to deregister
-     * - `backend_pubkey`: Hex-encoded public key of the TENEX backend
-     * - `device_id`: Stable device identifier (UIDevice.identifierForVendor on iOS)
+     * Register or deregister an APNs push-notification token with the backend.
      */
 open func registerApnsToken(deviceToken: String, enable: Bool, backendPubkey: String, deviceId: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_register_apns_token(self.uniffiClonePointer(),
@@ -2479,9 +2471,6 @@ open func stopBunker()throws   {try rustCallWithError(FfiConverterTypeTenexError
     
     /**
      * Toggle bookmark status for a nudge or skill.
-     *
-     * Performs an optimistic local update, publishes a kind:14202 event, and returns
-     * the updated list of bookmarked IDs.
      */
 open func toggleBookmark(itemId: String)throws  -> [String]  {
     return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -8663,7 +8652,7 @@ public enum DataChangeType {
     case bunkerSignRequest(request: FfiBunkerSignRequest
     )
     /**
-     * Bookmark list changed (user bookmarked/unbookmarked a nudge or skill, kind:14202)
+     * Bookmark list changed (kind:14202)
      */
     case bookmarkListChanged(bookmarkedIds: [String]
     )
@@ -10397,10 +10386,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_create_agent_definition() != 9741) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_create_nudge() != 53846) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_create_nudge() != 31059) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_create_project() != 59641) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_delete_agent() != 3202) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_delete_agent_definition() != 49759) {
@@ -10451,7 +10443,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_backend_trust_snapshot() != 11709) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_bookmarked_ids() != 56291) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_bookmarked_ids() != 26583) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_bunker_audit_log() != 42223) {
@@ -10514,7 +10506,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 30921) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_raw_event_json() != 42462) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_raw_event_json() != 48031) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_reports() != 65463) {
@@ -10535,7 +10527,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_is_bookmarked() != 54784) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_bookmarked() != 33558) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_conversation_archived() != 25908) {
@@ -10574,7 +10566,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 48105) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_register_apns_token() != 20033) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_register_apns_token() != 45155) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_remove_bunker_auto_approve_rule() != 27346) {
@@ -10631,7 +10623,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_stop_bunker() != 36083) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_toggle_bookmark() != 64019) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_toggle_bookmark() != 58602) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_toggle_conversation_archived() != 43672) {
