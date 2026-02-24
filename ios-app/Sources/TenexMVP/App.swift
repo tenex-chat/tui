@@ -29,6 +29,24 @@ struct TenexMVPApp: App {
     @StateObject private var sessionStore = AppSessionStore()
     private let notificationScheduler: NotificationScheduling = NotificationService.shared
 
+    private func handleIncomingURL(_ url: URL) {
+        // Handle both https://tenex.chat/signin?... and tenex://signin?...
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems,
+              let nsec = queryItems.first(where: { $0.name == "nsec" })?.value,
+              nsec.hasPrefix("nsec1") else { return }
+
+        let relay = queryItems.first(where: { $0.name == "relay" })?.value
+        let backend = queryItems.first(where: { $0.name == "backend" })?.value
+
+        sessionStore.handleDeepLinkLogin(
+            nsec: nsec,
+            relay: relay,
+            backendPubkey: backend,
+            coreManager: coreManager
+        )
+    }
+
     var body: some Scene {
         WindowGroup {
             AppRootSceneView(
@@ -36,6 +54,9 @@ struct TenexMVPApp: App {
                 sessionStore: sessionStore,
                 notificationScheduler: notificationScheduler
             )
+            .onOpenURL { url in
+                handleIncomingURL(url)
+            }
         }
         #if os(macOS)
         .defaultSize(width: 1200, height: 800)

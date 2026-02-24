@@ -121,6 +121,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func approveAllPendingBackends() throws -> UInt32
     func getBackendTrustSnapshot() throws -> BackendTrustSnapshot
     func getConfiguredRelays() -> [String]
+    func setRelayUrls(urls: [String]) throws
 
     // MARK: - Stats & Diagnostics
     func getStatsSnapshot() throws -> StatsSnapshot
