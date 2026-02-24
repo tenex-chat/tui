@@ -1617,6 +1617,7 @@ pub(super) fn handle_editing_mode(
                                         app.view = View::Home;
                                         app.load_filter_preferences();
                                         app.init_trusted_backends();
+                                        app.initialize_bunker_after_login();
                                         app.dismiss_notification();
                                     }
                                 }
@@ -1655,6 +1656,7 @@ pub(super) fn handle_editing_mode(
                                         app.view = View::Home;
                                         app.load_filter_preferences();
                                         app.init_trusted_backends();
+                                        app.initialize_bunker_after_login();
                                         app.dismiss_notification();
                                     }
                                 }

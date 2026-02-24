@@ -92,6 +92,7 @@ fn connect_and_init(
     app.view = View::Home;
     app.load_filter_preferences();
     app.init_trusted_backends();
+    app.initialize_bunker_after_login();
     Ok(())
 }
 
