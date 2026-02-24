@@ -23,7 +23,7 @@ UniFFI exports for Swift/iOS - **no async across FFI boundary**:
 
 ## Key Modules
 
-- `ffi.rs` - UniFFI interface (TenexCore object)
+- `ffi/mod.rs` + `ffi/*_api.rs` - UniFFI interface (TenexCore object, split by domain)
 - `runtime.rs` - Tokio bridge for FFI
 - `nostr/` - Protocol implementation (nostr-sdk + nostrdb)
 - `store/` - SQLite event storage

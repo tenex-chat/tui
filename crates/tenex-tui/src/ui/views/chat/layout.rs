@@ -299,6 +299,21 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_backend_approval_modal(f, area, state);
     }
 
+    // Render bunker approval modal if showing
+    if let ModalState::BunkerApproval(ref state) = app.modal_state {
+        super::super::render_bunker_approval_modal(f, area, state);
+    }
+
+    // Render bunker rules modal if showing
+    if let ModalState::BunkerRules(ref state) = app.modal_state {
+        super::super::render_bunker_rules_modal(f, app, area, state);
+    }
+
+    // Render bunker audit modal if showing
+    if let ModalState::BunkerAudit(ref state) = app.modal_state {
+        super::super::render_bunker_audit_modal(f, app, area, state);
+    }
+
     // Render projects modal if showing (Ctrl+T Shift+P from Chat view)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
         super::super::render_projects_modal(f, app, area);

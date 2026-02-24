@@ -2,7 +2,10 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::jaeger;
 use crate::runtime::BrowseResult;
-use crate::ui::modal::{AppearanceSetting, GeneralSetting, ModelBrowserState, VoiceBrowserState};
+use crate::ui::modal::{
+    AppearanceSetting, BunkerAuditState, BunkerRulesState, BunkerSetting, GeneralSetting,
+    ModelBrowserState, VoiceBrowserState,
+};
 use crate::ui::{self, App, ModalState};
 
 pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
@@ -254,6 +257,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     ui::modal::SettingsTab::Appearance => {
                         // Appearance settings are toggles/selects, no editing to restore
                     }
+                    ui::modal::SettingsTab::Bunker => {
+                        // Bunker tab uses action rows (no edit mode)
+                    }
                 }
                 app.modal_state = ModalState::AppSettings(state);
             } else {
@@ -434,6 +440,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         // Appearance settings don't use text editing - stop editing mode
                         state.stop_editing();
                     }
+                    ui::modal::SettingsTab::Bunker => {
+                        state.stop_editing();
+                    }
                 }
             } else {
                 // Handle toggle/cycle settings that don't require edit mode
@@ -514,6 +523,67 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     } else {
                         app.set_warning_status("Set OpenRouter API key first");
                     }
+                } else if state.current_tab == ui::modal::SettingsTab::Bunker {
+                    match state.selected_bunker_setting() {
+                        Some(BunkerSetting::Enabled) => {
+                            let target_enabled = !app.bunker_enabled();
+                            match app.set_bunker_enabled(target_enabled) {
+                                Ok(()) => {
+                                    if target_enabled && app.keys.is_none() {
+                                        app.set_warning_status(
+                                            "Bunker enabled. It will auto-start after login.",
+                                        );
+                                    } else if target_enabled {
+                                        app.set_warning_status("Bunker started");
+                                    } else {
+                                        app.set_warning_status("Bunker stopped");
+                                    }
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!(
+                                        "Failed to update bunker setting: {}",
+                                        e
+                                    ));
+                                }
+                            }
+                        }
+                        Some(BunkerSetting::Uri) => {
+                            if let Some(uri) = app.bunker_uri.clone() {
+                                match arboard::Clipboard::new() {
+                                    Ok(mut clipboard) => {
+                                        if clipboard.set_text(uri).is_ok() {
+                                            app.set_warning_status(
+                                                "Bunker URI copied to clipboard",
+                                            );
+                                        } else {
+                                            app.set_warning_status("Failed to copy bunker URI");
+                                        }
+                                    }
+                                    Err(_) => app.set_warning_status("Failed to access clipboard"),
+                                }
+                            } else {
+                                app.set_warning_status("Bunker is not running");
+                            }
+                        }
+                        Some(BunkerSetting::Rules) => {
+                            app.load_bunker_rules_from_preferences();
+                            app.modal_state =
+                                ModalState::BunkerRules(BunkerRulesState::new(Some(state)));
+                            return;
+                        }
+                        Some(BunkerSetting::Audit) => {
+                            if let Err(e) = app.refresh_bunker_audit_entries() {
+                                app.set_warning_status(&format!(
+                                    "Failed to refresh bunker audit: {}",
+                                    e
+                                ));
+                            }
+                            app.modal_state =
+                                ModalState::BunkerAudit(BunkerAuditState::new(Some(state)));
+                            return;
+                        }
+                        None => {}
+                    }
                 } else {
                     state.start_editing();
                 }
@@ -552,6 +622,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 ui::modal::SettingsTab::Appearance => {
                     // Appearance settings don't have text editing
                 }
+                ui::modal::SettingsTab::Bunker => {
+                    // Bunker settings don't have text editing
+                }
             }
         }
         KeyCode::Backspace if state.editing => {
@@ -586,6 +659,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 },
                 ui::modal::SettingsTab::Appearance => {
                     // Appearance settings don't have text editing
+                }
+                ui::modal::SettingsTab::Bunker => {
+                    // Bunker settings don't have text editing
                 }
             }
         }

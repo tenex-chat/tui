@@ -34,7 +34,7 @@ pub const INBOX_48H_CAP_SECONDS: u64 = 48 * 60 * 60;
 // Stats window constants
 /// Number of days for the cost display window (used in Stats tab and FFI).
 /// This is separate from the chart window to allow independent tuning.
-/// Note: Both TUI stats.rs and FFI ffi.rs use this constant for cost calculations.
+/// Note: Both TUI stats.rs and FFI (`ffi/mod.rs` + `ffi/stats_api.rs`) use this constant.
 pub const COST_WINDOW_DAYS: u64 = 14;
 
 /// Number of days for the chart display window (runtime, messages charts).
