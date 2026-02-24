@@ -817,7 +817,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getCollapsedThreadIds() throws  -> [String]
     
     /**
-     * Return currently configured relay URLs (read-only in this phase).
+     * Return currently configured relay URLs.
      */
     func getConfiguredRelays()  -> [String]
     
@@ -1167,6 +1167,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Set OpenRouter model
      */
     func setOpenrouterModel(model: String?) throws 
+    
+    /**
+     * Set relay URLs at runtime. Takes effect on next connect/reconnect.
+     */
+    func setRelayUrls(urls: [String]) throws 
     
     /**
      * Set selected voice IDs
@@ -1752,7 +1757,7 @@ open func getCollapsedThreadIds()throws  -> [String]  {
 }
     
     /**
-     * Return currently configured relay URLs (read-only in this phase).
+     * Return currently configured relay URLs.
      */
 open func getConfiguredRelays() -> [String]  {
     return try!  FfiConverterSequenceString.lift(try! rustCall() {
@@ -2398,6 +2403,16 @@ open func setOpenrouterApiKey(key: String?)throws   {try rustCallWithError(FfiCo
 open func setOpenrouterModel(model: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_set_openrouter_model(self.uniffiClonePointer(),
         FfiConverterOptionString.lower(model),$0
+    )
+}
+}
+    
+    /**
+     * Set relay URLs at runtime. Takes effect on next connect/reconnect.
+     */
+open func setRelayUrls(urls: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_relay_urls(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(urls),$0
     )
 }
 }
@@ -10455,7 +10470,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_collapsed_thread_ids() != 51682) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_configured_relays() != 14177) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_configured_relays() != 25664) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_conversation_runtime_ms() != 6855) {
@@ -10603,6 +10618,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_openrouter_model() != 18970) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_relay_urls() != 34642) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_selected_voice_ids() != 61539) {
