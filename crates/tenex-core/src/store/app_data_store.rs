@@ -30,6 +30,9 @@ pub struct AppDataStore {
 
     // Core app data
     pub projects: Vec<Project>,
+    // Latest tombstone timestamp per project a_tag. Used to prevent stale live
+    // events from reviving deleted projects when events arrive out of order.
+    project_tombstones: HashMap<String, u64>,
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
@@ -70,6 +73,7 @@ impl AppDataStore {
             reports: ReportsStore::new(),
             trust: TrustStore::new(),
             projects: Vec::new(),
+            project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
@@ -151,6 +155,7 @@ impl AppDataStore {
         self.reports.clear();
         self.trust.clear();
         self.projects.clear();
+        self.project_tombstones.clear();
         self.project_statuses.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
@@ -295,6 +300,8 @@ impl AppDataStore {
         if let Ok(projects) = crate::store::get_projects(&self.ndb) {
             self.projects = projects;
         }
+        self.project_tombstones =
+            crate::store::views::get_project_tombstones(&self.ndb).unwrap_or_default();
         let load_projects_elapsed_ms = load_projects_started_at.elapsed().as_millis();
         let project_count = self.projects.len();
 
@@ -1043,19 +1050,81 @@ impl AppDataStore {
         }
     }
 
+    fn project_revision_is_newer_or_preferred(
+        candidate_created_at: u64,
+        candidate_is_deleted: bool,
+        current_created_at: u64,
+        current_is_deleted: bool,
+    ) -> bool {
+        candidate_created_at > current_created_at
+            || (candidate_created_at == current_created_at
+                && candidate_is_deleted
+                && !current_is_deleted)
+    }
+
+    fn current_project_revision(&self, a_tag: &str) -> Option<(u64, bool)> {
+        let live_revision = self
+            .projects
+            .iter()
+            .find(|p| p.a_tag() == a_tag)
+            .map(|p| (p.created_at, false));
+        let tombstone_revision = self
+            .project_tombstones
+            .get(a_tag)
+            .copied()
+            .map(|ts| (ts, true));
+
+        match (live_revision, tombstone_revision) {
+            (Some(live), Some(tombstone)) => {
+                if Self::project_revision_is_newer_or_preferred(
+                    tombstone.0,
+                    tombstone.1,
+                    live.0,
+                    live.1,
+                ) {
+                    Some(tombstone)
+                } else {
+                    Some(live)
+                }
+            }
+            (Some(live), None) => Some(live),
+            (None, Some(tombstone)) => Some(tombstone),
+            (None, None) => None,
+        }
+    }
+
     fn handle_project_event(&mut self, note: &Note) {
         // Parse project directly from the note we already have
         // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
         if let Some(project) = Project::from_note(note) {
             let a_tag = project.a_tag();
+            let existing_index = self.projects.iter().position(|p| p.a_tag() == a_tag);
+
+            if let Some((current_created_at, current_is_deleted)) =
+                self.current_project_revision(&a_tag)
+            {
+                if !Self::project_revision_is_newer_or_preferred(
+                    project.created_at,
+                    project.is_deleted,
+                    current_created_at,
+                    current_is_deleted,
+                ) {
+                    return;
+                }
+            }
+
             if project.is_deleted {
-                self.projects.retain(|p| p.a_tag() != a_tag);
-            } else if let Some(existing) = self.projects.iter_mut().find(|p| p.a_tag() == a_tag) {
-                // Check if project already exists and update it
-                *existing = project;
+                if let Some(index) = existing_index {
+                    self.projects.remove(index);
+                }
+                self.project_tombstones.insert(a_tag, project.created_at);
             } else {
-                // Add new non-deleted project
-                self.projects.push(project);
+                self.project_tombstones.remove(&a_tag);
+                if let Some(index) = existing_index {
+                    self.projects[index] = project;
+                } else {
+                    self.projects.push(project);
+                }
             }
         }
     }
@@ -2510,6 +2579,160 @@ mod tests {
             .projects
             .iter()
             .all(|p| p.id != "delete-me" && !p.is_deleted));
+    }
+
+    #[test]
+    fn test_handle_project_event_ignores_older_live_after_tombstone() {
+        use crate::store::events::{ingest_events, wait_for_event_processing};
+        use nostr_sdk::prelude::*;
+        use nostrdb::Transaction;
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        let keys = Keys::generate();
+
+        let live_event = EventBuilder::new(Kind::Custom(31933), "Live project")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["out-of-order-delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Out of Order Delete".to_string()],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_100))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let tombstone_event = EventBuilder::new(Kind::Custom(31933), "")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["out-of-order-delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Out of Order Delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
+                Vec::<String>::new(),
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_200))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[live_event, tombstone_event], None).unwrap();
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let notes: Vec<_> = db
+            .ndb
+            .query(&txn, &[filter], 100)
+            .unwrap()
+            .into_iter()
+            .filter_map(|r| db.ndb.get_note_by_key(&txn, r.note_key).ok())
+            .collect();
+
+        let live_note = notes
+            .iter()
+            .find(|n| n.created_at() == 1_700_000_100)
+            .unwrap();
+        let tombstone_note = notes
+            .iter()
+            .find(|n| n.created_at() == 1_700_000_200)
+            .unwrap();
+
+        // Simulate out-of-order delivery: tombstone first, then stale live.
+        store.handle_project_event(tombstone_note);
+        store.handle_project_event(live_note);
+
+        assert!(
+            store
+                .projects
+                .iter()
+                .all(|p| p.id != "out-of-order-delete" && !p.is_deleted),
+            "Older live project should not resurrect after tombstone"
+        );
+    }
+
+    #[test]
+    fn test_handle_project_event_prefers_tombstone_on_equal_timestamp() {
+        use crate::store::events::{ingest_events, wait_for_event_processing};
+        use nostr_sdk::prelude::*;
+        use nostrdb::Transaction;
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        let keys = Keys::generate();
+
+        let live_event = EventBuilder::new(Kind::Custom(31933), "Live project")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["equal-ts-runtime-delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Equal TS Runtime Delete".to_string()],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_300))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let tombstone_event = EventBuilder::new(Kind::Custom(31933), "")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["equal-ts-runtime-delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Equal TS Runtime Delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
+                Vec::<String>::new(),
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_300))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[live_event, tombstone_event], None).unwrap();
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let notes: Vec<_> = db
+            .ndb
+            .query(&txn, &[filter], 100)
+            .unwrap()
+            .into_iter()
+            .filter_map(|r| db.ndb.get_note_by_key(&txn, r.note_key).ok())
+            .collect();
+
+        let has_deleted_tag = |note: &Note| {
+            for tag in note.tags() {
+                if tag.get(0).and_then(|t| t.variant().str()) == Some("deleted") {
+                    return true;
+                }
+            }
+            false
+        };
+
+        let live_note = notes.iter().find(|n| !has_deleted_tag(n)).unwrap();
+        let tombstone_note = notes.iter().find(|n| has_deleted_tag(n)).unwrap();
+
+        store.handle_project_event(live_note);
+        store.handle_project_event(tombstone_note);
+
+        assert!(
+            store
+                .projects
+                .iter()
+                .all(|p| p.id != "equal-ts-runtime-delete" && !p.is_deleted),
+            "Tombstone should win equal-timestamp conflict"
+        );
     }
 
     /// Regression test: Verify that when NostrDB text_search returns empty results,
@@ -4218,6 +4441,7 @@ mod tests {
             name: name.to_string(),
             description: String::new(),
             role: String::new(),
+            content: String::new(),
             instructions: String::new(),
             picture: None,
             version: None,

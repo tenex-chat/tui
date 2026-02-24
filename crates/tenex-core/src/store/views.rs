@@ -3,7 +3,14 @@ use anyhow::Result;
 use nostrdb::{Filter, Ndb, Transaction};
 use std::collections::{HashMap, HashSet};
 
-pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
+fn should_replace_project(existing: &Project, candidate: &Project) -> bool {
+    candidate.created_at > existing.created_at
+        || (candidate.created_at == existing.created_at
+            && candidate.is_deleted
+            && !existing.is_deleted)
+}
+
+fn get_latest_projects_by_atag(ndb: &Ndb) -> Result<HashMap<String, Project>> {
     let txn = Transaction::new(ndb)?;
     let filter = Filter::new().kinds([31933]).build();
     let results = ndb.query(&txn, &[filter], 1000)?;
@@ -17,13 +24,14 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
         })
         .collect();
 
-    // Deduplicate by a_tag, keeping only the newest (highest created_at)
+    // Deduplicate by a_tag, keeping only the newest revision.
+    // On equal timestamps, tombstones win over live records.
     let mut projects_by_atag: HashMap<String, Project> = HashMap::new();
     for project in all_projects {
         let a_tag = project.a_tag();
         match projects_by_atag.get(&a_tag) {
-            Some(existing) if existing.created_at >= project.created_at => {
-                // Keep existing (newer or equal)
+            Some(existing) if !should_replace_project(existing, &project) => {
+                // Keep existing canonical revision
             }
             _ => {
                 projects_by_atag.insert(a_tag, project);
@@ -31,7 +39,11 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
         }
     }
 
-    let mut projects: Vec<Project> = projects_by_atag
+    Ok(projects_by_atag)
+}
+
+pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
+    let mut projects: Vec<Project> = get_latest_projects_by_atag(ndb)?
         .into_values()
         .filter(|p| !p.is_deleted)
         .collect();
@@ -40,6 +52,13 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
     projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     Ok(projects)
+}
+
+pub fn get_project_tombstones(ndb: &Ndb) -> Result<HashMap<String, u64>> {
+    Ok(get_latest_projects_by_atag(ndb)?
+        .into_iter()
+        .filter_map(|(a_tag, project)| project.is_deleted.then_some((a_tag, project.created_at)))
+        .collect())
 }
 
 /// Build thread root index for all given projects in a single pass.
@@ -635,6 +654,53 @@ mod tests {
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].id, "revive-test");
         assert!(!projects[0].is_deleted);
+    }
+
+    #[test]
+    fn test_get_projects_prefers_tombstone_on_equal_timestamp() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let live_event = EventBuilder::new(Kind::Custom(31933), "Live project")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["equal-ts-delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Equal TS Delete".to_string()],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_300))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let tombstone_event = EventBuilder::new(Kind::Custom(31933), "")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["equal-ts-delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Equal TS Delete".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
+                Vec::<String>::new(),
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_300))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[live_event, tombstone_event], None).unwrap();
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        wait_for_event_processing(&db.ndb, filter, 5000);
+
+        let projects = get_projects(&db.ndb).unwrap();
+        assert!(
+            projects.is_empty(),
+            "Expected tombstone to win equal-timestamp conflict"
+        );
     }
 
     #[test]
