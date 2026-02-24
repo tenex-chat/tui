@@ -4070,6 +4070,231 @@ impl App {
         )));
     }
 
+    // ===== Bunker (NIP-46) Methods =====
+
+    /// Reload persisted bunker auto-approve rules into local UI state.
+    pub fn load_bunker_rules_from_preferences(&mut self) {
+        self.bunker_auto_approve_rules = self.preferences.borrow().bunker_auto_approve_rules().to_vec();
+    }
+
+    /// Return persisted bunker enabled preference.
+    pub fn bunker_enabled(&self) -> bool {
+        self.preferences.borrow().bunker_enabled()
+    }
+
+    /// Initialize bunker lifecycle after successful login/connect.
+    pub fn initialize_bunker_after_login(&mut self) {
+        self.load_bunker_rules_from_preferences();
+        if self.bunker_enabled() {
+            if let Err(e) = self.start_bunker_with_rules() {
+                self.set_warning_status(&format!("Failed to auto-start bunker: {}", e));
+            }
+        } else {
+            self.bunker_running = false;
+            self.bunker_uri = None;
+        }
+    }
+
+    /// Start bunker signer and replay persisted auto-approve rules.
+    pub fn start_bunker_with_rules(&mut self) -> Result<String, String> {
+        let core_handle = self
+            .core_handle
+            .clone()
+            .ok_or_else(|| "Core handle not available".to_string())?;
+
+        let (response_tx, response_rx) = std::sync::mpsc::channel::<Result<String, String>>();
+        core_handle
+            .send(NostrCommand::StartBunker { response_tx })
+            .map_err(|e| format!("Failed to send StartBunker command: {}", e))?;
+
+        let uri = response_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| format!("Timed out waiting for bunker start: {}", e))??;
+
+        self.load_bunker_rules_from_preferences();
+        for rule in &self.bunker_auto_approve_rules {
+            core_handle
+                .send(NostrCommand::AddBunkerAutoApproveRule {
+                    requester_pubkey: rule.requester_pubkey.clone(),
+                    event_kind: rule.event_kind,
+                })
+                .map_err(|e| format!("Failed to sync bunker rule: {}", e))?;
+        }
+
+        self.bunker_running = true;
+        self.bunker_uri = Some(uri.clone());
+        Ok(uri)
+    }
+
+    /// Stop bunker signer.
+    pub fn stop_bunker(&mut self) -> Result<(), String> {
+        let core_handle = self
+            .core_handle
+            .clone()
+            .ok_or_else(|| "Core handle not available".to_string())?;
+
+        let (response_tx, response_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+        core_handle
+            .send(NostrCommand::StopBunker { response_tx })
+            .map_err(|e| format!("Failed to send StopBunker command: {}", e))?;
+
+        response_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| format!("Timed out waiting for bunker stop: {}", e))??;
+
+        self.bunker_running = false;
+        self.bunker_uri = None;
+        self.bunker_pending_requests.clear();
+        self.bunker_pending_request_ids.clear();
+        Ok(())
+    }
+
+    /// Persist bunker enabled flag and apply runtime lifecycle when possible.
+    pub fn set_bunker_enabled(&mut self, enabled: bool) -> Result<(), String> {
+        self.preferences.borrow_mut().set_bunker_enabled(enabled)?;
+        if enabled {
+            if self.keys.is_some() {
+                self.start_bunker_with_rules()?;
+            } else {
+                self.bunker_running = false;
+            }
+        } else if self.bunker_running {
+            self.stop_bunker()?;
+        } else {
+            self.bunker_running = false;
+            self.bunker_uri = None;
+        }
+        Ok(())
+    }
+
+    /// Add a persisted bunker auto-approve rule and sync to runtime if needed.
+    pub fn add_bunker_auto_approve_rule(
+        &mut self,
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    ) -> Result<(), String> {
+        self.preferences
+            .borrow_mut()
+            .add_bunker_auto_approve_rule(requester_pubkey.clone(), event_kind)?;
+        self.load_bunker_rules_from_preferences();
+
+        if self.bunker_running {
+            if let Some(core_handle) = self.core_handle.clone() {
+                core_handle
+                    .send(NostrCommand::AddBunkerAutoApproveRule {
+                        requester_pubkey,
+                        event_kind,
+                    })
+                    .map_err(|e| format!("Failed to sync bunker rule: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove a persisted bunker auto-approve rule and sync to runtime if needed.
+    pub fn remove_bunker_auto_approve_rule(
+        &mut self,
+        requester_pubkey: &str,
+        event_kind: Option<u16>,
+    ) -> Result<(), String> {
+        self.preferences
+            .borrow_mut()
+            .remove_bunker_auto_approve_rule(requester_pubkey, event_kind)?;
+        self.load_bunker_rules_from_preferences();
+
+        if self.bunker_running {
+            if let Some(core_handle) = self.core_handle.clone() {
+                core_handle
+                    .send(NostrCommand::RemoveBunkerAutoApproveRule {
+                        requester_pubkey: requester_pubkey.to_string(),
+                        event_kind,
+                    })
+                    .map_err(|e| format!("Failed to sync bunker rule removal: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Refresh session-scoped bunker audit entries from core.
+    pub fn refresh_bunker_audit_entries(&mut self) -> Result<(), String> {
+        let core_handle = self
+            .core_handle
+            .clone()
+            .ok_or_else(|| "Core handle not available".to_string())?;
+        let (response_tx, response_rx) =
+            std::sync::mpsc::channel::<Vec<tenex_core::nostr::bunker::BunkerAuditEntry>>();
+        core_handle
+            .send(NostrCommand::GetBunkerAuditLog { response_tx })
+            .map_err(|e| format!("Failed to send GetBunkerAuditLog command: {}", e))?;
+
+        let mut entries = response_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|e| format!("Timed out waiting for bunker audit: {}", e))?;
+        entries.sort_by(|a, b| b.completed_at_ms.cmp(&a.completed_at_ms));
+        self.bunker_audit_entries = entries;
+        Ok(())
+    }
+
+    /// Queue incoming bunker signing request if not already queued.
+    pub fn enqueue_bunker_sign_request(
+        &mut self,
+        request: tenex_core::nostr::bunker::BunkerSignRequest,
+    ) {
+        if self
+            .bunker_pending_request_ids
+            .insert(request.request_id.clone())
+        {
+            self.bunker_pending_requests.push_back(request);
+        }
+    }
+
+    /// Open next pending bunker approval modal when no modal is active.
+    pub fn maybe_open_pending_bunker_approval(&mut self) {
+        if !self.modal_state.is_none() {
+            return;
+        }
+
+        if let Some(request) = self.bunker_pending_requests.pop_front() {
+            self.bunker_pending_request_ids.remove(&request.request_id);
+            self.modal_state =
+                ModalState::BunkerApproval(crate::ui::modal::BunkerApprovalState::new(request));
+            self.input_mode = InputMode::Normal;
+        }
+    }
+
+    /// Resolve bunker approval decision and optionally persist auto-approve rule.
+    pub fn resolve_bunker_sign_request(
+        &mut self,
+        request: tenex_core::nostr::bunker::BunkerSignRequest,
+        approved: bool,
+        persist_auto_approve: bool,
+    ) {
+        if let Some(core_handle) = self.core_handle.clone() {
+            if let Err(e) = core_handle.send(NostrCommand::BunkerResponse {
+                request_id: request.request_id.clone(),
+                approved,
+            }) {
+                self.set_warning_status(&format!("Failed to send bunker response: {}", e));
+            }
+        }
+
+        if approved && persist_auto_approve {
+            if let Err(e) = self.add_bunker_auto_approve_rule(
+                request.requester_pubkey.clone(),
+                request.event_kind,
+            ) {
+                self.set_warning_status(&format!("Failed to save bunker rule: {}", e));
+            }
+        }
+
+        let result_label = if approved { "Approved" } else { "Rejected" };
+        self.set_warning_status(&format!(
+            "{} bunker request {}",
+            result_label, request.request_id
+        ));
+        self.modal_state = ModalState::None;
+    }
+
     // ===== Backend Trust Methods =====
 
     /// Approve a backend pubkey (persist to preferences and update data store)
