@@ -23,7 +23,7 @@ struct AgentDefinitionsTabView: View {
     @State private var selectedAgentState: AgentDefinition?
     @State private var hasConfiguredViewModel = false
     @State private var hasConfiguredTeamsViewModel = false
-    @State private var navigationPath: [AgentDefinitionListItem] = []
+    @State private var detailItem: AgentDefinitionListItem?
     @State private var assignmentTarget: AgentDefinitionListItem?
     @State private var assignmentResult: AgentAssignmentResult?
     @State private var teamCreationTarget: AgentDefinitionListItem?
@@ -96,13 +96,34 @@ struct AgentDefinitionsTabView: View {
             TeamsTabView(layoutMode: .adaptive)
                 .environment(coreManager)
         }
+        .sheet(item: $detailItem) { item in
+            AgentDefinitionDetailView(
+                item: item,
+                canDelete: viewModel.canDelete(item),
+                onAssignmentResult: { result in
+                    assignmentResult = result
+                },
+                onDelete: {
+                    let deleted = await viewModel.deleteAgentDefinition(id: item.id)
+                    if deleted {
+                        selectedAgentBinding.wrappedValue = nil
+                        detailItem = nil
+                    }
+                    return deleted
+                }
+            )
+            #if os(macOS)
+            .frame(minWidth: 1200, minHeight: 600)
+            #endif
+            .environment(coreManager)
+        }
         .sheet(isPresented: $showNewAgentDefinitionModal) {
             NewAgentDefinitionSheet {
                 Task {
                     await viewModel.refresh()
                     if let newestMine = viewModel.mine.first {
                         selectedAgentBinding.wrappedValue = newestMine.agent
-                        navigationPath = [newestMine]
+                        detailItem = newestMine
                     }
                 }
             }
@@ -135,7 +156,7 @@ struct AgentDefinitionsTabView: View {
     }
 
     private var navigationListLayout: some View {
-        NavigationStack(path: $navigationPath) {
+        NavigationStack {
             listContent
                 .navigationTitle("Agent Definitions")
                 #if os(iOS)
@@ -143,23 +164,6 @@ struct AgentDefinitionsTabView: View {
                 #else
                 .toolbarTitleDisplayMode(.inline)
                 #endif
-                .navigationDestination(for: AgentDefinitionListItem.self) { item in
-                    AgentDefinitionDetailView(
-                        item: item,
-                        canDelete: viewModel.canDelete(item),
-                        onAssignmentResult: { result in
-                            assignmentResult = result
-                        },
-                        onDelete: {
-                            let deleted = await viewModel.deleteAgentDefinition(id: item.id)
-                            if deleted {
-                                selectedAgentBinding.wrappedValue = nil
-                                navigationPath.removeAll { $0.id == item.id }
-                            }
-                            return deleted
-                        }
-                    )
-                }
                 .searchable(text: $viewModel.searchText, placement: .toolbar, prompt: "Search definitions")
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
@@ -388,7 +392,7 @@ struct AgentDefinitionsTabView: View {
     private func agentDefinitionButton(for item: AgentDefinitionListItem, style: AgentDefinitionCardStyle) -> some View {
         Button {
             selectedAgentBinding.wrappedValue = item.agent
-            navigationPath.append(item)
+            detailItem = item
         } label: {
             agentDefinitionCard(for: item, style: style)
         }
@@ -464,16 +468,23 @@ struct AgentDefinitionsTabView: View {
 private struct AgentDefinitionDetailView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.openURL) private var openURL
+    @Environment(\.dismiss) private var dismiss
 
     let item: AgentDefinitionListItem
     let canDelete: Bool
     let onAssignmentResult: (AgentAssignmentResult) -> Void
     let onDelete: () async -> Bool
 
+    private enum DetailTab: String, Hashable {
+        case overview = "Overview"
+        case details = "Details"
+    }
+
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
     @State private var showAssignmentSheet = false
     @State private var showTeamCreationSheet = false
+    @State private var selectedTab: DetailTab = .overview
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -513,60 +524,112 @@ private struct AgentDefinitionDetailView: View {
         return url
     }
 
+    private var hasDetails: Bool {
+        hasDistinctInstructions || !item.agent.useCriteria.isEmpty ||
+        !item.agent.tools.isEmpty || !item.agent.mcpServers.isEmpty || !item.agent.fileIds.isEmpty
+    }
+
+    private var availableTabs: [DetailTab] {
+        var tabs: [DetailTab] = [.overview]
+        if hasDetails { tabs.append(.details) }
+        return tabs
+    }
+
+    @ViewBuilder
+    private var tabContent: some View {
+        switch selectedTab {
+        case .overview:
+            VStack(alignment: .leading, spacing: 24) {
+                if !contentText.isEmpty {
+                    MarkdownView(content: contentText)
+                }
+                metadataFooter
+            }
+        case .details:
+            VStack(alignment: .leading, spacing: 28) {
+                if hasDistinctInstructions {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Instructions")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        MarkdownView(content: instructionsText)
+                    }
+                }
+                if !item.agent.useCriteria.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Use Criteria")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(item.agent.useCriteria, id: \.self) { criteria in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("\u{2022}").foregroundStyle(.secondary)
+                                    Text(criteria)
+                                }
+                            }
+                        }
+                    }
+                }
+                technicalDetailsSection
+            }
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 heroSection
 
-                VStack(alignment: .leading, spacing: 24) {
-                    if !contentText.isEmpty {
-                        MarkdownView(content: contentText)
-                    }
-
-                    if hasDistinctInstructions {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Instructions")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            MarkdownView(content: instructionsText)
-                        }
-                    }
-
-                    if !item.agent.useCriteria.isEmpty {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Use Criteria")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(item.agent.useCriteria, id: \.self) { criteria in
-                                    HStack(alignment: .top, spacing: 6) {
-                                        Text("\u{2022}")
-                                            .foregroundStyle(.secondary)
-                                        Text(criteria)
-                                    }
-                                }
+                VStack(alignment: .leading, spacing: 0) {
+                    if availableTabs.count > 1 {
+                        Picker("", selection: $selectedTab) {
+                            ForEach(availableTabs, id: \.self) { tab in
+                                Text(tab.rawValue).tag(tab)
                             }
                         }
+                        .pickerStyle(.segmented)
+                        .padding(.vertical, 16)
                     }
 
-                    technicalDetailsSection
-
-                    metadataFooter
+                    tabContent
+                        .padding(.top, availableTabs.count > 1 ? 8 : 20)
+                        .padding(.bottom, 40)
                 }
+                .padding(.horizontal, 20)
                 .frame(maxWidth: 800, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 40)
             }
         }
         .background(Color.systemBackground.ignoresSafeArea())
-        .navigationTitle(displayName)
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #else
-        .toolbarTitleDisplayMode(.inline)
-        #endif
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 12) {
+                if canDelete {
+                    Button(role: .destructive) {
+                        showDeleteConfirmation = true
+                    } label: {
+                        if isDeleting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.white)
+                                .shadow(radius: 2)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isDeleting)
+                }
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .shadow(radius: 2)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+        }
         .confirmationDialog(
             "Delete Agent Definition",
             isPresented: $showDeleteConfirmation,
@@ -594,22 +657,6 @@ private struct AgentDefinitionDetailView: View {
                 onAssignmentResult(result)
             }
             .environment(coreManager)
-        }
-        .toolbar {
-            if canDelete {
-                ToolbarItem(placement: .destructiveAction) {
-                    Button(role: .destructive) {
-                        showDeleteConfirmation = true
-                    } label: {
-                        if isDeleting {
-                            ProgressView()
-                        } else {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                    .disabled(isDeleting)
-                }
-            }
         }
     }
 
@@ -647,21 +694,9 @@ private struct AgentDefinitionDetailView: View {
                 GeometryReader { geo in
                     heroOverlayContent
                         .padding(24)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .frame(width: geo.size.width * 0.5)
                 }
-                .background(
-                        LinearGradient(
-                            stops: [
-                                .init(color: Color.systemBackground, location: 0),
-                                .init(color: Color.systemBackground.opacity(0.85), location: 0.55),
-                                .init(color: Color.systemBackground.opacity(0.3), location: 0.75),
-                                .init(color: .clear, location: 1.0)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
             }
         } else {
             heroOverlayContent
@@ -690,7 +725,7 @@ private struct AgentDefinitionDetailView: View {
 
             if !item.agent.description.isEmpty {
                 Text(item.agent.description)
-                    .font(.subheadline)
+                    .font(.title3)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
             }
@@ -710,7 +745,7 @@ private struct AgentDefinitionDetailView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            .controlSize(.large)
+            .controlSize(.extraLarge)
             .padding(.top, 4)
         }
     }

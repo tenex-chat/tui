@@ -19,6 +19,7 @@ struct BunkerApprovalSheet: View {
     @State private var timer: Timer?
     @State private var alwaysApprove = false
     @State private var previewMode: EventPreviewMode = .raw
+    @State private var signedElsewhereTask: Task<Void, Never>?
 
     private enum EventPreviewMode: String, CaseIterable, Identifiable {
         case preview = "Preview"
@@ -45,8 +46,12 @@ struct BunkerApprovalSheet: View {
         .onAppear {
             previewMode = previewModel.isAgentDefinition4199 ? .preview : .raw
             startCountdown()
+            startSignedElsewhereWatch()
         }
-        .onDisappear { timer?.invalidate() }
+        .onDisappear {
+            timer?.invalidate()
+            signedElsewhereTask?.cancel()
+        }
     }
 
     // MARK: - Requester Identity
@@ -328,6 +333,64 @@ struct BunkerApprovalSheet: View {
                 .controlSize(.large)
             }
         }
+    }
+
+    // MARK: - Signed-Elsewhere Watch
+
+    private func extractEventId() -> String? {
+        guard let json = request.eventJson,
+              let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let id = obj["id"] as? String,
+              !id.isEmpty else { return nil }
+        return id
+    }
+
+    private func startSignedElsewhereWatch() {
+        guard let eventId = extractEventId() else { return }
+        let safeCore = coreManager.safeCore
+
+        signedElsewhereTask = Task {
+            let relays = await safeCore.getConfiguredRelays()
+            guard !relays.isEmpty, !Task.isCancelled else { return }
+
+            await withTaskGroup(of: Bool.self) { group in
+                for relay in relays {
+                    group.addTask { await Self.watchRelay(url: relay, eventId: eventId) }
+                }
+                for await found in group {
+                    if found {
+                        group.cancelAll()
+                        await MainActor.run { respond(approved: false) }
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    private static func watchRelay(url: String, eventId: String) async -> Bool {
+        guard let wsURL = URL(string: url) else { return false }
+        let wsTask = URLSession.shared.webSocketTask(with: wsURL)
+        wsTask.resume()
+        defer { wsTask.cancel(with: .normalClosure, reason: nil) }
+
+        let subId = UUID().uuidString
+        let req = "[\"REQ\",\"\(subId)\",{\"ids\":[\"\(eventId)\"]}]"
+
+        do {
+            try await wsTask.send(.string(req))
+            while !Task.isCancelled {
+                let message = try await wsTask.receive()
+                guard case .string(let text) = message else { continue }
+                if text.hasPrefix("[\"EVENT\"") && text.contains("\"\(eventId)\"") {
+                    return true
+                }
+            }
+        } catch {
+            // Connection failed or task cancelled
+        }
+        return false
     }
 
     // MARK: - Kind Helpers
