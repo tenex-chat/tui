@@ -23,6 +23,13 @@ pub struct Workspace {
     pub pinned: bool,
 }
 
+/// Persisted NIP-46 bunker auto-approve rule.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BunkerAutoApproveRulePref {
+    pub requester_pubkey: String,
+    pub event_kind: Option<u16>, // None = any event kind
+}
+
 impl ProjectDraft {
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
@@ -158,6 +165,12 @@ pub struct Preferences {
     /// AI Audio Notifications settings
     #[serde(default)]
     pub ai_audio_settings: AiAudioSettings,
+    /// Enable/disable auto-starting the NIP-46 bunker signer.
+    #[serde(default = "default_bunker_enabled")]
+    pub bunker_enabled: bool,
+    /// Persisted NIP-46 bunker auto-approve rules.
+    #[serde(default)]
+    pub bunker_auto_approve_rules: Vec<BunkerAutoApproveRulePref>,
 }
 
 /// Settings for AI-powered audio notifications
@@ -216,6 +229,10 @@ fn default_jaeger_endpoint() -> String {
     "http://localhost:16686".to_string()
 }
 
+fn default_bunker_enabled() -> bool {
+    true
+}
+
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -235,6 +252,8 @@ impl Default for Preferences {
             active_workspace_id: None,
             jaeger_endpoint: default_jaeger_endpoint(),
             ai_audio_settings: AiAudioSettings::default(),
+            bunker_enabled: default_bunker_enabled(),
+            bunker_auto_approve_rules: Vec::new(),
         }
     }
 }
@@ -430,6 +449,56 @@ impl PreferencesStorage {
             .blocked_backend_pubkeys
             .insert(pubkey.to_string());
         self.save_to_file();
+    }
+
+    // ===== Bunker (NIP-46) Methods =====
+
+    pub fn bunker_enabled(&self) -> bool {
+        self.prefs.bunker_enabled
+    }
+
+    pub fn set_bunker_enabled(&mut self, enabled: bool) -> Result<(), String> {
+        self.prefs.bunker_enabled = enabled;
+        self.save_to_file_with_result()
+    }
+
+    pub fn bunker_auto_approve_rules(&self) -> &[BunkerAutoApproveRulePref] {
+        &self.prefs.bunker_auto_approve_rules
+    }
+
+    pub fn add_bunker_auto_approve_rule(
+        &mut self,
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    ) -> Result<(), String> {
+        let exists = self
+            .prefs
+            .bunker_auto_approve_rules
+            .iter()
+            .any(|r| r.requester_pubkey == requester_pubkey && r.event_kind == event_kind);
+
+        if !exists {
+            self.prefs
+                .bunker_auto_approve_rules
+                .push(BunkerAutoApproveRulePref {
+                    requester_pubkey,
+                    event_kind,
+                });
+            self.save_to_file_with_result()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn remove_bunker_auto_approve_rule(
+        &mut self,
+        requester_pubkey: &str,
+        event_kind: Option<u16>,
+    ) -> Result<(), String> {
+        self.prefs.bunker_auto_approve_rules.retain(|r| {
+            !(r.requester_pubkey == requester_pubkey && r.event_kind == event_kind)
+        });
+        self.save_to_file_with_result()
     }
 
     // ===== Credentials Methods =====
@@ -655,5 +724,69 @@ impl PreferencesStorage {
         self.prefs.ai_audio_settings.enabled = !self.prefs.ai_audio_settings.enabled;
         self.save_to_file_with_result()?;
         Ok(self.prefs.ai_audio_settings.enabled)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn bunker_enabled_defaults_to_true() {
+        let dir = tempdir().expect("tempdir");
+        let storage = PreferencesStorage::new(dir.path().to_str().expect("utf8 path"));
+        assert!(storage.bunker_enabled());
+    }
+
+    #[test]
+    fn bunker_auto_approve_rules_add_remove_and_deduplicate() {
+        let dir = tempdir().expect("tempdir");
+        let mut storage = PreferencesStorage::new(dir.path().to_str().expect("utf8 path"));
+
+        storage
+            .add_bunker_auto_approve_rule("pubkey-a".to_string(), Some(1))
+            .expect("add rule");
+        storage
+            .add_bunker_auto_approve_rule("pubkey-a".to_string(), Some(1))
+            .expect("dedupe add");
+        storage
+            .add_bunker_auto_approve_rule("pubkey-a".to_string(), None)
+            .expect("add any-kind rule");
+
+        assert_eq!(storage.bunker_auto_approve_rules().len(), 2);
+
+        storage
+            .remove_bunker_auto_approve_rule("pubkey-a", Some(1))
+            .expect("remove specific rule");
+        assert_eq!(storage.bunker_auto_approve_rules().len(), 1);
+        assert_eq!(
+            storage.bunker_auto_approve_rules()[0],
+            BunkerAutoApproveRulePref {
+                requester_pubkey: "pubkey-a".to_string(),
+                event_kind: None,
+            }
+        );
+    }
+
+    #[test]
+    fn missing_bunker_fields_migrate_to_defaults() {
+        let dir = tempdir().expect("tempdir");
+        let prefs_path = dir.path().join("preferences.json");
+        let mut value = serde_json::to_value(Preferences::default()).expect("serialize prefs");
+
+        let map = value.as_object_mut().expect("object");
+        map.remove("bunker_enabled");
+        map.remove("bunker_auto_approve_rules");
+
+        fs::write(
+            &prefs_path,
+            serde_json::to_string_pretty(&value).expect("json"),
+        )
+        .expect("write prefs");
+
+        let storage = PreferencesStorage::new(dir.path().to_str().expect("utf8 path"));
+        assert!(storage.bunker_enabled());
+        assert!(storage.bunker_auto_approve_rules().is_empty());
     }
 }

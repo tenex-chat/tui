@@ -1023,9 +1023,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to publish bookmark list: {}", e);
                         }
                         // Notify via DataChange so the FFI callback notifies the UI layer.
-                        let _ = self.data_tx.send(DataChange::BookmarkListChanged {
-                            bookmarked_ids,
-                        });
+                        let _ = self
+                            .data_tx
+                            .send(DataChange::BookmarkListChanged { bookmarked_ids });
                     }
                     NostrCommand::ReactToTeam {
                         team_coordinate,
@@ -1128,7 +1128,9 @@ impl NostrWorker {
                         }
                     }
                     NostrCommand::StartBunker { response_tx } => {
-                        let result = if let Some(keys) = &self.keys {
+                        let result = if let Some(service) = &self.bunker_service {
+                            Ok(service.bunker_uri().to_string())
+                        } else if let Some(keys) = &self.keys {
                             // Create a channel for bunker signing requests → data_tx
                             let data_tx = self.data_tx.clone();
                             let (req_tx, req_rx) = std::sync::mpsc::channel();
@@ -1216,11 +1218,7 @@ impl NostrWorker {
                         backend_pubkey,
                         device_id,
                     } => {
-                        tlog!(
-                            "PUSH",
-                            "Worker: Registering APNs token (enable={})",
-                            enable
-                        );
+                        tlog!("PUSH", "Worker: Registering APNs token (enable={})", enable);
                         if let Err(e) = rt.block_on(self.handle_register_apns_token(
                             device_token,
                             enable,
@@ -2072,8 +2070,13 @@ impl NostrWorker {
             .ok_or_else(|| anyhow::anyhow!("No keys - not logged in"))?;
 
         // Parse the backend public key
-        let backend_pk = PublicKey::parse(&backend_pubkey)
-            .map_err(|e| anyhow::anyhow!("Invalid backend pubkey '{}': {}", &backend_pubkey[..8.min(backend_pubkey.len())], e))?;
+        let backend_pk = PublicKey::parse(&backend_pubkey).map_err(|e| {
+            anyhow::anyhow!(
+                "Invalid backend pubkey '{}': {}",
+                &backend_pubkey[..8.min(backend_pubkey.len())],
+                e
+            )
+        })?;
 
         // Build JSON payload
         let payload = serde_json::json!({
