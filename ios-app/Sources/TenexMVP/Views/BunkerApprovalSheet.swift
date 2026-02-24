@@ -129,12 +129,8 @@ struct BunkerApprovalSheet: View {
                     Text("Always approve \(kindName(kind)) from \(displayName)")
                         .font(.caption)
                 }
+                #if os(macOS)
                 .toggleStyle(.checkbox)
-                #else
-                Toggle(isOn: $alwaysApprove) {
-                    Text("Always approve \(kindName(kind)) from \(displayName)")
-                        .font(.caption)
-                }
                 #endif
             }
         }
