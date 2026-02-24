@@ -66,6 +66,8 @@ struct MarkdownView: View, Equatable {
                 element.view
             }
         }
+        .lineSpacing(6)
+        .textSelection(.enabled)
     }
 
     /// Returns cached parsed elements or parses and caches if needed
