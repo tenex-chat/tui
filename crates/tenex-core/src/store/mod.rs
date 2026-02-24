@@ -7,6 +7,7 @@ pub mod inbox_store;
 pub mod operations_store;
 pub mod reports_store;
 pub mod runtime_hierarchy;
+pub mod state_cache;
 pub mod statistics_store;
 pub mod trust_store;
 pub mod views;
