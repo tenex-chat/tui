@@ -377,3 +377,68 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
         app.modal_state = ModalState::AgentConfig(state);
     }
 }
+
+/// Handle key events for the agent deletion confirmation dialog (kind:24030)
+pub(super) fn handle_agent_deletion_key(app: &mut App, key: KeyEvent) {
+    let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::AgentDeletion(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            // Cancel — return to project settings
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Down => {
+            state.toggle_action();
+            app.modal_state = ModalState::AgentDeletion(state);
+        }
+        KeyCode::Tab => {
+            // Tab toggles scope between Project and Global
+            state.toggle_scope();
+            app.modal_state = ModalState::AgentDeletion(state);
+        }
+        KeyCode::Enter => {
+            if state.selected_index == 1 {
+                // Deletion confirmed — publish the kind:24030 event
+                let project_a_tag = match state.scope {
+                    ui::modal::AgentDeletionScope::Project => Some(state.project_a_tag.clone()),
+                    ui::modal::AgentDeletionScope::Global => None,
+                };
+
+                if let Some(ref core_handle) = app.core_handle {
+                    if let Err(e) = core_handle.send(NostrCommand::DeleteAgent {
+                        agent_pubkey: state.agent_pubkey.clone(),
+                        project_a_tag,
+                        reason: None,
+                        client: Some("tenex-tui".to_string()),
+                    }) {
+                        app.set_warning_status(&format!(
+                            "Failed to publish agent deletion: {}",
+                            e
+                        ));
+                    } else {
+                        let scope_str = match state.scope {
+                            ui::modal::AgentDeletionScope::Project => "project",
+                            ui::modal::AgentDeletionScope::Global => "global",
+                        };
+                        app.set_warning_status(&format!(
+                            "Agent '{}' deletion event published ({})",
+                            state.agent_name, scope_str
+                        ));
+                    }
+                } else {
+                    app.set_warning_status("Error: Not connected to relays");
+                }
+            }
+            app.modal_state = ModalState::None;
+        }
+        _ => {
+            app.modal_state = ModalState::AgentDeletion(state);
+        }
+    }
+}

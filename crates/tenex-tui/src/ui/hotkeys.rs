@@ -203,6 +203,7 @@ impl HotkeyContext {
             ModalState::NudgeCreate(_) => return HotkeyContext::AnyModal,
             ModalState::NudgeDetail(_) => return HotkeyContext::AnyModal,
             ModalState::NudgeDeleteConfirm(_) => return HotkeyContext::AnyModal,
+            ModalState::AgentDeletion(_) => return HotkeyContext::AnyModal,
             ModalState::AppSettings(_) => return HotkeyContext::AnyModal,
             ModalState::None => {}
         }
