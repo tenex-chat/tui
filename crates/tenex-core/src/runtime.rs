@@ -113,7 +113,10 @@ impl CoreRuntime {
             &nostrdb::Config::new(),
         )?);
 
-        let data_store = Rc::new(RefCell::new(AppDataStore::new(ndb.clone())));
+        let data_store = Rc::new(RefCell::new(AppDataStore::new_with_cache(
+            ndb.clone(),
+            config.data_dir.clone(),
+        )));
         let db = Arc::new(Database::with_ndb(ndb.clone(), &config.data_dir)?);
 
         let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
@@ -204,6 +207,10 @@ impl CoreRuntime {
     }
 
     pub fn shutdown(&mut self) {
+        // Persist the in-memory state before stopping so the next startup can skip
+        // the expensive rebuild_from_ndb().  Any error is logged; never panics.
+        self.data_store.borrow().save_cache();
+
         let _ = self.handle.send(NostrCommand::Shutdown);
         if let Some(worker_handle) = self.worker_handle.take() {
             let _ = worker_handle.join();

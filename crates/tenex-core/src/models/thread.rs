@@ -3,7 +3,7 @@ use nostrdb::Note;
 use super::message::{AskEvent, Message};
 use crate::constants::DEFAULT_THREAD_TITLE;
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct Thread {
     pub id: String,
     pub title: String,

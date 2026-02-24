@@ -1,7 +1,7 @@
 use nostrdb::Note;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, uniffi::Enum, serde::Serialize, serde::Deserialize)]
 pub enum AskQuestion {
     SingleSelect {
         title: String,
@@ -15,14 +15,14 @@ pub enum AskQuestion {
     },
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct AskEvent {
     pub title: Option<String>,
     pub context: String,
     pub questions: Vec<AskQuestion>,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct Message {
     pub id: String,
     pub content: String,

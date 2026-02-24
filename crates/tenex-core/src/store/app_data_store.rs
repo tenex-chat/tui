@@ -9,11 +9,13 @@ use crate::store::content_store::ContentStore;
 use crate::store::inbox_store::InboxStore;
 use crate::store::operations_store::OperationsStore;
 use crate::store::reports_store::ReportsStore;
+use crate::store::state_cache;
 use crate::store::statistics_store::{MessagesByDayCounts, StatisticsStore};
 use crate::store::trust_store::TrustStore;
 use crate::store::{RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
-use nostrdb::{Ndb, Note, Transaction};
+use nostrdb::{Filter, Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{trace, warn};
@@ -63,9 +65,19 @@ pub struct AppDataStore {
 
     /// Bookmark lists keyed by user pubkey (kind:14202 replaceable events)
     pub bookmarks: HashMap<String, BookmarkList>,
+
+    /// Directory for the persistent state cache file.
+    /// Set to `Some(path)` when the store is created with `new_with_cache()`.
+    /// `None` disables caching (used by FFI/iOS callers and tests).
+    cache_dir: Option<PathBuf>,
 }
 
 impl AppDataStore {
+    /// Create a new store and unconditionally rebuild from nostrdb.
+    ///
+    /// This is the existing constructor, preserved for backwards compatibility with
+    /// FFI (iOS) callers and tests. Caching is disabled — every startup does a full rebuild.
+    /// Use `new_with_cache` in the TUI runtime to get the fast-startup path.
     pub fn new(ndb: Arc<Ndb>) -> Self {
         let mut store = Self {
             ndb,
@@ -88,8 +100,46 @@ impl AppDataStore {
             runtime_hierarchy: RuntimeHierarchy::new(),
             needs_rebuild: false,
             bookmarks: HashMap::new(),
+            cache_dir: None,
         };
         store.rebuild_from_ndb();
+        store
+    }
+
+    /// Create a new store, trying to load from disk cache first.
+    ///
+    /// On a cache **hit**: loads the cached state, then queries nostrdb for any events
+    /// newer than the cache's `saved_at` timestamp (incremental catch-up).
+    /// On a cache **miss** (missing file, corrupt, stale, schema mismatch): falls back
+    /// to a full `rebuild_from_ndb()` — same as `new()`.
+    ///
+    /// The `cache_dir` path is retained so `save_cache()` can be called on shutdown.
+    pub fn new_with_cache(ndb: Arc<Ndb>, cache_dir: PathBuf) -> Self {
+        let mut store = Self {
+            ndb,
+            content: ContentStore::new(),
+            reports: ReportsStore::new(),
+            trust: TrustStore::new(),
+            projects: Vec::new(),
+            project_statuses: HashMap::new(),
+            threads_by_project: HashMap::new(),
+            messages_by_thread: HashMap::new(),
+            profiles: HashMap::new(),
+            inbox: InboxStore::new(),
+            user_pubkey: None,
+            agent_chatter: Vec::new(),
+            operations: OperationsStore::new(),
+            statistics: StatisticsStore::new(),
+            pending_project_subscriptions: Vec::new(),
+            thread_root_index: HashMap::new(),
+            runtime_hierarchy: RuntimeHierarchy::new(),
+            needs_rebuild: false,
+            bookmarks: HashMap::new(),
+            cache_dir: Some(cache_dir),
+        };
+        if !store.try_load_from_cache() {
+            store.rebuild_from_ndb();
+        }
         store
     }
 
@@ -429,6 +479,308 @@ impl AppDataStore {
     // NOTE: load_operations_status() was removed because ephemeral events (kind:24133)
     // should NOT be read from nostrdb. Operations status is only received via live
     // subscriptions and stored in memory (operations_by_event).
+
+    // ===== State Cache Methods =====
+
+    /// Attempt to populate the store from the on-disk cache.
+    ///
+    /// Returns `true` on a cache hit (store is now populated), `false` on any miss/error
+    /// (caller should fall back to `rebuild_from_ndb`).
+    fn try_load_from_cache(&mut self) -> bool {
+        let cache_dir = match self.cache_dir.clone() {
+            Some(d) => d,
+            None => return false,
+        };
+
+        let started_at = Instant::now();
+        crate::tlog!("PERF", "AppDataStore::try_load_from_cache attempt");
+
+        let (cached_state, saved_at) = match state_cache::load_cache(&cache_dir) {
+            Some(result) => result,
+            None => {
+                crate::tlog!("PERF", "AppDataStore::try_load_from_cache miss");
+                return false;
+            }
+        };
+
+        let restore_started_at = Instant::now();
+        self.restore_from_cached_state(cached_state);
+        let restore_elapsed_ms = restore_started_at.elapsed().as_millis();
+
+        let catchup_started_at = Instant::now();
+        let catchup_ok = self.do_incremental_catchup(saved_at);
+        let catchup_elapsed_ms = catchup_started_at.elapsed().as_millis();
+
+        if !catchup_ok {
+            // Incremental catch-up failed (nostrdb transaction/query error).
+            // Rather than serving a potentially stale cache, signal the caller to
+            // do a full rebuild.
+            warn!("AppDataStore::try_load_from_cache: incremental catch-up failed — falling back to full rebuild");
+            self.needs_rebuild = true;
+            return false;
+        }
+
+        self.needs_rebuild = false;
+
+        crate::tlog!(
+            "PERF",
+            "AppDataStore::try_load_from_cache hit projects={} threads={} messages={} restoreMs={} catchupMs={} totalMs={}",
+            self.projects.len(),
+            self.threads_by_project.values().map(|v| v.len()).sum::<usize>(),
+            self.messages_by_thread.values().map(|v| v.len()).sum::<usize>(),
+            restore_elapsed_ms,
+            catchup_elapsed_ms,
+            started_at.elapsed().as_millis()
+        );
+
+        true
+    }
+
+    /// Populate the store's fields from a `CachedState` snapshot.
+    ///
+    /// After calling this, derived data (statistics, runtime hierarchy) is rebuilt
+    /// from the restored data — this is fast and does not touch nostrdb.
+    fn restore_from_cached_state(&mut self, state: state_cache::CachedState) {
+        self.projects = state.projects;
+        self.threads_by_project = state.threads_by_project;
+        self.messages_by_thread = state.messages_by_thread;
+        self.profiles = state.profiles;
+        self.thread_root_index = state.thread_root_index;
+
+        self.content.agent_definitions = state.agent_definitions;
+        self.content.team_packs = state.team_packs;
+        self.content.mcp_tools = state.mcp_tools;
+        self.content.nudges = state.nudges;
+        self.content.skills = state.skills;
+        self.content.lessons = state.lessons;
+
+        self.reports.reports = state.reports;
+        self.reports.reports_all_versions = state.reports_all_versions;
+        self.reports.document_threads = state.document_threads;
+
+        // Rebuild derived data from the restored snapshot.  These operate only on
+        // already-loaded data and do not touch nostrdb, so they are fast.
+        self.statistics.rebuild_messages_by_day_counts_from_loaded(
+            &self.user_pubkey,
+            &self.messages_by_thread,
+        );
+        self.statistics
+            .rebuild_llm_activity_by_hour(&self.messages_by_thread);
+        self.statistics
+            .rebuild_runtime_by_day_counts(&self.messages_by_thread);
+        self.rebuild_runtime_hierarchy();
+
+        // Sort threads by effective_last_activity (descending).
+        for threads in self.threads_by_project.values_mut() {
+            threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+        }
+    }
+
+    /// Query nostrdb for events newer than `since_timestamp` and apply them via
+    /// `handle_event` so the in-memory state is fully up to date after a cache load.
+    ///
+    /// This is the "incremental catch-up" step: it processes only the delta between
+    /// the last cache save and the current nostrdb state, which is typically very fast.
+    ///
+    /// Returns `true` on success, `false` if the transaction or query failed.
+    /// On failure the caller should fall back to a full `rebuild_from_ndb()`.
+    fn do_incremental_catchup(&mut self, since_timestamp: u64) -> bool {
+        // Clock-skew safety: subtract 5 minutes so that events whose `created_at`
+        // is slightly before the cache's `max_created_at` (due to relay clock drift or
+        // out-of-order delivery) are still picked up.  `handle_event` deduplicates
+        // anything already present in state, so this is safe to over-fetch.
+        const CLOCK_SKEW_SECS: u64 = 5 * 60;
+        let since = since_timestamp.saturating_sub(CLOCK_SKEW_SECS);
+
+        // Clone the Arc so we can hold an immutable borrow on `ndb` (for the
+        // transaction + note lifetimes) while also mutably borrowing `self` for
+        // `handle_event`.  The underlying Ndb data is shared; no copy is made.
+        let ndb = Arc::clone(&self.ndb);
+
+        let txn = match Transaction::new(&ndb) {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("AppDataStore::do_incremental_catchup: failed to open transaction: {e}");
+                return false;
+            }
+        };
+
+        // Query for all event kinds we care about, restricted to events newer than
+        // the cache's max_created_at (minus clock-skew window).
+        let filter = Filter::new()
+            .kinds([31933, 1, 0, 4199, 34199, 4200, 4201, 4202, 4129, 513, 30023, 14202])
+            .since(since)
+            .build();
+
+        let results = match ndb.query(&txn, &[filter], 500_000) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("AppDataStore::do_incremental_catchup: query failed: {e}");
+                return false;
+            }
+        };
+
+        let new_event_count = results.len();
+        for result in &results {
+            if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+                self.handle_event(note.kind(), &note);
+            }
+        }
+
+        if new_event_count > 0 {
+            // Re-sort threads after incremental updates may have changed last_activity.
+            for threads in self.threads_by_project.values_mut() {
+                threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+            }
+        }
+
+        crate::tlog!(
+            "PERF",
+            "AppDataStore::do_incremental_catchup since={} newEvents={}",
+            since,
+            new_event_count
+        );
+
+        true
+    }
+
+    /// Snapshot the current in-memory state and write it to the cache file.
+    ///
+    /// Called from `CoreRuntime::shutdown()` so that the next startup can skip the
+    /// expensive `rebuild_from_ndb()`.  Any errors are logged as warnings; this method
+    /// never panics.
+    pub fn save_cache(&self) {
+        let cache_dir = match self.cache_dir.as_ref() {
+            Some(d) => d,
+            None => return, // caching disabled for this instance
+        };
+
+        // HIGH-2: Do not save an empty or invalid cache.  If `needs_rebuild` is true
+        // (e.g. the user just logged out), the in-memory state has been cleared and
+        // saving it would produce an empty cache that silently suppresses the full
+        // rebuild on the next startup.  Also guard against a missing `user_pubkey`
+        // for the same reason.
+        if self.needs_rebuild || self.user_pubkey.is_none() {
+            tracing::info!(
+                "AppDataStore::save_cache skipped (needs_rebuild={} no_user={})",
+                self.needs_rebuild,
+                self.user_pubkey.is_none()
+            );
+            return;
+        }
+
+        let started_at = Instant::now();
+
+        // HIGH-1: Compute the highest Nostr event `created_at` across all cached
+        // events so the incremental catch-up filter on the next startup is based on
+        // actual event timestamps rather than wall-clock save time.
+        let max_created_at = self.compute_max_created_at();
+
+        // MED-2: `CachedState` is moved (not cloned again) into `state_cache::save_cache`,
+        // which takes ownership.  This means we pay for exactly one clone of the store
+        // data here, not two.
+        let cached_state = state_cache::CachedState {
+            projects: self.projects.clone(),
+            threads_by_project: self.threads_by_project.clone(),
+            messages_by_thread: self.messages_by_thread.clone(),
+            profiles: self.profiles.clone(),
+            thread_root_index: self.thread_root_index.clone(),
+            agent_definitions: self.content.agent_definitions.clone(),
+            team_packs: self.content.team_packs.clone(),
+            mcp_tools: self.content.mcp_tools.clone(),
+            nudges: self.content.nudges.clone(),
+            skills: self.content.skills.clone(),
+            lessons: self.content.lessons.clone(),
+            reports: self.reports.reports.clone(),
+            reports_all_versions: self.reports.reports_all_versions.clone(),
+            document_threads: self.reports.document_threads.clone(),
+        };
+
+        match state_cache::save_cache(cache_dir, cached_state, max_created_at) {
+            Ok(()) => crate::tlog!(
+                "PERF",
+                "AppDataStore::save_cache ok projects={} threads={} messages={} maxCreatedAt={} elapsedMs={}",
+                self.projects.len(),
+                self.threads_by_project.values().map(|v| v.len()).sum::<usize>(),
+                self.messages_by_thread.values().map(|v| v.len()).sum::<usize>(),
+                max_created_at,
+                started_at.elapsed().as_millis()
+            ),
+            Err(e) => warn!("AppDataStore::save_cache failed: {}", e),
+        }
+    }
+
+    /// Compute the highest Nostr event `created_at` timestamp seen across all
+    /// data currently held in this store.
+    ///
+    /// Used when saving the cache so the next startup's incremental catch-up
+    /// filter uses the actual event-time high-water mark rather than wall-clock
+    /// save time.  This ensures late-arriving or backfilled events with
+    /// `created_at < saved_at` are never permanently missed.
+    fn compute_max_created_at(&self) -> u64 {
+        let mut max: u64 = 0;
+
+        // Messages are the highest-volume events and carry the most recent timestamps.
+        for messages in self.messages_by_thread.values() {
+            for msg in messages {
+                if msg.created_at > max {
+                    max = msg.created_at;
+                }
+            }
+        }
+
+        // Thread root events (conversation starts).
+        for threads in self.threads_by_project.values() {
+            for thread in threads {
+                if thread.last_activity > max {
+                    max = thread.last_activity;
+                }
+            }
+        }
+
+        // Projects.
+        for project in &self.projects {
+            if project.created_at > max {
+                max = project.created_at;
+            }
+        }
+
+        // Content definitions.
+        for ad in self.content.agent_definitions.values() {
+            if ad.created_at > max {
+                max = ad.created_at;
+            }
+        }
+        for nudge in self.content.nudges.values() {
+            if nudge.created_at > max {
+                max = nudge.created_at;
+            }
+        }
+        for skill in self.content.skills.values() {
+            if skill.created_at > max {
+                max = skill.created_at;
+            }
+        }
+        for lesson in self.content.lessons.values() {
+            if lesson.created_at > max {
+                max = lesson.created_at;
+            }
+        }
+        for mcp_tool in self.content.mcp_tools.values() {
+            if mcp_tool.created_at > max {
+                max = mcp_tool.created_at;
+            }
+        }
+
+        // Reports.
+        for report in self.reports.reports.values() {
+            if report.created_at > max {
+                max = report.created_at;
+            }
+        }
+
+        max
+    }
 
     // ===== Runtime Hierarchy Methods =====
 
