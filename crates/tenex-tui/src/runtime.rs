@@ -123,6 +123,30 @@ pub(crate) async fn run_app(
         ));
     }
 
+    // Set up a SIGTERM handler so that `kill <pid>` / supervisor shutdown triggers
+    // a graceful exit rather than an immediate OS termination.  Graceful exit means
+    // the `while app.running` loop exits normally, which lets `main()` call
+    // `core_runtime.shutdown()` → `AppDataStore::save_cache()`.
+    //
+    // This is the primary reason the cache was never written: SIGTERM killed the
+    // process before the shutdown sequence could run.
+    //
+    // Implementation note: we use a oneshot channel + spawned task rather than
+    // `#[cfg(unix)]` inside `tokio::select!` because the select! macro does not
+    // support attribute macros on its arms.  On non-Unix targets `_sigterm_guard`
+    // keeps the sender alive so the receiver stays forever-pending.
+    let (sigterm_tx, mut sigterm_rx) = tokio::sync::oneshot::channel::<()>();
+    #[cfg(unix)]
+    tokio::spawn(async move {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut sig) = signal(SignalKind::terminate()) {
+            sig.recv().await;
+            let _ = sigterm_tx.send(());
+        }
+    });
+    #[cfg(not(unix))]
+    let _sigterm_guard = sigterm_tx;
+
     let mut loop_count: u64 = 0;
     let mut terminal_events: u64 = 0;
     let mut ndb_events: u64 = 0;
@@ -427,6 +451,13 @@ pub(crate) async fn run_app(
                         // Modal was closed before results arrived — discard
                     }
                 }
+            }
+
+            // Gracefully handle SIGTERM (e.g. `kill <pid>`, supervisor shutdown).
+            // Without this arm the OS terminates the process immediately, bypassing
+            // `core_runtime.shutdown()` and therefore `AppDataStore::save_cache()`.
+            Ok(()) = &mut sigterm_rx => {
+                app.quit();
             }
         }
     }

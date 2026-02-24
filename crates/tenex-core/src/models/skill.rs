@@ -5,7 +5,7 @@ use crate::constants::DEFAULT_SKILL_TITLE;
 /// Skill - kind:4202 events for agent skills
 /// Skills are reusable instruction sets that can be attached to conversations.
 /// Unlike nudges, skills do not have tool permission modifiers.
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct Skill {
     pub id: String,
     pub pubkey: String,

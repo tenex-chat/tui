@@ -6,7 +6,7 @@ use nostrdb::Note;
 ///
 /// Each `["e", "<event-id>"]` tag represents a bookmarked nudge or skill.
 /// The event is replaceable: publishing a new one replaces the old one.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BookmarkList {
     /// Pubkey of the bookmark list owner (hex-encoded)
     pub pubkey: String,

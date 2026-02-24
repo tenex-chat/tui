@@ -3,7 +3,7 @@ use nostrdb::Note;
 use crate::constants::{DEFAULT_AGENT_NAME, DEFAULT_AGENT_ROLE};
 
 /// Agent Definition - kind:4199 events describing AI agents
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct AgentDefinition {
     pub id: String,
     pub pubkey: String,
