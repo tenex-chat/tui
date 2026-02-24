@@ -40,7 +40,7 @@ pub use nudge_crud::{
 pub use nudge_skill_selector::render_nudge_skill_selector;
 pub use project_settings::{
     available_agent_count, available_mcp_tool_count, get_agent_id_at_index,
-    get_mcp_tool_id_at_index, render_project_settings,
+    get_mcp_tool_id_at_index, render_agent_deletion_confirm, render_project_settings,
 };
 pub use report_tab::render_report_tab;
 pub use report_viewer::render_report_viewer;
