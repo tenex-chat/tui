@@ -682,6 +682,55 @@ impl NudgeDeleteConfirmState {
     }
 }
 
+/// Scope of agent deletion (project-only or global)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentDeletionScope {
+    /// Delete from a specific project (publishes `a` tag)
+    Project,
+    /// Delete globally (no `a` tag)
+    Global,
+}
+
+/// State for agent deletion confirmation dialog
+#[derive(Debug, Clone)]
+pub struct AgentDeletionState {
+    /// The agent's pubkey (hex)
+    pub agent_pubkey: String,
+    /// Human-readable agent name for display
+    pub agent_name: String,
+    /// The project's a-tag (e.g. "31933:<pubkey>:<d_tag>") — used when scope is Project
+    pub project_a_tag: String,
+    /// Deletion scope
+    pub scope: AgentDeletionScope,
+    /// Which action is currently highlighted: 0 = Cancel, 1 = Delete
+    pub selected_index: usize,
+}
+
+impl AgentDeletionState {
+    pub fn new(agent_pubkey: String, agent_name: String, project_a_tag: String) -> Self {
+        Self {
+            agent_pubkey,
+            agent_name,
+            project_a_tag,
+            scope: AgentDeletionScope::Project,
+            selected_index: 0, // Default to Cancel for safety
+        }
+    }
+
+    /// Toggle between Cancel (0) and Delete (1)
+    pub fn toggle_action(&mut self) {
+        self.selected_index = 1 - self.selected_index;
+    }
+
+    /// Toggle between Project and Global scope
+    pub fn toggle_scope(&mut self) {
+        self.scope = match self.scope {
+            AgentDeletionScope::Project => AgentDeletionScope::Global,
+            AgentDeletionScope::Global => AgentDeletionScope::Project,
+        };
+    }
+}
+
 /// What type of item is being added in project settings
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectSettingsAddMode {
@@ -2360,6 +2409,8 @@ pub enum ModalState {
     NudgeDetail(NudgeDetailState),
     /// Nudge delete confirmation - confirm deletion of a nudge
     NudgeDeleteConfirm(NudgeDeleteConfirmState),
+    /// Agent deletion confirmation - confirm publishing kind:24030 deletion event
+    AgentDeletion(AgentDeletionState),
     /// Workspace manager modal - create, edit, delete, switch workspaces
     WorkspaceManager(WorkspaceManagerState),
     /// Global app settings modal (accessible via comma key from anywhere)

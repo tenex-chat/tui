@@ -760,6 +760,37 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
             _ => {}
         }
     } else {
+        // Ctrl+D in the Agents pane opens the agent deletion confirmation modal
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            && code == KeyCode::Char('d')
+            && state.focus == ProjectSettingsFocus::Agents
+            && !state.pending_agent_definition_ids.is_empty()
+        {
+            use ui::modal::AgentDeletionState;
+            let agent_id = state.pending_agent_definition_ids[state.selector_index].clone();
+            let project_a_tag = state.project_a_tag.clone();
+
+            let (agent_pubkey, agent_name) = {
+                let ds = app.data_store.borrow();
+                if let Some(agent) = ds.content.get_agent_definition(&agent_id) {
+                    (agent.pubkey.clone(), agent.name.clone())
+                } else {
+                    (String::new(), agent_id[..16.min(agent_id.len())].to_string())
+                }
+            };
+
+            if !agent_pubkey.is_empty() {
+                app.modal_state = ModalState::AgentDeletion(AgentDeletionState::new(
+                    agent_pubkey,
+                    agent_name,
+                    project_a_tag,
+                ));
+            } else {
+                app.modal_state = ModalState::ProjectSettings(state);
+            }
+            return;
+        }
+
         match code {
             KeyCode::Esc => {
                 app.modal_state = ModalState::None;

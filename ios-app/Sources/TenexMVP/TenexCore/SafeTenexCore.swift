@@ -542,6 +542,22 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Publish a kind:24030 event to delete (decommission) an agent from a project or globally.
+    ///
+    /// - `agentPubkey`: Hex pubkey of the agent instance to delete.
+    /// - `projectATag`: Optional project a-tag (`31933:<pubkey>:<d_tag>`).
+    ///   Pass `nil` for global deletion (backend removes agent from all projects).
+    /// - `reason`: Optional reason text placed in event content.
+    func deleteAgent(agentPubkey: String, projectATag: String?, reason: String?) throws {
+        try profiler.measureFFI("deleteAgent") {
+            do {
+                try core.deleteAgent(agentPubkey: agentPubkey, projectATag: projectATag, reason: reason)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     /// Create a new project (kind:31933 replaceable event).
     func createProject(
         name: String,

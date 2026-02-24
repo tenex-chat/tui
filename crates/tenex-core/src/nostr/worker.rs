@@ -569,6 +569,19 @@ pub enum NostrCommand {
         backend_pubkey: String,
         device_id: String,
     },
+    /// Delete an agent from a project or globally (kind:24030)
+    DeleteAgent {
+        /// The hex pubkey of the agent to delete
+        agent_pubkey: String,
+        /// Project a-tag (`31933:<owner_pubkey>:<d_tag>`).
+        /// When `Some`, scope is "project" and the a-tag is included in the event.
+        /// When `None`, scope is "global" and no a-tag is included.
+        project_a_tag: Option<String>,
+        /// Optional reason text (event content)
+        reason: Option<String>,
+        /// Client identifier for the client tag
+        client: Option<String>,
+    },
     Shutdown,
 }
 
@@ -1026,6 +1039,27 @@ impl NostrWorker {
                         let _ = self
                             .data_tx
                             .send(DataChange::BookmarkListChanged { bookmarked_ids });
+                    }
+                    NostrCommand::DeleteAgent {
+                        agent_pubkey,
+                        project_a_tag,
+                        reason,
+                        client,
+                    } => {
+                        let short_pk: String = agent_pubkey.chars().take(8).collect();
+                        let scope = if project_a_tag.is_some() { "project" } else { "global" };
+                        debug_log(&format!(
+                            "Worker: Deleting agent {} (scope: {})",
+                            short_pk, scope
+                        ));
+                        if let Err(e) = rt.block_on(self.handle_delete_agent(
+                            agent_pubkey,
+                            project_a_tag,
+                            reason,
+                            client,
+                        )) {
+                            tlog!("ERROR", "Failed to delete agent: {}", e);
+                        }
                     }
                     NostrCommand::ReactToTeam {
                         team_coordinate,
@@ -2526,6 +2560,99 @@ impl NostrWorker {
             Err(_) => tlog!(
                 "ERROR",
                 "Timeout sending deletion event to relay (saved locally)"
+            ),
+        }
+
+        Ok(())
+    }
+
+    /// Publish a kind:24030 agent deletion event.
+    ///
+    /// Schema:
+    /// ```json
+    /// {
+    ///   "kind": 24030,
+    ///   "tags": [
+    ///     ["p", "<agent_pubkey_hex>"],
+    ///     ["a", "31933:<project_author>:<d_tag>"],  // present iff scope == "project"
+    ///     ["r", "project" | "global"]
+    ///   ],
+    ///   "content": "<optional reason>"
+    /// }
+    /// ```
+    async fn handle_delete_agent(
+        &self,
+        agent_pubkey: String,
+        project_a_tag: Option<String>,
+        reason: Option<String>,
+        client_tag: Option<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let pk = PublicKey::parse(&agent_pubkey)
+            .map_err(|e| anyhow::anyhow!("Invalid agent pubkey: {}", e))?;
+
+        let client_name = client_tag.unwrap_or_else(|| "tenex-ios".to_string());
+        let scope = if project_a_tag.is_some() {
+            "project"
+        } else {
+            "global"
+        };
+
+        // Build kind:24030 event
+        let mut event = EventBuilder::new(
+            Kind::Custom(24030),
+            reason.as_deref().unwrap_or(""),
+        )
+        .tag(Tag::public_key(pk))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+            vec![scope.to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+            vec![client_name],
+        ));
+
+        // Add project a-tag when scope is "project"
+        if let Some(ref a_tag) = project_a_tag {
+            let coordinate = Coordinate::parse(a_tag)
+                .map_err(|e| anyhow::anyhow!("Invalid project coordinate '{}': {}", a_tag, e))?;
+            event = event.tag(Tag::coordinate(coordinate, None));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => {
+                let short_pk: String = agent_pubkey.chars().take(8).collect();
+                debug_log(&format!(
+                    "Sent kind:24030 delete for agent {} ({}): {}",
+                    short_pk,
+                    scope,
+                    output.id()
+                ))
+            }
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send agent deletion event to relay: {}", e),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending agent deletion event to relay (saved locally)"
             ),
         }
 

@@ -821,6 +821,35 @@ impl TenexCore {
         Ok(())
     }
 
+    /// Delete an agent from a project or globally by publishing a kind:24030 event.
+    ///
+    /// - `agent_pubkey`: Hex pubkey of the agent to delete.
+    /// - `project_a_tag`: Optional project coordinate (`31933:<pubkey>:<d_tag>`).
+    ///   - `Some(a_tag)` → scope is "project", event includes the `a` tag.
+    ///   - `None` → scope is "global", no `a` tag (backend removes agent from all projects).
+    /// - `reason`: Optional reason text placed in event content.
+    pub fn delete_agent(
+        &self,
+        agent_pubkey: String,
+        project_a_tag: Option<String>,
+        reason: Option<String>,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::DeleteAgent {
+                agent_pubkey,
+                project_a_tag,
+                reason,
+                client: Some("tenex-ios".to_string()),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send delete agent command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
     /// Get all MCP tool definitions (kind:4200 events).
     ///
     /// Returns tools sorted by created_at descending (newest first).
