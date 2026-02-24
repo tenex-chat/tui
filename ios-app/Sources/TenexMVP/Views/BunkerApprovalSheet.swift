@@ -18,6 +18,18 @@ struct BunkerApprovalSheet: View {
     @State private var remainingSeconds = 60
     @State private var timer: Timer?
     @State private var alwaysApprove = false
+    @State private var previewMode: EventPreviewMode = .raw
+
+    private enum EventPreviewMode: String, CaseIterable, Identifiable {
+        case preview = "Preview"
+        case raw = "Raw"
+
+        var id: String { rawValue }
+    }
+
+    private var previewModel: BunkerSignPreviewModel {
+        BunkerSignPreviewModel(request: request)
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -30,7 +42,10 @@ struct BunkerApprovalSheet: View {
         }
         .padding(24)
         .frame(minWidth: 420, idealWidth: 500, minHeight: 400)
-        .onAppear { startCountdown() }
+        .onAppear {
+            previewMode = previewModel.isAgentDefinition4199 ? .preview : .raw
+            startCountdown()
+        }
         .onDisappear { timer?.invalidate() }
     }
 
@@ -78,8 +93,11 @@ struct BunkerApprovalSheet: View {
     // MARK: - Event Details
 
     private var eventDetailsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let kind = request.eventKind {
+        let preview = previewModel
+        let resolvedKind = preview.kind ?? request.eventKind
+
+        return VStack(alignment: .leading, spacing: 10) {
+            if let kind = resolvedKind {
                 HStack {
                     Label(kindName(kind), systemImage: kindIcon(kind))
                         .font(.subheadline.bold())
@@ -90,33 +108,180 @@ struct BunkerApprovalSheet: View {
                 }
             }
 
-            ScrollView {
-                Text(rawEventJson)
-                    .font(.caption)
-                    .fontDesign(.monospaced)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if preview.isAgentDefinition4199 {
+                Picker("Event View", selection: $previewMode) {
+                    Text(EventPreviewMode.preview.rawValue).tag(EventPreviewMode.preview)
+                    Text(EventPreviewMode.raw.rawValue).tag(EventPreviewMode.raw)
+                }
+                .pickerStyle(.segmented)
             }
-            .frame(maxHeight: 260)
-            .padding(8)
-            .background(.quaternary)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            if preview.isAgentDefinition4199,
+               previewMode == .preview,
+               let agent = preview.agentDefinition {
+                richAgentDefinitionPreview(agent)
+            } else {
+                rawEventSection(preview.rawEventJson)
+            }
         }
     }
 
-    private var rawEventJson: String {
-        var obj: [String: Any] = [:]
-        if let kind = request.eventKind { obj["kind"] = kind }
-        if let content = request.eventContent { obj["content"] = content }
-        if let tagsJson = request.eventTagsJson,
-           let data = tagsJson.data(using: .utf8),
-           let tags = try? JSONSerialization.jsonObject(with: data) {
-            obj["tags"] = tags
+    @ViewBuilder
+    private func richAgentDefinitionPreview(
+        _ agent: BunkerSignPreviewModel.AgentDefinitionPreview
+    ) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(agent.title ?? "Untitled Agent Definition")
+                    .font(.headline)
+
+                let metadataChips = [
+                    agent.role.map { "Role: \($0)" },
+                    agent.category.map { "Category: \($0)" },
+                    agent.version.map { "v\($0)" }
+                ].compactMap { $0 }
+
+                if !metadataChips.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 6)], spacing: 6) {
+                        ForEach(metadataChips, id: \.self) { chip in
+                            metadataChip(chip)
+                        }
+                    }
+                }
+
+                if let dTag = agent.dTag, !dTag.isEmpty {
+                    metadataRow(title: "d-tag", value: dTag)
+                }
+
+                if let description = agent.description, !description.isEmpty {
+                    richPreviewSection(title: "Description") {
+                        Text(description)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                if !agent.instructionsFromTags.isEmpty {
+                    richPreviewSection(title: "Instructions (tag)") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(agent.instructionsFromTags.enumerated()), id: \.offset) { entry in
+                                MarkdownView(content: entry.element)
+                            }
+                        }
+                    }
+                }
+
+                if !agent.contentMarkdown.isEmpty {
+                    richPreviewSection(title: "Content") {
+                        MarkdownView(content: agent.contentMarkdown)
+                    }
+                }
+
+                if !agent.useCriteria.isEmpty {
+                    richPreviewSection(title: "Use Criteria") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(agent.useCriteria.enumerated()), id: \.offset) { entry in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("•")
+                                        .foregroundStyle(.secondary)
+                                    Text(entry.element)
+                                        .font(.subheadline)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !agent.tools.isEmpty {
+                    richPreviewSection(title: "Tools") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 6)], spacing: 6) {
+                            ForEach(agent.tools, id: \.self) { tool in
+                                metadataChip(tool)
+                            }
+                        }
+                    }
+                }
+
+                if !agent.mcpServers.isEmpty {
+                    richPreviewSection(title: "MCP Servers") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(agent.mcpServers, id: \.self) { server in
+                                Text(server)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+
+                if !agent.fileEventIds.isEmpty {
+                    richPreviewSection(title: "File References (e-tags)") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(agent.fileEventIds, id: \.self) { fileId in
+                                Text(fileId)
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),
-              let str = String(data: data, encoding: .utf8)
-        else { return "(unable to serialize event)" }
-        return str
+        .frame(maxHeight: 300)
+        .padding(8)
+        .background(.quaternary)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func rawEventSection(_ rawJson: String) -> some View {
+        ScrollView {
+            Text(rawJson)
+                .font(.caption)
+                .fontDesign(.monospaced)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxHeight: 300)
+        .padding(8)
+        .background(.quaternary)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func metadataChip(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.tertiary, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func metadataRow(title: String, value: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .leading)
+
+            Text(value)
+                .font(.caption.monospaced())
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func richPreviewSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            content()
+        }
     }
 
     // MARK: - Auto-Approve Toggle
