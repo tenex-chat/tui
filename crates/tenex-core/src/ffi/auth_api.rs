@@ -95,9 +95,11 @@ impl TenexCore {
         );
 
         let send_connect_started_at = Instant::now();
+        let relay_urls = self.get_configured_relays();
         let _ = core_handle.send(NostrCommand::Connect {
             keys,
             user_pubkey: pubkey.clone(),
+            relay_urls,
             response_tx: None, // Don't wait for response
         });
         tlog!(

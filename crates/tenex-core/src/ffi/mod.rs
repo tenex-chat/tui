@@ -1694,6 +1694,8 @@ pub struct TenexCore {
     /// Read by get_today_runtime_ms() without acquiring the store RwLock,
     /// eliminating priority inversion when refresh() holds the write lock.
     cached_today_runtime_ms: Arc<AtomicU64>,
+    /// Runtime-configurable relay URLs (set via set_relay_urls, used during connect)
+    relay_urls: Arc<RwLock<Vec<String>>>,
 }
 
 impl Drop for TenexCore {
