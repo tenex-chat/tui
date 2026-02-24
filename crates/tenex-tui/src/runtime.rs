@@ -261,6 +261,8 @@ pub(crate) async fn run_app(
 
                 // Check for pending backend approvals
                 check_pending_backend_approvals(app);
+                // Check for pending bunker signing approvals
+                check_pending_bunker_approvals(app);
             }
 
             // Handle upload results from background tasks
@@ -744,6 +746,11 @@ fn check_pending_backend_approvals(app: &mut App) {
     if let Some(first) = pending.into_iter().next() {
         app.show_backend_approval_modal(first.backend_pubkey);
     }
+}
+
+/// Show pending bunker signing approvals when no modal is open.
+fn check_pending_bunker_approvals(app: &mut App) {
+    app.maybe_open_pending_bunker_approval();
 }
 
 /// Check if a pending new thread has arrived and navigate to it
