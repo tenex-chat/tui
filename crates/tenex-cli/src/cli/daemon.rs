@@ -2,8 +2,9 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use tokio::net::UnixListener;
 use tokio::sync::broadcast;
@@ -26,6 +27,62 @@ use super::protocol::{Request, Response};
 const SOCKET_NAME: &str = "tenex-cli.sock";
 const PID_FILE: &str = "daemon.pid";
 const LOG_FILE: &str = "tenex.log";
+const BUNKER_PENDING_TIMEOUT: Duration = Duration::from_secs(70);
+
+#[derive(Debug, Clone)]
+struct PendingBunkerRequest {
+    request: tenex_core::nostr::bunker::BunkerSignRequest,
+    received_at_ms: u64,
+    inserted_at: Instant,
+}
+
+#[derive(Debug, Default)]
+struct BunkerDaemonState {
+    running: bool,
+    uri: Option<String>,
+    pending: HashMap<String, PendingBunkerRequest>,
+}
+
+impl BunkerDaemonState {
+    fn upsert_pending(&mut self, request: tenex_core::nostr::bunker::BunkerSignRequest) {
+        let now_ms = now_unix_ms();
+        let request_id = request.request_id.clone();
+        self.pending.insert(
+            request_id,
+            PendingBunkerRequest {
+                request,
+                received_at_ms: now_ms,
+                inserted_at: Instant::now(),
+            },
+        );
+    }
+
+    fn remove_pending(&mut self, request_id: &str) -> Option<PendingBunkerRequest> {
+        self.pending.remove(request_id)
+    }
+
+    fn clear_pending(&mut self) {
+        self.pending.clear();
+    }
+
+    fn expire_stale_pending(&mut self) {
+        self.pending
+            .retain(|_, pending| pending.inserted_at.elapsed() <= BUNKER_PENDING_TIMEOUT);
+    }
+
+    fn pending_snapshot(&self) -> Vec<PendingBunkerRequest> {
+        let mut pending: Vec<PendingBunkerRequest> = self.pending.values().cloned().collect();
+        pending.sort_by_key(|p| p.received_at_ms);
+        pending
+    }
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Get socket path from data directory
 pub fn socket_path(data_dir: &Path) -> PathBuf {
@@ -74,7 +131,9 @@ pub async fn run_daemon(
         .expect("data_rx should be available");
 
     // Initialize preferences for credential storage and trusted backends
-    let prefs = PreferencesStorage::new(data_dir.to_str().unwrap_or("tenex_data"));
+    let prefs = Arc::new(Mutex::new(PreferencesStorage::new(
+        data_dir.to_str().unwrap_or("tenex_data"),
+    )));
 
     // Create a SINGLE shared data store for both Unix socket and HTTP handlers.
     // This ensures both see the same projects, threads, and messages.
@@ -119,8 +178,9 @@ pub async fn run_daemon(
 
     // Set trusted backends from preferences
     {
-        let approved = prefs.approved_backend_pubkeys().clone();
-        let blocked = prefs.blocked_backend_pubkeys().clone();
+        let prefs_guard = prefs.lock().unwrap();
+        let approved = prefs_guard.approved_backend_pubkeys().clone();
+        let blocked = prefs_guard.blocked_backend_pubkeys().clone();
         shared_data_store
             .lock()
             .unwrap()
@@ -129,7 +189,10 @@ pub async fn run_daemon(
     }
 
     // Try to auto-login: config credentials take priority over stored credentials
-    let keys = try_auto_login_with_config(config.as_ref(), &prefs, &core_handle);
+    let keys = {
+        let prefs_guard = prefs.lock().unwrap();
+        try_auto_login_with_config(config.as_ref(), &prefs_guard, &core_handle)
+    };
     if keys.is_some() {
         eprintln!("Auto-login successful");
     } else {
@@ -147,6 +210,18 @@ pub async fn run_daemon(
     // Track state
     let start_time = Instant::now();
     let ndb = core_runtime.ndb();
+    let logged_in = keys.is_some();
+    let bunker_state = Arc::new(Mutex::new(BunkerDaemonState::default()));
+
+    // Auto-start bunker when enabled in preferences and logged in.
+    if logged_in {
+        let should_start_bunker = prefs.lock().unwrap().bunker_enabled();
+        if should_start_bunker {
+            if let Err(e) = start_bunker_runtime(&core_handle, &bunker_state, &prefs) {
+                eprintln!("Failed to auto-start bunker: {}", e);
+            }
+        }
+    }
 
     // Spawn HTTP server if enabled (shares the same data store)
     let http_task = if http_enabled {
@@ -183,6 +258,10 @@ pub async fn run_daemon(
                             .lock()
                             .unwrap()
                             .handle_status_event_json(json);
+                    } else if let DataChange::BunkerSignRequest { request } = data_change {
+                        let mut state = bunker_state.lock().unwrap();
+                        state.upsert_pending(request);
+                        state.expire_stale_pending();
                     }
                 }
                 Err(broadcast::error::TryRecvError::Empty) => break,
@@ -190,6 +269,8 @@ pub async fn run_daemon(
                 Err(broadcast::error::TryRecvError::Closed) => break,
             }
         }
+
+        bunker_state.lock().unwrap().expire_stale_pending();
 
         tokio::select! {
             accept_result = listener.accept() => {
@@ -202,8 +283,10 @@ pub async fn run_daemon(
                             std_stream,
                             &shared_data_store,
                             &core_handle,
+                            &prefs,
+                            &bunker_state,
                             start_time,
-                            keys.is_some(),
+                            logged_in,
                         )?;
 
                         if should_shutdown {
@@ -373,10 +456,130 @@ fn try_auto_login(prefs: &PreferencesStorage, core_handle: &CoreHandle) -> Optio
     None
 }
 
+fn start_bunker_runtime(
+    core_handle: &CoreHandle,
+    bunker_state: &Arc<Mutex<BunkerDaemonState>>,
+    prefs: &Arc<Mutex<PreferencesStorage>>,
+) -> Result<String, String> {
+    let (response_tx, response_rx) = std::sync::mpsc::channel::<Result<String, String>>();
+    core_handle
+        .send(NostrCommand::StartBunker { response_tx })
+        .map_err(|e| format!("Failed to send StartBunker command: {}", e))?;
+
+    let uri = response_rx
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|e| format!("Timed out waiting for bunker start: {}", e))??;
+
+    replay_persisted_bunker_rules(core_handle, prefs)?;
+
+    {
+        let mut state = bunker_state.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        state.running = true;
+        state.uri = Some(uri.clone());
+        state.expire_stale_pending();
+    }
+
+    Ok(uri)
+}
+
+fn stop_bunker_runtime(
+    core_handle: &CoreHandle,
+    bunker_state: &Arc<Mutex<BunkerDaemonState>>,
+) -> Result<(), String> {
+    let (response_tx, response_rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    core_handle
+        .send(NostrCommand::StopBunker { response_tx })
+        .map_err(|e| format!("Failed to send StopBunker command: {}", e))?;
+
+    response_rx
+        .recv_timeout(Duration::from_secs(5))
+        .map_err(|e| format!("Timed out waiting for bunker stop: {}", e))??;
+
+    {
+        let mut state = bunker_state.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        state.running = false;
+        state.uri = None;
+        state.clear_pending();
+    }
+
+    Ok(())
+}
+
+fn replay_persisted_bunker_rules(
+    core_handle: &CoreHandle,
+    prefs: &Arc<Mutex<PreferencesStorage>>,
+) -> Result<(), String> {
+    let rules = {
+        let prefs_guard = prefs.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        prefs_guard.bunker_auto_approve_rules().to_vec()
+    };
+
+    for rule in rules {
+        core_handle
+            .send(NostrCommand::AddBunkerAutoApproveRule {
+                requester_pubkey: rule.requester_pubkey,
+                event_kind: rule.event_kind,
+            })
+            .map_err(|e| format!("Failed to apply bunker auto-approve rule: {}", e))?;
+    }
+
+    Ok(())
+}
+
+fn persist_bunker_enabled(
+    prefs: &Arc<Mutex<PreferencesStorage>>,
+    enabled: bool,
+) -> Result<(), String> {
+    let mut prefs_guard = prefs.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+    prefs_guard.set_bunker_enabled(enabled)
+}
+
+fn pending_request_to_json(pending: &PendingBunkerRequest) -> serde_json::Value {
+    let age_ms = pending.inserted_at.elapsed().as_millis() as u64;
+    serde_json::json!({
+        "request_id": pending.request.request_id,
+        "requester_pubkey": pending.request.requester_pubkey,
+        "event_kind": pending.request.event_kind,
+        "event_json": pending.request.event_json,
+        "event_content": pending.request.event_content,
+        "event_tags_json": pending.request.event_tags_json,
+        "received_at_ms": pending.received_at_ms,
+        "age_ms": age_ms,
+    })
+}
+
+fn bunker_audit_entry_to_json(entry: &tenex_core::nostr::bunker::BunkerAuditEntry) -> serde_json::Value {
+    serde_json::json!({
+        "timestamp_ms": entry.timestamp_ms,
+        "completed_at_ms": entry.completed_at_ms,
+        "request_id": entry.request_id,
+        "source_event_id": entry.source_event_id,
+        "requester_pubkey": entry.requester_pubkey,
+        "request_type": entry.request_type,
+        "event_kind": entry.event_kind,
+        "event_content_preview": entry.event_content_preview,
+        "event_content_full": entry.event_content_full,
+        "event_tags_json": entry.event_tags_json,
+        "request_payload_json": entry.request_payload_json,
+        "response_payload_json": entry.response_payload_json,
+        "decision": entry.decision,
+        "response_time_ms": entry.response_time_ms,
+    })
+}
+
+fn not_logged_in_response(id: u64) -> (Response, bool) {
+    (
+        Response::error(id, "NOT_LOGGED_IN", "Login required for bunker operations"),
+        false,
+    )
+}
+
 fn handle_connection(
     stream: UnixStream,
     data_store: &Arc<Mutex<AppDataStore>>,
     core_handle: &CoreHandle,
+    prefs: &Arc<Mutex<PreferencesStorage>>,
+    bunker_state: &Arc<Mutex<BunkerDaemonState>>,
     start_time: Instant,
     logged_in: bool,
 ) -> Result<bool> {
@@ -396,7 +599,15 @@ fn handle_connection(
         };
 
         let (response, should_shutdown) =
-            handle_request(&request, data_store, core_handle, start_time, logged_in);
+            handle_request(
+                &request,
+                data_store,
+                core_handle,
+                prefs,
+                bunker_state,
+                start_time,
+                logged_in,
+            );
 
         writeln!(writer, "{}", serde_json::to_string(&response)?)?;
         writer.flush()?;
@@ -415,6 +626,8 @@ fn handle_request(
     request: &Request,
     data_store: &Arc<Mutex<AppDataStore>>,
     core_handle: &CoreHandle,
+    prefs: &Arc<Mutex<PreferencesStorage>>,
+    bunker_state: &Arc<Mutex<BunkerDaemonState>>,
     _start_time: Instant,
     logged_in: bool,
 ) -> (Response, bool) {
@@ -912,6 +1125,416 @@ fn handle_request(
             ),
             false,
         ),
+
+        "bunker_start" => {
+            if !logged_in {
+                return not_logged_in_response(id);
+            }
+
+            match start_bunker_runtime(core_handle, bunker_state, prefs) {
+                Ok(uri) => (
+                    Response::success(
+                        id,
+                        serde_json::json!({
+                            "status": "started",
+                            "running": true,
+                            "uri": uri,
+                            "enabled": prefs.lock().unwrap().bunker_enabled(),
+                        }),
+                    ),
+                    false,
+                ),
+                Err(e) => (Response::error(id, "BUNKER_START_FAILED", &e), false),
+            }
+        }
+
+        "bunker_stop" => {
+            if !logged_in {
+                return not_logged_in_response(id);
+            }
+
+            match stop_bunker_runtime(core_handle, bunker_state) {
+                Ok(()) => (
+                    Response::success(
+                        id,
+                        serde_json::json!({
+                            "status": "stopped",
+                            "running": false
+                        }),
+                    ),
+                    false,
+                ),
+                Err(e) => (Response::error(id, "BUNKER_STOP_FAILED", &e), false),
+            }
+        }
+
+        "bunker_status" => {
+            if !logged_in {
+                return not_logged_in_response(id);
+            }
+
+            let mut state = bunker_state.lock().unwrap();
+            state.expire_stale_pending();
+            let pending_count = state.pending.len();
+            let running = state.running;
+            let uri = state.uri.clone();
+            drop(state);
+
+            let enabled = prefs.lock().unwrap().bunker_enabled();
+            (
+                Response::success(
+                    id,
+                    serde_json::json!({
+                        "running": running,
+                        "enabled": enabled,
+                        "uri": uri,
+                        "pending_count": pending_count
+                    }),
+                ),
+                false,
+            )
+        }
+
+        "bunker_list_pending" => {
+            if !logged_in {
+                return not_logged_in_response(id);
+            }
+
+            let mut state = bunker_state.lock().unwrap();
+            state.expire_stale_pending();
+            let pending: Vec<serde_json::Value> = state
+                .pending_snapshot()
+                .iter()
+                .map(pending_request_to_json)
+                .collect();
+            (
+                Response::success(
+                    id,
+                    serde_json::json!({
+                        "pending": pending
+                    }),
+                ),
+                false,
+            )
+        }
+
+        "bunker_respond" => {
+            if !logged_in {
+                return not_logged_in_response(id);
+            }
+
+            let request_id = request.params["request_id"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let approved = request.params["approved"].as_bool();
+
+            let (request_id, approved) = match (request_id, approved) {
+                (Some(request_id), Some(approved)) => (request_id.to_string(), approved),
+                _ => {
+                    return (
+                        Response::error(
+                            id,
+                            "INVALID_PARAMS",
+                            "request_id (string) and approved (bool) are required",
+                        ),
+                        false,
+                    );
+                }
+            };
+
+            let removed = {
+                let mut state = bunker_state.lock().unwrap();
+                state.expire_stale_pending();
+                state.remove_pending(&request_id).is_some()
+            };
+
+            if !removed {
+                return (
+                    Response::error(
+                        id,
+                        "PENDING_NOT_FOUND",
+                        &format!("No pending bunker request '{}'", request_id),
+                    ),
+                    false,
+                );
+            }
+
+            match core_handle.send(NostrCommand::BunkerResponse {
+                request_id: request_id.clone(),
+                approved,
+            }) {
+                Ok(()) => (
+                    Response::success(
+                        id,
+                        serde_json::json!({
+                            "status": if approved { "approved" } else { "rejected" },
+                            "request_id": request_id
+                        }),
+                    ),
+                    false,
+                ),
+                Err(e) => (
+                    Response::error(
+                        id,
+                        "BUNKER_RESPONSE_FAILED",
+                        &format!("Failed to send response: {}", e),
+                    ),
+                    false,
+                ),
+            }
+        }
+
+        "bunker_rules_list" => {
+            let rules = {
+                let prefs_guard = prefs.lock().unwrap();
+                prefs_guard.bunker_auto_approve_rules().to_vec()
+            };
+            let rules_json: Vec<serde_json::Value> = rules
+                .into_iter()
+                .map(|rule| {
+                    serde_json::json!({
+                        "requester_pubkey": rule.requester_pubkey,
+                        "event_kind": rule.event_kind
+                    })
+                })
+                .collect();
+
+            (
+                Response::success(
+                    id,
+                    serde_json::json!({
+                        "rules": rules_json
+                    }),
+                ),
+                false,
+            )
+        }
+
+        "bunker_rules_add" => {
+            let requester_pubkey = request.params["requester_pubkey"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let event_kind = request.params["event_kind"]
+                .as_u64()
+                .and_then(|value| u16::try_from(value).ok());
+
+            let requester_pubkey = match requester_pubkey {
+                Some(pubkey) => pubkey.to_string(),
+                None => {
+                    return (
+                        Response::error(
+                            id,
+                            "INVALID_PARAMS",
+                            "requester_pubkey is required",
+                        ),
+                        false,
+                    );
+                }
+            };
+
+            let save_result = {
+                let mut prefs_guard = prefs.lock().unwrap();
+                prefs_guard.add_bunker_auto_approve_rule(requester_pubkey.clone(), event_kind)
+            };
+            if let Err(e) = save_result {
+                return (Response::error(id, "PREFERENCES_ERROR", &e), false);
+            }
+
+            let running = bunker_state.lock().unwrap().running;
+            if running {
+                if let Err(e) = core_handle.send(NostrCommand::AddBunkerAutoApproveRule {
+                    requester_pubkey: requester_pubkey.clone(),
+                    event_kind,
+                }) {
+                    return (
+                        Response::error(
+                            id,
+                            "BUNKER_RULES_ADD_FAILED",
+                            &format!("Failed to apply runtime rule: {}", e),
+                        ),
+                        false,
+                    );
+                }
+            }
+
+            (
+                Response::success(
+                    id,
+                    serde_json::json!({
+                        "status": "added",
+                        "requester_pubkey": requester_pubkey,
+                        "event_kind": event_kind
+                    }),
+                ),
+                false,
+            )
+        }
+
+        "bunker_rules_remove" => {
+            let requester_pubkey = request.params["requester_pubkey"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let event_kind = request.params["event_kind"]
+                .as_u64()
+                .and_then(|value| u16::try_from(value).ok());
+
+            let requester_pubkey = match requester_pubkey {
+                Some(pubkey) => pubkey.to_string(),
+                None => {
+                    return (
+                        Response::error(
+                            id,
+                            "INVALID_PARAMS",
+                            "requester_pubkey is required",
+                        ),
+                        false,
+                    );
+                }
+            };
+
+            let remove_result = {
+                let mut prefs_guard = prefs.lock().unwrap();
+                prefs_guard.remove_bunker_auto_approve_rule(&requester_pubkey, event_kind)
+            };
+            if let Err(e) = remove_result {
+                return (Response::error(id, "PREFERENCES_ERROR", &e), false);
+            }
+
+            let running = bunker_state.lock().unwrap().running;
+            if running {
+                if let Err(e) = core_handle.send(NostrCommand::RemoveBunkerAutoApproveRule {
+                    requester_pubkey: requester_pubkey.clone(),
+                    event_kind,
+                }) {
+                    return (
+                        Response::error(
+                            id,
+                            "BUNKER_RULES_REMOVE_FAILED",
+                            &format!("Failed to remove runtime rule: {}", e),
+                        ),
+                        false,
+                    );
+                }
+            }
+
+            (
+                Response::success(
+                    id,
+                    serde_json::json!({
+                        "status": "removed",
+                        "requester_pubkey": requester_pubkey,
+                        "event_kind": event_kind
+                    }),
+                ),
+                false,
+            )
+        }
+
+        "bunker_audit" => {
+            if !logged_in {
+                return not_logged_in_response(id);
+            }
+
+            let limit = request.params["limit"].as_u64().and_then(|v| usize::try_from(v).ok());
+            let (response_tx, response_rx) =
+                std::sync::mpsc::channel::<Vec<tenex_core::nostr::bunker::BunkerAuditEntry>>();
+
+            if let Err(e) = core_handle.send(NostrCommand::GetBunkerAuditLog { response_tx }) {
+                return (
+                    Response::error(
+                        id,
+                        "BUNKER_AUDIT_FAILED",
+                        &format!("Failed to fetch bunker audit log: {}", e),
+                    ),
+                    false,
+                );
+            }
+
+            let mut entries = match response_rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(entries) => entries,
+                Err(e) => {
+                    return (
+                        Response::error(
+                            id,
+                            "BUNKER_AUDIT_FAILED",
+                            &format!("Timed out waiting for bunker audit log: {}", e),
+                        ),
+                        false,
+                    );
+                }
+            };
+
+            entries.sort_by(|a, b| b.completed_at_ms.cmp(&a.completed_at_ms));
+            if let Some(limit) = limit {
+                entries.truncate(limit);
+            }
+
+            let entries_json: Vec<serde_json::Value> =
+                entries.iter().map(bunker_audit_entry_to_json).collect();
+            (
+                Response::success(
+                    id,
+                    serde_json::json!({
+                        "entries": entries_json
+                    }),
+                ),
+                false,
+            )
+        }
+
+        "bunker_set_enabled" => {
+            let enabled = match request.params["enabled"].as_bool() {
+                Some(enabled) => enabled,
+                None => {
+                    return (
+                        Response::error(id, "INVALID_PARAMS", "enabled (bool) is required"),
+                        false,
+                    );
+                }
+            };
+
+            if let Err(e) = persist_bunker_enabled(prefs, enabled) {
+                return (Response::error(id, "PREFERENCES_ERROR", &e), false);
+            }
+
+            let mut uri = bunker_state.lock().unwrap().uri.clone();
+            if enabled {
+                if logged_in {
+                    match start_bunker_runtime(core_handle, bunker_state, prefs) {
+                        Ok(started_uri) => {
+                            uri = Some(started_uri);
+                        }
+                        Err(e) => {
+                            return (Response::error(id, "BUNKER_START_FAILED", &e), false);
+                        }
+                    }
+                }
+            } else {
+                let should_stop = bunker_state.lock().unwrap().running;
+                if should_stop {
+                    if let Err(e) = stop_bunker_runtime(core_handle, bunker_state) {
+                        return (Response::error(id, "BUNKER_STOP_FAILED", &e), false);
+                    }
+                }
+                uri = None;
+            }
+
+            let running = bunker_state.lock().unwrap().running;
+            (
+                Response::success(
+                    id,
+                    serde_json::json!({
+                        "enabled": enabled,
+                        "running": running,
+                        "uri": uri
+                    }),
+                ),
+                false,
+            )
+        }
 
         "shutdown" => (
             Response::success(id, serde_json::json!({"status": "shutting_down"})),
@@ -1663,4 +2286,79 @@ fn validate_nudge_ids_param(nudge_ids_param: &serde_json::Value) -> Result<Vec<S
     }
 
     Ok(validated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_pending_request(
+        request_id: &str,
+        requester_pubkey: &str,
+        event_kind: Option<u16>,
+    ) -> tenex_core::nostr::bunker::BunkerSignRequest {
+        tenex_core::nostr::bunker::BunkerSignRequest {
+            request_id: request_id.to_string(),
+            requester_pubkey: requester_pubkey.to_string(),
+            event_kind,
+            event_json: None,
+            event_content: Some("test-content".to_string()),
+            event_tags_json: None,
+        }
+    }
+
+    #[test]
+    fn pending_queue_insert_update_and_expiry() {
+        let mut state = BunkerDaemonState::default();
+
+        state.upsert_pending(make_pending_request("req-1", "pubkey-a", Some(1)));
+        assert_eq!(state.pending.len(), 1);
+
+        // Same request_id should update/replace, not duplicate.
+        state.upsert_pending(make_pending_request("req-1", "pubkey-a", Some(2)));
+        assert_eq!(state.pending.len(), 1);
+        assert_eq!(
+            state.pending.get("req-1").and_then(|p| p.request.event_kind),
+            Some(2)
+        );
+
+        state.upsert_pending(make_pending_request("req-2", "pubkey-b", Some(3)));
+        assert_eq!(state.pending.len(), 2);
+
+        // Force req-1 to be stale and verify expiry removes it.
+        if let Some(pending) = state.pending.get_mut("req-1") {
+            pending.inserted_at = Instant::now() - BUNKER_PENDING_TIMEOUT - Duration::from_secs(1);
+        }
+        state.expire_stale_pending();
+
+        assert_eq!(state.pending.len(), 1);
+        assert!(state.pending.contains_key("req-2"));
+        assert!(!state.pending.contains_key("req-1"));
+    }
+
+    #[test]
+    fn persist_bunker_enabled_roundtrip() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "tenex-cli-daemon-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&data_dir).expect("create temp dir");
+
+        let prefs = Arc::new(Mutex::new(PreferencesStorage::new(
+            data_dir.to_str().expect("utf8 path"),
+        )));
+
+        // Default enabled
+        assert!(prefs.lock().unwrap().bunker_enabled());
+
+        persist_bunker_enabled(&prefs, false).expect("disable bunker");
+        let reloaded = PreferencesStorage::new(data_dir.to_str().expect("utf8 path"));
+        assert!(!reloaded.bunker_enabled());
+
+        persist_bunker_enabled(&prefs, true).expect("enable bunker");
+        let reloaded = PreferencesStorage::new(data_dir.to_str().expect("utf8 path"));
+        assert!(reloaded.bunker_enabled());
+
+        std::fs::remove_dir_all(&data_dir).ok();
+    }
 }

@@ -213,6 +213,61 @@ enum Commands {
         #[arg(long, short)]
         wait: bool,
     },
+
+    /// Manage NIP-46 bunker signer
+    Bunker {
+        #[command(subcommand)]
+        command: BunkerCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum BunkerCommands {
+    /// Start the bunker signer service
+    Start,
+    /// Stop the bunker signer service
+    Stop,
+    /// Show bunker status
+    Status,
+    /// Watch pending signing requests (interactive)
+    Watch,
+    /// Enable bunker auto-start and persist preference
+    Enable,
+    /// Disable bunker auto-start and persist preference
+    Disable,
+    /// Manage persisted bunker auto-approve rules
+    Rules {
+        #[command(subcommand)]
+        command: BunkerRulesCommands,
+    },
+    /// Show session bunker audit log entries
+    Audit {
+        /// Limit number of returned entries
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+}
+
+#[derive(Subcommand)]
+enum BunkerRulesCommands {
+    /// List persisted auto-approve rules
+    List,
+    /// Add a persisted auto-approve rule
+    Add {
+        /// Requester pubkey (hex)
+        requester_pubkey: String,
+        /// Event kind to match (omit to match any kind)
+        #[arg(long)]
+        kind: Option<u16>,
+    },
+    /// Remove a persisted auto-approve rule
+    Remove {
+        /// Requester pubkey (hex)
+        requester_pubkey: String,
+        /// Event kind to match (omit for any-kind rule)
+        #[arg(long)]
+        kind: Option<u16>,
+    },
 }
 
 fn main() {
@@ -424,6 +479,32 @@ fn main() {
             tools: tool,
             wait_for_project,
             wait,
+        },
+        Some(Commands::Bunker { command }) => match command {
+            BunkerCommands::Start => CliCommand::BunkerStart,
+            BunkerCommands::Stop => CliCommand::BunkerStop,
+            BunkerCommands::Status => CliCommand::BunkerStatus,
+            BunkerCommands::Watch => CliCommand::BunkerWatch,
+            BunkerCommands::Enable => CliCommand::BunkerEnable,
+            BunkerCommands::Disable => CliCommand::BunkerDisable,
+            BunkerCommands::Rules { command } => match command {
+                BunkerRulesCommands::List => CliCommand::BunkerRulesList,
+                BunkerRulesCommands::Add {
+                    requester_pubkey,
+                    kind,
+                } => CliCommand::BunkerRulesAdd {
+                    requester_pubkey,
+                    event_kind: kind,
+                },
+                BunkerRulesCommands::Remove {
+                    requester_pubkey,
+                    kind,
+                } => CliCommand::BunkerRulesRemove {
+                    requester_pubkey,
+                    event_kind: kind,
+                },
+            },
+            BunkerCommands::Audit { limit } => CliCommand::BunkerAudit { limit },
         },
         None => {
             // No command - show help

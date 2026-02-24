@@ -124,13 +124,48 @@ pub enum CliCommand {
         wait_for_project: bool,
         wait: bool,
     },
+    /// Start NIP-46 bunker signer
+    BunkerStart,
+    /// Stop NIP-46 bunker signer
+    BunkerStop,
+    /// Get bunker runtime status
+    BunkerStatus,
+    /// Watch pending bunker signing requests (interactive local mode)
+    BunkerWatch,
+    /// Enable bunker auto-start and persist preference
+    BunkerEnable,
+    /// Disable bunker auto-start and persist preference
+    BunkerDisable,
+    /// List persisted bunker auto-approve rules
+    BunkerRulesList,
+    /// Add persisted bunker auto-approve rule
+    BunkerRulesAdd {
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    },
+    /// Remove persisted bunker auto-approve rule
+    BunkerRulesRemove {
+        requester_pubkey: String,
+        event_kind: Option<u16>,
+    },
+    /// Get bunker session audit entries
+    BunkerAudit {
+        limit: Option<usize>,
+    },
+    /// Internal: list pending bunker signing requests
+    BunkerListPending,
+    /// Internal: respond to pending bunker signing request
+    BunkerRespond {
+        request_id: String,
+        approved: bool,
+    },
 }
 
 impl CliCommand {
     /// Convert to a Request for sending to daemon
     pub fn to_request(&self, id: u64) -> Option<Request> {
         let (method, params) = match self {
-            CliCommand::Daemon => return None, // Not sent to daemon
+            CliCommand::Daemon | CliCommand::BunkerWatch => return None, // Not sent to daemon
             CliCommand::ListProjects => ("list_projects", serde_json::json!({})),
             CliCommand::ListThreads {
                 project_slug,
@@ -243,6 +278,55 @@ impl CliCommand {
                     "wait": wait
                 }),
             ),
+            CliCommand::BunkerStart => ("bunker_start", serde_json::json!({})),
+            CliCommand::BunkerStop => ("bunker_stop", serde_json::json!({})),
+            CliCommand::BunkerStatus => ("bunker_status", serde_json::json!({})),
+            CliCommand::BunkerEnable => (
+                "bunker_set_enabled",
+                serde_json::json!({ "enabled": true }),
+            ),
+            CliCommand::BunkerDisable => (
+                "bunker_set_enabled",
+                serde_json::json!({ "enabled": false }),
+            ),
+            CliCommand::BunkerRulesList => ("bunker_rules_list", serde_json::json!({})),
+            CliCommand::BunkerRulesAdd {
+                requester_pubkey,
+                event_kind,
+            } => (
+                "bunker_rules_add",
+                serde_json::json!({
+                    "requester_pubkey": requester_pubkey,
+                    "event_kind": event_kind
+                }),
+            ),
+            CliCommand::BunkerRulesRemove {
+                requester_pubkey,
+                event_kind,
+            } => (
+                "bunker_rules_remove",
+                serde_json::json!({
+                    "requester_pubkey": requester_pubkey,
+                    "event_kind": event_kind
+                }),
+            ),
+            CliCommand::BunkerAudit { limit } => (
+                "bunker_audit",
+                serde_json::json!({
+                    "limit": limit
+                }),
+            ),
+            CliCommand::BunkerListPending => ("bunker_list_pending", serde_json::json!({})),
+            CliCommand::BunkerRespond {
+                request_id,
+                approved,
+            } => (
+                "bunker_respond",
+                serde_json::json!({
+                    "request_id": request_id,
+                    "approved": approved
+                }),
+            ),
         };
 
         Some(Request {
@@ -250,5 +334,125 @@ impl CliCommand {
             method: method.to_string(),
             params,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bunker_watch_is_local_only() {
+        assert!(CliCommand::BunkerWatch.to_request(1).is_none());
+    }
+
+    #[test]
+    fn bunker_start_to_request_mapping() {
+        let req = CliCommand::BunkerStart.to_request(42).expect("request");
+        assert_eq!(req.id, 42);
+        assert_eq!(req.method, "bunker_start");
+        assert_eq!(req.params, serde_json::json!({}));
+    }
+
+    #[test]
+    fn bunker_stop_to_request_mapping() {
+        let req = CliCommand::BunkerStop.to_request(7).expect("request");
+        assert_eq!(req.method, "bunker_stop");
+        assert_eq!(req.params, serde_json::json!({}));
+    }
+
+    #[test]
+    fn bunker_status_to_request_mapping() {
+        let req = CliCommand::BunkerStatus.to_request(8).expect("request");
+        assert_eq!(req.method, "bunker_status");
+        assert_eq!(req.params, serde_json::json!({}));
+    }
+
+    #[test]
+    fn bunker_enable_disable_to_request_mapping() {
+        let enable_req = CliCommand::BunkerEnable.to_request(9).expect("request");
+        assert_eq!(enable_req.method, "bunker_set_enabled");
+        assert_eq!(enable_req.params, serde_json::json!({ "enabled": true }));
+
+        let disable_req = CliCommand::BunkerDisable.to_request(10).expect("request");
+        assert_eq!(disable_req.method, "bunker_set_enabled");
+        assert_eq!(disable_req.params, serde_json::json!({ "enabled": false }));
+    }
+
+    #[test]
+    fn bunker_rules_list_to_request_mapping() {
+        let req = CliCommand::BunkerRulesList.to_request(11).expect("request");
+        assert_eq!(req.method, "bunker_rules_list");
+        assert_eq!(req.params, serde_json::json!({}));
+    }
+
+    #[test]
+    fn bunker_rules_add_to_request_mapping() {
+        let req = CliCommand::BunkerRulesAdd {
+            requester_pubkey: "abc123".to_string(),
+            event_kind: Some(1),
+        }
+        .to_request(12)
+        .expect("request");
+        assert_eq!(req.method, "bunker_rules_add");
+        assert_eq!(
+            req.params,
+            serde_json::json!({
+                "requester_pubkey": "abc123",
+                "event_kind": 1
+            })
+        );
+    }
+
+    #[test]
+    fn bunker_rules_remove_to_request_mapping() {
+        let req = CliCommand::BunkerRulesRemove {
+            requester_pubkey: "abc123".to_string(),
+            event_kind: None,
+        }
+        .to_request(13)
+        .expect("request");
+        assert_eq!(req.method, "bunker_rules_remove");
+        assert_eq!(
+            req.params,
+            serde_json::json!({
+                "requester_pubkey": "abc123",
+                "event_kind": null
+            })
+        );
+    }
+
+    #[test]
+    fn bunker_audit_to_request_mapping() {
+        let req = CliCommand::BunkerAudit { limit: Some(25) }
+            .to_request(14)
+            .expect("request");
+        assert_eq!(req.method, "bunker_audit");
+        assert_eq!(req.params, serde_json::json!({ "limit": 25 }));
+    }
+
+    #[test]
+    fn bunker_list_pending_to_request_mapping() {
+        let req = CliCommand::BunkerListPending.to_request(15).expect("request");
+        assert_eq!(req.method, "bunker_list_pending");
+        assert_eq!(req.params, serde_json::json!({}));
+    }
+
+    #[test]
+    fn bunker_respond_to_request_mapping() {
+        let req = CliCommand::BunkerRespond {
+            request_id: "req-1".to_string(),
+            approved: true,
+        }
+        .to_request(16)
+        .expect("request");
+        assert_eq!(req.method, "bunker_respond");
+        assert_eq!(
+            req.params,
+            serde_json::json!({
+                "request_id": "req-1",
+                "approved": true
+            })
+        );
     }
 }
