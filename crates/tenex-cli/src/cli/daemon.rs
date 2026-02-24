@@ -395,6 +395,7 @@ fn try_login_with_credentials(
         .send(NostrCommand::Connect {
             keys: keys.clone(),
             user_pubkey: pubkey,
+            relay_urls: vec![],
             response_tx: None,
         })
         .map_err(|_| anyhow::anyhow!("Failed to send Connect command"))?;
@@ -418,6 +419,7 @@ fn try_auto_login(prefs: &PreferencesStorage, core_handle: &CoreHandle) -> Optio
                         .send(NostrCommand::Connect {
                             keys: keys.clone(),
                             user_pubkey: pubkey,
+                            relay_urls: vec![],
                             response_tx: None,
                         })
                         .is_ok()
@@ -441,6 +443,7 @@ fn try_auto_login(prefs: &PreferencesStorage, core_handle: &CoreHandle) -> Optio
                 .send(NostrCommand::Connect {
                     keys: keys.clone(),
                     user_pubkey: pubkey,
+                    relay_urls: vec![],
                     response_tx: None,
                 })
                 .is_ok()

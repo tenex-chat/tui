@@ -1637,6 +1637,7 @@ pub(super) fn handle_editing_mode(
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {
                                         keys: keys.clone(),
                                         user_pubkey: user_pubkey.clone(),
+                                        relay_urls: vec![],
                                         response_tx: None,
                                     }) {
                                         app.set_warning_status(&format!(
@@ -1676,6 +1677,7 @@ pub(super) fn handle_editing_mode(
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {
                                         keys: keys.clone(),
                                         user_pubkey: user_pubkey.clone(),
+                                        relay_urls: vec![],
                                         response_tx: None,
                                     }) {
                                         app.set_warning_status(&format!(
