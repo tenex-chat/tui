@@ -2,7 +2,7 @@ use crate::models::{
     AskEvent, ChatDraft, DraftImageAttachment, DraftPasteAttachment, Message, NamedDraft,
     PreferencesStorage, Project, ProjectAgent, ProjectStatus, SendState, Thread, TimeFilter,
 };
-use crate::nostr::DataChange;
+use crate::nostr::{DataChange, NostrCommand};
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::audio_player::{AudioPlaybackState, AudioPlayer};
@@ -18,7 +18,7 @@ use crate::ui::state::{
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
 use nostr_sdk::Keys;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -317,6 +317,19 @@ pub struct App {
 
     pub preferences: RefCell<PreferencesStorage>,
 
+    /// Whether bunker signer is currently running in this TUI session.
+    pub bunker_running: bool,
+    /// Active bunker URI when signer is running.
+    pub bunker_uri: Option<String>,
+    /// Pending bunker signing requests waiting for user decision.
+    pub bunker_pending_requests: VecDeque<tenex_core::nostr::bunker::BunkerSignRequest>,
+    /// Dedup set for queued bunker request IDs.
+    pub bunker_pending_request_ids: HashSet<String>,
+    /// Persisted bunker auto-approve rules from preferences.
+    pub bunker_auto_approve_rules: Vec<tenex_core::models::project_draft::BunkerAutoApproveRulePref>,
+    /// Session-scoped bunker audit entries from the running bunker process.
+    pub bunker_audit_entries: Vec<tenex_core::nostr::bunker::BunkerAuditEntry>,
+
     /// Unified modal state
     pub modal_state: ModalState,
 
@@ -384,6 +397,9 @@ impl App {
         negentropy_stats: tenex_core::stats::SharedNegentropySyncStats,
         data_dir: &str,
     ) -> Self {
+        let prefs = PreferencesStorage::new(data_dir);
+        let bunker_rules = prefs.bunker_auto_approve_rules().to_vec();
+
         Self {
             running: true,
             view: View::Login,
@@ -426,7 +442,13 @@ impl App {
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
             home: HomeViewState::new(),
-            preferences: RefCell::new(PreferencesStorage::new(data_dir)),
+            preferences: RefCell::new(prefs),
+            bunker_running: false,
+            bunker_uri: None,
+            bunker_pending_requests: VecDeque::new(),
+            bunker_pending_request_ids: HashSet::new(),
+            bunker_auto_approve_rules: bunker_rules,
+            bunker_audit_entries: Vec::new(),
             modal_state: ModalState::None,
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
@@ -1639,8 +1661,8 @@ impl App {
                 DataChange::MCPToolsChanged => {
                     // MCP tools are already updated in the store by the worker
                 }
-                DataChange::BunkerSignRequest { .. } => {
-                    // Bunker signing requests not yet handled in TUI
+                DataChange::BunkerSignRequest { request } => {
+                    self.enqueue_bunker_sign_request(request);
                 }
                 DataChange::BookmarkListChanged { bookmarked_ids: _ } => {
                     // Bookmarks are already updated in the store by the worker

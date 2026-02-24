@@ -10,6 +10,7 @@ pub enum SettingsTab {
     General,
     AI,
     Appearance,
+    Bunker,
 }
 
 impl SettingsTab {
@@ -17,6 +18,7 @@ impl SettingsTab {
         SettingsTab::General,
         SettingsTab::AI,
         SettingsTab::Appearance,
+        SettingsTab::Bunker,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -24,6 +26,7 @@ impl SettingsTab {
             SettingsTab::General => "General",
             SettingsTab::AI => "AI",
             SettingsTab::Appearance => "Appearance",
+            SettingsTab::Bunker => "Bunker",
         }
     }
 }
@@ -96,6 +99,32 @@ impl AppearanceSetting {
     }
 
     pub fn from_index(index: usize) -> Option<AppearanceSetting> {
+        Self::ALL.get(index).copied()
+    }
+}
+
+/// Settings in the Bunker tab
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BunkerSetting {
+    Enabled,
+    Uri,
+    Rules,
+    Audit,
+}
+
+impl BunkerSetting {
+    pub const ALL: &'static [BunkerSetting] = &[
+        BunkerSetting::Enabled,
+        BunkerSetting::Uri,
+        BunkerSetting::Rules,
+        BunkerSetting::Audit,
+    ];
+
+    pub const fn count() -> usize {
+        Self::ALL.len()
+    }
+
+    pub fn from_index(index: usize) -> Option<BunkerSetting> {
         Self::ALL.get(index).copied()
     }
 }
@@ -326,6 +355,8 @@ pub struct AppSettingsState {
     pub ai_index: usize,
     /// Selected setting index in Appearance tab
     pub appearance_index: usize,
+    /// Selected setting index in Bunker tab
+    pub bunker_index: usize,
     /// Whether a field is currently being edited
     pub editing: bool,
     /// The current value being edited for jaeger endpoint
@@ -349,6 +380,7 @@ impl AppSettingsState {
             general_index: 0,
             ai_index: 0,
             appearance_index: 0,
+            bunker_index: 0,
             editing: false,
             jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
             ai: AiSettingsState::new(
@@ -395,6 +427,11 @@ impl AppSettingsState {
     /// Get selected setting in Appearance tab
     pub fn selected_appearance_setting(&self) -> Option<AppearanceSetting> {
         AppearanceSetting::from_index(self.appearance_index)
+    }
+
+    /// Get selected setting in Bunker tab
+    pub fn selected_bunker_setting(&self) -> Option<BunkerSetting> {
+        BunkerSetting::from_index(self.bunker_index)
     }
 
     /// Check if jaeger endpoint is being edited
@@ -463,6 +500,11 @@ impl AppSettingsState {
                     self.appearance_index -= 1;
                 }
             }
+            SettingsTab::Bunker => {
+                if self.bunker_index > 0 {
+                    self.bunker_index -= 1;
+                }
+            }
         }
     }
 
@@ -481,6 +523,11 @@ impl AppSettingsState {
             SettingsTab::Appearance => {
                 if self.appearance_index + 1 < AppearanceSetting::count() {
                     self.appearance_index += 1;
+                }
+            }
+            SettingsTab::Bunker => {
+                if self.bunker_index + 1 < BunkerSetting::count() {
+                    self.bunker_index += 1;
                 }
             }
         }
@@ -1933,6 +1980,131 @@ impl BackendApprovalState {
     }
 }
 
+/// Actions for bunker signing approval modal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BunkerApprovalAction {
+    Approve,
+    Reject,
+}
+
+impl BunkerApprovalAction {
+    pub const ALL: [BunkerApprovalAction; 2] =
+        [BunkerApprovalAction::Approve, BunkerApprovalAction::Reject];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            BunkerApprovalAction::Approve => "Approve Request",
+            BunkerApprovalAction::Reject => "Reject Request",
+        }
+    }
+
+    pub fn hotkey(&self) -> char {
+        match self {
+            BunkerApprovalAction::Approve => 'a',
+            BunkerApprovalAction::Reject => 'r',
+        }
+    }
+}
+
+/// State for bunker signing approval modal
+#[derive(Debug, Clone)]
+pub struct BunkerApprovalState {
+    pub request: tenex_core::nostr::bunker::BunkerSignRequest,
+    pub selected_index: usize,
+    pub always_approve: bool,
+}
+
+impl BunkerApprovalState {
+    pub fn new(request: tenex_core::nostr::bunker::BunkerSignRequest) -> Self {
+        Self {
+            request,
+            selected_index: 0,
+            always_approve: false,
+        }
+    }
+
+    pub fn selected_action(&self) -> BunkerApprovalAction {
+        BunkerApprovalAction::ALL[self.selected_index]
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.selected_index + 1 < BunkerApprovalAction::ALL.len() {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn toggle_always_approve(&mut self) {
+        self.always_approve = !self.always_approve;
+    }
+}
+
+/// State for bunker auto-approve rules modal
+#[derive(Debug, Clone)]
+pub struct BunkerRulesState {
+    pub selected_index: usize,
+    pub return_to_settings: Option<AppSettingsState>,
+}
+
+impl BunkerRulesState {
+    pub fn new(return_to_settings: Option<AppSettingsState>) -> Self {
+        Self {
+            selected_index: 0,
+            return_to_settings,
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+}
+
+/// State for bunker audit modal
+#[derive(Debug, Clone)]
+pub struct BunkerAuditState {
+    pub selected_index: usize,
+    pub scroll_offset: usize,
+    pub return_to_settings: Option<AppSettingsState>,
+}
+
+impl BunkerAuditState {
+    pub fn new(return_to_settings: Option<AppSettingsState>) -> Self {
+        Self {
+            selected_index: 0,
+            scroll_offset: 0,
+            return_to_settings,
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+        if self.scroll_offset > self.selected_index {
+            self.scroll_offset = self.selected_index;
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+}
+
 impl CommandPaletteState {
     pub fn new() -> Self {
         Self { selected_index: 0 }
@@ -2170,6 +2342,12 @@ pub enum ModalState {
     DraftNavigator(DraftNavigatorState),
     /// Backend approval modal for unknown backend pubkeys
     BackendApproval(BackendApprovalState),
+    /// Bunker signing approval modal
+    BunkerApproval(BunkerApprovalState),
+    /// Bunker auto-approve rules modal
+    BunkerRules(BunkerRulesState),
+    /// Bunker session audit modal
+    BunkerAudit(BunkerAuditState),
     /// Debug stats modal (Ctrl+T D)
     DebugStats(DebugStatsState),
     /// History search modal (Ctrl+R) - search through previous messages sent by user
@@ -2304,5 +2482,29 @@ mod tests {
 
         assert_eq!(state.active_agent_pubkey.as_deref(), Some("pubkey-b"));
         assert!(!state.has_config_changes());
+    }
+
+    #[test]
+    fn bunker_approval_action_resolution_and_toggle() {
+        let request = tenex_core::nostr::bunker::BunkerSignRequest {
+            request_id: "req-1".to_string(),
+            requester_pubkey: "pubkey-1".to_string(),
+            event_kind: Some(1),
+            event_json: None,
+            event_content: Some("content".to_string()),
+            event_tags_json: None,
+        };
+
+        let mut state = BunkerApprovalState::new(request);
+        assert_eq!(state.selected_action(), BunkerApprovalAction::Approve);
+        assert!(!state.always_approve);
+
+        state.toggle_always_approve();
+        assert!(state.always_approve);
+
+        state.move_down();
+        assert_eq!(state.selected_action(), BunkerApprovalAction::Reject);
+        state.move_up();
+        assert_eq!(state.selected_action(), BunkerApprovalAction::Approve);
     }
 }
