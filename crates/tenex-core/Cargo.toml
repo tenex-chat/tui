@@ -29,6 +29,7 @@ parking_lot.workspace = true
 tracing.workspace = true
 uniffi = { workspace = true, features = ["cli"] }
 keyring.workspace = true
+bincode.workspace = true
 
 [[bin]]
 name = "uniffi-bindgen"
