@@ -13,6 +13,7 @@ pub struct BunkerSignRequest {
     pub request_id: String,
     pub requester_pubkey: String,
     pub event_kind: Option<u16>,
+    pub event_json: Option<String>,
     pub event_content: Option<String>,
     pub event_tags_json: Option<String>,
 }
@@ -667,6 +668,7 @@ async fn process_request(
                 request_id: request_id.clone(),
                 requester_pubkey: requester_pubkey.to_hex(),
                 event_kind: Some(unsigned.kind.as_u16()),
+                event_json: Some(unsigned.as_json()),
                 event_content: Some(unsigned.content.clone()),
                 event_tags_json: Some(tags_json),
             };
