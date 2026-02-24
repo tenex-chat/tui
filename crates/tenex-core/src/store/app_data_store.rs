@@ -121,6 +121,7 @@ impl AppDataStore {
             reports: ReportsStore::new(),
             trust: TrustStore::new(),
             projects: Vec::new(),
+            project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
