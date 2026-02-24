@@ -434,6 +434,7 @@ impl DeltaSummary {
             DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
             DataChangeType::General => self.general += 1,
             DataChangeType::BunkerSignRequest { .. } => self.bunker_sign_request += 1,
+            DataChangeType::BookmarkListChanged { .. } => {}
         }
     }
 
@@ -775,9 +776,10 @@ fn process_data_changes_with_deltas(
                     },
                 });
             }
-            DataChange::BookmarkListChanged { .. } => {
-                // Bookmark changes are handled optimistically in toggle_bookmark;
-                // no additional FFI delta needed.
+            DataChange::BookmarkListChanged { bookmarked_ids } => {
+                deltas.push(DataChangeType::BookmarkListChanged {
+                    bookmarked_ids: bookmarked_ids.iter().cloned().collect(),
+                });
             }
         }
     }
@@ -832,7 +834,9 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
                 diagnostics_changed = true;
                 stats_changed = true;
             }
-            DataChangeType::StreamChunk { .. } | DataChangeType::BunkerSignRequest { .. } => {}
+            DataChangeType::StreamChunk { .. }
+            | DataChangeType::BunkerSignRequest { .. }
+            | DataChangeType::BookmarkListChanged { .. } => {}
         }
     }
 
@@ -1623,6 +1627,8 @@ pub enum DataChangeType {
     General,
     /// NIP-46 bunker signing request requires user approval
     BunkerSignRequest { request: FfiBunkerSignRequest },
+    /// Bookmark list changed (kind:14202)
+    BookmarkListChanged { bookmarked_ids: Vec<String> },
 }
 
 /// Callback interface for event notifications to Swift/Kotlin.

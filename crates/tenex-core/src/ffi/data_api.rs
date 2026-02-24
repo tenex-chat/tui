@@ -183,6 +183,18 @@ impl TenexCore {
         messages
     }
 
+    /// Get raw Nostr event JSON for an event ID.
+    pub fn get_raw_event_json(&self, event_id: String) -> Option<String> {
+        let _tx_guard = self.ndb_transaction_lock.lock().ok()?;
+
+        let ndb = {
+            let ndb_guard = self.ndb.read().ok()?;
+            ndb_guard.as_ref()?.clone()
+        };
+
+        crate::store::get_raw_event_json(ndb.as_ref(), &event_id)
+    }
+
     /// Resolve an ask event by event ID.
     /// Used for q-tag references that may point to ask events instead of child threads.
     pub fn get_ask_event_by_id(&self, event_id: String) -> Option<AskEventLookupInfo> {
@@ -541,5 +553,27 @@ impl TenexCore {
                 }
             })
             .collect())
+    }
+
+    /// Register or deregister an APNs push-notification token with the backend.
+    pub fn register_apns_token(
+        &self,
+        device_token: String,
+        enable: bool,
+        backend_pubkey: String,
+        device_id: String,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+        core_handle
+            .send(NostrCommand::RegisterApnsToken {
+                device_token,
+                enable,
+                backend_pubkey,
+                device_id,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send RegisterApnsToken command: {}", e),
+            })?;
+        Ok(())
     }
 }
