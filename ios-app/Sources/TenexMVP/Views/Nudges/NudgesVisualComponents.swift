@@ -34,7 +34,30 @@ struct NudgesHeroHeader: View {
     }
 }
 
-struct NudgeVisualCard: View {
+struct NudgeTableHeader: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("Name")
+                .frame(minWidth: 140, alignment: .leading)
+            Text("Description")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Tags")
+                .frame(width: 140, alignment: .leading)
+            Text("Permissions")
+                .frame(width: 120, alignment: .leading)
+            Text("Author")
+                .frame(width: 120, alignment: .leading)
+            Text("Age")
+                .frame(width: 50, alignment: .trailing)
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+}
+
+struct NudgeTableRow: View {
     let item: NudgeListItem
 
     private var shortDescription: String {
@@ -58,75 +81,71 @@ struct NudgeVisualCard: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            NudgeCardBackground()
+        HStack(spacing: 0) {
+            // Name
+            Text(item.nudge.title.isEmpty ? "Untitled Nudge" : item.nudge.title)
+                .font(.body.weight(.medium))
+                .lineLimit(1)
+                .frame(minWidth: 140, alignment: .leading)
 
-            Rectangle()
-                .fill(.black.opacity(0.38))
+            // Description
+            Text(shortDescription)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .leading, spacing: 7) {
-                if !item.nudge.hashtags.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(item.nudge.hashtags.prefix(3), id: \.self) { tag in
-                                Text("#\(tag)")
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(.black.opacity(0.35), in: Capsule())
-                            }
-                        }
-                    }
+            // Tags
+            HStack(spacing: 4) {
+                ForEach(item.nudge.hashtags.prefix(2), id: \.self) { tag in
+                    Text("#\(tag)")
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.askBrand.opacity(0.15), in: Capsule())
+                        .foregroundStyle(Color.askBrand)
                 }
-
-                Text(item.nudge.title.isEmpty ? "Untitled Nudge" : item.nudge.title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-
-                if !shortDescription.isEmpty {
-                    Text(shortDescription)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(2)
-                }
-
-                HStack(spacing: 8) {
-                    AgentAvatarView(
-                        agentName: item.authorDisplayName,
-                        pubkey: item.nudge.pubkey,
-                        fallbackPictureUrl: item.authorPictureURL,
-                        size: 20,
-                        showBorder: false
-                    )
-                    Text(item.authorDisplayName)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.95))
-                        .lineLimit(1)
-                }
-
-                HStack(spacing: 8) {
-                    Text(permissionLabel)
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(permissionColor.opacity(0.25), in: Capsule())
-                    Spacer(minLength: 0)
-                    Label(relativeTimeString(from: item.nudge.createdAt), systemImage: "clock")
+                if item.nudge.hashtags.count > 2 {
+                    Text("+\(item.nudge.hashtags.count - 2)")
                         .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.9))
+                        .foregroundStyle(.tertiary)
                 }
             }
-            .padding(14)
+            .frame(width: 140, alignment: .leading)
+
+            // Permissions
+            Text(permissionLabel)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(permissionColor.opacity(0.15), in: Capsule())
+                .foregroundStyle(permissionColor)
+                .frame(width: 120, alignment: .leading)
+
+            // Author
+            HStack(spacing: 6) {
+                AgentAvatarView(
+                    agentName: item.authorDisplayName,
+                    pubkey: item.nudge.pubkey,
+                    fallbackPictureUrl: item.authorPictureURL,
+                    size: 18,
+                    showBorder: false
+                )
+                Text(item.authorDisplayName)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .frame(width: 120, alignment: .leading)
+
+            // Age
+            Text(relativeTimeString(from: item.nudge.createdAt))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(width: 50, alignment: .trailing)
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 220)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.16), radius: 14, y: 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 
     private func relativeTimeString(from timestamp: UInt64) -> String {
@@ -143,23 +162,5 @@ struct NudgeVisualCard: View {
             return "\(diff / 3_600)h"
         }
         return "\(diff / 86_400)d"
-    }
-}
-
-private struct NudgeCardBackground: View {
-    var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    Color.agentBrand.opacity(0.64),
-                    Color.askBrand.opacity(0.44),
-                    Color.systemGray5.opacity(0.50)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            TeamsPolygonBackdrop()
-                .opacity(0.55)
-        }
     }
 }

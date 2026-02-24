@@ -110,11 +110,18 @@ struct TeamFeaturedCard: View {
 
 struct TeamGridCard: View {
     let item: TeamListItem
+    private var cardHeight: CGFloat {
+        #if os(macOS)
+        360
+        #else
+        244
+        #endif
+    }
 
     var body: some View {
         TeamVisualCard(
             item: item,
-            height: 244,
+            height: cardHeight,
             titleFont: .headline,
             showPrimaryCategory: false
         )
@@ -262,11 +269,32 @@ private struct TeamImagePlaceholder: View {
 
 struct AgentDefinitionVisualCard: View {
     let item: AgentDefinitionListItem
+    static var gridMinimumWidth: CGFloat {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        210
+        #else
+        290
+        #endif
+    }
 
-    private var shortDescription: String {
-        item.agent.description
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    static var gridMaximumWidth: CGFloat {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        250
+        #else
+        .infinity
+        #endif
+    }
+
+    private var cardAspectRatio: CGFloat {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        (2.0 / 3.0) / 1.1
+        #else
+        1.45
+        #endif
+    }
+
+    private var roleLine: String {
+        item.agent.role.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -280,38 +308,16 @@ struct AgentDefinitionVisualCard: View {
                 .fill(.black.opacity(0.4))
 
             VStack(alignment: .leading, spacing: 6) {
-                if !item.agent.role.isEmpty {
-                    Text(item.agent.role)
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.35), in: Capsule())
-                }
-
                 Text(item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name)
                     .font(.headline)
                     .foregroundStyle(.white)
                     .lineLimit(2)
 
-                if !shortDescription.isEmpty {
-                    Text(shortDescription)
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(2)
-                }
-
-                HStack(spacing: 8) {
-                    AgentAvatarView(
-                        agentName: item.authorDisplayName,
-                        pubkey: item.agent.pubkey,
-                        fallbackPictureUrl: item.authorPictureURL,
-                        size: 20,
-                        showBorder: false
-                    )
-                    Text(item.authorDisplayName)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.95))
-                        .lineLimit(1)
+                if !roleLine.isEmpty {
+                    Text(roleLine)
+                        .font(.subheadline.weight(.light))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(3)
                 }
 
                 HStack(spacing: 12) {
@@ -324,17 +330,109 @@ struct AgentDefinitionVisualCard: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.9))
+
+                Text(item.authorDisplayName)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(1)
             }
             .padding(14)
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 200)
+        .aspectRatio(cardAspectRatio, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(.white.opacity(0.12), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.16), radius: 14, y: 8)
+    }
+}
+
+struct AgentDefinitionCompactCard: View {
+    let item: AgentDefinitionListItem
+
+    private var cardHeight: CGFloat {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        116
+        #else
+        108
+        #endif
+    }
+
+    private var shortDescription: String {
+        item.agent.description
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    if !item.agent.role.isEmpty {
+                        Text(item.agent.role)
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Color.systemGray5, in: Capsule())
+                            .lineLimit(1)
+                    }
+                }
+
+                if !shortDescription.isEmpty {
+                    Text(shortDescription)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+
+                HStack(spacing: 12) {
+                    HStack(spacing: 7) {
+                        AgentAvatarView(
+                            agentName: item.authorDisplayName,
+                            pubkey: item.agent.pubkey,
+                            fallbackPictureUrl: item.authorPictureURL,
+                            size: 20,
+                            showBorder: false
+                        )
+                        Text(item.authorDisplayName)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if let model = item.agent.model, !model.isEmpty {
+                        Label(model, systemImage: "cpu")
+                            .lineLimit(1)
+                    }
+
+                    if !item.agent.tools.isEmpty {
+                        Label("\(item.agent.tools.count) tools", systemImage: "wrench")
+                            .lineLimit(1)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: cardHeight, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.systemGray6.opacity(0.7))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.08), radius: 6, y: 3)
     }
 }
 

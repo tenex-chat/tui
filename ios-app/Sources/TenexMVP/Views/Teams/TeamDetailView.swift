@@ -221,7 +221,16 @@ struct TeamDetailView: View {
                     .padding(.vertical, 6)
             } else {
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 290), spacing: 14, alignment: .top)],
+                    columns: [
+                        GridItem(
+                            .adaptive(
+                                minimum: AgentDefinitionVisualCard.gridMinimumWidth,
+                                maximum: AgentDefinitionVisualCard.gridMaximumWidth
+                            ),
+                            spacing: 14,
+                            alignment: .top
+                        )
+                    ],
                     alignment: .leading,
                     spacing: 14
                 ) {

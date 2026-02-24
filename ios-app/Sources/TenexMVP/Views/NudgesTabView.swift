@@ -165,7 +165,7 @@ struct NudgesTabView: View {
                     emptyState
                 } else {
                     if !viewModel.filteredMine.isEmpty {
-                        cardSection(
+                        tableSection(
                             title: "Mine",
                             subtitle: "Nudges authored by you",
                             items: viewModel.filteredMine
@@ -173,7 +173,7 @@ struct NudgesTabView: View {
                     }
 
                     if !viewModel.filteredCommunity.isEmpty {
-                        cardSection(
+                        tableSection(
                             title: "Community",
                             subtitle: "Nudges shared by other authors",
                             items: viewModel.filteredCommunity
@@ -194,12 +194,12 @@ struct NudgesTabView: View {
         #endif
     }
 
-    private func cardSection(
+    private func tableSection(
         title: String,
         subtitle: String,
         items: [NudgeListItem]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
@@ -207,13 +207,19 @@ struct NudgesTabView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .padding(.bottom, 4)
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: 14)], spacing: 14) {
-                ForEach(items) { item in
+            NudgeTableHeader()
+
+            Divider()
+
+            LazyVStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     Button {
                         open(item)
                     } label: {
-                        NudgeVisualCard(item: item)
+                        NudgeTableRow(item: item)
+                            .background(index.isMultiple(of: 2) ? Color.clear : Color.systemGray6.opacity(0.4))
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
@@ -235,6 +241,11 @@ struct NudgesTabView: View {
                     }
                 }
             }
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.systemGray5, lineWidth: 0.5)
+            )
         }
     }
 
