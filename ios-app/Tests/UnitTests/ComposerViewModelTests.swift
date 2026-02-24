@@ -449,4 +449,6 @@ private final class MockNotificationScheduler: NotificationScheduling {
     func updateBadge(count _: Int) async {}
 
     func clearBadge() async {}
+
+    func scheduleAskNotification(askEventId _: String, title _: String, body _: String, fromAgent _: String, projectId _: String?, conversationId _: String?) async {}
 }
