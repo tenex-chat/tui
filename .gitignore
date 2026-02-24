@@ -16,6 +16,7 @@ ios-app/.xcodebuild/
 ios-app/DerivedData/
 ios-app/DerivedDevice/
 ios-app/DerivedTests/
+ios-app/.codex-derived-*/
 ios-app/mockups/
 
 # Xcode build artifacts (wherever they appear)
