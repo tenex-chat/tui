@@ -1,7 +1,7 @@
 use nostrdb::Note;
 
 /// Team Pack - kind:34199 events grouping agent definitions into a hireable team.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TeamPack {
     pub id: String,
     pub pubkey: String,
