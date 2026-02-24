@@ -2,8 +2,8 @@
 
 use crate::ui::components::{Modal, ModalSize};
 use crate::ui::modal::{
-    AiSetting, AppSettingsState, AppearanceSetting, GeneralSetting, ModelBrowserState, SettingsTab,
-    VoiceBrowserState,
+    AiSetting, AppSettingsState, AppearanceSetting, BunkerSetting, GeneralSetting,
+    ModelBrowserState, SettingsTab, VoiceBrowserState,
 };
 use crate::ui::{theme, App};
 use ratatui::{
@@ -47,6 +47,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
         SettingsTab::General => render_general_tab(f, app, content_area, state),
         SettingsTab::AI => render_ai_tab(f, content_area, state),
         SettingsTab::Appearance => render_appearance_tab(f, app, content_area, state),
+        SettingsTab::Bunker => render_bunker_tab(f, app, content_area, state),
     };
 
     // Hints at bottom
@@ -314,6 +315,66 @@ fn render_appearance_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettin
         "Filter scheduled events from lists (Enter to cycle: Show All → Hide → Show Only)",
         app.scheduled_filter.label(),
         is_hide_scheduled_selected,
+    );
+}
+
+/// Render Bunker tab content
+fn render_bunker_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {
+    let mut y_offset = area.y;
+
+    render_section_header(f, area.x, y_offset, area.width, "NIP-46 Bunker");
+    y_offset += 2;
+
+    let enabled_selected = state.selected_bunker_setting() == Some(BunkerSetting::Enabled);
+    render_toggle_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Enabled:",
+        "Persist bunker enable flag and start/stop when logged in (Enter to toggle)",
+        app.bunker_enabled(),
+        enabled_selected,
+    );
+    y_offset += 3;
+
+    let uri_selected = state.selected_bunker_setting() == Some(BunkerSetting::Uri);
+    let uri_display = app.bunker_uri.as_deref().unwrap_or("(not running)");
+    render_select_field(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "URI:",
+        "Current bunker URI (Enter to copy)",
+        uri_display,
+        uri_selected,
+    );
+    y_offset += 3;
+
+    let rules_selected = state.selected_bunker_setting() == Some(BunkerSetting::Rules);
+    render_select_field(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Rules:",
+        "Manage persisted auto-approve rules (Enter to open)",
+        &format!("{}", app.bunker_auto_approve_rules.len()),
+        rules_selected,
+    );
+    y_offset += 3;
+
+    let audit_selected = state.selected_bunker_setting() == Some(BunkerSetting::Audit);
+    render_select_field(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Audit:",
+        "Session audit entries from current bunker process (Enter to open)",
+        &format!("{}", app.bunker_audit_entries.len()),
+        audit_selected,
     );
 }
 
@@ -645,6 +706,11 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
                     ));
                 }
             }
+        } else if state.current_tab == SettingsTab::Bunker {
+            hints.push(Span::styled(
+                " action",
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         } else {
             hints.push(Span::styled(
                 " edit",

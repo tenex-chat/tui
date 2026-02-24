@@ -1,0 +1,37 @@
+{
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/SourcePackages/checkouts/Kingfisher/Sources/Networking/SessionDelegate.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/SessionDelegate.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/SessionDelegate.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/SessionDelegate.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/SessionDelegate.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/SessionDelegate.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/SourcePackages/checkouts/Kingfisher/Sources/SwiftUI/ImageBinder.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageBinder.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageBinder.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageBinder.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageBinder.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageBinder.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/SourcePackages/checkouts/Kingfisher/Sources/SwiftUI/ImageContext.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageContext.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageContext.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageContext.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageContext.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/ImageContext.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/SourcePackages/checkouts/Kingfisher/Sources/SwiftUI/KFAnimatedImage.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFAnimatedImage.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFAnimatedImage.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFAnimatedImage.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFAnimatedImage.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFAnimatedImage.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/SourcePackages/checkouts/Kingfisher/Sources/SwiftUI/KFImage.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFImage.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFImage.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFImage.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFImage.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771931750/Build/Intermediates.noindex/Kingfisher.build/Debug/Kingfisher.build/Objects-normal/arm64/KFImage.swiftdeps"
+  }
+}

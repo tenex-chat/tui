@@ -1,6 +1,7 @@
 pub mod agent_browser;
 pub mod app_settings;
 pub mod ask_modal;
+pub mod bunker;
 pub mod chat;
 pub mod command_palette;
 pub mod create_agent;
@@ -24,6 +25,9 @@ pub mod workspace_modal;
 
 pub use agent_browser::render_agent_browser;
 pub use app_settings::render_app_settings;
+pub use bunker::{
+    render_bunker_approval_modal, render_bunker_audit_modal, render_bunker_rules_modal,
+};
 pub use chat::render_chat;
 pub use command_palette::render_command_palette;
 pub use create_agent::render_create_agent;

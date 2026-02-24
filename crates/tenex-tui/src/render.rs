@@ -149,8 +149,20 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     // Global modal overlays - render AppSettings modal for views that don't handle it themselves
     // (Home, Chat, and AgentBrowser handle modals in their own render functions)
     if matches!(app.view, View::Login | View::LessonViewer) {
-        if let ModalState::AppSettings(ref state) = app.modal_state {
-            ui::views::render_app_settings(f, app, f.area(), state);
+        match &app.modal_state {
+            ModalState::AppSettings(state) => {
+                ui::views::render_app_settings(f, app, f.area(), state)
+            }
+            ModalState::BunkerApproval(state) => {
+                ui::views::render_bunker_approval_modal(f, f.area(), state)
+            }
+            ModalState::BunkerRules(state) => {
+                ui::views::render_bunker_rules_modal(f, app, f.area(), state)
+            }
+            ModalState::BunkerAudit(state) => {
+                ui::views::render_bunker_audit_modal(f, app, f.area(), state)
+            }
+            _ => {}
         }
     }
 }

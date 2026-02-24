@@ -50,6 +50,18 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
     if let ModalState::AppSettings(ref state) = app.modal_state {
         super::render_app_settings(f, app, area, state);
     }
+
+    if let ModalState::BunkerApproval(ref state) = app.modal_state {
+        super::render_bunker_approval_modal(f, area, state);
+    }
+
+    if let ModalState::BunkerRules(ref state) = app.modal_state {
+        super::render_bunker_rules_modal(f, app, area, state);
+    }
+
+    if let ModalState::BunkerAudit(ref state) = app.modal_state {
+        super::render_bunker_audit_modal(f, app, area, state);
+    }
 }
 
 /// Render the agent list with search filter

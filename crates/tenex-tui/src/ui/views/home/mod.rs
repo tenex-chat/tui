@@ -163,6 +163,21 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
         super::render_backend_approval_modal(f, area, state);
     }
 
+    // Bunker approval modal
+    if let ModalState::BunkerApproval(ref state) = app.modal_state {
+        super::render_bunker_approval_modal(f, area, state);
+    }
+
+    // Bunker rules modal
+    if let ModalState::BunkerRules(ref state) = app.modal_state {
+        super::render_bunker_rules_modal(f, app, area, state);
+    }
+
+    // Bunker audit modal
+    if let ModalState::BunkerAudit(ref state) = app.modal_state {
+        super::render_bunker_audit_modal(f, app, area, state);
+    }
+
     // Debug stats modal (Ctrl+T D)
     if let ModalState::DebugStats(ref state) = app.modal_state {
         super::render_debug_stats(f, area, app, state);

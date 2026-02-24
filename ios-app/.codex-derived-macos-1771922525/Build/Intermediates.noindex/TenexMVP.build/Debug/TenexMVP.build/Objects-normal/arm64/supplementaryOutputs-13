@@ -1,0 +1,65 @@
+{
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/Settings/AppSettingsView.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsView.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsView.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsView.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsView.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsView.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/Settings/AppSettingsViewModel.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsViewModel.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsViewModel.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsViewModel.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsViewModel.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/AppSettingsViewModel.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/Settings/ProviderLogoView.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ProviderLogoView.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ProviderLogoView.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ProviderLogoView.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ProviderLogoView.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ProviderLogoView.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/SharedConversationComponents.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SharedConversationComponents.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SharedConversationComponents.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SharedConversationComponents.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SharedConversationComponents.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SharedConversationComponents.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/SlackMessageRow.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SlackMessageRow.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SlackMessageRow.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SlackMessageRow.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SlackMessageRow.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/SlackMessageRow.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/Stats/ActivityGridView.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ActivityGridView.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ActivityGridView.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ActivityGridView.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ActivityGridView.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/ActivityGridView.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/Stats/EmptyChartView.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/EmptyChartView.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/EmptyChartView.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/EmptyChartView.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/EmptyChartView.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/EmptyChartView.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/Stats/MessagesChartView.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MessagesChartView.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MessagesChartView.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MessagesChartView.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MessagesChartView.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MessagesChartView.swiftdeps"
+  },
+  "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/Sources/TenexMVP/Views/Stats/MetricCardsView.swift" : {
+    "const-values" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MetricCardsView.swiftconstvalues",
+    "dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MetricCardsView.d",
+    "diagnostics" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MetricCardsView.dia",
+    "object" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MetricCardsView.o",
+    "swift-dependencies" : "/Users/pablofernandez/Work/TENEX-TUI-Client-awwmtk/ios-app/.codex-derived-macos-1771922525/Build/Intermediates.noindex/TenexMVP.build/Debug/TenexMVP.build/Objects-normal/arm64/MetricCardsView.swiftdeps"
+  }
+}

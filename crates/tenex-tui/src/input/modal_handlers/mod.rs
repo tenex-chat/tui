@@ -7,6 +7,7 @@ mod agent;
 mod ask;
 mod attachments;
 mod backend;
+mod bunker;
 mod command_palette;
 mod drafts;
 mod helpers;
@@ -150,6 +151,24 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle backend approval modal when open
     if matches!(app.modal_state, ModalState::BackendApproval(_)) {
         backend::handle_backend_approval_modal_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle bunker signing approval modal when open
+    if matches!(app.modal_state, ModalState::BunkerApproval(_)) {
+        bunker::handle_bunker_approval_modal_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle bunker rules modal when open
+    if matches!(app.modal_state, ModalState::BunkerRules(_)) {
+        bunker::handle_bunker_rules_modal_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle bunker audit modal when open
+    if matches!(app.modal_state, ModalState::BunkerAudit(_)) {
+        bunker::handle_bunker_audit_modal_key(app, key);
         return Ok(true);
     }
 
