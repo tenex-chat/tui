@@ -523,10 +523,23 @@ fn process_note_keys_with_deltas(
                     }
                 }
                 31933 => {
-                    if let Some(project) = Project::from_note(&note) {
-                        deltas.push(DataChangeType::ProjectUpsert {
-                            project: project.clone(),
-                        });
+                    if let Some(project_event) = Project::from_note(&note) {
+                        let a_tag = project_event.a_tag();
+                        let project = store
+                            .get_projects()
+                            .iter()
+                            .find(|p| p.a_tag() == a_tag)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                // Always emit canonical state after store update.
+                                // If no live project remains for this a_tag, emit a tombstone
+                                // so clients remove stale rows instead of re-adding them.
+                                let mut tombstone = project_event;
+                                tombstone.is_deleted = true;
+                                tombstone
+                            });
+
+                        deltas.push(DataChangeType::ProjectUpsert { project });
                     }
                 }
                 1 => {
@@ -765,6 +778,7 @@ fn process_data_changes_with_deltas(
                         request_id: request.request_id.clone(),
                         requester_pubkey: request.requester_pubkey.clone(),
                         event_kind: request.event_kind,
+                        event_json: request.event_json.clone(),
                         event_content: request.event_content.clone(),
                         event_tags_json: request.event_tags_json.clone(),
                     },
@@ -1596,6 +1610,7 @@ pub struct FfiBunkerSignRequest {
     pub request_id: String,
     pub requester_pubkey: String,
     pub event_kind: Option<u16>,
+    pub event_json: Option<String>,
     pub event_content: Option<String>,
     pub event_tags_json: Option<String>,
 }

@@ -11,6 +11,7 @@ pub struct AgentDefinition {
     pub name: String,
     pub description: String,
     pub role: String,
+    pub content: String,
     pub instructions: String,
     pub picture: Option<String>,
     pub version: Option<String>,
@@ -32,7 +33,7 @@ impl AgentDefinition {
 
         let id = hex::encode(note.id());
         let pubkey = hex::encode(note.pubkey());
-        let content_instructions = note.content().to_string();
+        let content = note.content().to_string();
         let created_at = note.created_at();
 
         let mut d_tag: Option<String> = None;
@@ -93,7 +94,8 @@ impl AgentDefinition {
             name: name.unwrap_or_else(|| DEFAULT_AGENT_NAME.to_string()),
             description: description.unwrap_or_default(),
             role: role.unwrap_or_else(|| DEFAULT_AGENT_ROLE.to_string()),
-            instructions: instructions_tag.unwrap_or(content_instructions),
+            content: content.clone(),
+            instructions: instructions_tag.unwrap_or(content),
             picture,
             version,
             model,
@@ -196,6 +198,7 @@ mod tests {
                     vec!["tag instructions".to_string()],
                 )),
         );
+        assert_eq!(from_tag.content, "legacy content");
         assert_eq!(from_tag.instructions, "tag instructions");
 
         let from_content = parse_agent_from_builder(
@@ -204,6 +207,7 @@ mod tests {
                 vec!["Agent".to_string()],
             )),
         );
+        assert_eq!(from_content.content, "content fallback");
         assert_eq!(from_content.instructions, "content fallback");
     }
 

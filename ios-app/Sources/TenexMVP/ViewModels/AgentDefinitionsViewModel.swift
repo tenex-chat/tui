@@ -137,6 +137,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
             let haystacks: [String] = [
                 item.agent.name,
                 item.agent.description,
+                item.agent.content,
                 item.agent.role,
                 item.agent.model ?? "",
                 item.agent.dTag,

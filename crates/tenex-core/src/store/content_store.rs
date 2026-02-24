@@ -269,6 +269,7 @@ mod tests {
             name: name.to_string(),
             description: String::new(),
             role: String::new(),
+            content: String::new(),
             instructions: String::new(),
             picture: None,
             version: None,
