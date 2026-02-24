@@ -2673,6 +2673,7 @@ public struct AgentDefinition {
     public var name: String
     public var description: String
     public var role: String
+    public var content: String
     public var instructions: String
     public var picture: String?
     public var version: String?
@@ -2688,7 +2689,7 @@ public struct AgentDefinition {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, pubkey: String, dTag: String, name: String, description: String, role: String, instructions: String, picture: String?, version: String?, model: String?, tools: [String], mcpServers: [String], useCriteria: [String], 
+    public init(id: String, pubkey: String, dTag: String, name: String, description: String, role: String, content: String, instructions: String, picture: String?, version: String?, model: String?, tools: [String], mcpServers: [String], useCriteria: [String], 
         /**
          * File attachment event IDs (e-tags referencing NIP-94 kind:1063 events)
          */fileIds: [String], createdAt: UInt64) {
@@ -2698,6 +2699,7 @@ public struct AgentDefinition {
         self.name = name
         self.description = description
         self.role = role
+        self.content = content
         self.instructions = instructions
         self.picture = picture
         self.version = version
@@ -2733,6 +2735,9 @@ extension AgentDefinition: Equatable, Hashable {
             return false
         }
         if lhs.role != rhs.role {
+            return false
+        }
+        if lhs.content != rhs.content {
             return false
         }
         if lhs.instructions != rhs.instructions {
@@ -2772,6 +2777,7 @@ extension AgentDefinition: Equatable, Hashable {
         hasher.combine(name)
         hasher.combine(description)
         hasher.combine(role)
+        hasher.combine(content)
         hasher.combine(instructions)
         hasher.combine(picture)
         hasher.combine(version)
@@ -2799,6 +2805,7 @@ public struct FfiConverterTypeAgentDefinition: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
                 role: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
                 instructions: FfiConverterString.read(from: &buf), 
                 picture: FfiConverterOptionString.read(from: &buf), 
                 version: FfiConverterOptionString.read(from: &buf), 
@@ -2818,6 +2825,7 @@ public struct FfiConverterTypeAgentDefinition: FfiConverterRustBuffer {
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
         FfiConverterString.write(value.role, into: &buf)
+        FfiConverterString.write(value.content, into: &buf)
         FfiConverterString.write(value.instructions, into: &buf)
         FfiConverterOptionString.write(value.picture, into: &buf)
         FfiConverterOptionString.write(value.version, into: &buf)
@@ -4268,15 +4276,17 @@ public struct FfiBunkerSignRequest {
     public var requestId: String
     public var requesterPubkey: String
     public var eventKind: UInt16?
+    public var eventJson: String?
     public var eventContent: String?
     public var eventTagsJson: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(requestId: String, requesterPubkey: String, eventKind: UInt16?, eventContent: String?, eventTagsJson: String?) {
+    public init(requestId: String, requesterPubkey: String, eventKind: UInt16?, eventJson: String?, eventContent: String?, eventTagsJson: String?) {
         self.requestId = requestId
         self.requesterPubkey = requesterPubkey
         self.eventKind = eventKind
+        self.eventJson = eventJson
         self.eventContent = eventContent
         self.eventTagsJson = eventTagsJson
     }
@@ -4298,6 +4308,9 @@ extension FfiBunkerSignRequest: Equatable, Hashable {
         if lhs.eventKind != rhs.eventKind {
             return false
         }
+        if lhs.eventJson != rhs.eventJson {
+            return false
+        }
         if lhs.eventContent != rhs.eventContent {
             return false
         }
@@ -4311,6 +4324,7 @@ extension FfiBunkerSignRequest: Equatable, Hashable {
         hasher.combine(requestId)
         hasher.combine(requesterPubkey)
         hasher.combine(eventKind)
+        hasher.combine(eventJson)
         hasher.combine(eventContent)
         hasher.combine(eventTagsJson)
     }
@@ -4328,6 +4342,7 @@ public struct FfiConverterTypeFfiBunkerSignRequest: FfiConverterRustBuffer {
                 requestId: FfiConverterString.read(from: &buf), 
                 requesterPubkey: FfiConverterString.read(from: &buf), 
                 eventKind: FfiConverterOptionUInt16.read(from: &buf), 
+                eventJson: FfiConverterOptionString.read(from: &buf), 
                 eventContent: FfiConverterOptionString.read(from: &buf), 
                 eventTagsJson: FfiConverterOptionString.read(from: &buf)
         )
@@ -4337,6 +4352,7 @@ public struct FfiConverterTypeFfiBunkerSignRequest: FfiConverterRustBuffer {
         FfiConverterString.write(value.requestId, into: &buf)
         FfiConverterString.write(value.requesterPubkey, into: &buf)
         FfiConverterOptionUInt16.write(value.eventKind, into: &buf)
+        FfiConverterOptionString.write(value.eventJson, into: &buf)
         FfiConverterOptionString.write(value.eventContent, into: &buf)
         FfiConverterOptionString.write(value.eventTagsJson, into: &buf)
     }
