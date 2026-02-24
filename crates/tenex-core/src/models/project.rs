@@ -1,6 +1,6 @@
 use nostrdb::Note;
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct Project {
     pub id: String,
     pub title: String,

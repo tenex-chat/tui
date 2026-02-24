@@ -414,7 +414,8 @@ pub(super) fn handle_agent_deletion_key(app: &mut App, key: KeyEvent) {
                     if let Err(e) = core_handle.send(NostrCommand::DeleteAgent {
                         agent_pubkey: state.agent_pubkey.clone(),
                         project_a_tag,
-                        reason: String::new(),
+                        reason: None,
+                        client: None,
                     }) {
                         app.set_warning_status(&format!(
                             "Failed to publish agent deletion: {}",

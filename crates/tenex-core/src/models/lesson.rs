@@ -1,7 +1,7 @@
 use nostrdb::Note;
 
 /// Agent Lesson - kind:4129 events containing learning insights
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Lesson {
     pub id: String,
     pub pubkey: String,

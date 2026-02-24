@@ -2,7 +2,7 @@
 use nostrdb::Note;
 
 /// A report/document (kind:30023 - Article)
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize)]
 pub struct Report {
     /// Event ID (hex)
     pub id: String,
