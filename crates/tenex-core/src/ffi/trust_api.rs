@@ -162,9 +162,21 @@ impl TenexCore {
         })
     }
 
-    /// Return currently configured relay URLs (read-only in this phase).
+    /// Return currently configured relay URLs.
     pub fn get_configured_relays(&self) -> Vec<String> {
-        vec![crate::constants::RELAY_URL.to_string()]
+        self.relay_urls
+            .read()
+            .map(|urls| urls.clone())
+            .unwrap_or_else(|_| vec![crate::constants::RELAY_URL.to_string()])
+    }
+
+    /// Set relay URLs at runtime. Takes effect on next connect/reconnect.
+    pub fn set_relay_urls(&self, urls: Vec<String>) -> Result<(), TenexError> {
+        let mut relay_urls = self.relay_urls.write().map_err(|e| TenexError::LockError {
+            resource: format!("relay_urls: {}", e),
+        })?;
+        *relay_urls = urls;
+        Ok(())
     }
 
     /// Get diagnostics about backend approvals and project statuses.

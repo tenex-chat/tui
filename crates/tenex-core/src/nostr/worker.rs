@@ -335,6 +335,7 @@ pub enum NostrCommand {
     Connect {
         keys: Keys,
         user_pubkey: String,
+        relay_urls: Vec<String>,
         response_tx: Option<Sender<Result<(), String>>>,
     },
     PublishThread {
@@ -630,6 +631,8 @@ pub struct NostrWorker {
     cancel_tx: Option<watch::Sender<bool>>,
     /// NIP-46 bunker service (remote signer)
     bunker_service: Option<super::bunker::BunkerService>,
+    /// Relay URLs to connect to (set via Connect command)
+    relay_urls: Vec<String>,
 }
 
 impl NostrWorker {
@@ -656,6 +659,7 @@ impl NostrWorker {
             subscribed_projects: Arc::new(RwLock::new(HashSet::new())),
             cancel_tx: None,
             bunker_service: None,
+            relay_urls: vec![RELAY_URL.to_string()],
         }
     }
 
@@ -699,12 +703,16 @@ impl NostrWorker {
                     NostrCommand::Connect {
                         keys,
                         user_pubkey,
+                        relay_urls,
                         response_tx,
                     } => {
                         debug_log(&format!(
                             "Worker: Connecting with user {}",
                             &user_pubkey[..8]
                         ));
+                        if !relay_urls.is_empty() {
+                            self.relay_urls = relay_urls;
+                        }
                         let result = rt.block_on(self.handle_connect(keys, user_pubkey));
                         if let Some(tx) = response_tx {
                             let _ = tx.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
@@ -1295,7 +1303,9 @@ impl NostrWorker {
             .database(ndb_database)
             .build();
 
-        client.add_relay(RELAY_URL).await?;
+        for url in &self.relay_urls {
+            client.add_relay(url).await?;
+        }
 
         tlog!("CONN", "Starting relay connect...");
         let connect_start = std::time::Instant::now();

@@ -24,6 +24,7 @@ impl TenexCore {
             callback_listener_handle: Arc::new(RwLock::new(None)),
             ndb_transaction_lock: Arc::new(Mutex::new(())),
             cached_today_runtime_ms: Arc::new(AtomicU64::new(0)),
+            relay_urls: Arc::new(RwLock::new(vec![crate::constants::RELAY_URL.to_string()])),
         }
     }
 
