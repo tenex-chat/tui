@@ -119,6 +119,35 @@ final class AppSessionStore: ObservableObject {
         }
     }
 
+    func handleDeepLinkLogin(nsec: String, relay: String?, backendPubkey: String?, coreManager: TenexCoreManager) {
+        guard !isLoggedIn else { return }
+
+        Task {
+            do {
+                if let relay {
+                    try await coreManager.safeCore.setRelayUrls(urls: [relay])
+                }
+
+                let result = try await coreManager.safeCore.login(nsec: nsec)
+                guard result.success else {
+                    autoLoginError = "Deep link login failed"
+                    return
+                }
+
+                _ = await coreManager.saveCredential(nsec: nsec)
+
+                if let backendPubkey, !backendPubkey.isEmpty {
+                    try? await coreManager.safeCore.approveBackend(pubkey: backendPubkey)
+                }
+
+                userNpub = result.npub
+                isLoggedIn = true
+            } catch {
+                autoLoginError = "Deep link login error: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func getDebugNsec() -> String? {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments

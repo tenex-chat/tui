@@ -11,6 +11,9 @@ struct LoginView: View {
     @State private var nsecInput = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+    #if os(iOS)
+    @State private var showingQRScanner = false
+    #endif
     private let loginCardWidth: CGFloat = 320
 
     var body: some View {
@@ -90,6 +93,18 @@ struct LoginView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(nsecInput.isEmpty || isLoading)
 
+                    #if os(iOS)
+                    // QR Code Scanner Button
+                    Button {
+                        showingQRScanner = true
+                    } label: {
+                        Label("Scan QR Code", systemImage: "qrcode.viewfinder")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(isLoading)
+                    #endif
+
                     // Footer Info
                     VStack(spacing: 2) {
                         #if os(macOS)
@@ -125,11 +140,74 @@ struct LoginView: View {
             .padding(24)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showingQRScanner) {
+                NavigationStack {
+                    QRScannerView(
+                        onResult: { result in
+                            showingQRScanner = false
+                            handleQRResult(result)
+                        },
+                        onError: { error in
+                            showingQRScanner = false
+                            errorMessage = error
+                        }
+                    )
+                    .navigationTitle("Scan QR Code")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showingQRScanner = false }
+                        }
+                    }
+                }
+            }
             #else
             .toolbarTitleDisplayMode(.inline)
             #endif
         }
     }
+
+    #if os(iOS)
+    private func handleQRResult(_ result: QRScanResult) {
+        errorMessage = nil
+        isLoading = true
+
+        Task {
+            do {
+                // Set relay URL if provided
+                if let relay = result.relay {
+                    try await coreManager.safeCore.setRelayUrls(urls: [relay])
+                }
+
+                let loginResult = try await coreManager.safeCore.login(nsec: result.nsec)
+
+                if loginResult.success {
+                    _ = await coreManager.saveCredential(nsec: result.nsec)
+                    if let backend = result.backend, !backend.isEmpty {
+                        try? await coreManager.safeCore.approveBackend(pubkey: backend)
+                    }
+                    isLoading = false
+                    userNpub = loginResult.npub
+                    isLoggedIn = true
+                } else {
+                    isLoading = false
+                    errorMessage = "Login failed"
+                }
+            } catch let error as CoreError {
+                isLoading = false
+                switch error {
+                case .tenex(let tenexError):
+                    errorMessage = "Error: \(tenexError)"
+                case .notInitialized:
+                    errorMessage = "Core not initialized"
+                }
+            } catch {
+                isLoading = false
+                errorMessage = "Unexpected error: \(error.localizedDescription)"
+            }
+        }
+    }
+    #endif
 
     private func login() {
         // Reset state

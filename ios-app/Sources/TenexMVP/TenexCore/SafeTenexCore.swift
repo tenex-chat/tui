@@ -775,6 +775,17 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Set relay URLs at runtime. Takes effect on next connect/reconnect.
+    func setRelayUrls(urls: [String]) throws {
+        try profiler.measureFFI("setRelayUrls") {
+            do {
+                try core.setRelayUrls(urls: urls)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Stats & Diagnostics
 
     /// Get stats snapshot.
