@@ -15,9 +15,10 @@ struct ProjectsTabView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     let layoutMode: ProjectsLayoutMode
     private let selectedProjectIdBindingOverride: Binding<String?>?
+    private let showNewProjectBindingOverride: Binding<Bool>?
     @State private var selectedProjectIdState: String?
+    @State private var showNewProjectState = false
     @State private var searchText = ""
-    @State private var showNewProject = false
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -25,10 +26,16 @@ struct ProjectsTabView: View {
 
     init(
         layoutMode: ProjectsLayoutMode = .adaptive,
-        selectedProjectId: Binding<String?>? = nil
+        selectedProjectId: Binding<String?>? = nil,
+        showNewProject: Binding<Bool>? = nil
     ) {
         self.layoutMode = layoutMode
         self.selectedProjectIdBindingOverride = selectedProjectId
+        self.showNewProjectBindingOverride = showNewProject
+    }
+
+    private var showNewProjectBinding: Binding<Bool> {
+        showNewProjectBindingOverride ?? $showNewProjectState
     }
 
     private var selectedProjectIdBinding: Binding<String?> {
@@ -157,13 +164,21 @@ struct ProjectsTabView: View {
                     )
                 }
         }
+        .sheet(isPresented: showNewProjectBinding) {
+            NavigationStack {
+                CreateProjectView(onComplete: { showNewProjectBinding.wrappedValue = false })
+            }
+            .environment(coreManager)
+        }
     }
 
     // MARK: - Detail Content
 
     @ViewBuilder
     private var projectDetailContent: some View {
-        if let projectId = selectedProjectIdBinding.wrappedValue {
+        if showNewProjectBinding.wrappedValue {
+            CreateProjectView(onComplete: { showNewProjectBinding.wrappedValue = false })
+        } else if let projectId = selectedProjectIdBinding.wrappedValue {
             ProjectSettingsView(
                 projectId: projectId,
                 selectedProjectId: selectedProjectIdBinding
@@ -226,7 +241,7 @@ struct ProjectsTabView: View {
             }
             ToolbarItem(placement: .navigation) {
                 Button {
-                    showNewProject = true
+                    showNewProjectBinding.wrappedValue = true
                 } label: {
                     Image(systemName: "plus")
                 }
@@ -237,16 +252,12 @@ struct ProjectsTabView: View {
             }
             ToolbarItem(placement: .automatic) {
                 Button {
-                    showNewProject = true
+                    showNewProjectBinding.wrappedValue = true
                 } label: {
                     Image(systemName: "plus")
                 }
             }
             #endif
-        }
-        .sheet(isPresented: $showNewProject) {
-            OnboardingWizardSheet()
-                .environment(coreManager)
         }
     }
 

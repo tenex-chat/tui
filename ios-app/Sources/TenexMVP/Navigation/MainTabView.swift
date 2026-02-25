@@ -123,19 +123,24 @@ struct MainTabView: View {
             }
             .environment(coreManager)
         }
+        #if os(iOS)
         .sheet(isPresented: $showOnboarding) {
-            OnboardingWizardSheet()
-                .environment(coreManager)
+            NavigationStack {
+                CreateProjectView(onComplete: { showOnboarding = false })
+            }
+            .environment(coreManager)
         }
         .task {
             guard !hasCheckedOnboarding else { return }
             hasCheckedOnboarding = true
-            // Short delay to let initial fetchData populate projects
+            // Only auto-show on compact iPhone; shell layouts handle it inline
+            guard !useMailShellLayout && !useSidebarAdaptableTabs else { return }
             try? await Task.sleep(for: .seconds(2))
             if coreManager.projects.isEmpty {
                 showOnboarding = true
             }
         }
+        #endif
         .ignoresSafeArea(.keyboard)
     }
 
