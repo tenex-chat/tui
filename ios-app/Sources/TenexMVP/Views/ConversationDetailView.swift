@@ -244,7 +244,9 @@ struct ConversationDetailView: View {
             // Collapsible content
             VStack(alignment: .leading, spacing: 0) {
                 // Content with height measurement
-                MarkdownView(content: reply.content)
+                // MessageContentView handles attachment detection and renders collapsible buttons
+                // for [Text Attachment X] references, falling through to MarkdownView otherwise.
+                MessageContentView(content: reply.content)
                     .font(.body)
                     .foregroundStyle(.primary)
                     #if !os(macOS)
