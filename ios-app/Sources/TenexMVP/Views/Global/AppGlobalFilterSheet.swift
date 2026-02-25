@@ -5,34 +5,10 @@ struct AppGlobalFilterToolbarButton: View {
     @State private var isPresented = false
 
     var body: some View {
-        #if os(macOS)
-        Menu {
-            timeSubmenu
-            scheduledEventsSubmenu
-            projectsSubmenu
-            statusSubmenu
-            hashtagsSubmenu
-            if !coreManager.isAppFilterDefault {
-                Divider()
-                Button {
-                    coreManager.resetAppFilterToDefaults()
-                } label: {
-                    Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
-                }
-            }
-        } label: {
-            Image(systemName: filterIcon)
-        }
-        .accessibilityIdentifier("global_filter_button")
-        .accessibilityLabel("Global Filter")
-        .accessibilityValue(coreManager.appFilterSummaryLabel)
-        .help("Filter by time, schedule, projects, status, and hashtags")
-        #else
         Button {
             isPresented = true
         } label: {
-            Label(coreManager.appFilterSummaryLabel, systemImage: filterIcon)
-                .lineLimit(1)
+            filterButtonLabel
         }
         .accessibilityIdentifier("global_filter_button")
         .accessibilityLabel("Global Filter")
@@ -48,6 +24,15 @@ struct AppGlobalFilterToolbarButton: View {
             )
             .environment(coreManager)
         }
+    }
+
+    @ViewBuilder
+    private var filterButtonLabel: some View {
+        #if os(macOS)
+        Image(systemName: filterIcon)
+        #else
+        Label(coreManager.appFilterSummaryLabel, systemImage: filterIcon)
+            .lineLimit(1)
         #endif
     }
 
@@ -56,210 +41,6 @@ struct AppGlobalFilterToolbarButton: View {
             ? "line.3.horizontal.decrease.circle"
             : "line.3.horizontal.decrease.circle.fill"
     }
-
-    // MARK: - macOS Menu Submenus
-
-    #if os(macOS)
-    @ViewBuilder
-    private var timeSubmenu: some View {
-        Picker(selection: Binding(
-            get: { coreManager.appFilterTimeWindow },
-            set: { newValue in
-                coreManager.updateAppFilter(
-                    projectIds: coreManager.appFilterProjectIds,
-                    timeWindow: newValue
-                )
-            }
-        )) {
-            ForEach(AppTimeWindow.allCases, id: \.self) { window in
-                Text(window.label).tag(window)
-            }
-        } label: {
-            Label("Time", systemImage: "clock")
-        }
-    }
-
-    @ViewBuilder
-    private var scheduledEventsSubmenu: some View {
-        Picker(selection: Binding(
-            get: { coreManager.appFilterScheduledEvent },
-            set: { newValue in
-                coreManager.updateAppFilter(
-                    projectIds: coreManager.appFilterProjectIds,
-                    timeWindow: coreManager.appFilterTimeWindow,
-                    scheduledEvent: newValue
-                )
-            }
-        )) {
-            ForEach(ScheduledEventFilter.allCases, id: \.self) { filter in
-                Text(filter.label).tag(filter)
-            }
-        } label: {
-            Label("Scheduled Events", systemImage: "calendar.badge.clock")
-        }
-    }
-
-    @ViewBuilder
-    private var projectsSubmenu: some View {
-        Menu {
-            Button {
-                coreManager.updateAppFilter(projectIds: [], timeWindow: coreManager.appFilterTimeWindow)
-            } label: {
-                if coreManager.appFilterProjectIds.isEmpty {
-                    Label("All Projects", systemImage: "checkmark")
-                } else {
-                    Text("All Projects")
-                }
-            }
-
-            Divider()
-
-            ForEach(bootedProjects, id: \.id) { project in
-                Toggle(isOn: Binding(
-                    get: { coreManager.appFilterProjectIds.contains(project.id) },
-                    set: { _ in toggleProject(project.id) }
-                )) {
-                    Label(project.title, systemImage: "bolt.fill")
-                }
-            }
-
-            if !unbootedProjects.isEmpty {
-                Divider()
-
-                Menu("Unbooted Projects") {
-                    ForEach(unbootedProjects, id: \.id) { project in
-                        Toggle(isOn: Binding(
-                            get: { coreManager.appFilterProjectIds.contains(project.id) },
-                            set: { _ in toggleProject(project.id) }
-                        )) {
-                            Text(project.title)
-                        }
-                    }
-                }
-            }
-        } label: {
-            Label("Projects", systemImage: "folder")
-        }
-    }
-
-    @ViewBuilder
-    private var statusSubmenu: some View {
-        Menu {
-            Button {
-                updateStatus(.all)
-            } label: {
-                if coreManager.appFilterStatus == .all {
-                    Label("All Statuses", systemImage: "checkmark")
-                } else {
-                    Text("All Statuses")
-                }
-            }
-
-            if coreManager.appFilterAvailableStatusLabels.isEmpty {
-                Divider()
-                Text("No statuses in current scope")
-                    .foregroundStyle(.secondary)
-            } else {
-                Divider()
-                ForEach(coreManager.appFilterAvailableStatusLabels, id: \.self) { status in
-                    Button {
-                        updateStatus(.label(status))
-                    } label: {
-                        if coreManager.appFilterStatus != .all,
-                           coreManager.appFilterStatus.allows(statusLabel: status) {
-                            Label(status, systemImage: "checkmark")
-                        } else {
-                            Text(status)
-                        }
-                    }
-                }
-            }
-        } label: {
-            Label("Status", systemImage: "flag")
-        }
-    }
-
-    @ViewBuilder
-    private var hashtagsSubmenu: some View {
-        Menu {
-            Button {
-                updateHashtags(Set<String>())
-            } label: {
-                if coreManager.appFilterHashtags.isEmpty {
-                    Label("Any Hashtag", systemImage: "checkmark")
-                } else {
-                    Text("Any Hashtag")
-                }
-            }
-
-            if coreManager.appFilterAvailableHashtags.isEmpty {
-                Divider()
-                Text("No hashtags in current scope")
-                    .foregroundStyle(.secondary)
-            } else {
-                Divider()
-                ForEach(coreManager.appFilterAvailableHashtags, id: \.self) { hashtag in
-                    Toggle(isOn: Binding(
-                        get: { coreManager.appFilterHashtags.contains(hashtag) },
-                        set: { _ in toggleHashtag(hashtag) }
-                    )) {
-                        Text("#\(hashtag)")
-                    }
-                }
-            }
-        } label: {
-            Label("Hashtag", systemImage: "number")
-        }
-    }
-
-    private var bootedProjects: [Project] {
-        coreManager.projects
-            .filter { coreManager.projectOnlineStatus[$0.id] == true }
-            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-    }
-
-    private var unbootedProjects: [Project] {
-        coreManager.projects
-            .filter { coreManager.projectOnlineStatus[$0.id] != true }
-            .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
-    }
-
-    private func toggleProject(_ projectId: String) {
-        var ids = coreManager.appFilterProjectIds
-        if ids.contains(projectId) {
-            ids.remove(projectId)
-        } else {
-            ids.insert(projectId)
-        }
-        coreManager.updateAppFilter(projectIds: ids, timeWindow: coreManager.appFilterTimeWindow)
-    }
-
-    private func updateStatus(_ status: ConversationStatusFilter) {
-        coreManager.updateAppFilter(
-            projectIds: coreManager.appFilterProjectIds,
-            timeWindow: coreManager.appFilterTimeWindow,
-            status: status
-        )
-    }
-
-    private func updateHashtags(_ hashtags: Set<String>) {
-        coreManager.updateAppFilter(
-            projectIds: coreManager.appFilterProjectIds,
-            timeWindow: coreManager.appFilterTimeWindow,
-            hashtags: hashtags
-        )
-    }
-
-    private func toggleHashtag(_ hashtag: String) {
-        var hashtags = coreManager.appFilterHashtags
-        if hashtags.contains(hashtag) {
-            hashtags.remove(hashtag)
-        } else {
-            hashtags.insert(hashtag)
-        }
-        updateHashtags(hashtags)
-    }
-    #endif
 }
 
 struct AppGlobalFilterSheet: View {
