@@ -113,8 +113,8 @@ struct SharedMessageBubble: View {
                     }
                 }
 
-                // Message content with markdown rendering
-                MarkdownView(content: message.content)
+                // Message content with markdown rendering (attachment-aware)
+                MessageContentView(content: message.content)
                     .font(.body)
                     .padding(12)
                     .background(isUser ? Color.agentBrand : Color.systemGray6)
