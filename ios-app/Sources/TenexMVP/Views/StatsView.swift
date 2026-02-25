@@ -310,7 +310,7 @@ struct ErrorView: View {
             Button(action: retry) {
                 Label("Retry", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.bordered)
+            .adaptiveGlassButtonStyle()
             .padding(.top, 8)
         }
         .padding()
@@ -339,7 +339,7 @@ struct EmptyStatsView: View {
             Button(action: onLoad) {
                 Label("Load Stats", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.bordered)
+            .adaptiveGlassButtonStyle()
             .padding(.top, 8)
         }
         .padding()

@@ -90,7 +90,7 @@ struct LoginView: View {
                                 .frame(maxWidth: .infinity)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .adaptiveProminentGlassButtonStyle()
                     .disabled(nsecInput.isEmpty || isLoading)
 
                     #if os(iOS)
@@ -101,7 +101,7 @@ struct LoginView: View {
                         Label("Scan QR Code", systemImage: "qrcode.viewfinder")
                             .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
                     .disabled(isLoading)
                     #endif
 

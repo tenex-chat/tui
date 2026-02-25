@@ -559,7 +559,7 @@ struct NewNudgeSheet: View {
                         .frame(minWidth: 90)
                 }
                 .disabled(isCreating)
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
             }
 
             Spacer(minLength: 0)

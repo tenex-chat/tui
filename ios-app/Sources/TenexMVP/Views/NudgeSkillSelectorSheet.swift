@@ -318,7 +318,7 @@ struct NudgeSkillSelectorSheet: View {
                 } label: {
                     Label("Show All Items", systemImage: "list.bullet")
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
                 .padding(.top, 4)
             } else {
                 Image(systemName: searchText.isEmpty ? "bolt.slash" : "magnifyingglass")

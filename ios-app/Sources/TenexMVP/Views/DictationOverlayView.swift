@@ -127,13 +127,13 @@ struct RecordingView: View {
                     Label("Cancel", systemImage: "xmark.circle.fill")
                         .font(.subheadline)
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
 
                 Button(action: onStop) {
                     Label("Done", systemImage: "stop.circle.fill")
                         .font(.subheadline)
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
                 .tint(Color.recordingActive)
             }
         }
@@ -187,13 +187,13 @@ struct FinalTranscriptionView: View {
             // Actions
             HStack(spacing: 16) {
                 Button("Cancel") { onCancel() }
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
 
                 Button("Insert") {
                     learnFromEdits()
                     onConfirm(editedText)
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
             }
         }
     }

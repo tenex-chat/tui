@@ -371,7 +371,7 @@ private struct NudgeDetailView: View {
                 Button(action: onFork) {
                     Label("Fork", systemImage: "square.on.square")
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
                 .accessibilityLabel("Fork Nudge")
 
                 if canDelete {
@@ -384,7 +384,7 @@ private struct NudgeDetailView: View {
                             Label("Delete", systemImage: "trash")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
                     .disabled(isDeleting)
                 }
             }

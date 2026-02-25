@@ -401,7 +401,7 @@ struct NewAgentDefinitionSheet: View {
                         .frame(minWidth: 90)
                 }
                 .disabled(isCreating)
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
             }
 
             Spacer(minLength: 0)
@@ -741,7 +741,7 @@ private struct AIAssistedPromptRewriteSheet: View {
                         Button(suggestion) {
                             rewriteInstruction = suggestion
                         }
-                        .buttonStyle(.bordered)
+                        .adaptiveGlassButtonStyle()
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -784,7 +784,7 @@ private struct AIAssistedPromptRewriteSheet: View {
                 } label: {
                     Label("Edit", systemImage: "chevron.left")
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
                 .disabled(isGenerating)
             }
 

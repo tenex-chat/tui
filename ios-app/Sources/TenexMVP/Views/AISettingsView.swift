@@ -235,7 +235,7 @@ struct AISettingsView: View {
                         Button("Save Prompt") {
                             saveAudioPrompt()
                         }
-                        .buttonStyle(.borderedProminent)
+                        .adaptiveProminentGlassButtonStyle()
                         .controlSize(.small)
                         .disabled(audioPrompt.isEmpty)
                         Spacer()
@@ -304,7 +304,7 @@ struct AISettingsView: View {
                     Button("Set Key") {
                         isEditing.wrappedValue = true
                     }
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
                 }
             }
 
@@ -321,14 +321,14 @@ struct AISettingsView: View {
                         onSave()
                         isEditing.wrappedValue = false
                     }
-                    .buttonStyle(.borderedProminent)
+                    .adaptiveProminentGlassButtonStyle()
                     .disabled(keyInput.wrappedValue.isEmpty || isSavingApiKey)
 
                     Button("Cancel") {
                         keyInput.wrappedValue = ""
                         isEditing.wrappedValue = false
                     }
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
                 }
             }
         }
@@ -624,7 +624,7 @@ private struct VoiceSelectorSheet: View {
                         Button("Fetch Voices") {
                             onFetch()
                         }
-                        .buttonStyle(.borderedProminent)
+                        .adaptiveProminentGlassButtonStyle()
                     }
                 } else {
                     List(availableVoices, id: \.voiceId) { voice in
@@ -692,7 +692,7 @@ private struct ModelSelectorSheet: View {
                         Button("Fetch Models") {
                             onFetch()
                         }
-                        .buttonStyle(.borderedProminent)
+                        .adaptiveProminentGlassButtonStyle()
                     }
                 } else {
                     List(availableModels, id: \.id) { model in

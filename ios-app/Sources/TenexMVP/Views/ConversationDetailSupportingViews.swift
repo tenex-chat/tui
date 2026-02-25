@@ -414,7 +414,7 @@ struct FullConversationSheet: View {
                                 .padding(.horizontal, 12)
                                 .frame(maxWidth: .infinity, alignment: .center)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .adaptiveProminentGlassButtonStyle()
                             .padding(.bottom, 12)
                         }
 
