@@ -308,46 +308,21 @@ extension MessageComposerView {
     }
 
     var workspaceAccessoryButton: some View {
-        Menu {
-            Button {
-                #if os(iOS)
-                showImagePicker = true
-                #else
-                openMacFilePicker()
-                #endif
-            } label: {
-                Label("Attach Image", systemImage: "photo")
-            }
-            .disabled(isUploadingImage)
-
-            Button {
-                openNudgeSkillSelector(mode: .all)
-            } label: {
-                Label("Add Shortcuts", systemImage: "slash.circle")
-            }
-
-            Divider()
-
-            Button {
-                saveDraftAsNamed()
-            } label: {
-                Label("Save Draft", systemImage: "bookmark")
-            }
-            .disabled(localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            Button {
-                showDraftBrowser = true
-            } label: {
-                Label("Browse Drafts", systemImage: "doc.text.magnifyingglass")
-            }
+        Button {
+            #if os(iOS)
+            showImagePicker = true
+            #else
+            openMacFilePicker()
+            #endif
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: workspaceIconSize, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
         }
-        .menuStyle(.borderlessButton)
-        .disabled(selectedProject == nil)
+        .buttonStyle(.borderless)
+        .disabled(selectedProject == nil || isUploadingImage)
+        .help("Attach image")
     }
 
     var workspaceMicGlyph: some View {
