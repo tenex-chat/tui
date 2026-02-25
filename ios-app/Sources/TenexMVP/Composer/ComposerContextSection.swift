@@ -3,9 +3,13 @@ import SwiftUI
 extension MessageComposerView {
     func projectChipView(_ project: Project) -> some View {
         HStack(spacing: 8) {
-            ProjectChipView(project: project) {
-                showProjectSelector = true
+            Menu {
+                projectSelectionMenuContent()
+            } label: {
+                projectMenuChipLabel(project)
             }
+            .menuIndicator(.hidden)
+            .menuStyle(.borderlessButton)
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -13,15 +17,46 @@ extension MessageComposerView {
         .background(.bar)
     }
 
+    func projectMenuChipLabel(_ project: Project) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(deterministicColor(for: project.id).gradient)
+                .frame(width: 24, height: 24)
+                .overlay {
+                    Image(systemName: "folder.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.white)
+                }
+
+            Text(project.title)
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.primary)
+
+            Image(systemName: "chevron.down")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color.systemBackground)
+                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+        )
+    }
+
     var projectPromptView: some View {
-        Button(action: { showProjectSelector = true }) {
+        Menu {
+            projectSelectionMenuContent()
+        } label: {
             HStack(spacing: 12) {
                 Image(systemName: "folder")
                     .foregroundStyle(Color.composerAction)
                 Text("Select a project to start")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Image(systemName: "chevron.right")
+                Image(systemName: "chevron.down")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -29,7 +64,8 @@ extension MessageComposerView {
             .padding(.vertical, 12)
             .background(.bar)
         }
-        .buttonStyle(.borderless)
+        .menuIndicator(.hidden)
+        .menuStyle(.borderlessButton)
     }
 
     var agentPromptView: some View {
@@ -53,7 +89,9 @@ extension MessageComposerView {
 
     /// Compact project prompt button for horizontal layout
     var projectPromptButton: some View {
-        Button(action: { showProjectSelector = true }) {
+        Menu {
+            projectSelectionMenuContent()
+        } label: {
             HStack(spacing: 6) {
                 Image(systemName: "folder")
                     .font(.caption)
@@ -61,6 +99,9 @@ extension MessageComposerView {
                 Text("Select project")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -69,7 +110,8 @@ extension MessageComposerView {
                     .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
             )
         }
-        .buttonStyle(.borderless)
+        .menuIndicator(.hidden)
+        .menuStyle(.borderlessButton)
     }
 
     /// Compact agent prompt button for horizontal layout
@@ -215,9 +257,7 @@ extension MessageComposerView {
                 HStack(spacing: 16) {
                     if let project = selectedProject {
                         if isNewConversation {
-                            inlineContextToken(text: workspaceProjectLabel(project.title)) {
-                                showProjectSelector = true
-                            }
+                            projectSelectionInlineToken(text: workspaceProjectLabel(project.title))
                         } else {
                             Text(workspaceProjectLabel(project.title))
                                 .font(.subheadline)
@@ -228,9 +268,7 @@ extension MessageComposerView {
                                 .frame(height: workspaceContextRowHeight)
                         }
                     } else if isNewConversation {
-                        inlineContextToken(text: "Select project") {
-                            showProjectSelector = true
-                        }
+                        projectSelectionInlineToken(text: "Select project")
                     }
 
                     if selectedProject != nil {
@@ -249,6 +287,7 @@ extension MessageComposerView {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             workspaceMicGlyph
+            workspacePinnedPromptsMenu
 
             Button(action: sendMessage) {
                 Image(systemName: "arrow.up")
@@ -316,6 +355,19 @@ extension MessageComposerView {
             .font(.system(size: workspaceIconSize, weight: .medium))
             .foregroundStyle(.secondary.opacity(0.88))
             .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+    }
+
+    var workspacePinnedPromptsMenu: some View {
+        Menu {
+            pinnedPromptsMenuContent()
+        } label: {
+            Image(systemName: recentPinnedPrompts.isEmpty ? "pin" : "pin.fill")
+                .font(.system(size: workspaceIconSize, weight: .medium))
+                .foregroundStyle(.secondary.opacity(0.88))
+                .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+        }
+        .menuStyle(.borderlessButton)
+        .help("Pinned prompts")
     }
 
     var agentPopoverToken: some View {
@@ -414,6 +466,82 @@ extension MessageComposerView {
         .buttonStyle(.borderless)
     }
 
+    func projectSelectionInlineToken(text: String) -> some View {
+        Menu {
+            projectSelectionMenuContent()
+        } label: {
+            HStack(spacing: 4) {
+                Text(text)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary.opacity(0.95))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: max(9, workspaceIconSize - 4), weight: .semibold))
+                    .foregroundStyle(.secondary.opacity(0.88))
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 2)
+            .frame(height: workspaceContextRowHeight)
+            .contentShape(Rectangle())
+        }
+        .menuIndicator(.hidden)
+        .menuStyle(.borderlessButton)
+    }
+
+    @ViewBuilder
+    private func projectSelectionMenuContent() -> some View {
+        if projectMenuState.booted.isEmpty && projectMenuState.unbooted.isEmpty {
+            Text("No projects available")
+        } else {
+            if !projectMenuState.booted.isEmpty {
+                Section("Booted Projects") {
+                    ForEach(projectMenuState.booted, id: \.id) { project in
+                        projectSelectionButton(for: project)
+                    }
+                }
+            }
+
+            if !projectMenuState.unbooted.isEmpty {
+                Menu("Unbooted Projects") {
+                    ForEach(projectMenuState.unbooted, id: \.id) { project in
+                        projectSelectionButton(for: project)
+                    }
+                }
+            }
+        }
+    }
+
+    private func projectSelectionButton(for project: Project) -> some View {
+        Button {
+            selectProjectForComposer(project)
+        } label: {
+            if selectedProject?.id == project.id {
+                Label(project.title, systemImage: "checkmark")
+            } else {
+                Text(project.title)
+            }
+        }
+    }
+
+    private var projectMenuState: ComposerProjectMenuState {
+        let sortedProjects = coreManager.projects.sorted { lhs, rhs in
+            let lhsOnline = coreManager.projectOnlineStatus[lhs.id] ?? false
+            let rhsOnline = coreManager.projectOnlineStatus[rhs.id] ?? false
+            if lhsOnline != rhsOnline { return lhsOnline }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+
+        let booted = sortedProjects.filter { coreManager.projectOnlineStatus[$0.id] ?? false }
+        let unbooted = sortedProjects.filter { !(coreManager.projectOnlineStatus[$0.id] ?? false) }
+        return ComposerProjectMenuState(booted: booted, unbooted: unbooted)
+    }
+
+    private func selectProjectForComposer(_ project: Project) {
+        guard selectedProject?.id != project.id else { return }
+        selectedProject = project
+        projectChanged()
+    }
+
     func workspaceProjectLabel(_ name: String) -> String {
         truncatedWorkspaceToken(name)
     }
@@ -428,6 +556,11 @@ extension MessageComposerView {
         return "\(value[..<end])..."
     }
 
+}
+
+private struct ComposerProjectMenuState {
+    var booted: [Project] = []
+    var unbooted: [Project] = []
 }
 
 struct ProjectChipView: View {

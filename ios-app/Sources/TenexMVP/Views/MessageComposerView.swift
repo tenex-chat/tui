@@ -63,7 +63,6 @@ struct MessageComposerView: View {
     // MARK: - State
 
     @State var selectedProject: Project?
-    @State var showProjectSelector = false
     @State var draft: Draft
     @State var availableAgents: [ProjectAgent] = []
     @State var agentsLoadError: String?
@@ -87,6 +86,12 @@ struct MessageComposerView: View {
     @State var showDictationOverlay = false
     @State var showDraftBrowser = false
     @State var draftSavedConfirmation = false
+    @State var pinnedPromptManager = PinnedPromptManager.shared
+    @State var showPinPromptTitleSheet = false
+    @State var showPinnedPromptBrowser = false
+    @State var pinPromptTitle = ""
+    @State var pinnedPromptSaveError: String?
+    @State var showPinnedPromptSaveError = false
     @State var messageHistory = MessageHistory()
 
     // Image attachment state
@@ -370,16 +375,6 @@ struct MessageComposerView: View {
         .task(id: selectedProject?.id) {
             await refreshComposerContextForSelectedProject()
         }
-        .sheet(isPresented: $showProjectSelector) {
-            ProjectSelectorSheet(
-                projects: coreManager.projects,
-                projectOnlineStatus: coreManager.projectOnlineStatus,
-                selectedProject: $selectedProject,
-                onDone: {
-                    projectChanged()
-                }
-            )
-        }
         .sheet(isPresented: $showAgentSelector) {
             AgentSelectorSheet(
                 agents: availableAgents,
@@ -433,6 +428,20 @@ struct MessageComposerView: View {
                 }
             }
         }
+        .sheet(isPresented: $showPinPromptTitleSheet) {
+            PinPromptTitleSheet(
+                title: $pinPromptTitle,
+                promptText: localText.trimmingCharacters(in: .whitespacesAndNewlines),
+                onSave: { title in
+                    savePinnedPrompt(with: title)
+                }
+            )
+        }
+        .sheet(isPresented: $showPinnedPromptBrowser) {
+            PinnedPromptBrowserSheet { prompt in
+                applyPinnedPrompt(prompt)
+            }
+        }
         #if os(iOS)
         .sheet(isPresented: $showImagePicker) {
             ImagePicker { imageData, mimeType in
@@ -464,6 +473,11 @@ struct MessageComposerView: View {
         } message: {
             Text("Failed to save your draft: \(saveFailedError ?? "Unknown error"). Your changes may be lost if you dismiss now. Please try again or contact support.")
         }
+        .alert("Pinned Prompt Save Failed", isPresented: $showPinnedPromptSaveError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(pinnedPromptSaveError ?? "Unknown error")
+        }
     }
 
     var composerViewWithLifecycle: some View {
@@ -489,9 +503,7 @@ struct MessageComposerView: View {
                 if isNewConversation {
                     HStack(spacing: 12) {
                         if let project = selectedProject {
-                            ProjectChipView(project: project) {
-                                showProjectSelector = true
-                            }
+                            projectChipView(project)
                         } else {
                             projectPromptButton
                         }

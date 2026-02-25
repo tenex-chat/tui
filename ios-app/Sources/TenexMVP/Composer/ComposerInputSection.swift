@@ -201,6 +201,8 @@ extension MessageComposerView {
             .disabled(!dictationManager.state.isIdle || selectedProject == nil)
             #endif
 
+            pinnedPromptsToolbarButton
+
             if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button {
                     saveDraftAsNamed()
@@ -274,6 +276,95 @@ extension MessageComposerView {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.systemBackground)
+    }
+
+    var pinnedPromptsToolbarButton: some View {
+        Menu {
+            pinnedPromptsMenuContent()
+        } label: {
+            Image(systemName: recentPinnedPrompts.isEmpty ? "pin" : "pin.fill")
+                .foregroundStyle(Color.composerAction)
+        }
+        .buttonStyle(.borderless)
+        .help("Pinned prompts")
+    }
+
+    var canPinCurrentPrompt: Bool {
+        isNewConversation && !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var recentPinnedPrompts: [PinnedPrompt] {
+        Array(pinnedPromptManager.all().prefix(8))
+    }
+
+    @ViewBuilder
+    func pinnedPromptsMenuContent() -> some View {
+        if canPinCurrentPrompt {
+            Button {
+                pinCurrentPrompt()
+            } label: {
+                Label("Pin this prompt", systemImage: "pin")
+            }
+            Divider()
+        }
+
+        if recentPinnedPrompts.isEmpty {
+            Text("No pinned prompts yet")
+        } else {
+            ForEach(recentPinnedPrompts) { prompt in
+                Button {
+                    applyPinnedPrompt(prompt)
+                } label: {
+                    Text(prompt.title)
+                }
+            }
+        }
+
+        Divider()
+
+        Button {
+            showPinnedPromptBrowser = true
+        } label: {
+            Label("Manage Pinned Prompts", systemImage: "list.bullet")
+        }
+    }
+
+    func pinCurrentPrompt() {
+        pinPromptTitle = ""
+        showPinPromptTitleSheet = true
+    }
+
+    func savePinnedPrompt(with title: String) {
+        let text = localText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        Task { @MainActor in
+            _ = await pinnedPromptManager.pin(title: title, text: text)
+            if let error = pinnedPromptManager.lastSaveError {
+                pinnedPromptSaveError = error.localizedDescription
+                showPinnedPromptSaveError = true
+                return
+            }
+
+            pinPromptTitle = ""
+            showPinPromptTitleSheet = false
+        }
+    }
+
+    func applyPinnedPrompt(_ prompt: PinnedPrompt) {
+        isProgrammaticUpdate = true
+        localText = prompt.text
+        isDirty = true
+
+        if let projectId = selectedProject?.id {
+            Task {
+                await draftManager.updateContent(prompt.text, conversationId: conversationId, projectId: projectId)
+            }
+        }
+
+        Task {
+            await pinnedPromptManager.markUsed(prompt.id)
+        }
     }
 
     func persistSelectedNudgeIds() {

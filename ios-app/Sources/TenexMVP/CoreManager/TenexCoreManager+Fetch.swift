@@ -50,13 +50,11 @@ extension TenexCoreManager {
             appFilterConversationScope = sortedConversations(c)
             let now = UInt64(Date().timeIntervalSince1970)
             conversations = sortedConversations(
-                appFilterConversationScope.filter { conversation in
-                    conversationMatchesAppFilter(
-                        conversation,
-                        now: now,
-                        snapshot: filterSnapshot
-                    )
-                }
+                conversationsMatchingAppFilter(
+                    appFilterConversationScope,
+                    now: now,
+                    snapshot: filterSnapshot
+                )
             )
             inboxItems = i
             bookmarkedIds = Set(bIds ?? [])
@@ -369,13 +367,11 @@ extension TenexCoreManager {
                 guard self.appFilterSnapshot == snapshot else { return }
                 self.appFilterConversationScope = self.sortedConversations(refreshed)
                 let now = UInt64(Date().timeIntervalSince1970)
-                let filtered = self.appFilterConversationScope.filter { conversation in
-                    self.conversationMatchesAppFilter(
-                        conversation,
-                        now: now,
-                        snapshot: snapshot
-                    )
-                }
+                let filtered = self.conversationsMatchingAppFilter(
+                    self.appFilterConversationScope,
+                    now: now,
+                    snapshot: snapshot
+                )
                 self.conversations = self.sortedConversations(filtered)
                 self.updateActiveAgentsState()
                 let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
