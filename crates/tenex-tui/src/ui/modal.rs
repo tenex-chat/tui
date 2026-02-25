@@ -2072,8 +2072,12 @@ impl BunkerApprovalState {
         }
     }
 
-    pub fn selected_action(&self) -> BunkerApprovalAction {
-        BunkerApprovalAction::ALL[self.selected_index]
+    /// Returns None when the checkbox is selected, Some(action) otherwise.
+    pub fn selected_action(&self) -> Option<BunkerApprovalAction> {
+        match self.selected_index {
+            0 => None,
+            idx => Some(BunkerApprovalAction::ALL[idx - 1]),
+        }
     }
 
     pub fn move_up(&mut self) {
@@ -2083,7 +2087,8 @@ impl BunkerApprovalState {
     }
 
     pub fn move_down(&mut self) {
-        if self.selected_index + 1 < BunkerApprovalAction::ALL.len() {
+        // 0 = checkbox, 1 = Approve, 2 = Reject
+        if self.selected_index + 1 < BunkerApprovalAction::ALL.len() + 1 {
             self.selected_index += 1;
         }
     }
@@ -2547,15 +2552,21 @@ mod tests {
         };
 
         let mut state = BunkerApprovalState::new(request);
-        assert_eq!(state.selected_action(), BunkerApprovalAction::Approve);
+        // index 0 = checkbox
+        assert_eq!(state.selected_action(), None);
         assert!(!state.always_approve);
 
+        // Enter on checkbox toggles it
         state.toggle_always_approve();
         assert!(state.always_approve);
 
         state.move_down();
-        assert_eq!(state.selected_action(), BunkerApprovalAction::Reject);
+        assert_eq!(state.selected_action(), Some(BunkerApprovalAction::Approve));
+        state.move_down();
+        assert_eq!(state.selected_action(), Some(BunkerApprovalAction::Reject));
         state.move_up();
-        assert_eq!(state.selected_action(), BunkerApprovalAction::Approve);
+        assert_eq!(state.selected_action(), Some(BunkerApprovalAction::Approve));
+        state.move_up();
+        assert_eq!(state.selected_action(), None);
     }
 }

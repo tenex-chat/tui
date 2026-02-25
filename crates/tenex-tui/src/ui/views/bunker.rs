@@ -36,7 +36,7 @@ pub fn render_bunker_approval_modal(f: &mut Frame, area: Rect, state: &BunkerApp
         content_area.x + 2,
         content_area.y,
         content_area.width.saturating_sub(4),
-        4,
+        3,
     );
     let summary = vec![
         Line::from(vec![
@@ -56,40 +56,29 @@ pub fn render_bunker_approval_modal(f: &mut Frame, area: Rect, state: &BunkerApp
             Span::styled("Preview: ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(preview, Style::default().fg(theme::TEXT_PRIMARY)),
         ]),
-        Line::from(vec![
-            Span::styled(
-                if state.always_approve { "[x]" } else { "[ ]" },
-                Style::default()
-                    .fg(if state.always_approve {
-                        theme::ACCENT_SUCCESS
-                    } else {
-                        theme::TEXT_MUTED
-                    })
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                " Always approve this requester + kind",
-                Style::default().fg(theme::TEXT_PRIMARY),
-            ),
-        ]),
     ];
     f.render_widget(Paragraph::new(summary), summary_area);
 
-    let actions: Vec<ModalItem> = BunkerApprovalAction::ALL
-        .iter()
-        .enumerate()
-        .map(|(idx, action)| {
+    let checkbox_label = format!(
+        "{} Always approve this requester + kind",
+        if state.always_approve { "[x]" } else { "[ ]" }
+    );
+    let mut actions: Vec<ModalItem> = vec![ModalItem::new(checkbox_label)
+        .with_shortcut("space".to_string())
+        .selected(state.selected_index == 0)];
+    actions.extend(BunkerApprovalAction::ALL.iter().enumerate().map(
+        |(idx, action)| {
             ModalItem::new(action.label())
                 .with_shortcut(action.hotkey().to_string())
-                .selected(idx == state.selected_index)
-        })
-        .collect();
+                .selected(idx + 1 == state.selected_index)
+        },
+    ));
 
     let actions_area = Rect::new(
         content_area.x,
-        content_area.y + 5,
+        content_area.y + 4,
         content_area.width,
-        content_area.height.saturating_sub(6),
+        content_area.height.saturating_sub(5),
     );
     render_modal_items(f, actions_area, &actions);
 

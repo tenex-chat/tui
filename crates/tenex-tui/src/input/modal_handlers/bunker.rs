@@ -38,10 +38,15 @@ pub(super) fn handle_bunker_approval_modal_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Enter => match state.selected_action() {
-            BunkerApprovalAction::Approve => {
+            None => {
+                if let ModalState::BunkerApproval(ref mut s) = app.modal_state {
+                    s.toggle_always_approve();
+                }
+            }
+            Some(BunkerApprovalAction::Approve) => {
                 app.resolve_bunker_sign_request(state.request, true, state.always_approve);
             }
-            BunkerApprovalAction::Reject => {
+            Some(BunkerApprovalAction::Reject) => {
                 app.resolve_bunker_sign_request(state.request, false, false);
             }
         },
@@ -174,10 +179,14 @@ mod tests {
             event_tags_json: None,
         };
         let mut state = crate::ui::modal::BunkerApprovalState::new(request);
-        assert_eq!(state.selected_action(), BunkerApprovalAction::Approve);
+        // index 0 = checkbox
+        assert_eq!(state.selected_action(), None);
 
         state.move_down();
-        assert_eq!(state.selected_action(), BunkerApprovalAction::Reject);
+        assert_eq!(state.selected_action(), Some(BunkerApprovalAction::Approve));
+
+        state.move_down();
+        assert_eq!(state.selected_action(), Some(BunkerApprovalAction::Reject));
 
         state.toggle_always_approve();
         assert!(state.always_approve);
