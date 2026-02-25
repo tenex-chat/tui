@@ -485,6 +485,16 @@ struct MessageComposerView: View {
         .task(id: scenePhase) {
             await persistDraftForScenePhase(scenePhase)
         }
+        .onChange(of: initialAgentPubkey) { _, newValue in
+            guard !isDirty else { return }
+            guard !isNewConversation else { return }
+            guard let newValue, !newValue.isEmpty else { return }
+            guard draft.agentPubkey != newValue else { return }
+
+            Task {
+                await loadAgents()
+            }
+        }
         .onChange(of: coreManager.onlineAgents) { _, newAgents in
             // Reactively update availableAgents when centralized state changes
             // This eliminates the need for manual refresh() calls
