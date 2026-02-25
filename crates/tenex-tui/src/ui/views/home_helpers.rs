@@ -60,9 +60,18 @@ pub fn build_thread_hierarchy(
         }
     }
 
-    // Sort children by most recent activity (same as parent sorting)
+    // Sort children by 60-second bucketed activity for stable ordering.
+    // Within the same bucket, tie-break by event ID alphabetically ascending
+    // to prevent children from jumping positions due to near-simultaneous activity.
     for children in parent_to_children.values_mut() {
-        children.sort_by(|a, b| b.0.last_activity.cmp(&a.0.last_activity));
+        children.sort_by(|a, b| {
+            let a_bucket = a.0.last_activity / 60;
+            let b_bucket = b.0.last_activity / 60;
+            match b_bucket.cmp(&a_bucket) {
+                std::cmp::Ordering::Equal => a.0.id.cmp(&b.0.id),
+                other => other,
+            }
+        });
     }
 
     // Count all descendants (recursive) for a thread
