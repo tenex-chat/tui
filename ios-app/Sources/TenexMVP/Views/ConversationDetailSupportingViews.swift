@@ -288,7 +288,7 @@ struct FullConversationSheet: View {
 
     @State private var selectedDelegation: String?
     @State private var showComposer = false
-    @State private var availableAgents: [ProjectAgent] = []
+    @State private var currentUserPubkey: String?
     @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var visibleMessageLimit = 240
 
@@ -340,12 +340,12 @@ struct FullConversationSheet: View {
         coreManager.projects.first { $0.id == conversation.extractedProjectId }
     }
 
-    /// Find the last agent that spoke in the conversation (like TUI's get_most_recent_agent_from_conversation)
-    /// Returns hex pubkey format for use with MessageComposerView
+    /// Find the last non-user author that spoke in the conversation.
+    /// Returns hex pubkey format for use with MessageComposerView.
     private var lastAgentPubkey: String? {
-        LastAgentFinder.findLastAgentPubkey(
+        return LastAgentFinder.findLastAgentPubkey(
             messages: messages,
-            availableAgents: availableAgents
+            currentUserPubkey: currentUserPubkey
         )
     }
 
@@ -373,6 +373,9 @@ struct FullConversationSheet: View {
             }
         }
         .navigationTitle("Full Conversation")
+        .task(id: conversation.thread.id) {
+            currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #else
@@ -488,17 +491,6 @@ struct FullConversationSheet: View {
                 .onChange(of: coreManager.streamingBuffers[conversation.thread.id]?.text.count) { _, _ in
                     DispatchQueue.main.async {
                         maybeScrollToStreamingRow(with: proxy)
-                    }
-                }
-                .task {
-                    // Load available agents for the project to determine last agent
-                    if let projectId = project?.id {
-                        availableAgents = coreManager.onlineAgents[projectId] ?? []
-                    }
-                }
-                .onChange(of: coreManager.onlineAgents) { _, _ in
-                    if let projectId = project?.id {
-                        availableAgents = coreManager.onlineAgents[projectId] ?? []
                     }
                 }
             }

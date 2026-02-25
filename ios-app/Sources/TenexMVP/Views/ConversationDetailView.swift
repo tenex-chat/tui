@@ -15,6 +15,7 @@ struct ConversationDetailView: View {
     @State private var showComposer = false
     @State private var isLatestReplyExpanded = false
     @State private var latestReplyContentHeight: CGFloat = 0
+    @State private var currentUserPubkey: String?
 
     /// Initialize the view with a conversation and core manager
     /// Note: coreManager is passed explicitly to support @StateObject initialization
@@ -130,6 +131,7 @@ struct ConversationDetailView: View {
 
     /// Initializes the view model with the core manager and loads data
     private func initializeAndLoad() async {
+        currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
         viewModel.setCoreManager(coreManager)
         await viewModel.loadData()
     }
@@ -202,13 +204,11 @@ struct ConversationDetailView: View {
         coreManager.projects.first { $0.id == conversation.extractedProjectId }
     }
 
-    /// Find the last agent that spoke in the conversation (hex pubkey format)
-    /// Filters to exclude user messages and only selects from available agents
+    /// Find the last non-user author that spoke in the conversation (hex pubkey format)
     private var lastAgentPubkey: String? {
-        let availableAgents = project.flatMap { coreManager.onlineAgents[$0.id] } ?? []
         return LastAgentFinder.findLastAgentPubkey(
             messages: viewModel.messages,
-            availableAgents: availableAgents
+            currentUserPubkey: currentUserPubkey
         )
     }
 
