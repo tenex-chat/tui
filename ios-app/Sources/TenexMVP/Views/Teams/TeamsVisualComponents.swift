@@ -269,6 +269,8 @@ private struct TeamImagePlaceholder: View {
 
 struct AgentDefinitionVisualCard: View {
     let item: AgentDefinitionListItem
+    @State private var isHovered = false
+
     static var gridMinimumWidth: CGFloat {
         #if os(macOS) || targetEnvironment(macCatalyst)
         210
@@ -297,6 +299,22 @@ struct AgentDefinitionVisualCard: View {
         item.agent.role.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var contentOpacity: Double {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        isHovered ? 1.0 : 0.2
+        #else
+        1.0
+        #endif
+    }
+
+    private var hoverGradientOpacity: Double {
+        #if os(macOS) || targetEnvironment(macCatalyst)
+        isHovered ? 1.0 : 0.0
+        #else
+        1.0
+        #endif
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             AgentDefinitionCardBackground(
@@ -305,7 +323,19 @@ struct AgentDefinitionVisualCard: View {
             )
 
             Rectangle()
-                .fill(.black.opacity(0.4))
+                .fill(.black.opacity(0.18))
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.86)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 200)
+                .opacity(hoverGradientOpacity)
+            }
+            .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name)
@@ -337,6 +367,7 @@ struct AgentDefinitionVisualCard: View {
                     .lineLimit(1)
             }
             .padding(14)
+            .opacity(contentOpacity)
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(cardAspectRatio, contentMode: .fit)
@@ -346,6 +377,14 @@ struct AgentDefinitionVisualCard: View {
                 .stroke(.white.opacity(0.12), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.16), radius: 14, y: 8)
+        .onHover { hovering in
+            #if os(macOS) || targetEnvironment(macCatalyst)
+            withAnimation(.easeOut(duration: 0.24)) {
+                isHovered = hovering
+            }
+            #endif
+        }
+        .animation(.easeOut(duration: 0.24), value: isHovered)
     }
 }
 
