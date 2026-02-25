@@ -5,5 +5,8 @@
     <!-- APNs environment: "development" for debug/TestFlight, "production" for App Store -->
     <key>aps-environment</key>
     <string>development</string>
+    <!-- Microphone access for voice dictation (ElevenLabs STT on macOS, SpeechAnalyzer on iOS) -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>

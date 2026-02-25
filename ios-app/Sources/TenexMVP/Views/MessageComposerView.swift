@@ -582,7 +582,6 @@ struct MessageComposerView: View {
                 toolbarView
             }
         }
-        #if os(iOS)
         .overlay {
             if showDictationOverlay {
                 DictationOverlayView(
@@ -609,7 +608,6 @@ struct MessageComposerView: View {
                 )
             }
         }
-        #endif
         #if os(macOS)
         .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
             handleFileDrop(providers: providers)

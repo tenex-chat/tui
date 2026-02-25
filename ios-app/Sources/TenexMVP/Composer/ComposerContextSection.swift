@@ -326,10 +326,20 @@ extension MessageComposerView {
     }
 
     var workspaceMicGlyph: some View {
-        Image(systemName: "mic")
-            .font(.system(size: workspaceIconSize, weight: .medium))
-            .foregroundStyle(.secondary.opacity(0.88))
-            .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+        Button {
+            Task {
+                showDictationOverlay = true
+                try? await dictationManager.startRecording()
+            }
+        } label: {
+            Image(systemName: dictationManager.state.isRecording ? "mic.fill" : "mic")
+                .font(.system(size: workspaceIconSize, weight: .medium))
+                .foregroundStyle(dictationManager.state.isRecording ? Color.recordingActive : .secondary.opacity(0.88))
+                .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+        }
+        .buttonStyle(.borderless)
+        .disabled(!dictationManager.state.isIdle || selectedProject == nil)
+        .help("Voice dictation")
     }
 
     var workspacePinnedPromptsMenu: some View {
