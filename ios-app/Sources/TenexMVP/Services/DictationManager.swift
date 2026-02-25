@@ -272,9 +272,10 @@ enum DictationError: LocalizedError {
 
 #elseif os(macOS)
 import Foundation
+import AVFoundation
 import Observation
 
-/// macOS stub for DictationManager - voice dictation is not available on macOS.
+/// Manages voice dictation on macOS using AVAudioEngine for capture and ElevenLabs streaming STT for transcription.
 @MainActor
 @Observable
 final class DictationManager {
@@ -297,23 +298,204 @@ final class DictationManager {
     private(set) var finalText: String = ""
     private(set) var error: String?
 
+    private var audioEngine: AVAudioEngine?
+    private var sttService: ElevenLabsSTTService?
+    private var accumulatedText: String = ""
+
+    // MARK: - Recording Control
+
     func startRecording() async throws {
-        error = "Voice dictation is not available on macOS"
+        guard state.isIdle else { return }
+
+        error = nil
+        accumulatedText = ""
+
+        // Request microphone permission
+        let granted = await requestMicrophonePermission()
+        guard granted else {
+            error = "Microphone access denied. Grant permission in System Settings > Privacy & Security > Microphone."
+            return
+        }
+
+        state = .recording(partialText: "")
+
+        do {
+            try await startStreaming()
+        } catch {
+            self.error = error.localizedDescription
+            state = .idle
+        }
     }
 
     func stopRecording() async {
+        guard case .recording(let partialText) = state else { return }
+
+        let capturedPartialText = partialText
+
+        // Stop audio engine
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+
+        // Signal end of audio to ElevenLabs
+        sttService?.endAudioAndDisconnect()
+
+        // Give a brief moment for any final transcript to arrive
+        try? await Task.sleep(for: .milliseconds(300))
+
+        // Cleanup
+        audioEngine = nil
+        sttService = nil
+
+        // If finalText is empty but we had partial text, use that
+        if finalText.isEmpty && !capturedPartialText.isEmpty {
+            finalText = capturedPartialText
+        }
+
+        // If we still have no finalText but accumulated text, use that
+        if finalText.isEmpty && !accumulatedText.isEmpty {
+            finalText = accumulatedText
+        }
+
         state = .idle
     }
 
     func cancelRecording() {
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine = nil
+
+        sttService?.disconnect()
+        sttService = nil
+
         finalText = ""
+        accumulatedText = ""
         state = .idle
     }
 
     func reset() {
         finalText = ""
+        accumulatedText = ""
         state = .idle
         error = nil
+    }
+
+    // MARK: - Private Methods
+
+    private func requestMicrophonePermission() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await AVCaptureDevice.requestAccess(for: .audio)
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    private func startStreaming() async throws {
+        // Create and connect STT service
+        let service = ElevenLabsSTTService()
+        sttService = service
+
+        service.onTranscript = { [weak self] result in
+            Task { @MainActor in
+                guard let self = self else { return }
+                guard case .recording = self.state else { return }
+
+                if result.isFinal {
+                    // Accumulate final segments
+                    if !result.text.isEmpty {
+                        if !self.accumulatedText.isEmpty {
+                            self.accumulatedText += " "
+                        }
+                        self.accumulatedText += result.text
+                        self.finalText = self.accumulatedText
+                    }
+                    self.state = .recording(partialText: self.accumulatedText)
+                } else {
+                    // Show accumulated text + current partial
+                    let displayText: String
+                    if self.accumulatedText.isEmpty {
+                        displayText = result.text
+                    } else {
+                        displayText = self.accumulatedText + " " + result.text
+                    }
+                    self.state = .recording(partialText: displayText)
+                }
+            }
+        }
+
+        service.onError = { [weak self] error in
+            Task { @MainActor in
+                self?.error = error.localizedDescription
+            }
+        }
+
+        try await service.connect()
+
+        // Setup audio engine after connection
+        try setupAudioEngine()
+    }
+
+    private func setupAudioEngine() throws {
+        let engine = AVAudioEngine()
+        audioEngine = engine
+
+        let inputNode = engine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        // Target format: 16kHz mono PCM 16-bit signed little-endian
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 16000,
+            channels: 1,
+            interleaved: true
+        ) else {
+            throw DictationError.audioEngineSetupFailed
+        }
+
+        // Create converter from mic format to target format
+        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+            throw DictationError.audioEngineSetupFailed
+        }
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            guard let self = self else { return }
+
+            // Calculate output frame count based on sample rate ratio
+            let ratio = targetFormat.sampleRate / inputFormat.sampleRate
+            let outputFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
+            guard outputFrameCount > 0 else { return }
+
+            guard let convertedBuffer = AVAudioPCMBuffer(
+                pcmFormat: targetFormat,
+                frameCapacity: outputFrameCount
+            ) else { return }
+
+            var conversionError: NSError?
+            converter.convert(to: convertedBuffer, error: &conversionError) { _, outStatus in
+                outStatus.pointee = .haveData
+                return buffer
+            }
+
+            guard conversionError == nil, convertedBuffer.frameLength > 0 else { return }
+
+            // Extract raw PCM data from buffer
+            guard let int16Data = convertedBuffer.int16ChannelData else { return }
+            let data = Data(
+                bytes: int16Data[0],
+                count: Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
+            )
+
+            Task { @MainActor in
+                self.sttService?.sendAudioChunk(data)
+            }
+        }
+
+        engine.prepare()
+        try engine.start()
     }
 }
 

@@ -1,4 +1,3 @@
-#if os(iOS)
 import SwiftUI
 
 /// Overlay view for voice dictation that shows recording state and transcription editing.
@@ -27,7 +26,6 @@ struct DictationOverlayView: View {
                     if !manager.finalText.isEmpty {
                         FinalTranscriptionView(
                             originalText: manager.finalText,
-                            phoneticLearner: manager.phoneticLearner,
                             onConfirm: { finalText in
                                 onComplete(finalText)
                                 manager.reset()
@@ -145,14 +143,12 @@ struct RecordingView: View {
 struct FinalTranscriptionView: View {
     @State private var editedText: String
     let originalText: String
-    let phoneticLearner: PhoneticLearner
     let onConfirm: (String) -> Void
     let onCancel: () -> Void
 
-    init(originalText: String, phoneticLearner: PhoneticLearner, onConfirm: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
+    init(originalText: String, onConfirm: @escaping (String) -> Void, onCancel: @escaping () -> Void) {
         _editedText = State(initialValue: originalText)
         self.originalText = originalText
-        self.phoneticLearner = phoneticLearner
         self.onConfirm = onConfirm
         self.onCancel = onCancel
     }
@@ -190,7 +186,9 @@ struct FinalTranscriptionView: View {
                     .adaptiveGlassButtonStyle()
 
                 Button("Insert") {
+                    #if os(iOS)
                     learnFromEdits()
+                    #endif
                     onConfirm(editedText)
                 }
                 .adaptiveProminentGlassButtonStyle()
@@ -198,15 +196,18 @@ struct FinalTranscriptionView: View {
         }
     }
 
+    #if os(iOS)
     private func learnFromEdits() {
         // Compare word-by-word and record phonetically similar corrections
+        // PhoneticLearner is only used on iOS (where DictationManager has the property)
         let originalWords = originalText.split(separator: " ").map(String.init)
         let editedWords = editedText.split(separator: " ").map(String.init)
 
         for (orig, edited) in zip(originalWords, editedWords) where orig != edited {
-            phoneticLearner.recordCorrection(original: orig, replacement: edited)
+            PhoneticLearner().recordCorrection(original: orig, replacement: edited)
         }
     }
+    #endif
 }
 
 // MARK: - Preview
@@ -221,4 +222,3 @@ struct FinalTranscriptionView: View {
         onCancel: { }
     )
 }
-#endif
