@@ -217,7 +217,15 @@ extension TenexCoreManager {
             case (false, true):
                 return false
             default:
-                return lhs.thread.effectiveLastActivity > rhs.thread.effectiveLastActivity
+                // Bucket by 60-second windows to prevent near-simultaneous activity from
+                // causing conversations to jump positions. Within the same bucket, use
+                // alphabetical event ID for stable, deterministic ordering.
+                let lhsBucket = lhs.thread.effectiveLastActivity / 60
+                let rhsBucket = rhs.thread.effectiveLastActivity / 60
+                if lhsBucket != rhsBucket {
+                    return lhsBucket > rhsBucket
+                }
+                return lhs.thread.id < rhs.thread.id
             }
         }
         return updated

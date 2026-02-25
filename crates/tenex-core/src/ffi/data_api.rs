@@ -476,15 +476,21 @@ impl TenexCore {
         }
         let collect_elapsed_ms = collect_started_at.elapsed().as_millis();
 
-        // Sort: active first (by effective_last_activity desc), then inactive by effective_last_activity desc
+        // Sort: active first (by effective_last_activity desc), then inactive by effective_last_activity desc.
+        // Within the same 60-second bucket, sort alphabetically by event ID for stable ordering
+        // (prevents conversations from jumping positions due to near-simultaneous activity).
         let sort_started_at = Instant::now();
         conversations.sort_by(|a, b| match (a.is_active, b.is_active) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
-            _ => b
-                .thread
-                .effective_last_activity
-                .cmp(&a.thread.effective_last_activity),
+            _ => {
+                let a_bucket = a.thread.effective_last_activity / 60;
+                let b_bucket = b.thread.effective_last_activity / 60;
+                match b_bucket.cmp(&a_bucket) {
+                    std::cmp::Ordering::Equal => a.thread.id.cmp(&b.thread.id),
+                    other => other,
+                }
+            }
         });
         let sort_elapsed_ms = sort_started_at.elapsed().as_millis();
 
