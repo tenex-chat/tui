@@ -120,7 +120,7 @@ struct TeamDetailView: View {
                 }
                 .font(.subheadline.weight(.semibold))
             }
-            .buttonStyle(.borderedProminent)
+            .adaptiveProminentGlassButtonStyle()
             .tint(item.team.likedByMe ? .pink : .accentColor)
             .disabled(isTogglingLike || isHiring)
 
@@ -133,7 +133,7 @@ struct TeamDetailView: View {
                 }
                 .font(.subheadline.weight(.semibold))
             }
-            .buttonStyle(.bordered)
+            .adaptiveGlassButtonStyle()
             .disabled(isHiring)
 
             Spacer()
@@ -329,7 +329,7 @@ struct TeamDetailView: View {
                         Label("Post Comment", systemImage: "paperplane.fill")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
                 .disabled(isPostingComment || commentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }

@@ -944,7 +944,7 @@ private struct ConversationsEmptyState: View {
                 Button(action: onClearFilter) {
                     Label("Clear Filter", systemImage: "xmark.circle")
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
                 .padding(.top, 8)
             }
         }

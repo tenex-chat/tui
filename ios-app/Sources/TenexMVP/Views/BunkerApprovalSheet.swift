@@ -320,7 +320,7 @@ struct BunkerApprovalSheet: View {
                     Text("Reject")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
                 .controlSize(.large)
 
                 Button {
@@ -329,7 +329,7 @@ struct BunkerApprovalSheet: View {
                     Text("Approve")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
                 .controlSize(.large)
             }
         }

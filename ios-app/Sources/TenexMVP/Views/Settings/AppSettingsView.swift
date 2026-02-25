@@ -237,7 +237,7 @@ private struct RelaysSettingsSectionView: View {
                 Button("Reconnect Relays") {
                     Task { await viewModel.reconnectRelays(coreManager: coreManager) }
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
 
                 Button("Sync Now") {
                     Task { await viewModel.syncNow(coreManager: coreManager) }
@@ -298,7 +298,7 @@ private struct BackendsSettingsSectionView: View {
                                         )
                                     }
                                 }
-                                .buttonStyle(.borderedProminent)
+                                .adaptiveProminentGlassButtonStyle()
                                 Button("Block") {
                                     Task {
                                         await viewModel.blockBackend(
@@ -307,7 +307,7 @@ private struct BackendsSettingsSectionView: View {
                                         )
                                     }
                                 }
-                                .buttonStyle(.bordered)
+                                .adaptiveGlassButtonStyle()
                             }
                         }
                         .padding(.vertical, 2)
@@ -370,9 +370,9 @@ private struct BackendsSettingsSectionView: View {
                 .textSelection(.enabled)
             HStack {
                 Button(primaryActionTitle, action: primaryAction)
-                    .buttonStyle(.borderedProminent)
+                    .adaptiveProminentGlassButtonStyle()
                 Button("Remove", role: .destructive, action: removeAction)
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
             }
         }
         .padding(.vertical, 2)
@@ -389,19 +389,19 @@ private struct PushSettingsSectionView: View {
                 Button("Re-register Device") {
                     Task { await viewModel.reRegisterPush(coreManager: coreManager) }
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
                 .disabled(viewModel.isReRegisteringPush)
 
                 Button("Republish Cached Token") {
                     Task { await viewModel.republishCachedPush(coreManager: coreManager) }
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
                 .disabled(viewModel.isReRegisteringPush)
 
                 Button("Refresh Push Info") {
                     Task { await viewModel.reloadPush(coreManager: coreManager) }
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
 
                 if viewModel.isReRegisteringPush {
                     HStack(spacing: 8) {
@@ -580,7 +580,7 @@ private struct BunkerSettingsSectionView: View {
                         UIPasteboard.general.string = viewModel.bunkerUri
                         #endif
                     }
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
                 }
             }
 
@@ -782,7 +782,7 @@ private struct AISettingsSectionView: View {
                                     showCredentialSheet = true
                                 }
                             }
-                            .buttonStyle(.bordered)
+                            .adaptiveGlassButtonStyle()
                         }
                         .padding(12)
                         if index < providers.count - 1 {
@@ -980,14 +980,14 @@ private struct AudioSettingsSectionView: View {
                     Button("Save Prompt") {
                         Task { await viewModel.saveAudioPrompt(coreManager: coreManager) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .adaptiveProminentGlassButtonStyle()
 
                     Spacer()
 
                     Button("Reset to Default", role: .destructive) {
                         Task { await viewModel.resetAudioPrompt(coreManager: coreManager) }
                     }
-                    .buttonStyle(.bordered)
+                    .adaptiveGlassButtonStyle()
                 }
             } header: {
                 Text("Audio Prompt")
@@ -1208,7 +1208,7 @@ private struct VoiceBrowserSheet: View {
                         previewPlayer.stop()
                         dismiss()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .adaptiveProminentGlassButtonStyle()
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
@@ -1262,7 +1262,7 @@ private struct VoiceBrowserSheet: View {
                         systemImage: viewModel.selectedVoiceIds.contains(voice.voiceId) ? "checkmark.circle.fill" : "circle"
                     )
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
             }
 
             if let description = voice.description, !description.isEmpty {
@@ -1293,7 +1293,7 @@ private struct VoiceBrowserSheet: View {
                             systemImage: previewPlayer.playingVoiceId == voice.voiceId ? "stop.fill" : "play.fill"
                         )
                     }
-                    .buttonStyle(.borderedProminent)
+                    .adaptiveProminentGlassButtonStyle()
                     .controlSize(.small)
                 } else {
                     Text("No preview available")

@@ -19,11 +19,33 @@ struct AdaptiveButtonStyle: ViewModifier {
     }
 }
 
+/// A ViewModifier that applies a prominent glass button style or prominent bordered
+/// style based on accessibility settings and OS availability.
+struct AdaptiveProminentButtonStyle: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.buttonStyle(.borderedProminent)
+        } else if #available(iOS 26.0, macOS 26.0, *) {
+            content.buttonStyle(.glassProminent)
+        } else {
+            content.buttonStyle(.borderedProminent)
+        }
+    }
+}
+
 extension View {
     /// Applies glass button style, or falls back to bordered style when
     /// accessibility's reduce transparency is enabled.
     func adaptiveGlassButtonStyle() -> some View {
         modifier(AdaptiveButtonStyle())
+    }
+
+    /// Applies a prominent glass button style, or falls back to prominent bordered style
+    /// when accessibility's reduce transparency is enabled.
+    func adaptiveProminentGlassButtonStyle() -> some View {
+        modifier(AdaptiveProminentButtonStyle())
     }
 
     /// Applies consistent iOS modal sizing so sheets don't collapse to fitted content.

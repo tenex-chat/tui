@@ -182,7 +182,7 @@ struct AskAnswerView: View {
                 } label: {
                     Label("Previous", systemImage: "chevron.left")
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
             }
 
             Spacer()
@@ -198,7 +198,7 @@ struct AskAnswerView: View {
                 } label: {
                     Label("Next", systemImage: "chevron.right")
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
                 .tint(Color.askBrand)
                 .disabled(!hasCurrentAnswer)
             } else {
@@ -213,7 +213,7 @@ struct AskAnswerView: View {
                         Label("Submit", systemImage: "paperplane.fill")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
                 .tint(Color.statusActive)
                 .disabled(!isComplete || isSubmitting)
             }

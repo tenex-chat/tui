@@ -752,7 +752,7 @@ private struct AgentDefinitionDetailView: View {
                         } label: {
                             Label("Hire", systemImage: "play.fill")
                         }
-                        .buttonStyle(.borderedProminent)
+                        .adaptiveProminentGlassButtonStyle()
 
                         if ownedTeams.isEmpty {
                             Button {
@@ -760,7 +760,7 @@ private struct AgentDefinitionDetailView: View {
                             } label: {
                                 Label("Create team", systemImage: "plus")
                             }
-                            .buttonStyle(.bordered)
+                            .adaptiveGlassButtonStyle()
                         } else {
                             Menu {
                                 ForEach(ownedTeams, id: \.id) { team in
@@ -794,7 +794,7 @@ private struct AgentDefinitionDetailView: View {
                                     Label("Add to team", systemImage: "plus")
                                 }
                             }
-                            .buttonStyle(.bordered)
+                            .adaptiveGlassButtonStyle()
                         }
                     }
                     .controlSize(.extraLarge)

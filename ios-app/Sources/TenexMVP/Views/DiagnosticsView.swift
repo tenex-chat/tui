@@ -380,7 +380,7 @@ struct DiagnosticsErrorView: View {
             Button(action: retry) {
                 Label("Retry", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.bordered)
+            .adaptiveGlassButtonStyle()
             .padding(.top, 8)
         }
         .padding()
@@ -409,7 +409,7 @@ struct DiagnosticsEmptyView: View {
             Button(action: onLoad) {
                 Label("Load Diagnostics", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.bordered)
+            .adaptiveGlassButtonStyle()
             .padding(.top, 8)
         }
         .padding()

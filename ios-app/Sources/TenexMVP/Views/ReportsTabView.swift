@@ -234,7 +234,7 @@ struct ReportsTabView: View {
                 } label: {
                     Label("Clear Filters", systemImage: "xmark.circle")
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
                 .padding(.top, 8)
             }
         }

@@ -89,7 +89,7 @@ struct DiagnosticsBunkerTab: View {
                 } label: {
                     Label("Copy JSON", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
 
                 Button {
                     exportDocument = BunkerAuditExportDocument(text: buildAuditExportJSON())
@@ -97,7 +97,7 @@ struct DiagnosticsBunkerTab: View {
                 } label: {
                     Label("Export JSON", systemImage: "square.and.arrow.down")
                 }
-                .buttonStyle(.borderedProminent)
+                .adaptiveProminentGlassButtonStyle()
             }
 
             Text("Each entry includes request payload, response payload, timing, and decision metadata.")
@@ -367,7 +367,7 @@ private struct BunkerAuditEntryRow: View {
                     Label("Copy", systemImage: "doc.on.doc")
                         .font(.caption2)
                 }
-                .buttonStyle(.bordered)
+                .adaptiveGlassButtonStyle()
             }
 
             ScrollView([.horizontal, .vertical], showsIndicators: true) {
