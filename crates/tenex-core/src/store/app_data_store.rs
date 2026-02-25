@@ -2257,12 +2257,17 @@ impl AppDataStore {
             })
             .collect();
 
-        // Sort by effective_last_activity descending (most recent first)
-        // This enables hierarchical sorting where parent conversations reflect
-        // the most recent activity in their entire delegation tree.
+        // Sort by 60-second bucketed effective_last_activity for stable ordering.
+        // Within the same 60-second bucket, tie-break by event ID alphabetically ascending
+        // to prevent conversations from jumping positions due to near-simultaneous activity.
+        // This matches the bucketing logic applied in the FFI path (get_all_conversations).
         threads.sort_by(|a, b| {
-            b.0.effective_last_activity
-                .cmp(&a.0.effective_last_activity)
+            let a_bucket = a.0.effective_last_activity / 60;
+            let b_bucket = b.0.effective_last_activity / 60;
+            match b_bucket.cmp(&a_bucket) {
+                std::cmp::Ordering::Equal => a.0.id.cmp(&b.0.id),
+                other => other,
+            }
         });
 
         // Apply optional limit AFTER sorting
