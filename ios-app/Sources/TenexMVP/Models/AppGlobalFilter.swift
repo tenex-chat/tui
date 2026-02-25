@@ -175,19 +175,22 @@ struct AppGlobalFilterSnapshot: Equatable {
     let scheduledEventFilter: ScheduledEventFilter
     let statusFilter: ConversationStatusFilter
     let hashtagFilter: Set<String>
+    let showArchived: Bool
 
     init(
         projectIds: Set<String>,
         timeWindow: AppTimeWindow,
         scheduledEventFilter: ScheduledEventFilter = .defaultValue,
         statusFilter: ConversationStatusFilter = .defaultValue,
-        hashtagFilter: Set<String> = []
+        hashtagFilter: Set<String> = [],
+        showArchived: Bool = false
     ) {
         self.projectIds = projectIds
         self.timeWindow = timeWindow
         self.scheduledEventFilter = scheduledEventFilter
         self.statusFilter = statusFilter
         self.hashtagFilter = AppFilterMetadataNormalizer.normalizedHashtags(hashtagFilter)
+        self.showArchived = showArchived
     }
 
     var isDefault: Bool {
@@ -196,6 +199,7 @@ struct AppGlobalFilterSnapshot: Equatable {
             && scheduledEventFilter == .defaultValue
             && statusFilter.isDefault
             && hashtagFilter.isEmpty
+            && !showArchived
     }
 
     /// Include check for conversations (applies scheduled/status/hashtag filter).
