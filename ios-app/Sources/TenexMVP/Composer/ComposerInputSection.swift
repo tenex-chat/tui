@@ -334,22 +334,7 @@ extension MessageComposerView {
                     .help("Browse saved drafts")
                 }
 
-                if selectedProject != nil {
-                    Button {
-                        openNudgeSkillSelector(mode: .all)
-                    } label: {
-                        Text("/")
-                            .font(.body.weight(.bold).monospaced())
-                            .foregroundStyle(Color.composerAction)
-                            .frame(width: 24, height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color.composerAction.opacity(0.5), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Nudges & Skills")
-                }
+                nudgeSkillToolbarButton
 
                 Spacer()
 
@@ -411,7 +396,32 @@ extension MessageComposerView {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.systemBackground)
+        .modifier(ToolbarGlassBackground())
+    }
+
+    /// Toolbar button that opens the nudge/skill selector sheet.
+    /// Shows a [/] glyph with a count badge when items are selected.
+    var nudgeSkillToolbarButton: some View {
+        Button {
+            openNudgeSkillSelector(mode: .all)
+        } label: {
+            HStack(spacing: 3) {
+                Text("/")
+                    .font(.body.monospaced().weight(.semibold))
+                    .foregroundStyle(Color.composerAction)
+                if (selectedNudges.count + selectedSkills.count) > 0 {
+                    Text("\(selectedNudges.count + selectedSkills.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.composerAction))
+                }
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(selectedProject == nil)
+        .help("Nudges & Skills")
     }
 
     var pinnedPromptsToolbarButton: some View {
@@ -542,6 +552,31 @@ extension MessageComposerView {
             draftSavedConfirmation = true
             try? await Task.sleep(for: .seconds(1.5))
             draftSavedConfirmation = false
+        }
+    }
+}
+
+// MARK: - Liquid Glass Toolbar Background
+
+/// Applies Liquid Glass styling to the composer toolbar on iOS 26+,
+/// falling back to a translucent material on earlier versions.
+private struct ToolbarGlassBackground: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content
+                .background(Color.systemBackground)
+        } else if #available(iOS 26.0, macOS 26.0, *) {
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: 0, style: .continuous)
+                        .fill(Color.systemBackground.opacity(0.56))
+                        .glassEffect(.regular)
+                )
+        } else {
+            content
+                .background(.ultraThinMaterial)
         }
     }
 }

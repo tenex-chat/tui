@@ -185,7 +185,6 @@ extension MessageComposerView {
                         persistSelectedNudgeIds()
                     }
                 }
-
             }
             .padding(.horizontal, 16)
         }

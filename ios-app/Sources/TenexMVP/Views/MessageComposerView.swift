@@ -608,12 +608,12 @@ struct MessageComposerView: View {
                     }
                 }
 
-                // Nudge chips (for all conversations)
+                // Nudge chips (shown only when nudges are selected)
                 if selectedProject != nil && !selectedNudges.isEmpty {
                     nudgeChipsView
                 }
 
-                // Skill chips (for all conversations)
+                // Skill chips (shown only when skills are selected)
                 if selectedProject != nil && !selectedSkills.isEmpty {
                     skillChipsView
                 }
