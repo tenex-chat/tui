@@ -185,7 +185,7 @@ struct ConversationWorkspaceView: View {
     @State private var workspaceWidth: CGFloat = .infinity
     @State private var selectedDelegationConversation: ConversationFullInfo?
     @State private var selectedReportDestination: SelectedReportDestination?
-    @State private var availableAgents: [ProjectAgent] = []
+    @State private var currentUserPubkey: String?
     @State private var visibleMessageWindow: Int = 30
     /// Defers ForEach rendering until after the @Published initialization storm settles.
     /// Without this, 15-20 body re-evaluations each process 30+ rows during loadData().
@@ -380,11 +380,8 @@ struct ConversationWorkspaceView: View {
             )
             await initializeWorkspace()
         }
-        .onChange(of: coreManager.onlineAgents) { _, _ in
-            refreshAvailableAgents()
-        }
         .onChange(of: coreManager.conversations) { _, _ in
-            refreshAvailableAgents()
+            refreshLastAgentContext()
             viewModel.handleConversationsChanged(coreManager.conversations)
         }
         .onChange(of: coreManager.messagesByConversation) { _, _ in
@@ -759,7 +756,8 @@ struct ConversationWorkspaceView: View {
             viewModel.setCoreManager(coreManager)
             await viewModel.loadData()
         }
-        refreshAvailableAgents()
+        currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
+        refreshLastAgentContext()
         // Warm caches for message avatars and display names before rendering the transcript.
         let uniquePubkeys = Array(Set(viewModel.messages.map(\.pubkey).filter { !$0.isEmpty }))
         coreManager.prefetchProfilePictures(uniquePubkeys)
@@ -778,12 +776,7 @@ struct ConversationWorkspaceView: View {
         )
     }
 
-    private func refreshAvailableAgents() {
-        if let projectId = project?.id {
-            availableAgents = coreManager.onlineAgents[projectId] ?? []
-        } else {
-            availableAgents = []
-        }
+    private func refreshLastAgentContext() {
         recomputeLastAgentPubkey()
     }
 
@@ -794,7 +787,7 @@ struct ConversationWorkspaceView: View {
         }
         cachedLastAgentPubkey = LastAgentFinder.findLastAgentPubkey(
             messages: viewModel.messages,
-            availableAgents: availableAgents
+            currentUserPubkey: currentUserPubkey
         )
     }
 

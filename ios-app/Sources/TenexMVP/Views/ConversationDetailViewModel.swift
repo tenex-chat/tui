@@ -811,27 +811,28 @@ enum TextUtilities {
 /// Utility for finding the last agent that spoke in a conversation.
 /// Used by reply buttons to pre-select the agent to reply to.
 enum LastAgentFinder {
-    /// Finds the last agent (non-user) that spoke in the conversation.
-    /// Only considers agents that are currently available (online).
+    /// Finds the most recent non-user message author in a conversation.
+    /// This intentionally does not depend on online status so reply targeting
+    /// still defaults to the actual latest agent when they have gone offline.
     ///
     /// - Parameters:
     ///   - messages: The messages in the conversation
-    ///   - availableAgents: The currently available/online agents for the project
+    ///   - currentUserPubkey: Current user pubkey used to exclude user-authored messages
     /// - Returns: The hex pubkey of the last agent that spoke, or nil if none found
     static func findLastAgentPubkey(
         messages: [Message],
-        availableAgents: [ProjectAgent]
+        currentUserPubkey: String?
     ) -> String? {
-        // Get set of agent pubkeys (hex format) for quick lookup
-        let agentPubkeys = Set(availableAgents.map { $0.pubkey })
-
-        // Find the most recent message from a known agent
         var latestAgentPubkey: String?
         var latestTimestamp: UInt64 = 0
 
         for msg in messages {
-            // Message pubkey is already hex -- check directly against known agents
-            if agentPubkeys.contains(msg.pubkey) && msg.createdAt >= latestTimestamp {
+            guard !msg.pubkey.isEmpty else { continue }
+            if let currentUserPubkey,
+               msg.pubkey.caseInsensitiveCompare(currentUserPubkey) == .orderedSame {
+                continue
+            }
+            if msg.createdAt >= latestTimestamp {
                 latestTimestamp = msg.createdAt
                 latestAgentPubkey = msg.pubkey
             }
