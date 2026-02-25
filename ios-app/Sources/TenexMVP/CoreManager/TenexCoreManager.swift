@@ -141,12 +141,14 @@ class TenexCoreManager {
     var appFilterScheduledEvent: ScheduledEventFilter
     var appFilterStatus: ConversationStatusFilter
     var appFilterHashtags: Set<String>
+    var appFilterShowArchived: Bool
 
     static let appFilterProjectsDefaultsKey = "app.global.filter.projectIds"
     static let appFilterTimeWindowDefaultsKey = "app.global.filter.timeWindow"
     static let appFilterScheduledEventDefaultsKey = "app.global.filter.scheduledEvent"
     static let appFilterStatusDefaultsKey = "app.global.filter.statusLabel"
     static let appFilterHashtagsDefaultsKey = "app.global.filter.hashtags"
+    static let appFilterShowArchivedDefaultsKey = "app.global.filter.showArchived"
 
     // MARK: - Ask Badge Support
 
@@ -243,6 +245,7 @@ class TenexCoreManager {
         appFilterScheduledEvent = persistedFilter.scheduledEvent
         appFilterStatus = persistedFilter.status
         appFilterHashtags = persistedFilter.hashtags
+        appFilterShowArchived = persistedFilter.showArchived
 
         // Create core immediately (lightweight)
         let tenexCore = TenexCore()

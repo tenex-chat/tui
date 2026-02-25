@@ -13,7 +13,6 @@ struct ConversationsTabView: View {
     @State private var showAudioQueue = false
     @State private var audioNotificationsEnabled = false
     @State private var showStats = false
-    @State private var showArchived = false
     @State private var selectedConversationState: ConversationFullInfo?
     @State private var newConversationProjectIdState: String?
     @State private var detailNavigationPath: [String] = []
@@ -111,7 +110,7 @@ struct ConversationsTabView: View {
     private var filteredConversations: [ConversationFullInfo] {
         var conversations = coreManager.conversations
 
-        if !showArchived {
+        if !coreManager.appFilterShowArchived {
             conversations = conversations.filter { !$0.isArchived }
         }
 
@@ -156,7 +155,7 @@ struct ConversationsTabView: View {
                 pendingCreatedConversationId = nil
             }
         }
-        .onChange(of: showArchived) { _, _ in
+        .onChange(of: coreManager.appFilterShowArchived) { _, _ in
             rebuildHierarchy()
         }
         .onChange(of: coreManager.projects) { _, _ in
@@ -420,6 +419,24 @@ struct ConversationsTabView: View {
                     )
                     .equatable()
                     .tag(conversation)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            toggleArchive(conversation)
+                        } label: {
+                            Label(
+                                conversation.isArchived ? "Unarchive" : "Archive",
+                                systemImage: conversation.isArchived ? "tray.and.arrow.up" : "archivebox"
+                            )
+                        }
+                    }
+                    .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                        Button {
+                            conversationToReference = conversation
+                        } label: {
+                            Label("Reference", systemImage: "link")
+                        }
+                        .tint(Color.agentBrand)
+                    }
                 } else {
                     ConversationRowFull(
                         conversation: conversation,
@@ -438,9 +455,12 @@ struct ConversationsTabView: View {
                     .tag(conversation)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
-                            // Archive action placeholder
+                            toggleArchive(conversation)
                         } label: {
-                            Label("Archive", systemImage: "archivebox")
+                            Label(
+                                conversation.isArchived ? "Unarchive" : "Archive",
+                                systemImage: conversation.isArchived ? "tray.and.arrow.up" : "archivebox"
+                            )
                         }
                     }
                     .swipeActions(edge: .leading, allowsFullSwipe: false) {
@@ -466,6 +486,22 @@ struct ConversationsTabView: View {
                 )
                 .equatable()
                 .tag(conversation)
+                .contextMenu {
+                    Button {
+                        toggleArchive(conversation)
+                    } label: {
+                        Label(
+                            conversation.isArchived ? "Unarchive" : "Archive",
+                            systemImage: conversation.isArchived ? "tray.and.arrow.up" : "archivebox"
+                        )
+                    }
+
+                    Button {
+                        conversationToReference = conversation
+                    } label: {
+                        Label("Reference", systemImage: "link")
+                    }
+                }
                 #endif
             }
         }
@@ -517,10 +553,6 @@ struct ConversationsTabView: View {
 
     private func settingsMenu(compact: Bool) -> some View {
         Menu {
-            Toggle(isOn: $showArchived) {
-                Label("Show Archived", systemImage: "archivebox")
-            }
-
             Toggle(isOn: $audioNotificationsEnabled) {
                 Label("Audio Notifications", systemImage: "speaker.wave.2")
             }
@@ -609,6 +641,11 @@ struct ConversationsTabView: View {
         guard selectedConversationBinding.wrappedValue != nil else { return }
         if detailNavigationPath.last == conversationId { return }
         detailNavigationPath.append(conversationId)
+    }
+
+    private func toggleArchive(_ conversation: ConversationFullInfo) {
+        _ = coreManager.safeCore.toggleConversationArchived(conversationId: conversation.thread.id)
+        scheduleHierarchyRebuild()
     }
 
     private func projectTitle(for conversation: ConversationFullInfo) -> String? {

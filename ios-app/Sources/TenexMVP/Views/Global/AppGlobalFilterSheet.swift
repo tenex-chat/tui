@@ -14,6 +14,19 @@ struct AppGlobalFilterToolbarButton: View {
             Divider()
 
             Button {
+                applyFilter(showArchived: !coreManager.appFilterShowArchived)
+            } label: {
+                if coreManager.appFilterShowArchived {
+                    Label("Show Archived", systemImage: "checkmark")
+                } else {
+                    Text("Show Archived")
+                }
+            }
+            .accessibilityIdentifier("global_filter_show_archived")
+
+            Divider()
+
+            Button {
                 coreManager.resetAppFilterToDefaults()
             } label: {
                 Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
@@ -217,14 +230,16 @@ struct AppGlobalFilterToolbarButton: View {
         timeWindow: AppTimeWindow? = nil,
         scheduledEvent: ScheduledEventFilter? = nil,
         status: ConversationStatusFilter? = nil,
-        hashtags: Set<String>? = nil
+        hashtags: Set<String>? = nil,
+        showArchived: Bool? = nil
     ) {
         coreManager.updateAppFilter(
             projectIds: projectIds ?? coreManager.appFilterProjectIds,
             timeWindow: timeWindow ?? coreManager.appFilterTimeWindow,
             scheduledEvent: scheduledEvent ?? coreManager.appFilterScheduledEvent,
             status: status ?? coreManager.appFilterStatus,
-            hashtags: hashtags ?? coreManager.appFilterHashtags
+            hashtags: hashtags ?? coreManager.appFilterHashtags,
+            showArchived: showArchived ?? coreManager.appFilterShowArchived
         )
     }
 }

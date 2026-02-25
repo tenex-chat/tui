@@ -7,7 +7,8 @@ extension TenexCoreManager {
             timeWindow: appFilterTimeWindow,
             scheduledEventFilter: appFilterScheduledEvent,
             statusFilter: appFilterStatus,
-            hashtagFilter: appFilterHashtags
+            hashtagFilter: appFilterHashtags,
+            showArchived: appFilterShowArchived
         )
     }
 
@@ -41,6 +42,9 @@ extension TenexCoreManager {
             } else {
                 parts.append("\(appFilterHashtags.count) Tags")
             }
+        }
+        if appFilterShowArchived {
+            parts.append("Archived")
         }
         return parts.joined(separator: " · ")
     }
@@ -113,17 +117,20 @@ extension TenexCoreManager {
         timeWindow: AppTimeWindow,
         scheduledEvent: ScheduledEventFilter? = nil,
         status: ConversationStatusFilter? = nil,
-        hashtags: Set<String>? = nil
+        hashtags: Set<String>? = nil,
+        showArchived: Bool? = nil
     ) {
         let newScheduledEvent = scheduledEvent ?? appFilterScheduledEvent
         let newStatus = status ?? appFilterStatus
         let newHashtags = AppFilterMetadataNormalizer.normalizedHashtags(hashtags ?? appFilterHashtags)
+        let newShowArchived = showArchived ?? appFilterShowArchived
 
         guard projectIds != appFilterProjectIds
             || timeWindow != appFilterTimeWindow
             || newScheduledEvent != appFilterScheduledEvent
             || newStatus != appFilterStatus
             || newHashtags != appFilterHashtags
+            || newShowArchived != appFilterShowArchived
         else { return }
 
         appFilterProjectIds = projectIds
@@ -131,6 +138,7 @@ extension TenexCoreManager {
         appFilterScheduledEvent = newScheduledEvent
         appFilterStatus = newStatus
         appFilterHashtags = newHashtags
+        appFilterShowArchived = newShowArchived
         persistAppFilter()
 
         // Apply immediately to the cached base scope so selection/UI react instantly.
@@ -138,9 +146,7 @@ extension TenexCoreManager {
         let snapshot = appFilterSnapshot
         let source = appFilterConversationScope.isEmpty ? conversations : appFilterConversationScope
         conversations = sortedConversations(
-            source.filter { conversation in
-                conversationMatchesAppFilter(conversation, now: now, snapshot: snapshot)
-            }
+            conversationsMatchingAppFilter(source, now: now, snapshot: snapshot)
         )
         updateActiveAgentsState()
         refreshUnansweredAskCount(reason: "updateAppFilter")
@@ -156,7 +162,8 @@ extension TenexCoreManager {
             timeWindow: .defaultValue,
             scheduledEvent: .defaultValue,
             status: .defaultValue,
-            hashtags: Set<String>()
+            hashtags: Set<String>(),
+            showArchived: false
         )
     }
 
@@ -170,17 +177,134 @@ extension TenexCoreManager {
         now: UInt64? = nil,
         snapshot: AppGlobalFilterSnapshot? = nil
     ) -> Bool {
-        let projectId = Self.projectId(fromATag: conversation.projectATag)
         let resolvedNow = now ?? UInt64(Date().timeIntervalSince1970)
         let resolvedSnapshot = snapshot ?? appFilterSnapshot
-        return resolvedSnapshot.includesConversation(
+        return Self.matchesConversationAppFilter(
+            conversation,
+            now: resolvedNow,
+            snapshot: resolvedSnapshot
+        )
+    }
+
+    /// Filters conversations by app filter facets and enforces root visibility:
+    /// descendants are hidden whenever their root conversation is hidden.
+    func conversationsMatchingAppFilter(
+        _ conversations: [ConversationFullInfo],
+        now: UInt64? = nil,
+        snapshot: AppGlobalFilterSnapshot? = nil
+    ) -> [ConversationFullInfo] {
+        let resolvedNow = now ?? UInt64(Date().timeIntervalSince1970)
+        let resolvedSnapshot = snapshot ?? appFilterSnapshot
+        return Self.filterConversationsByRootVisibility(
+            conversations,
+            now: resolvedNow,
+            snapshot: resolvedSnapshot
+        )
+    }
+
+    nonisolated static func matchesConversationAppFilter(
+        _ conversation: ConversationFullInfo,
+        now: UInt64,
+        snapshot: AppGlobalFilterSnapshot
+    ) -> Bool {
+        let projectId = projectId(fromATag: conversation.projectATag)
+        guard snapshot.includes(
             projectId: projectId,
             timestamp: conversation.thread.effectiveLastActivity,
-            now: resolvedNow,
+            now: now
+        ) else {
+            return false
+        }
+
+        guard snapshot.includesConversationFacets(
             isScheduled: conversation.thread.isScheduled,
             statusLabel: conversation.thread.statusLabel,
             hashtags: conversation.thread.hashtags
+        ) else {
+            return false
+        }
+
+        if !snapshot.showArchived && conversation.isArchived {
+            return false
+        }
+
+        return true
+    }
+
+    nonisolated static func filterConversationsByRootVisibility(
+        _ conversations: [ConversationFullInfo],
+        now: UInt64,
+        snapshot: AppGlobalFilterSnapshot
+    ) -> [ConversationFullInfo] {
+        guard !conversations.isEmpty else { return [] }
+
+        let conversationsById = Dictionary(
+            uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) }
         )
+        var rootIdByConversationId: [String: String] = [:]
+        var rootVisibilityById: [String: Bool] = [:]
+
+        func resolveRootId(for conversationId: String) -> String {
+            if let cached = rootIdByConversationId[conversationId] {
+                return cached
+            }
+
+            var currentId = conversationId
+            var path: [String] = []
+            var seenIds: Set<String> = []
+
+            while true {
+                path.append(currentId)
+                guard
+                    let conversation = conversationsById[currentId],
+                    let rawParentId = conversation.thread.parentConversationId
+                else {
+                    break
+                }
+
+                let parentId = rawParentId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !parentId.isEmpty, conversationsById[parentId] != nil else {
+                    break
+                }
+
+                if seenIds.contains(parentId) {
+                    break
+                }
+
+                seenIds.insert(currentId)
+                currentId = parentId
+            }
+
+            for id in path {
+                rootIdByConversationId[id] = currentId
+            }
+            return currentId
+        }
+
+        return conversations.filter { conversation in
+            guard matchesConversationAppFilter(conversation, now: now, snapshot: snapshot) else {
+                return false
+            }
+
+            let rootId = resolveRootId(for: conversation.thread.id)
+            if let rootVisible = rootVisibilityById[rootId] {
+                return rootVisible
+            }
+
+            let rootVisible: Bool
+            if let rootConversation = conversationsById[rootId] {
+                rootVisible = matchesConversationAppFilter(
+                    rootConversation,
+                    now: now,
+                    snapshot: snapshot
+                )
+            } else {
+                rootVisible = true
+            }
+
+            rootVisibilityById[rootId] = rootVisible
+            return rootVisible
+        }
     }
 
     func reportMatchesAppFilter(_ report: Report, now: UInt64? = nil) -> Bool {
@@ -204,7 +328,8 @@ extension TenexCoreManager {
         timeWindow: AppTimeWindow,
         scheduledEvent: ScheduledEventFilter,
         status: ConversationStatusFilter,
-        hashtags: Set<String>
+        hashtags: Set<String>,
+        showArchived: Bool
     ) {
         let persistedProjectIds = Set(defaults.stringArray(forKey: Self.appFilterProjectsDefaultsKey) ?? [])
         let persistedTimeWindow = defaults.string(forKey: Self.appFilterTimeWindowDefaultsKey)
@@ -228,13 +353,15 @@ extension TenexCoreManager {
         let persistedHashtags = AppFilterMetadataNormalizer.normalizedHashtags(
             defaults.stringArray(forKey: Self.appFilterHashtagsDefaultsKey) ?? []
         )
+        let persistedShowArchived = defaults.bool(forKey: Self.appFilterShowArchivedDefaultsKey)
 
         return (
             persistedProjectIds,
             persistedTimeWindow,
             persistedScheduledEvent,
             persistedStatus,
-            persistedHashtags
+            persistedHashtags,
+            persistedShowArchived
         )
     }
 
@@ -244,6 +371,7 @@ extension TenexCoreManager {
         scheduledEvent: ScheduledEventFilter = .defaultValue,
         status: ConversationStatusFilter = .defaultValue,
         hashtags: Set<String> = [],
+        showArchived: Bool = false,
         defaults: UserDefaults = .standard
     ) {
         defaults.set(Array(projectIds).sorted(), forKey: Self.appFilterProjectsDefaultsKey)
@@ -262,6 +390,8 @@ extension TenexCoreManager {
         } else {
             defaults.set(normalizedHashtags.sorted(), forKey: Self.appFilterHashtagsDefaultsKey)
         }
+
+        defaults.set(showArchived, forKey: Self.appFilterShowArchivedDefaultsKey)
     }
 
     func persistAppFilter(defaults: UserDefaults = .standard) {
@@ -271,6 +401,7 @@ extension TenexCoreManager {
             scheduledEvent: appFilterScheduledEvent,
             status: appFilterStatus,
             hashtags: appFilterHashtags,
+            showArchived: appFilterShowArchived,
             defaults: defaults
         )
     }
