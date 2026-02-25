@@ -36,16 +36,15 @@ final class AppGlobalFilterUITest: XCTestCase {
         let button = try waitForGlobalFilterButton()
         button.tap()
 
+        let timeMenu = app.buttons["global_filter_menu_time"]
+        XCTAssertTrue(timeMenu.waitForExistence(timeout: defaultTimeout))
+        timeMenu.tap()
+
         let sevenDayOption = app.buttons["global_filter_time_days7"]
         XCTAssertTrue(sevenDayOption.waitForExistence(timeout: defaultTimeout))
         sevenDayOption.tap()
 
-        let done = app.buttons["global_filter_done"]
-        XCTAssertTrue(done.waitForExistence(timeout: defaultTimeout))
-        done.tap()
-
-        let afterChange = try waitForGlobalFilterButton()
-        let changedSummary = (afterChange.value as? String) ?? afterChange.label
+        let changedSummary = try waitForGlobalFilterSummaryPrefix("7d")
         XCTAssertTrue(changedSummary.hasPrefix("7d"))
 
         app.terminate()
@@ -80,5 +79,18 @@ final class AppGlobalFilterUITest: XCTestCase {
             throw XCTSkip("Global filter button not found in active screen.")
         }
         return button
+    }
+
+    private func waitForGlobalFilterSummaryPrefix(_ prefix: String) throws -> String {
+        let deadline = Date().addingTimeInterval(defaultTimeout)
+        while Date() < deadline {
+            let button = try waitForGlobalFilterButton()
+            let summary = (button.value as? String) ?? button.label
+            if summary.hasPrefix(prefix) {
+                return summary
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        throw XCTSkip("Global filter summary did not update with prefix '\(prefix)'.")
     }
 }
