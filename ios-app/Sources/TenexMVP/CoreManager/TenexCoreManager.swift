@@ -327,7 +327,7 @@ class TenexCoreManager {
         diagnosticsVersion &+= 1
     }
 
-    static func projectId(fromATag aTag: String) -> String {
+    nonisolated static func projectId(fromATag aTag: String) -> String {
         let parts = aTag.split(separator: ":")
         guard parts.count >= 3 else { return "" }
         return parts.dropFirst(2).joined(separator: ":")

@@ -112,9 +112,11 @@ extension TenexCoreManager {
 
         appFilterConversationScope = sortedConversations(updatedScope)
         let filtered = sortedConversations(
-            appFilterConversationScope.filter { candidate in
-                conversationMatchesAppFilter(candidate, now: now, snapshot: snapshot)
-            }
+            conversationsMatchingAppFilter(
+                appFilterConversationScope,
+                now: now,
+                snapshot: snapshot
+            )
         )
         if filtered != conversations {
             conversations = filtered
@@ -319,9 +321,11 @@ extension TenexCoreManager {
             let now = UInt64(Date().timeIntervalSince1970)
             let snapshot = appFilterSnapshot
             conversations = sortedConversations(
-                appFilterConversationScope.filter { conversation in
-                    conversationMatchesAppFilter(conversation, now: now, snapshot: snapshot)
-                }
+                conversationsMatchingAppFilter(
+                    appFilterConversationScope,
+                    now: now,
+                    snapshot: snapshot
+                )
             )
             updateActiveAgentsState()
             refreshRuntimeText()
