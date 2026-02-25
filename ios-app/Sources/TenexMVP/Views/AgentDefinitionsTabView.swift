@@ -484,7 +484,17 @@ private struct AgentDefinitionDetailView: View {
     @State private var isDeleting = false
     @State private var showAssignmentSheet = false
     @State private var showTeamCreationSheet = false
+    @State private var currentUserPubkey: String?
+    @State private var isAddingToTeam = false
     @State private var selectedTab: DetailTab = .overview
+    @State private var ownedTeams: [Project] = []
+
+    private static let modalSurface = Color(
+        red: 17.0 / 255.0,
+        green: 17.0 / 255.0,
+        blue: 17.0 / 255.0
+    )
+    private let contentColumnMaxWidth: CGFloat = 800
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -535,6 +545,27 @@ private struct AgentDefinitionDetailView: View {
         return tabs
     }
 
+    private func recomputeOwnedTeams() {
+        guard let currentUserPubkey else {
+            ownedTeams = []
+            return
+        }
+        ownedTeams = coreManager.projects
+            .filter { project in
+                !project.isDeleted &&
+                project.pubkey.caseInsensitiveCompare(currentUserPubkey) == .orderedSame
+            }
+            .sorted { lhs, rhs in
+                let lhsTitle = teamTitle(lhs)
+                let rhsTitle = teamTitle(rhs)
+                let titleOrder = lhsTitle.localizedCaseInsensitiveCompare(rhsTitle)
+                if titleOrder != .orderedSame {
+                    return titleOrder == .orderedAscending
+                }
+                return lhs.createdAt > rhs.createdAt
+            }
+    }
+
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
@@ -579,6 +610,10 @@ private struct AgentDefinitionDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 heroSection
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                    .frame(maxWidth: contentColumnMaxWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .center)
 
                 VStack(alignment: .leading, spacing: 0) {
                     if availableTabs.count > 1 {
@@ -596,11 +631,12 @@ private struct AgentDefinitionDetailView: View {
                         .padding(.bottom, 40)
                 }
                 .padding(.horizontal, 20)
-                .frame(maxWidth: 800, alignment: .leading)
+                .frame(maxWidth: contentColumnMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .background(Color.systemBackground.ignoresSafeArea())
+        .background(Self.modalSurface.ignoresSafeArea())
+        .preferredColorScheme(.dark)
         .overlay(alignment: .topTrailing) {
             HStack(spacing: 12) {
                 if canDelete {
@@ -658,12 +694,123 @@ private struct AgentDefinitionDetailView: View {
             }
             .environment(coreManager)
         }
+        .task {
+            if currentUserPubkey == nil {
+                currentUserPubkey = coreManager.safeCore.getCurrentUser()?.pubkey
+            }
+            recomputeOwnedTeams()
+        }
+        .onChange(of: coreManager.projects) { _, _ in recomputeOwnedTeams() }
+        .onChange(of: currentUserPubkey) { _, _ in recomputeOwnedTeams() }
     }
 
     // MARK: - Hero
 
-    @ViewBuilder
     private var heroSection: some View {
+        ZStack(alignment: .bottomLeading) {
+            heroImageBackground
+
+            LinearGradient(
+                colors: [.clear, Self.modalSurface.opacity(0.56), Self.modalSurface],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    if !item.agent.role.isEmpty {
+                        chip(text: item.agent.role, foreground: .primary, background: Color.white.opacity(0.15))
+                    }
+                    if let model = item.agent.model, !model.isEmpty {
+                        chip(text: model, foreground: Color.agentBrand, background: Color.agentBrand.opacity(0.15))
+                    }
+                    if let version = item.agent.version, !version.isEmpty {
+                        chip(text: "v\(version)", foreground: .secondary, background: Color.white.opacity(0.1))
+                    }
+                }
+
+                if !item.agent.description.isEmpty {
+                    Text(item.agent.description)
+                        .font(.title3)
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(2)
+                }
+
+                HStack(alignment: .bottom, spacing: 16) {
+                    Text(displayName)
+                        .font(.system(size: 56, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+
+                    Spacer(minLength: 12)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            showAssignmentSheet = true
+                        } label: {
+                            Label("Hire", systemImage: "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        if ownedTeams.isEmpty {
+                            Button {
+                                showTeamCreationSheet = true
+                            } label: {
+                                Label("Create team", systemImage: "plus")
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Menu {
+                                ForEach(ownedTeams, id: \.id) { team in
+                                    let alreadyHasAgent = team.agentDefinitionIds.contains(item.agent.id)
+                                    Button {
+                                        Task { await addAgent(to: team) }
+                                    } label: {
+                                        Label(
+                                            teamTitle(team),
+                                            systemImage: alreadyHasAgent ? "checkmark.circle.fill" : "person.3"
+                                        )
+                                    }
+                                    .disabled(isAddingToTeam || alreadyHasAgent)
+                                }
+
+                                Divider()
+
+                                Button {
+                                    showTeamCreationSheet = true
+                                } label: {
+                                    Label("Create new team", systemImage: "plus")
+                                }
+                            } label: {
+                                if isAddingToTeam {
+                                    HStack(spacing: 8) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                        Text("Add to team")
+                                    }
+                                } else {
+                                    Label("Add to team", systemImage: "plus")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .controlSize(.extraLarge)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 420)
+        .clipped()
+    }
+
+    @ViewBuilder
+    private var heroImageBackground: some View {
         if let imageURL = agentImageURL {
             AsyncImage(url: imageURL) { phase in
                 switch phase {
@@ -687,66 +834,12 @@ private struct AgentDefinitionDetailView: View {
                     EmptyView()
                 }
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 420)
-            .clipped()
-            .overlay(alignment: .leading) {
-                GeometryReader { geo in
-                    heroOverlayContent
-                        .padding(24)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                        .frame(width: geo.size.width * 0.5)
-                }
-            }
         } else {
-            heroOverlayContent
-                .padding(.horizontal, 20)
-                .padding(.top, 24)
-                .padding(.bottom, 8)
-        }
-    }
-
-    private var heroOverlayContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                if !item.agent.role.isEmpty {
-                    chip(text: item.agent.role, foreground: .primary, background: Color.white.opacity(0.15))
-                }
-                if let model = item.agent.model, !model.isEmpty {
-                    chip(text: model, foreground: Color.agentBrand, background: Color.agentBrand.opacity(0.15))
-                }
-                if let version = item.agent.version, !version.isEmpty {
-                    chip(text: "v\(version)", foreground: .secondary, background: Color.white.opacity(0.1))
-                }
-            }
-
-            Text(displayName)
-                .font(.largeTitle.weight(.bold))
-
-            if !item.agent.description.isEmpty {
-                Text(item.agent.description)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-            }
-
-            HStack(spacing: 12) {
-                Button {
-                    showAssignmentSheet = true
-                } label: {
-                    Label("Hire", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button {
-                    showTeamCreationSheet = true
-                } label: {
-                    Label("Create Team", systemImage: "plus")
-                }
-                .buttonStyle(.bordered)
-            }
-            .controlSize(.extraLarge)
-            .padding(.top, 4)
+            LinearGradient(
+                colors: [Color.systemGray6, Self.modalSurface],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
         }
     }
 
@@ -870,6 +963,60 @@ private struct AgentDefinitionDetailView: View {
     private func shortHex(_ value: String) -> String {
         guard value.count > 16 else { return value }
         return "\(value.prefix(8))...\(value.suffix(8))"
+    }
+
+    private func teamTitle(_ project: Project) -> String {
+        let trimmed = project.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "Untitled Team" : trimmed
+    }
+
+    @MainActor
+    private func addAgent(to team: Project) async {
+        guard !isAddingToTeam else { return }
+
+        let teamName = teamTitle(team)
+        if team.agentDefinitionIds.contains(item.agent.id) {
+            onAssignmentResult(
+                AgentAssignmentResult(
+                    title: "Already in Team",
+                    message: "\(displayName) is already in \(teamName)."
+                )
+            )
+            return
+        }
+
+        isAddingToTeam = true
+        defer { isAddingToTeam = false }
+
+        var updatedAgentIds = team.agentDefinitionIds
+        updatedAgentIds.append(item.agent.id)
+
+        do {
+            try await coreManager.safeCore.updateProject(
+                projectId: team.id,
+                title: team.title,
+                description: team.description ?? "",
+                repoUrl: team.repoUrl,
+                pictureUrl: team.pictureUrl,
+                agentDefinitionIds: updatedAgentIds,
+                mcpToolIds: team.mcpToolIds
+            )
+            await coreManager.fetchData()
+
+            onAssignmentResult(
+                AgentAssignmentResult(
+                    title: "Added to Team",
+                    message: "Added \(displayName) to \(teamName)."
+                )
+            )
+        } catch {
+            onAssignmentResult(
+                AgentAssignmentResult(
+                    title: "Unable to Add",
+                    message: "Couldn't add \(displayName) to \(teamName)."
+                )
+            )
+        }
     }
 
     private func openAuthorProfile() {
