@@ -69,8 +69,15 @@ final class ConversationHierarchy {
             return true
         }
 
-        // Sort roots by effective last activity (computed below) - we'll re-sort after computing aggregates
-        self.rootConversations = roots.sorted { $0.thread.lastActivity > $1.thread.lastActivity }
+        // Sort roots by 60-second bucketed last activity for stability, tie-breaking on event ID
+        self.rootConversations = roots.sorted { lhs, rhs in
+            let lhsBucket = lhs.thread.lastActivity / 60
+            let rhsBucket = rhs.thread.lastActivity / 60
+            if lhsBucket != rhsBucket {
+                return lhsBucket > rhsBucket
+            }
+            return lhs.thread.id < rhs.thread.id
+        }
 
         // Step 3: Compute aggregated data for each conversation (using safe BFS with cycle detection)
         var aggregated: [String: AggregatedConversationData] = [:]
@@ -176,16 +183,19 @@ final class ConversationHierarchy {
         aggregatedData[conversationId] ?? AggregatedConversationData.empty
     }
 
-    /// Get root conversations sorted by effective last activity (stable ordering)
+    /// Get root conversations sorted by 60-second bucketed effective last activity (stable ordering).
+    /// Conversations within the same 60-second window tie-break on event ID to prevent jumping.
     func getSortedRoots() -> [ConversationFullInfo] {
         rootConversations.sorted { lhs, rhs in
             let lhsActivity = aggregatedData[lhs.thread.id]?.effectiveLastActivity ?? lhs.thread.lastActivity
             let rhsActivity = aggregatedData[rhs.thread.id]?.effectiveLastActivity ?? rhs.thread.lastActivity
 
-            if lhsActivity != rhsActivity {
-                return lhsActivity > rhsActivity // Descending by activity
+            let lhsBucket = lhsActivity / 60
+            let rhsBucket = rhsActivity / 60
+            if lhsBucket != rhsBucket {
+                return lhsBucket > rhsBucket // Descending by bucket
             }
-            // Tiebreaker: sort by ID for deterministic ordering
+            // Within same bucket: sort by ID for deterministic ordering
             return lhs.thread.id < rhs.thread.id
         }
     }

@@ -57,7 +57,9 @@ final class ConversationFullHierarchy {
         )
         self.hierarchicallyActiveById = activityMap
 
-        // Step 5: Sort roots by hierarchical activity first, then by effective last activity
+        // Step 5: Sort roots by hierarchical activity first, then by effective last activity.
+        // Uses 60-second bucketing to prevent near-simultaneous activity from causing
+        // conversations to jump positions. Within the same bucket, tie-break on event ID.
         self.sortedRootConversations = roots.sorted { a, b in
             let aActive = activityMap[a.thread.id] ?? a.isActive
             let bActive = activityMap[b.thread.id] ?? b.isActive
@@ -66,8 +68,13 @@ final class ConversationFullHierarchy {
             if aActive && !bActive { return true }
             if !aActive && bActive { return false }
 
-            // Within same activity status, sort by effective last activity (newest first)
-            return a.thread.effectiveLastActivity > b.thread.effectiveLastActivity
+            // Within same activity status, bucket by 60-second windows for stability
+            let aBucket = a.thread.effectiveLastActivity / 60
+            let bBucket = b.thread.effectiveLastActivity / 60
+            if aBucket != bBucket {
+                return aBucket > bBucket
+            }
+            return a.thread.id < b.thread.id
         }
     }
 
