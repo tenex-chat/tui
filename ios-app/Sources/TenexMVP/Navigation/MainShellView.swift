@@ -10,6 +10,8 @@ struct MainShellView: View {
     @State private var selectedSection: AppSection? = .chats
     @State private var selectedConversation: ConversationFullInfo?
     @State private var selectedProjectId: String?
+    @State private var showNewProject = false
+    @State private var hasCheckedOnboarding = false
     @State private var selectedReport: Report?
     @State private var selectedInboxFilter: InboxFilter = .all
     @State private var selectedInboxItemId: String?
@@ -48,6 +50,15 @@ struct MainShellView: View {
         }
         .task(id: userNpub) {
             await refreshCurrentUserIdentity()
+        }
+        .task {
+            guard !hasCheckedOnboarding else { return }
+            hasCheckedOnboarding = true
+            try? await Task.sleep(for: .seconds(2))
+            if coreManager.projects.isEmpty {
+                selectedSection = .projects
+                showNewProject = true
+            }
         }
     }
 
@@ -262,7 +273,8 @@ struct MainShellView: View {
         case .projects:
             ProjectsTabView(
                 layoutMode: .shellComposite,
-                selectedProjectId: $selectedProjectId
+                selectedProjectId: $selectedProjectId,
+                showNewProject: $showNewProject
             )
             .accessibilityIdentifier(AppSection.projects.accessibilityContentID)
         case .reports:
