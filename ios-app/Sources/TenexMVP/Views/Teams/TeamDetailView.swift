@@ -153,7 +153,7 @@ struct TeamDetailView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.authorDisplayName)
                     .font(.subheadline.weight(.semibold))
-                Text(formatDate(item.team.createdAt))
+                Text(TimestampTextFormatter.string(from: item.team.createdAt, style: .mediumDateShortTime))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -384,17 +384,6 @@ struct TeamDetailView: View {
         }
     }
 
-    private func formatDate(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Self.dateFormatter.string(from: date)
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }
 
 private struct TeamDetailHero: View {
@@ -471,7 +460,7 @@ private struct TeamCommentRowView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.primary)
 
-                Text(formatDate(comment.comment.createdAt))
+                Text(TimestampTextFormatter.string(from: comment.comment.createdAt, style: .shortTime))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
@@ -493,15 +482,4 @@ private struct TeamCommentRowView: View {
         }
     }
 
-    private func formatDate(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Self.dateFormatter.string(from: date)
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }

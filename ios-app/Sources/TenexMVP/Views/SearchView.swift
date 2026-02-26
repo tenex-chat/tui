@@ -545,36 +545,12 @@ struct DraftSearchRow: View {
                         .foregroundStyle(.tertiary)
                 }
 
-                highlightedText(result.text, searchTerm: searchTerm)
+                SearchTextHighlighter.highlightedText(result.text, searchTerm: searchTerm)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
         }
-    }
-
-    private func highlightedText(_ text: String, searchTerm: String) -> Text {
-        guard !searchTerm.isEmpty else { return Text(text) }
-
-        var result = AttributedString(text)
-        let lowercasedText = text.lowercased()
-        let lowercasedTerm = searchTerm.lowercased()
-
-        var searchStart = lowercasedText.startIndex
-        while let range = lowercasedText.range(of: lowercasedTerm, range: searchStart..<lowercasedText.endIndex) {
-            let startOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.lowerBound)
-            let endOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.upperBound)
-
-            let attrStart = result.index(result.startIndex, offsetByCharacters: startOffset)
-            let attrEnd = result.index(result.startIndex, offsetByCharacters: endOffset)
-
-            result[attrStart..<attrEnd].font = .body.bold()
-            result[attrStart..<attrEnd].foregroundColor = .orange
-
-            searchStart = range.upperBound
-        }
-
-        return Text(result)
     }
 }
 
@@ -623,7 +599,7 @@ struct MatchingMessageRow: View {
                 }
 
                 // Content with highlighted search term
-                highlightedText(result.content, searchTerm: searchTerm)
+                SearchTextHighlighter.highlightedText(result.content, searchTerm: searchTerm)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
@@ -642,8 +618,10 @@ struct MatchingMessageRow: View {
         }
     }
 
-    /// Build highlighted text with search term emphasized using AttributedString
-    private func highlightedText(_ text: String, searchTerm: String) -> Text {
+}
+
+private enum SearchTextHighlighter {
+    static func highlightedText(_ text: String, searchTerm: String) -> Text {
         guard !searchTerm.isEmpty else {
             return Text(text)
         }
@@ -652,10 +630,8 @@ struct MatchingMessageRow: View {
         let lowercasedText = text.lowercased()
         let lowercasedTerm = searchTerm.lowercased()
 
-        // Find all occurrences and apply highlighting
         var searchStart = lowercasedText.startIndex
         while let range = lowercasedText.range(of: lowercasedTerm, range: searchStart..<lowercasedText.endIndex) {
-            // Map to AttributedString range
             let startOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.lowerBound)
             let endOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.upperBound)
 
