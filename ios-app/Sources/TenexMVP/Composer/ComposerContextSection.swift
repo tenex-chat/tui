@@ -287,7 +287,12 @@ extension MessageComposerView {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             workspaceMicGlyph
-            workspacePinnedPromptsMenu
+            #if os(macOS)
+            if shouldShowWorkspaceReferenceConversationButton {
+                workspaceReferenceConversationButton
+            }
+            #endif
+            workspacePinnedPromptsControl
 
             Button(action: sendMessage) {
                 Image(systemName: "arrow.up")
@@ -342,6 +347,64 @@ extension MessageComposerView {
         .help("Voice dictation")
     }
 
+    #if os(macOS)
+    var shouldShowWorkspaceReferenceConversationButton: Bool {
+        usesWorkspaceInlineLayout && !isNewConversation && conversationId != nil && selectedProject != nil
+    }
+
+    var workspaceReferenceConversationButton: some View {
+        Button {
+            triggerReferenceConversationLaunch()
+        } label: {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: workspaceIconSize, weight: .medium))
+                .foregroundStyle(.secondary.opacity(0.88))
+                .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+        }
+        .buttonStyle(.borderless)
+        .disabled(onReferenceConversationRequested == nil)
+        .help("Reference this conversation")
+    }
+
+    func triggerReferenceConversationLaunch() {
+        guard let onReferenceConversationRequested,
+              let project = selectedProject,
+              let conversationId = conversationId
+        else {
+            return
+        }
+
+        let messages = coreManager.messagesByConversation[conversationId] ?? []
+        let contextMessage = ConversationFormatters.generateContextMessage(
+            conversationId: conversationId,
+            messages: messages
+        )
+        let seed = NewThreadComposerSeed(
+            projectId: project.id,
+            agentPubkey: draft.agentPubkey,
+            initialContent: "[Text Attachment 1]",
+            textAttachments: [TextAttachment(id: 1, content: contextMessage)],
+            referenceConversationId: conversationId
+        )
+
+        onReferenceConversationRequested(
+            ReferenceConversationLaunchPayload(seed: seed)
+        )
+    }
+    #endif
+
+    @ViewBuilder
+    var workspacePinnedPromptsControl: some View {
+        switch pinControlMode {
+        case .hidden:
+            EmptyView()
+        case .menu:
+            workspacePinnedPromptsMenu
+        case .pinAction:
+            workspacePinPromptButton
+        }
+    }
+
     var workspacePinnedPromptsMenu: some View {
         Menu {
             pinnedPromptsMenuContent()
@@ -353,6 +416,20 @@ extension MessageComposerView {
         }
         .menuStyle(.borderlessButton)
         .help("Pinned prompts")
+    }
+
+    var workspacePinPromptButton: some View {
+        Button {
+            pinCurrentPrompt()
+        } label: {
+            Image(systemName: "pin")
+                .font(.system(size: workspaceIconSize, weight: .medium))
+                .foregroundStyle(.secondary.opacity(0.88))
+                .frame(width: workspaceAccessoryButtonSize, height: workspaceAccessoryButtonSize)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Pin this prompt")
+        .help("Pin this prompt")
     }
 
     var agentPopoverToken: some View {

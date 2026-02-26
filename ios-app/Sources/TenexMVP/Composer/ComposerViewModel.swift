@@ -16,6 +16,7 @@ struct ComposerDraftLoadResult {
     let draft: Draft?
     let localText: String?
     let imageAttachments: [ImageAttachment]
+    let textAttachments: [TextAttachment]
     let shouldShowLoadFailedAlert: Bool
 }
 
@@ -52,6 +53,7 @@ final class ComposerViewModel {
         projectId: String,
         conversationId: String?,
         initialContent: String?,
+        initialTextAttachments: [TextAttachment],
         referenceConversationId: String?,
         referenceReportATag: String?,
         isDirty: Bool
@@ -66,6 +68,7 @@ final class ComposerViewModel {
                 draft: nil,
                 localText: nil,
                 imageAttachments: [],
+                textAttachments: [],
                 shouldShowLoadFailedAlert: true
             )
         }
@@ -89,18 +92,28 @@ final class ComposerViewModel {
                 draft: nil,
                 localText: nil,
                 imageAttachments: [],
+                textAttachments: [],
                 shouldShowLoadFailedAlert: false
             )
         }
 
-        if let initialContent, !initialContent.isEmpty {
+        let hasInitialContent = !(initialContent ?? "").isEmpty
+        let hasInitialTextAttachments = !initialTextAttachments.isEmpty
+        if hasInitialContent || hasInitialTextAttachments {
+            let seededContent = initialContent ?? ""
             var modifiedDraft = loadedDraft
-            modifiedDraft.updateContent(initialContent)
+            modifiedDraft.updateContent(seededContent)
             modifiedDraft.setReferenceConversation(referenceConversationId)
             modifiedDraft.setReferenceReportATag(referenceReportATag)
+            modifiedDraft.setTextAttachments(initialTextAttachments)
 
             await dependencies.drafts.updateContent(
-                initialContent,
+                seededContent,
+                conversationId: conversationId,
+                projectId: projectId
+            )
+            await dependencies.drafts.updateTextAttachments(
+                initialTextAttachments,
                 conversationId: conversationId,
                 projectId: projectId
             )
@@ -117,8 +130,9 @@ final class ComposerViewModel {
 
             return ComposerDraftLoadResult(
                 draft: modifiedDraft,
-                localText: initialContent,
+                localText: seededContent,
                 imageAttachments: modifiedDraft.imageAttachments,
+                textAttachments: modifiedDraft.textAttachments,
                 shouldShowLoadFailedAlert: false
             )
         }
@@ -127,6 +141,7 @@ final class ComposerViewModel {
             draft: loadedDraft,
             localText: loadedDraft.content,
             imageAttachments: loadedDraft.imageAttachments,
+            textAttachments: loadedDraft.textAttachments,
             shouldShowLoadFailedAlert: false
         )
     }
@@ -206,7 +221,8 @@ final class ComposerViewModel {
         content: String,
         agentPubkey: String?,
         nudgeIds: [String],
-        skillIds: [String]
+        skillIds: [String],
+        referenceConversationId: String?
     ) async throws -> SendMessageResult {
         if isNewConversation {
             return try await dependencies.core.sendThread(
@@ -215,7 +231,8 @@ final class ComposerViewModel {
                 content: content,
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
-                skillIds: skillIds
+                skillIds: skillIds,
+                referenceConversationId: referenceConversationId
             )
         }
 

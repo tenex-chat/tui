@@ -34,6 +34,9 @@ struct MessageComposerView: View {
     /// Initial content to pre-populate the composer with (e.g., context message for conversation reference)
     let initialContent: String?
 
+    /// Initial text attachments to seed in the draft (TUI-style [Text Attachment N] payloads)
+    let initialTextAttachments: [TextAttachment]
+
     /// Reference conversation ID for context tagging (adds ["context", "<id>"] tag when sent)
     let referenceConversationId: String?
 
@@ -44,6 +47,9 @@ struct MessageComposerView: View {
 
     /// Callback when message is sent successfully
     var onSend: ((SendMessageResult) -> Void)?
+
+    /// Callback when "reference conversation" is requested from workspace composer
+    var onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
 
     /// Callback when the view is dismissed
     var onDismiss: (() -> Void)?
@@ -93,6 +99,7 @@ struct MessageComposerView: View {
     @State var pinnedPromptSaveError: String?
     @State var showPinnedPromptSaveError = false
     @State var messageHistory = MessageHistory()
+    @State var showModalComposerDeprecationAlert = false
 
     // Image attachment state
     @State var showImagePicker = false
@@ -102,6 +109,8 @@ struct MessageComposerView: View {
     @State var isDropTargeted = false
     /// Local image attachments synced with draft for UI display
     @State var localImageAttachments: [ImageAttachment] = []
+    /// Local text attachments synced with draft for UI display
+    @State var localTextAttachments: [TextAttachment] = []
 
     // PERFORMANCE FIX: Local text state for instant typing response
     // This decouples TextEditor binding from draft persistence to eliminate per-keystroke lag
@@ -169,8 +178,9 @@ struct MessageComposerView: View {
         // Draft sync may be pending, but localText always has current content
         let hasTextContent = !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let hasImageContent = !localImageAttachments.isEmpty
+        let hasTextAttachmentContent = !localTextAttachments.isEmpty
         // Either text or images is sufficient to send
-        return (hasTextContent || hasImageContent) && !isSending && !isUploadingImage
+        return (hasTextContent || hasImageContent || hasTextAttachmentContent) && !isSending && !isUploadingImage
     }
 
     var selectedAgent: ProjectAgent? {
@@ -234,11 +244,13 @@ struct MessageComposerView: View {
         conversationTitle: String? = nil,
         initialAgentPubkey: String? = nil,
         initialContent: String? = nil,
+        initialTextAttachments: [TextAttachment] = [],
         referenceConversationId: String? = nil,
         referenceReportATag: String? = nil,
         displayStyle: DisplayStyle = .modal,
         inlineLayoutStyle: InlineLayoutStyle = .standard,
         onSend: ((SendMessageResult) -> Void)? = nil,
+        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
         self.initialProject = project
@@ -246,11 +258,13 @@ struct MessageComposerView: View {
         self.conversationTitle = conversationTitle
         self.initialAgentPubkey = initialAgentPubkey
         self.initialContent = initialContent
+        self.initialTextAttachments = initialTextAttachments
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
         self.displayStyle = displayStyle
         self.inlineLayoutStyle = inlineLayoutStyle
         self.onSend = onSend
+        self.onReferenceConversationRequested = onReferenceConversationRequested
         self.onDismiss = onDismiss
 
         // Initialize state with project if provided
@@ -258,24 +272,72 @@ struct MessageComposerView: View {
 
         // Initialize draft (will be updated in onAppear)
         if let conversationId = conversationId, let projectId = project?.id {
-            _draft = State(initialValue: Draft(conversationId: conversationId, projectId: projectId, referenceConversationId: referenceConversationId, referenceReportATag: referenceReportATag))
+            var seededDraft = Draft(
+                conversationId: conversationId,
+                projectId: projectId,
+                referenceConversationId: referenceConversationId,
+                referenceReportATag: referenceReportATag
+            )
+            seededDraft.setTextAttachments(initialTextAttachments)
+            _draft = State(initialValue: seededDraft)
         } else if let projectId = project?.id {
-            _draft = State(initialValue: Draft(projectId: projectId, content: initialContent ?? "", referenceConversationId: referenceConversationId, referenceReportATag: referenceReportATag))
+            var seededDraft = Draft(
+                projectId: projectId,
+                content: initialContent ?? "",
+                referenceConversationId: referenceConversationId,
+                referenceReportATag: referenceReportATag
+            )
+            seededDraft.setTextAttachments(initialTextAttachments)
+            _draft = State(initialValue: seededDraft)
         } else {
             // No project yet - will be set when project is selected
-            _draft = State(initialValue: Draft(projectId: "", content: initialContent ?? "", referenceConversationId: referenceConversationId, referenceReportATag: referenceReportATag))
+            var seededDraft = Draft(
+                projectId: "",
+                content: initialContent ?? "",
+                referenceConversationId: referenceConversationId,
+                referenceReportATag: referenceReportATag
+            )
+            seededDraft.setTextAttachments(initialTextAttachments)
+            _draft = State(initialValue: seededDraft)
         }
 
         // Initialize localText with initial content if provided
         if let content = initialContent {
             _localText = State(initialValue: content)
         }
+        _localTextAttachments = State(initialValue: initialTextAttachments)
     }
 
     // MARK: - Body
 
     var body: some View {
-        composerViewWithLifecycle
+        // TODO(#modal-composer-deprecation): remove modal flow after all call sites migrate to inline.
+        if displayStyle == .modal {
+            deprecatedModalComposerView
+        } else {
+            composerViewWithLifecycle
+        }
+    }
+
+    var deprecatedModalComposerView: some View {
+        Color.clear
+            .onAppear {
+                if !showModalComposerDeprecationAlert {
+                    showModalComposerDeprecationAlert = true
+                }
+            }
+            .alert("Modal Composer Deprecated", isPresented: $showModalComposerDeprecationAlert) {
+                Button("OK") {
+                    dismissModalComposerDeprecationAlert()
+                }
+            } message: {
+                Text("this used to open a composer modal, now it doesnt")
+            }
+    }
+
+    func dismissModalComposerDeprecationAlert() {
+        onDismiss?()
+        dismiss()
     }
 
     @ViewBuilder
@@ -284,6 +346,7 @@ struct MessageComposerView: View {
             if isInlineComposer {
                 composerContent
             } else {
+                // TODO(#modal-composer-deprecation): delete this legacy modal composer UI when callers migrate.
                 NavigationStack {
                     composerContent
                         .navigationTitle(isNewConversation ? "New Conversation" : "Reply")
@@ -564,6 +627,11 @@ struct MessageComposerView: View {
             // Image attachment chips (for all conversations)
             if !localImageAttachments.isEmpty && selectedProject != nil {
                 imageAttachmentChipsView
+            }
+
+            // Text attachment chips (for all conversations)
+            if !localTextAttachments.isEmpty && selectedProject != nil {
+                textAttachmentChipsView
             }
 
             if usesWorkspaceInlineLayout {
