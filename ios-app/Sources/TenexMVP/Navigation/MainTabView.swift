@@ -12,6 +12,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case teams
     case agentDefinitions
     case nudges
+    case skills
     case settings
 
     var id: String { rawValue }
@@ -29,6 +30,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .teams: return "Teams"
         case .agentDefinitions: return "Agent Definitions"
         case .nudges: return "Nudges"
+        case .skills: return "Skills"
         case .settings: return "Settings"
         }
     }
@@ -46,6 +48,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .teams: return "person.2"
         case .agentDefinitions: return "person.3.sequence"
         case .nudges: return "forward.circle"
+        case .skills: return "bolt.fill"
         case .settings: return "gearshape"
         }
     }
@@ -260,7 +263,7 @@ struct MainTabView: View {
 
             TabSection("More") {
                 Tab("Settings", systemImage: "gearshape", value: 8) {
-                    AppSettingsView(defaultSection: .relays, isEmbedded: false)
+                    AppSettingsView(defaultSection: .relays, isEmbedded: false, onLogout: handleLogout)
                         .environment(coreManager)
                         .nowPlayingInset(coreManager: coreManager)
                 }

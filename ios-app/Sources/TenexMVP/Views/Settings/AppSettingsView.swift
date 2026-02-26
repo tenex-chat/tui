@@ -8,14 +8,16 @@ struct AppSettingsView: View {
     @State private var phonePath: [SettingsSection] = []
     let defaultSection: SettingsSection
     let isEmbedded: Bool
+    let onLogout: (() async -> Void)?
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
-    init(defaultSection: SettingsSection = .audio, isEmbedded: Bool = false) {
+    init(defaultSection: SettingsSection = .audio, isEmbedded: Bool = false, onLogout: (() async -> Void)? = nil) {
         self.defaultSection = defaultSection
         self.isEmbedded = isEmbedded
+        self.onLogout = onLogout
         _selectedSection = State(initialValue: defaultSection)
     }
 
@@ -65,6 +67,7 @@ struct AppSettingsView: View {
         #if os(macOS)
         .listStyle(.sidebar)
         #endif
+        .tenexListSurfaceBackground()
     }
 
     @ViewBuilder
@@ -139,11 +142,24 @@ struct AppSettingsView: View {
 
     private var phoneSettingsView: some View {
         NavigationStack(path: $phonePath) {
-            List(SettingsSection.allCases) { section in
-                NavigationLink(value: section) {
-                    Label(section.title, systemImage: section.icon)
+            List {
+                ForEach(SettingsSection.allCases) { section in
+                    NavigationLink(value: section) {
+                        Label(section.title, systemImage: section.icon)
+                    }
+                }
+
+                if let onLogout {
+                    Section {
+                        Button(role: .destructive) {
+                            Task { await onLogout() }
+                        } label: {
+                            Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                    }
                 }
             }
+            .tenexListSurfaceBackground()
             .navigationDestination(for: SettingsSection.self) { section in
                 sectionContent(section)
                     .navigationTitle(section.title)
