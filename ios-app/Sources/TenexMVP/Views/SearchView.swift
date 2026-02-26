@@ -315,6 +315,7 @@ struct SearchView: View {
             }
         }
         .sheet(isPresented: $showDraftComposer) {
+            // TODO(#modal-composer-deprecation): migrate this modal composer entry point to inline flow.
             MessageComposerView(
                 initialContent: draftTextForComposer,
                 displayStyle: .modal

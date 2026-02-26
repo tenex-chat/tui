@@ -13,6 +13,7 @@ import UIKit
 struct ConversationAdaptiveDetailView: View {
     let conversation: ConversationFullInfo
     let onOpenConversationId: ((String) -> Void)?
+    let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
     @Environment(TenexCoreManager.self) private var coreManager
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -20,16 +21,19 @@ struct ConversationAdaptiveDetailView: View {
 
     init(
         conversation: ConversationFullInfo,
-        onOpenConversationId: ((String) -> Void)? = nil
+        onOpenConversationId: ((String) -> Void)? = nil,
+        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil
     ) {
         self.conversation = conversation
         self.onOpenConversationId = onOpenConversationId
+        self.onReferenceConversationRequested = onReferenceConversationRequested
     }
 
     var body: some View {
         #if os(macOS)
         ConversationWorkspaceView(
             source: .existing(conversation: conversation),
+            onReferenceConversationRequested: onReferenceConversationRequested,
             onOpenConversationId: onOpenConversationId
         )
             .environment(coreManager)
@@ -37,6 +41,7 @@ struct ConversationAdaptiveDetailView: View {
         if horizontalSizeClass == .regular {
             ConversationWorkspaceView(
                 source: .existing(conversation: conversation),
+                onReferenceConversationRequested: onReferenceConversationRequested,
                 onOpenConversationId: onOpenConversationId
             )
                 .environment(coreManager)
@@ -120,16 +125,53 @@ private struct RawEventDestination: Identifiable, Hashable {
     var id: String { eventId }
 }
 
+struct NewThreadComposerSeed: Equatable {
+    let launchId: UUID
+    let projectId: String
+    let agentPubkey: String?
+    let initialContent: String
+    let textAttachments: [TextAttachment]
+    let referenceConversationId: String?
+
+    init(
+        launchId: UUID = UUID(),
+        projectId: String,
+        agentPubkey: String? = nil,
+        initialContent: String,
+        textAttachments: [TextAttachment],
+        referenceConversationId: String?
+    ) {
+        self.launchId = launchId
+        self.projectId = projectId
+        self.agentPubkey = agentPubkey
+        self.initialContent = initialContent
+        self.textAttachments = textAttachments
+        self.referenceConversationId = referenceConversationId
+    }
+
+    var identity: String {
+        launchId.uuidString
+    }
+}
+
+struct ReferenceConversationLaunchPayload: Equatable {
+    let seed: NewThreadComposerSeed
+}
+
 enum ConversationWorkspaceSource {
     case existing(conversation: ConversationFullInfo)
-    case newThread(project: Project)
+    case newThread(
+        project: Project,
+        agentPubkey: String? = nil,
+        composerSeed: NewThreadComposerSeed? = nil
+    )
 
     var identity: String {
         switch self {
         case .existing(let conversation):
             return "existing-\(conversation.thread.id)"
-        case .newThread(let project):
-            return "new-thread-\(project.id)"
+        case .newThread(let project, let agentPubkey, let composerSeed):
+            return "new-thread-\(project.id)-\(agentPubkey ?? "none")-\(composerSeed?.identity ?? "none")"
         }
     }
 
@@ -137,7 +179,7 @@ enum ConversationWorkspaceSource {
         switch self {
         case .existing(let conversation):
             return conversation
-        case .newThread(let project):
+        case .newThread(let project, _, _):
             let now = UInt64(Date().timeIntervalSince1970)
             let thread = Thread(
                 id: "new-thread-\(project.id)",
@@ -174,6 +216,7 @@ enum ConversationWorkspaceSource {
 struct ConversationWorkspaceView: View {
     let source: ConversationWorkspaceSource
     let onThreadCreated: ((String) -> Void)?
+    let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
     let onOpenConversationId: ((String) -> Void)?
 
     @Environment(TenexCoreManager.self) private var coreManager
@@ -201,10 +244,12 @@ struct ConversationWorkspaceView: View {
     init(
         source: ConversationWorkspaceSource,
         onThreadCreated: ((String) -> Void)? = nil,
+        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
         onOpenConversationId: ((String) -> Void)? = nil
     ) {
         self.source = source
         self.onThreadCreated = onThreadCreated
+        self.onReferenceConversationRequested = onReferenceConversationRequested
         self.onOpenConversationId = onOpenConversationId
         self.seedConversation = source.seedConversation
         _viewModel = StateObject(wrappedValue: ConversationDetailViewModel(conversation: source.seedConversation))
@@ -236,6 +281,20 @@ struct ConversationWorkspaceView: View {
         return false
     }
 
+    private var newThreadAgentPubkey: String? {
+        if case .newThread(_, let agentPubkey, _) = source {
+            return agentPubkey
+        }
+        return nil
+    }
+
+    private var newThreadComposerSeed: NewThreadComposerSeed? {
+        if case .newThread(_, _, let composerSeed) = source {
+            return composerSeed
+        }
+        return nil
+    }
+
     private var currentConversation: ConversationFullInfo {
         switch source {
         case .existing(let conversation):
@@ -249,7 +308,7 @@ struct ConversationWorkspaceView: View {
         switch source {
         case .existing:
             return coreManager.projects.first { $0.id == currentConversation.extractedProjectId }
-        case .newThread(let project):
+        case .newThread(let project, _, _):
             return coreManager.projects.first { $0.id == project.id } ?? project
         }
     }
@@ -564,12 +623,16 @@ struct ConversationWorkspaceView: View {
                 project: project,
                 conversationId: isNewThreadMode ? nil : currentConversation.thread.id,
                 conversationTitle: isNewThreadMode ? nil : currentConversation.thread.title,
-                initialAgentPubkey: isNewThreadMode ? nil : lastAgentPubkey,
+                initialAgentPubkey: isNewThreadMode ? newThreadAgentPubkey : lastAgentPubkey,
+                initialContent: isNewThreadMode ? newThreadComposerSeed?.initialContent : nil,
+                initialTextAttachments: isNewThreadMode ? (newThreadComposerSeed?.textAttachments ?? []) : [],
+                referenceConversationId: isNewThreadMode ? newThreadComposerSeed?.referenceConversationId : nil,
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace,
                 onSend: isNewThreadMode ? { result in
                     onThreadCreated?(result.eventId)
-                } : nil
+                } : nil,
+                onReferenceConversationRequested: isNewThreadMode ? nil : onReferenceConversationRequested
             )
             .environment(coreManager)
             .background(

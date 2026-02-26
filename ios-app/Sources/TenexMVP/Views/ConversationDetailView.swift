@@ -351,6 +351,7 @@ struct ConversationDetailView: View {
         }
         #if os(iOS)
         .sheet(isPresented: $showComposer) {
+            // TODO(#modal-composer-deprecation): migrate this modal composer entry point to inline flow.
             MessageComposerView(
                 project: project,
                 conversationId: conversation.thread.id,

@@ -18,9 +18,11 @@ struct MainShellView: View {
     @State private var activeInboxConversationId: String?
     @State private var selectedSearchConversation: ConversationFullInfo?
     @State private var selectedTeam: TeamInfo?
+    @State private var selectedAgentInstance: AgentInstance?
     @State private var selectedAgentDefinition: AgentDefinition?
     @State private var selectedNudge: Nudge?
     @State private var newConversationProjectId: String?
+    @State private var newConversationAgentPubkey: String?
     @State private var currentUserPubkey: String?
     @State private var currentUserDisplayName: String = "You"
 
@@ -38,6 +40,10 @@ struct MainShellView: View {
 
     private var activeConversationsCount: Int {
         ConversationActivityMetrics.activeConversationCount(conversations: coreManager.conversations)
+    }
+
+    private var totalOnlineAgentsCount: Int {
+        coreManager.onlineAgents.values.reduce(0) { $0 + $1.count }
     }
 
     var body: some View {
@@ -200,6 +206,14 @@ struct MainShellView: View {
                     .background((projectsOnlineCount > 0 ? Color.presenceOnline : .secondary).opacity(0.16))
                     .foregroundStyle(projectsOnlineCount > 0 ? Color.presenceOnline : .secondary)
                     .clipShape(Capsule())
+            } else if section == .agents, totalOnlineAgentsCount > 0 {
+                Text("\(totalOnlineAgentsCount)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.agentBrand.opacity(0.16))
+                    .foregroundStyle(Color.agentBrand)
+                    .clipShape(Capsule())
             } else if section == .stats {
                 Text(runtimeText)
                     .font(.caption2.weight(.semibold))
@@ -259,6 +273,7 @@ struct MainShellView: View {
                 layoutMode: .shellComposite,
                 selectedConversation: $selectedConversation,
                 newConversationProjectId: $newConversationProjectId,
+                newConversationAgentPubkey: $newConversationAgentPubkey,
                 onShowDiagnosticsInApp: { selectedSection = .diagnostics }
             )
             .accessibilityIdentifier(AppSection.chats.accessibilityContentID)
@@ -266,7 +281,8 @@ struct MainShellView: View {
             ConversationsTabView(
                 layoutMode: .adaptive,
                 selectedConversation: $selectedConversation,
-                newConversationProjectId: $newConversationProjectId
+                newConversationProjectId: $newConversationProjectId,
+                newConversationAgentPubkey: $newConversationAgentPubkey
             )
             .accessibilityIdentifier(AppSection.chats.accessibilityContentID)
             #endif
@@ -277,6 +293,18 @@ struct MainShellView: View {
                 showNewProject: $showNewProject
             )
             .accessibilityIdentifier(AppSection.projects.accessibilityContentID)
+        case .agents:
+            AgentsTabView(
+                layoutMode: .adaptive,
+                selectedAgent: $selectedAgentInstance,
+                onNavigateToChat: { projectId, agentPubkey in
+                    selectedConversation = nil
+                    newConversationProjectId = projectId
+                    newConversationAgentPubkey = agentPubkey
+                    selectedSection = .chats
+                }
+            )
+            .accessibilityIdentifier(AppSection.agents.accessibilityContentID)
         case .reports:
             ReportsTabView(layoutMode: .adaptive, selectedReport: $selectedReport)
                 .accessibilityIdentifier(AppSection.reports.accessibilityContentID)

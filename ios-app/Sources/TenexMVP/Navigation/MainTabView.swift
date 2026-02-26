@@ -3,6 +3,7 @@ import SwiftUI
 enum AppSection: String, CaseIterable, Identifiable {
     case chats
     case projects
+    case agents
     case reports
     case inbox
     case search
@@ -19,6 +20,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         switch self {
         case .chats: return "Chats"
         case .projects: return "Projects"
+        case .agents: return "Agents"
         case .reports: return "Reports"
         case .inbox: return "Inbox"
         case .search: return "Search"
@@ -35,6 +37,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         switch self {
         case .chats: return "bubble.left.and.bubble.right"
         case .projects: return "folder"
+        case .agents: return "cpu"
         case .reports: return "doc.richtext"
         case .inbox: return "tray"
         case .search: return "magnifyingglass"
@@ -155,10 +158,17 @@ struct MainTabView: View {
         )
     }
 
+    @MainActor
+    private func handleLogout() async {
+        _ = await coreManager.clearCredentials()
+        userNpub = ""
+        isLoggedIn = false
+    }
+
     private var compactTabView: some View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: 0) {
-                ConversationsTabView()
+                ConversationsTabView(onLogout: handleLogout)
                     .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
@@ -200,7 +210,7 @@ struct MainTabView: View {
     private var sidebarAdaptableTabView: some View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: 0) {
-                ConversationsTabView(layoutMode: .adaptive)
+                ConversationsTabView(layoutMode: .adaptive, onLogout: handleLogout)
                     .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }

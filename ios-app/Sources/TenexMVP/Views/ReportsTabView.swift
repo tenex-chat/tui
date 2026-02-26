@@ -409,6 +409,7 @@ struct ReportsTabDetailView: View {
         }
         .sheet(isPresented: $showChatWithAuthor) {
             if let project = project {
+                // TODO(#modal-composer-deprecation): migrate this modal composer entry point to inline flow.
                 MessageComposerView(
                     project: project,
                     initialAgentPubkey: report.author,
