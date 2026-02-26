@@ -36,7 +36,8 @@ final class DelegationTreeViewModel: ObservableObject {
         let descendantIds = await safeCore.getDescendantConversationIds(conversationId: rootConversationId)
 
         // Step 2: Load full info for root + all descendants
-        let allIds = [rootConversationId] + descendantIds
+        var seenConversationIds = Set<String>()
+        let allIds = ([rootConversationId] + descendantIds).filter { seenConversationIds.insert($0).inserted }
         let allConversations = await safeCore.getConversationsByIds(conversationIds: allIds)
 
         guard let rootConversation = allConversations.first(where: { $0.thread.id == rootConversationId }) else {
@@ -62,19 +63,30 @@ final class DelegationTreeViewModel: ObservableObject {
         // Step 4: Build conversation lookup map
         let conversationById = Dictionary(uniqueKeysWithValues: allConversations.map { ($0.thread.id, $0) })
 
-        // Step 5: Build tree recursively
+        // Step 5: Build parent->children relationships.
+        // We combine explicit parent tags with q-tag links so delegations still render
+        // when child threads are missing parentConversationId.
+        let childrenByParentId = buildChildrenByParent(
+            rootConversationId: rootConversationId,
+            conversationById: conversationById,
+            messagesByConversation: messagesByConversation
+        )
+
+        // Step 6: Build tree recursively
+        var visitedConversationIds = Set<String>()
         var root = buildNode(
             conversation: rootConversation,
             delegationMessage: nil,
             returnMessage: nil,
-            parentConversation: nil,
+            childrenByParentId: childrenByParentId,
             conversationById: conversationById,
             messagesByConversation: messagesByConversation,
-            depth: 0
+            depth: 0,
+            visitedConversationIds: &visitedConversationIds
         )
         assignDepths(&root, depth: 0)
 
-        // Step 6: Compute layout
+        // Step 7: Compute layout
         var ySlot = 0
         computeLayout(node: &root, ySlot: &ySlot)
 
@@ -88,16 +100,28 @@ final class DelegationTreeViewModel: ObservableObject {
         conversation: ConversationFullInfo,
         delegationMessage: Message?,
         returnMessage: Message?,
-        parentConversation: ConversationFullInfo?,
+        childrenByParentId: [String: [String]],
         conversationById: [String: ConversationFullInfo],
         messagesByConversation: [String: [Message]],
-        depth: Int
+        depth: Int,
+        visitedConversationIds: inout Set<String>
     ) -> DelegationTreeNode {
-        // Find children: conversations whose parentId == this conversation's id
-        let childConversations = conversationById.values.filter { $0.thread.parentConversationId == conversation.thread.id }
+        // Guard against cycles in malformed hierarchy data.
+        guard visitedConversationIds.insert(conversation.thread.id).inserted else {
+            return DelegationTreeNode(
+                conversation: conversation,
+                delegationMessage: delegationMessage,
+                returnMessage: returnMessage,
+                children: [],
+                depth: depth
+            )
+        }
+
+        let childIds = childrenByParentId[conversation.thread.id] ?? []
+        let childConversations = childIds.compactMap { conversationById[$0] }
 
         var children: [DelegationTreeNode] = []
-        for childConv in childConversations.sorted(by: { $0.thread.lastActivity < $1.thread.lastActivity }) {
+        for childConv in childConversations {
             let childMessages = messagesByConversation[childConv.thread.id] ?? []
 
             // Outgoing arrow: OP of the child conversation (first message = delegation brief)
@@ -113,10 +137,11 @@ final class DelegationTreeViewModel: ObservableObject {
                 conversation: childConv,
                 delegationMessage: delegMsg,
                 returnMessage: childReturnMsg,
-                parentConversation: conversation,
+                childrenByParentId: childrenByParentId,
                 conversationById: conversationById,
                 messagesByConversation: messagesByConversation,
-                depth: depth + 1
+                depth: depth + 1,
+                visitedConversationIds: &visitedConversationIds
             )
             children.append(childNode)
         }
@@ -128,6 +153,79 @@ final class DelegationTreeViewModel: ObservableObject {
             children: children,
             depth: depth
         )
+    }
+
+    private func buildChildrenByParent(
+        rootConversationId: String,
+        conversationById: [String: ConversationFullInfo],
+        messagesByConversation: [String: [Message]]
+    ) -> [String: [String]] {
+        let knownConversationIds = Set(conversationById.keys)
+        var parentByChild: [String: (parentId: String, priority: Int)] = [:]
+
+        func registerParent(childId: String, parentId: String, priority: Int) {
+            guard childId != parentId else { return }
+            guard knownConversationIds.contains(childId), knownConversationIds.contains(parentId) else { return }
+
+            if let existing = parentByChild[childId] {
+                // Keep stronger parent source. If same priority, keep deterministic ordering.
+                if existing.priority > priority ||
+                    (existing.priority == priority && existing.parentId <= parentId) {
+                    return
+                }
+            }
+            parentByChild[childId] = (parentId: parentId, priority: priority)
+        }
+
+        // Priority 1: explicit thread parent
+        for conversation in conversationById.values {
+            let childId = conversation.thread.id
+            guard childId != rootConversationId else { continue }
+            if let parentId = conversation.thread.parentConversationId {
+                registerParent(childId: childId, parentId: parentId, priority: 1)
+            }
+        }
+
+        // Priority 3 (strongest): inferred parent from child's delegation tags.
+        // This mirrors runtime_hierarchy where message-level parent info can override thread-level tags.
+        for conversation in conversationById.values {
+            let childId = conversation.thread.id
+            guard childId != rootConversationId else { continue }
+            let messages = messagesByConversation[childId] ?? []
+            if let inferredParentId = messages
+                .compactMap(\.delegationTag)
+                .first(where: { $0 != childId }) {
+                registerParent(childId: childId, parentId: inferredParentId, priority: 3)
+            }
+        }
+
+        // Priority 2: q-tag edges from parent messages to child conversation ids.
+        for (parentId, messages) in messagesByConversation {
+            guard knownConversationIds.contains(parentId) else { continue }
+            for message in messages {
+                for childId in message.qTags {
+                    registerParent(childId: childId, parentId: parentId, priority: 2)
+                }
+            }
+        }
+
+        var childrenByParentId: [String: [String]] = [:]
+        for (childId, relation) in parentByChild {
+            childrenByParentId[relation.parentId, default: []].append(childId)
+        }
+
+        for parentId in Array(childrenByParentId.keys) {
+            childrenByParentId[parentId]?.sort { lhs, rhs in
+                let lhsActivity = conversationById[lhs]?.thread.lastActivity ?? 0
+                let rhsActivity = conversationById[rhs]?.thread.lastActivity ?? 0
+                if lhsActivity != rhsActivity {
+                    return lhsActivity < rhsActivity
+                }
+                return lhs < rhs
+            }
+        }
+
+        return childrenByParentId
     }
 
     private func assignDepths(_ node: inout DelegationTreeNode, depth: Int) {

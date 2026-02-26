@@ -229,6 +229,22 @@ private struct DelegationNodeCard: View {
         Color.conversationStatus(for: conversation.thread.statusLabel, isActive: conversation.isActive)
     }
 
+    private var recipientPubkey: String? {
+        conversation.thread.pTags.first
+    }
+
+    private var recipientDisplayName: String? {
+        guard let recipientPubkey else { return nil }
+        let resolved = coreManager.displayName(for: recipientPubkey)
+        if !resolved.isEmpty, resolved != recipientPubkey {
+            return resolved
+        }
+        if recipientPubkey.count > 18 {
+            return "\(recipientPubkey.prefix(8))...\(recipientPubkey.suffix(6))"
+        }
+        return recipientPubkey
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Header: avatar + name + active pulse
@@ -246,6 +262,16 @@ private struct DelegationNodeCard: View {
                             .font(.caption)
                             .fontWeight(.semibold)
                             .lineLimit(1)
+
+                        if let recipientDisplayName, recipientDisplayName != conversation.author {
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Text(recipientDisplayName)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
 
                         if conversation.isActive {
                             Circle()
