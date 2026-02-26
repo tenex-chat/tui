@@ -27,7 +27,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func getRawEventJson(eventId: String) -> String?
     func getAskEventById(eventId: String) -> AskEventLookupInfo?
     func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?) throws -> SendMessageResult
     func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws -> SendMessageResult
 
     // MARK: - Inbox

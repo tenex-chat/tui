@@ -288,10 +288,18 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a new conversation thread.
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult {
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?) throws -> SendMessageResult {
         try profiler.measureFFI("sendThread") {
             do {
-                return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds, skillIds: skillIds)
+                return try core.sendThread(
+                    projectId: projectId,
+                    title: title,
+                    content: content,
+                    agentPubkey: agentPubkey,
+                    nudgeIds: nudgeIds,
+                    skillIds: skillIds,
+                    referenceConversationId: referenceConversationId
+                )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

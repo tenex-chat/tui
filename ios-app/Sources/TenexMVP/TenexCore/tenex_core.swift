@@ -1121,7 +1121,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws  -> SendMessageResult
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?) throws  -> SendMessageResult
     
     /**
      * Enable or disable audio notifications
@@ -2314,7 +2314,7 @@ open func sendMessage(conversationId: String, projectId: String, content: String
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String])throws  -> SendMessageResult  {
+open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?)throws  -> SendMessageResult  {
     return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_send_thread(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
@@ -2322,7 +2322,8 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
         FfiConverterString.lower(content),
         FfiConverterOptionString.lower(agentPubkey),
         FfiConverterSequenceString.lower(nudgeIds),
-        FfiConverterSequenceString.lower(skillIds),$0
+        FfiConverterSequenceString.lower(skillIds),
+        FfiConverterOptionString.lower(referenceConversationId),$0
     )
 })
 }
@@ -10596,7 +10597,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 31521) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 64001) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 44798) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_audio_notifications_enabled() != 31649) {
