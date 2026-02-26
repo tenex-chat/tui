@@ -253,7 +253,7 @@ struct ProjectSettingsView: View {
             }
 
             LabeledContent("Created") {
-                Text(Self.dateFormatter.string(from: Date(timeIntervalSince1970: TimeInterval(project.createdAt))))
+                Text(TimestampTextFormatter.string(from: project.createdAt, style: .mediumDateShortTime))
                     .foregroundStyle(.secondary)
             }
 
@@ -715,10 +715,4 @@ struct ProjectSettingsView: View {
         showErrorAlert = true
     }
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
 }

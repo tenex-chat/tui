@@ -43,24 +43,44 @@ typealias KeychainResult<T> = Result<T, KeychainError>
 /// All operations are designed to be called from background threads.
 final class KeychainService {
 
-    // MARK: - Constants
+    private enum CredentialDescriptor {
+        case nsec
+        case elevenLabsApiKey
+        case openRouterApiKey
 
-    /// Unique identifier for the nsec credential item
-    private static let nsecServiceKey = "com.tenex.mvp.nsec"
-    private static let nsecAccountKey = "tenex-user-nsec"
+        var serviceKey: String {
+            switch self {
+            case .nsec:
+                return "com.tenex.mvp.nsec"
+            case .elevenLabsApiKey:
+                return "com.tenex.mvp.elevenlabs"
+            case .openRouterApiKey:
+                return "com.tenex.mvp.openrouter"
+            }
+        }
 
-    /// Unique identifier for ElevenLabs API key
-    private static let elevenLabsServiceKey = "com.tenex.mvp.elevenlabs"
-    private static let elevenLabsAccountKey = "tenex-elevenlabs-api-key"
+        var accountKey: String {
+            switch self {
+            case .nsec:
+                return "tenex-user-nsec"
+            case .elevenLabsApiKey:
+                return "tenex-elevenlabs-api-key"
+            case .openRouterApiKey:
+                return "tenex-openrouter-api-key"
+            }
+        }
 
-    /// Unique identifier for OpenRouter API key
-    private static let openRouterServiceKey = "com.tenex.mvp.openrouter"
-    private static let openRouterAccountKey = "tenex-openrouter-api-key"
-
-    /// Plaintext file names used by macOS storage backend.
-    private static let nsecFileName = "nsec.txt"
-    private static let elevenLabsFileName = "elevenlabs_api_key.txt"
-    private static let openRouterFileName = "openrouter_api_key.txt"
+        var fileName: String {
+            switch self {
+            case .nsec:
+                return "nsec.txt"
+            case .elevenLabsApiKey:
+                return "elevenlabs_api_key.txt"
+            case .openRouterApiKey:
+                return "openrouter_api_key.txt"
+            }
+        }
+    }
 
     // MARK: - Singleton
 
@@ -75,135 +95,28 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveNsec(_ nsec: String) -> KeychainResult<Void> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return saveFileCredential(nsec, fileName: Self.nsecFileName)
-        #else
-        guard let nsecData = nsec.data(using: .utf8) else {
-            return .failure(.encodingFailed)
-        }
-
-        // First, try to update existing item
-        let updateQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.nsecServiceKey,
-            kSecAttrAccount as String: Self.nsecAccountKey
-        ]
-
-        let updateAttributes: [String: Any] = [
-            kSecValueData as String: nsecData,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
-
-        var status = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
-
-        if status == errSecItemNotFound {
-            // Item doesn't exist, add it
-            let addQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: Self.nsecServiceKey,
-                kSecAttrAccount as String: Self.nsecAccountKey,
-                kSecValueData as String: nsecData,
-                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            ]
-
-            status = SecItemAdd(addQuery as CFDictionary, nil)
-        }
-
-        return mapOSStatus(status)
-        #endif
+        saveCredential(nsec, descriptor: .nsec)
     }
 
     /// Retrieves the stored nsec credential from credential storage
     /// - Returns: Result containing the nsec string or specific failure
     /// - Precondition: Must be called from a background thread
     func loadNsec() -> KeychainResult<String> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return loadFileCredential(fileName: Self.nsecFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.nsecServiceKey,
-            kSecAttrAccount as String: Self.nsecAccountKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess else {
-            return .failure(mapOSStatusToError(status))
-        }
-
-        guard let data = result as? Data else {
-            return .failure(.unexpectedData)
-        }
-
-        guard let nsec = String(data: data, encoding: .utf8) else {
-            return .failure(.decodingFailed)
-        }
-
-        return .success(nsec)
-        #endif
+        loadCredential(descriptor: .nsec)
     }
 
     /// Deletes the stored nsec credential from credential storage
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteNsec() -> KeychainResult<Void> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return deleteFileCredential(fileName: Self.nsecFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.nsecServiceKey,
-            kSecAttrAccount as String: Self.nsecAccountKey
-        ]
-
-        let status = SecItemDelete(query as CFDictionary)
-
-        // Treat "not found" as success for deletion
-        if status == errSecItemNotFound {
-            return .success(())
-        }
-
-        return mapOSStatus(status)
-        #endif
+        deleteCredential(descriptor: .nsec)
     }
 
     /// Checks if nsec credential exists in credential storage without retrieving it
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasStoredNsec() -> KeychainResult<Bool> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return hasFileCredential(fileName: Self.nsecFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.nsecServiceKey,
-            kSecAttrAccount as String: Self.nsecAccountKey,
-            kSecReturnData as String: false // Just check existence
-        ]
-
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
-
-        switch status {
-        case errSecSuccess:
-            return .success(true)
-        case errSecItemNotFound:
-            return .success(false)
-        default:
-            return .failure(mapOSStatusToError(status))
-        }
-        #endif
+        hasCredential(descriptor: .nsec)
     }
 
     // MARK: - ElevenLabs API Key Methods
@@ -213,132 +126,28 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveElevenLabsApiKey(_ key: String) -> KeychainResult<Void> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return saveFileCredential(key, fileName: Self.elevenLabsFileName)
-        #else
-        guard let keyData = key.data(using: .utf8) else {
-            return .failure(.encodingFailed)
-        }
-
-        let updateQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.elevenLabsServiceKey,
-            kSecAttrAccount as String: Self.elevenLabsAccountKey
-        ]
-
-        let updateAttributes: [String: Any] = [
-            kSecValueData as String: keyData,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
-
-        var status = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
-
-        if status == errSecItemNotFound {
-            let addQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: Self.elevenLabsServiceKey,
-                kSecAttrAccount as String: Self.elevenLabsAccountKey,
-                kSecValueData as String: keyData,
-                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            ]
-
-            status = SecItemAdd(addQuery as CFDictionary, nil)
-        }
-
-        return mapOSStatus(status)
-        #endif
+        saveCredential(key, descriptor: .elevenLabsApiKey)
     }
 
     /// Retrieves the stored ElevenLabs API key from credential storage
     /// - Returns: Result containing the API key or specific failure
     /// - Precondition: Must be called from a background thread
     func loadElevenLabsApiKey() -> KeychainResult<String> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return loadFileCredential(fileName: Self.elevenLabsFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.elevenLabsServiceKey,
-            kSecAttrAccount as String: Self.elevenLabsAccountKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess else {
-            return .failure(mapOSStatusToError(status))
-        }
-
-        guard let data = result as? Data else {
-            return .failure(.unexpectedData)
-        }
-
-        guard let key = String(data: data, encoding: .utf8) else {
-            return .failure(.decodingFailed)
-        }
-
-        return .success(key)
-        #endif
+        loadCredential(descriptor: .elevenLabsApiKey)
     }
 
     /// Deletes the stored ElevenLabs API key from credential storage
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteElevenLabsApiKey() -> KeychainResult<Void> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return deleteFileCredential(fileName: Self.elevenLabsFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.elevenLabsServiceKey,
-            kSecAttrAccount as String: Self.elevenLabsAccountKey
-        ]
-
-        let status = SecItemDelete(query as CFDictionary)
-
-        if status == errSecItemNotFound {
-            return .success(())
-        }
-
-        return mapOSStatus(status)
-        #endif
+        deleteCredential(descriptor: .elevenLabsApiKey)
     }
 
     /// Checks if ElevenLabs API key exists in credential storage without retrieving it
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasElevenLabsApiKey() -> KeychainResult<Bool> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return hasFileCredential(fileName: Self.elevenLabsFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.elevenLabsServiceKey,
-            kSecAttrAccount as String: Self.elevenLabsAccountKey,
-            kSecReturnData as String: false
-        ]
-
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
-
-        switch status {
-        case errSecSuccess:
-            return .success(true)
-        case errSecItemNotFound:
-            return .success(false)
-        default:
-            return .failure(mapOSStatusToError(status))
-        }
-        #endif
+        hasCredential(descriptor: .elevenLabsApiKey)
     }
 
     // MARK: - OpenRouter API Key Methods
@@ -348,131 +157,67 @@ final class KeychainService {
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func saveOpenRouterApiKey(_ key: String) -> KeychainResult<Void> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return saveFileCredential(key, fileName: Self.openRouterFileName)
-        #else
-        guard let keyData = key.data(using: .utf8) else {
-            return .failure(.encodingFailed)
-        }
-
-        let updateQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.openRouterServiceKey,
-            kSecAttrAccount as String: Self.openRouterAccountKey
-        ]
-
-        let updateAttributes: [String: Any] = [
-            kSecValueData as String: keyData,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
-
-        var status = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
-
-        if status == errSecItemNotFound {
-            let addQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: Self.openRouterServiceKey,
-                kSecAttrAccount as String: Self.openRouterAccountKey,
-                kSecValueData as String: keyData,
-                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            ]
-
-            status = SecItemAdd(addQuery as CFDictionary, nil)
-        }
-
-        return mapOSStatus(status)
-        #endif
+        saveCredential(key, descriptor: .openRouterApiKey)
     }
 
     /// Retrieves the stored OpenRouter API key from credential storage
     /// - Returns: Result containing the API key or specific failure
     /// - Precondition: Must be called from a background thread
     func loadOpenRouterApiKey() -> KeychainResult<String> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return loadFileCredential(fileName: Self.openRouterFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.openRouterServiceKey,
-            kSecAttrAccount as String: Self.openRouterAccountKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess else {
-            return .failure(mapOSStatusToError(status))
-        }
-
-        guard let data = result as? Data else {
-            return .failure(.unexpectedData)
-        }
-
-        guard let key = String(data: data, encoding: .utf8) else {
-            return .failure(.decodingFailed)
-        }
-
-        return .success(key)
-        #endif
+        loadCredential(descriptor: .openRouterApiKey)
     }
 
     /// Deletes the stored OpenRouter API key from credential storage
     /// - Returns: Result indicating success or specific failure
     /// - Precondition: Must be called from a background thread
     func deleteOpenRouterApiKey() -> KeychainResult<Void> {
-        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
-
-        #if os(macOS)
-        return deleteFileCredential(fileName: Self.openRouterFileName)
-        #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.openRouterServiceKey,
-            kSecAttrAccount as String: Self.openRouterAccountKey
-        ]
-
-        let status = SecItemDelete(query as CFDictionary)
-
-        if status == errSecItemNotFound {
-            return .success(())
-        }
-
-        return mapOSStatus(status)
-        #endif
+        deleteCredential(descriptor: .openRouterApiKey)
     }
 
     /// Checks if OpenRouter API key exists in credential storage without retrieving it
     /// - Returns: Result indicating whether credential exists
     /// - Precondition: Must be called from a background thread
     func hasOpenRouterApiKey() -> KeychainResult<Bool> {
+        hasCredential(descriptor: .openRouterApiKey)
+    }
+
+    private func saveCredential(_ value: String, descriptor: CredentialDescriptor) -> KeychainResult<Void> {
         precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
         #if os(macOS)
-        return hasFileCredential(fileName: Self.openRouterFileName)
+        return saveFileCredential(value, fileName: descriptor.fileName)
         #else
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.openRouterServiceKey,
-            kSecAttrAccount as String: Self.openRouterAccountKey,
-            kSecReturnData as String: false
-        ]
+        return saveKeychainCredential(value, serviceKey: descriptor.serviceKey, accountKey: descriptor.accountKey)
+        #endif
+    }
 
-        let status = SecItemCopyMatching(query as CFDictionary, nil)
+    private func loadCredential(descriptor: CredentialDescriptor) -> KeychainResult<String> {
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
 
-        switch status {
-        case errSecSuccess:
-            return .success(true)
-        case errSecItemNotFound:
-            return .success(false)
-        default:
-            return .failure(mapOSStatusToError(status))
-        }
+        #if os(macOS)
+        return loadFileCredential(fileName: descriptor.fileName)
+        #else
+        return loadKeychainCredential(serviceKey: descriptor.serviceKey, accountKey: descriptor.accountKey)
+        #endif
+    }
+
+    private func deleteCredential(descriptor: CredentialDescriptor) -> KeychainResult<Void> {
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return deleteFileCredential(fileName: descriptor.fileName)
+        #else
+        return deleteKeychainCredential(serviceKey: descriptor.serviceKey, accountKey: descriptor.accountKey)
+        #endif
+    }
+
+    private func hasCredential(descriptor: CredentialDescriptor) -> KeychainResult<Bool> {
+        precondition(!Foundation.Thread.isMainThread, "Credential storage operations must not be called on the main thread")
+
+        #if os(macOS)
+        return hasFileCredential(fileName: descriptor.fileName)
+        #else
+        return hasKeychainCredential(serviceKey: descriptor.serviceKey, accountKey: descriptor.accountKey)
         #endif
     }
 
@@ -574,6 +319,99 @@ final class KeychainService {
         return .success(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
+    private func saveKeychainCredential(_ value: String, serviceKey: String, accountKey: String) -> KeychainResult<Void> {
+        guard let valueData = value.data(using: .utf8) else {
+            return .failure(.encodingFailed)
+        }
+
+        let updateQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceKey,
+            kSecAttrAccount as String: accountKey
+        ]
+
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: valueData,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+
+        var status = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
+
+        if status == errSecItemNotFound {
+            let addQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: serviceKey,
+                kSecAttrAccount as String: accountKey,
+                kSecValueData as String: valueData,
+                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            ]
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+
+        return mapOSStatus(status)
+    }
+
+    private func loadKeychainCredential(serviceKey: String, accountKey: String) -> KeychainResult<String> {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceKey,
+            kSecAttrAccount as String: accountKey,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess else {
+            return .failure(mapOSStatusToError(status))
+        }
+
+        guard let data = result as? Data else {
+            return .failure(.unexpectedData)
+        }
+
+        guard let value = String(data: data, encoding: .utf8) else {
+            return .failure(.decodingFailed)
+        }
+
+        return .success(value)
+    }
+
+    private func deleteKeychainCredential(serviceKey: String, accountKey: String) -> KeychainResult<Void> {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceKey,
+            kSecAttrAccount as String: accountKey
+        ]
+
+        let status = SecItemDelete(query as CFDictionary)
+        if status == errSecItemNotFound {
+            return .success(())
+        }
+
+        return mapOSStatus(status)
+    }
+
+    private func hasKeychainCredential(serviceKey: String, accountKey: String) -> KeychainResult<Bool> {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceKey,
+            kSecAttrAccount as String: accountKey,
+            kSecReturnData as String: false
+        ]
+
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        switch status {
+        case errSecSuccess:
+            return .success(true)
+        case errSecItemNotFound:
+            return .success(false)
+        default:
+            return .failure(mapOSStatusToError(status))
+        }
+    }
+
     /// Maps an OSStatus to a Result<Void, KeychainError>
     private func mapOSStatus(_ status: OSStatus) -> KeychainResult<Void> {
         if status == errSecSuccess {
@@ -609,29 +447,45 @@ extension KeychainService {
         }
     }
 
+    private func saveCredentialAsync(_ value: String, descriptor: CredentialDescriptor) async -> KeychainResult<Void> {
+        await runAsync { self.saveCredential(value, descriptor: descriptor) }
+    }
+
+    private func loadCredentialAsync(descriptor: CredentialDescriptor) async -> KeychainResult<String> {
+        await runAsync { self.loadCredential(descriptor: descriptor) }
+    }
+
+    private func deleteCredentialAsync(descriptor: CredentialDescriptor) async -> KeychainResult<Void> {
+        await runAsync { self.deleteCredential(descriptor: descriptor) }
+    }
+
+    private func hasCredentialAsync(descriptor: CredentialDescriptor) async -> KeychainResult<Bool> {
+        await runAsync { self.hasCredential(descriptor: descriptor) }
+    }
+
     /// Saves nsec credential asynchronously on a background thread
     /// - Parameter nsec: The nsec string to save
     /// - Returns: Result indicating success or failure
     func saveNsecAsync(_ nsec: String) async -> KeychainResult<Void> {
-        await runAsync { self.saveNsec(nsec) }
+        await saveCredentialAsync(nsec, descriptor: .nsec)
     }
 
     /// Loads nsec credential asynchronously on a background thread
     /// - Returns: Result containing the nsec or failure
     func loadNsecAsync() async -> KeychainResult<String> {
-        await runAsync { self.loadNsec() }
+        await loadCredentialAsync(descriptor: .nsec)
     }
 
     /// Deletes nsec credential asynchronously on a background thread
     /// - Returns: Result indicating success or failure
     func deleteNsecAsync() async -> KeychainResult<Void> {
-        await runAsync { self.deleteNsec() }
+        await deleteCredentialAsync(descriptor: .nsec)
     }
 
     /// Checks for stored credential asynchronously on a background thread
     /// - Returns: Result indicating whether credential exists
     func hasStoredNsecAsync() async -> KeychainResult<Bool> {
-        await runAsync { self.hasStoredNsec() }
+        await hasCredentialAsync(descriptor: .nsec)
     }
 
     // MARK: - ElevenLabs Async Extensions
@@ -640,25 +494,25 @@ extension KeychainService {
     /// - Parameter key: The API key to save
     /// - Returns: Result indicating success or failure
     func saveElevenLabsApiKeyAsync(_ key: String) async -> KeychainResult<Void> {
-        await runAsync { self.saveElevenLabsApiKey(key) }
+        await saveCredentialAsync(key, descriptor: .elevenLabsApiKey)
     }
 
     /// Loads ElevenLabs API key asynchronously on a background thread
     /// - Returns: Result containing the API key or failure
     func loadElevenLabsApiKeyAsync() async -> KeychainResult<String> {
-        await runAsync { self.loadElevenLabsApiKey() }
+        await loadCredentialAsync(descriptor: .elevenLabsApiKey)
     }
 
     /// Deletes ElevenLabs API key asynchronously on a background thread
     /// - Returns: Result indicating success or failure
     func deleteElevenLabsApiKeyAsync() async -> KeychainResult<Void> {
-        await runAsync { self.deleteElevenLabsApiKey() }
+        await deleteCredentialAsync(descriptor: .elevenLabsApiKey)
     }
 
     /// Checks for stored ElevenLabs API key asynchronously on a background thread
     /// - Returns: Result indicating whether credential exists
     func hasElevenLabsApiKeyAsync() async -> KeychainResult<Bool> {
-        await runAsync { self.hasElevenLabsApiKey() }
+        await hasCredentialAsync(descriptor: .elevenLabsApiKey)
     }
 
     // MARK: - OpenRouter Async Extensions
@@ -667,24 +521,24 @@ extension KeychainService {
     /// - Parameter key: The API key to save
     /// - Returns: Result indicating success or failure
     func saveOpenRouterApiKeyAsync(_ key: String) async -> KeychainResult<Void> {
-        await runAsync { self.saveOpenRouterApiKey(key) }
+        await saveCredentialAsync(key, descriptor: .openRouterApiKey)
     }
 
     /// Loads OpenRouter API key asynchronously on a background thread
     /// - Returns: Result containing the API key or failure
     func loadOpenRouterApiKeyAsync() async -> KeychainResult<String> {
-        await runAsync { self.loadOpenRouterApiKey() }
+        await loadCredentialAsync(descriptor: .openRouterApiKey)
     }
 
     /// Deletes OpenRouter API key asynchronously on a background thread
     /// - Returns: Result indicating success or failure
     func deleteOpenRouterApiKeyAsync() async -> KeychainResult<Void> {
-        await runAsync { self.deleteOpenRouterApiKey() }
+        await deleteCredentialAsync(descriptor: .openRouterApiKey)
     }
 
     /// Checks for stored OpenRouter API key asynchronously on a background thread
     /// - Returns: Result indicating whether credential exists
     func hasOpenRouterApiKeyAsync() async -> KeychainResult<Bool> {
-        await runAsync { self.hasOpenRouterApiKey() }
+        await hasCredentialAsync(descriptor: .openRouterApiKey)
     }
 }

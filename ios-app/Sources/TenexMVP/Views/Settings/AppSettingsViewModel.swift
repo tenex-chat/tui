@@ -36,6 +36,20 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
 
 @MainActor
 final class AppSettingsViewModel: ObservableObject {
+    private enum ApiProvider {
+        case elevenLabs
+        case openRouter
+
+        var displayName: String {
+            switch self {
+            case .elevenLabs:
+                return "ElevenLabs"
+            case .openRouter:
+                return "OpenRouter"
+            }
+        }
+    }
+
     @Published var hasElevenLabsKey = false
     @Published var hasOpenRouterKey = false
     @Published var audioEnabled = false
@@ -81,12 +95,10 @@ final class AppSettingsViewModel: ObservableObject {
     func load(coreManager: TenexCoreManager) async {
         isLoading = true
 
-        async let elevenLabsCheck = KeychainService.shared.hasElevenLabsApiKeyAsync()
-        async let openRouterCheck = KeychainService.shared.hasOpenRouterApiKeyAsync()
-
-        let (elevenLabsResult, openRouterResult) = await (elevenLabsCheck, openRouterCheck)
-        if case .success(let has) = elevenLabsResult { hasElevenLabsKey = has }
-        if case .success(let has) = openRouterResult { hasOpenRouterKey = has }
+        async let elevenLabsCheck = hasApiKey(for: .elevenLabs)
+        async let openRouterCheck = hasApiKey(for: .openRouter)
+        hasElevenLabsKey = await elevenLabsCheck
+        hasOpenRouterKey = await openRouterCheck
 
         do {
             let settings = try await coreManager.safeCore.getAiAudioSettings()
@@ -237,55 +249,26 @@ final class AppSettingsViewModel: ObservableObject {
     }
 
     func saveElevenLabsKey(_ key: String) async {
-        guard !key.isEmpty else { return }
-        isSavingApiKey = true
-        let result = await KeychainService.shared.saveElevenLabsApiKeyAsync(key)
-        isSavingApiKey = false
-
-        switch result {
-        case .success:
-            hasElevenLabsKey = true
-        case .failure(let error):
-            errorMessage = "Failed to save ElevenLabs key: \(error.localizedDescription)"
-        }
+        await saveApiKey(key, for: .elevenLabs)
     }
 
     func deleteElevenLabsKey() async {
-        let result = await KeychainService.shared.deleteElevenLabsApiKeyAsync()
-        if case .success = result {
-            hasElevenLabsKey = false
-            availableVoices = []
-        }
+        await deleteApiKey(for: .elevenLabs)
     }
 
     func saveOpenRouterKey(_ key: String) async {
-        guard !key.isEmpty else { return }
-        isSavingApiKey = true
-        let result = await KeychainService.shared.saveOpenRouterApiKeyAsync(key)
-        isSavingApiKey = false
-
-        switch result {
-        case .success:
-            hasOpenRouterKey = true
-        case .failure(let error):
-            errorMessage = "Failed to save OpenRouter key: \(error.localizedDescription)"
-        }
+        await saveApiKey(key, for: .openRouter)
     }
 
     func deleteOpenRouterKey() async {
-        let result = await KeychainService.shared.deleteOpenRouterApiKeyAsync()
-        if case .success = result {
-            hasOpenRouterKey = false
-            availableModels = []
-        }
+        await deleteApiKey(for: .openRouter)
     }
 
     func fetchModels(coreManager: TenexCoreManager) async {
         isLoadingModels = true
         defer { isLoadingModels = false }
 
-        let keyResult = await KeychainService.shared.loadOpenRouterApiKeyAsync()
-        guard case .success(let apiKey) = keyResult else {
+        guard let apiKey = await loadApiKey(for: .openRouter) else {
             errorMessage = "OpenRouter API key not found in local storage"
             return
         }
@@ -301,8 +284,7 @@ final class AppSettingsViewModel: ObservableObject {
         isLoadingVoices = true
         defer { isLoadingVoices = false }
 
-        let keyResult = await KeychainService.shared.loadElevenLabsApiKeyAsync()
-        guard case .success(let apiKey) = keyResult else {
+        guard let apiKey = await loadApiKey(for: .elevenLabs) else {
             errorMessage = "ElevenLabs API key not found in local storage"
             return
         }
@@ -489,6 +471,85 @@ final class AppSettingsViewModel: ObservableObject {
 
     private static func persistBunkerEnabled(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: bunkerEnabledDefaultsKey)
+    }
+
+    private func hasApiKey(for provider: ApiProvider) async -> Bool {
+        let result: KeychainResult<Bool>
+        switch provider {
+        case .elevenLabs:
+            result = await KeychainService.shared.hasElevenLabsApiKeyAsync()
+        case .openRouter:
+            result = await KeychainService.shared.hasOpenRouterApiKeyAsync()
+        }
+
+        if case .success(let hasKey) = result {
+            return hasKey
+        }
+
+        return false
+    }
+
+    private func saveApiKey(_ key: String, for provider: ApiProvider) async {
+        guard !key.isEmpty else { return }
+
+        isSavingApiKey = true
+        defer { isSavingApiKey = false }
+
+        let result: KeychainResult<Void>
+        switch provider {
+        case .elevenLabs:
+            result = await KeychainService.shared.saveElevenLabsApiKeyAsync(key)
+        case .openRouter:
+            result = await KeychainService.shared.saveOpenRouterApiKeyAsync(key)
+        }
+
+        switch result {
+        case .success:
+            switch provider {
+            case .elevenLabs:
+                hasElevenLabsKey = true
+            case .openRouter:
+                hasOpenRouterKey = true
+            }
+        case .failure(let error):
+            errorMessage = "Failed to save \(provider.displayName) key: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteApiKey(for provider: ApiProvider) async {
+        let result: KeychainResult<Void>
+        switch provider {
+        case .elevenLabs:
+            result = await KeychainService.shared.deleteElevenLabsApiKeyAsync()
+        case .openRouter:
+            result = await KeychainService.shared.deleteOpenRouterApiKeyAsync()
+        }
+
+        guard case .success = result else { return }
+
+        switch provider {
+        case .elevenLabs:
+            hasElevenLabsKey = false
+            availableVoices = []
+        case .openRouter:
+            hasOpenRouterKey = false
+            availableModels = []
+        }
+    }
+
+    private func loadApiKey(for provider: ApiProvider) async -> String? {
+        let result: KeychainResult<String>
+        switch provider {
+        case .elevenLabs:
+            result = await KeychainService.shared.loadElevenLabsApiKeyAsync()
+        case .openRouter:
+            result = await KeychainService.shared.loadOpenRouterApiKeyAsync()
+        }
+
+        if case .success(let key) = result {
+            return key
+        }
+        return nil
     }
 }
 

@@ -280,13 +280,6 @@ struct ReportsTabRowView: View {
     let projectTitle: String?
     var showsChevron: Bool = true
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }()
-
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -314,7 +307,7 @@ struct ReportsTabRowView: View {
                         .foregroundStyle(.tertiary)
 
                     // Date
-                    Text(formatDate(report.createdAt))
+                    Text(TimestampTextFormatter.string(from: report.createdAt, style: .mediumDate))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
 
@@ -343,10 +336,6 @@ struct ReportsTabRowView: View {
         .padding(.vertical, 8)
     }
 
-    private func formatDate(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Self.dateFormatter.string(from: date)
-    }
 }
 
 // MARK: - Reports Tab Detail View
@@ -358,13 +347,6 @@ struct ReportsTabDetailView: View {
 
     @Environment(TenexCoreManager.self) private var coreManager
     @State private var showChatWithAuthor = false
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .short
-        return formatter
-    }()
 
     /// The report's a-tag for reference (format: 30023:pubkey:slug)
     private var reportATag: String {
@@ -467,7 +449,7 @@ struct ReportsTabDetailView: View {
 
                 HStack(spacing: 4) {
                     Image(systemName: "clock")
-                    Text(formatDate(report.createdAt))
+                    Text(TimestampTextFormatter.string(from: report.createdAt, style: .longDateShortTime))
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -487,10 +469,6 @@ struct ReportsTabDetailView: View {
         }
     }
 
-    private func formatDate(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Self.dateFormatter.string(from: date)
-    }
 }
 
 // MARK: - Report Author Name Helper

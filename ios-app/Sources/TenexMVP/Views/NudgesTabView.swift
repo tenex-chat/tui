@@ -297,13 +297,6 @@ private struct NudgeDetailView: View {
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
     private var nudge: Nudge {
         item.nudge
     }
@@ -418,7 +411,10 @@ private struct NudgeDetailView: View {
                 }
 
                 metadataRow(title: "Pubkey", value: shortHex(nudge.pubkey))
-                metadataRow(title: "Created", value: formatDate(nudge.createdAt))
+                metadataRow(
+                    title: "Created",
+                    value: TimestampTextFormatter.string(from: nudge.createdAt, style: .mediumDateShortTime)
+                )
                 metadataRow(title: "Event ID", value: shortHex(nudge.id))
 
                 if let supersedes = nudge.supersedes, !supersedes.isEmpty {
@@ -580,11 +576,6 @@ private struct NudgeDetailView: View {
                 .textSelection(.enabled)
             Spacer(minLength: 0)
         }
-    }
-
-    private func formatDate(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Self.dateFormatter.string(from: date)
     }
 
     private func shortHex(_ value: String) -> String {

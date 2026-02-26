@@ -496,13 +496,6 @@ private struct AgentDefinitionDetailView: View {
     )
     private let contentColumnMaxWidth: CGFloat = 800
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-
     private var displayName: String {
         item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name
     }
@@ -859,7 +852,7 @@ private struct AgentDefinitionDetailView: View {
 
                 Text("\u{00B7}")
                     .foregroundStyle(.tertiary)
-                Text(formatDate(item.agent.createdAt))
+                Text(TimestampTextFormatter.string(from: item.agent.createdAt, style: .mediumDateShortTime))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -953,11 +946,6 @@ private struct AgentDefinitionDetailView: View {
             .padding(.vertical, 3)
             .background(background, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .foregroundStyle(foreground)
-    }
-
-    private func formatDate(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Self.dateFormatter.string(from: date)
     }
 
     private func shortHex(_ value: String) -> String {
