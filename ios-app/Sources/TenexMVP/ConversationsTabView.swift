@@ -6,7 +6,9 @@ struct ConversationsTabView: View {
     let layoutMode: ConversationsLayoutMode
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
     private let newConversationProjectIdBindingOverride: Binding<String?>?
+    private let newConversationAgentPubkeyBindingOverride: Binding<String?>?
     private let onShowDiagnosticsInApp: (() -> Void)?
+    private let onLogout: (() async -> Void)?
 
     @State private var showDiagnostics = false
     @State private var showAISettings = false
@@ -15,6 +17,8 @@ struct ConversationsTabView: View {
     @State private var showStats = false
     @State private var selectedConversationState: ConversationFullInfo?
     @State private var newConversationProjectIdState: String?
+    @State private var newConversationAgentPubkeyState: String?
+    @State private var newConversationSeedState: NewThreadComposerSeed?
     @State private var detailNavigationPath: [String] = []
     @State private var projectForNewConversation: SelectedProjectForComposer?
     @State private var pendingCreatedConversationId: String?
@@ -32,12 +36,16 @@ struct ConversationsTabView: View {
         layoutMode: ConversationsLayoutMode = .adaptive,
         selectedConversation: Binding<ConversationFullInfo?>? = nil,
         newConversationProjectId: Binding<String?>? = nil,
-        onShowDiagnosticsInApp: (() -> Void)? = nil
+        newConversationAgentPubkey: Binding<String?>? = nil,
+        onShowDiagnosticsInApp: (() -> Void)? = nil,
+        onLogout: (() async -> Void)? = nil
     ) {
         self.layoutMode = layoutMode
         self.selectedConversationBindingOverride = selectedConversation
         self.newConversationProjectIdBindingOverride = newConversationProjectId
+        self.newConversationAgentPubkeyBindingOverride = newConversationAgentPubkey
         self.onShowDiagnosticsInApp = onShowDiagnosticsInApp
+        self.onLogout = onLogout
     }
 
     private var selectedConversationBinding: Binding<ConversationFullInfo?> {
@@ -46,6 +54,10 @@ struct ConversationsTabView: View {
 
     private var newConversationProjectIdBinding: Binding<String?> {
         newConversationProjectIdBindingOverride ?? $newConversationProjectIdState
+    }
+
+    private var newConversationAgentPubkeyBinding: Binding<String?> {
+        newConversationAgentPubkeyBindingOverride ?? $newConversationAgentPubkeyState
     }
 
     private var useSplitView: Bool {
@@ -153,6 +165,7 @@ struct ConversationsTabView: View {
                 selectedConversationBinding.wrappedValue = nil
                 newConversationProjectIdBinding.wrappedValue = nil
                 pendingCreatedConversationId = nil
+                newConversationSeedState = nil
             }
         }
         .onChange(of: coreManager.appFilterShowArchived) { _, _ in
@@ -170,7 +183,21 @@ struct ConversationsTabView: View {
             }
             guard newId != nil else { return }
             newConversationProjectIdBinding.wrappedValue = nil
+            newConversationAgentPubkeyBinding.wrappedValue = nil
             pendingCreatedConversationId = nil
+            newConversationSeedState = nil
+        }
+        .onChange(of: newConversationProjectIdBinding.wrappedValue) { _, newProjectId in
+            guard let seed = newConversationSeedState else { return }
+            if newProjectId != seed.projectId || newConversationAgentPubkeyBinding.wrappedValue != seed.agentPubkey {
+                newConversationSeedState = nil
+            }
+        }
+        .onChange(of: newConversationAgentPubkeyBinding.wrappedValue) { _, newAgentPubkey in
+            guard let seed = newConversationSeedState else { return }
+            if newAgentPubkey != seed.agentPubkey {
+                newConversationSeedState = nil
+            }
         }
         .sheet(isPresented: $showDiagnostics) {
             #if os(macOS)
@@ -203,6 +230,7 @@ struct ConversationsTabView: View {
                 .tenexModalPresentation(detents: [.large])
         }
         .sheet(item: $projectForNewConversation) { selectedProject in
+            // TODO(#modal-composer-deprecation): migrate this modal composer entry point to inline flow.
             MessageComposerView(project: selectedProject.project)
                 .environment(coreManager)
                 .tenexModalPresentation(detents: [.large])
@@ -210,6 +238,7 @@ struct ConversationsTabView: View {
         .sheet(item: $conversationToReference) { conversation in
             let projectId = TenexCoreManager.projectId(fromATag: conversation.projectATag)
             if let project = coreManager.projects.first(where: { $0.id == projectId }) {
+                // TODO(#modal-composer-deprecation): migrate this modal composer entry point to inline flow.
                 MessageComposerView(
                     project: project,
                     initialContent: ConversationFormatters.generateContextMessage(conversation: conversation),
@@ -272,18 +301,28 @@ struct ConversationsTabView: View {
         if let conversation = selectedConversationBinding.wrappedValue {
             ConversationAdaptiveDetailView(
                 conversation: conversation,
-                onOpenConversationId: pushConversationInDetailStack
+                onOpenConversationId: pushConversationInDetailStack,
+                onReferenceConversationRequested: handleReferenceConversationLaunch
             )
                 .environment(coreManager)
             .id(conversation.thread.id)
         } else if let newProjectId = newConversationProjectIdBinding.wrappedValue,
                   let project = coreManager.projects.first(where: { $0.id == newProjectId }) {
+            let composerSeed =
+                (newConversationSeedState?.projectId == newProjectId
+                && newConversationSeedState?.agentPubkey == newConversationAgentPubkeyBinding.wrappedValue)
+                ? newConversationSeedState
+                : nil
             ConversationWorkspaceView(
-                source: .newThread(project: project),
+                source: .newThread(
+                    project: project,
+                    agentPubkey: newConversationAgentPubkeyBinding.wrappedValue,
+                    composerSeed: composerSeed
+                ),
                 onThreadCreated: handleThreadCreated
             )
             .environment(coreManager)
-            .id("new-thread-\(project.id)")
+            .id("new-thread-\(project.id)-\(newConversationAgentPubkeyBinding.wrappedValue ?? "none")-\(composerSeed?.identity ?? "none")")
         } else {
             ContentUnavailableView(
                 "Select a Conversation",
@@ -585,6 +624,18 @@ struct ConversationsTabView: View {
             } label: {
                 Label("Diagnostics", systemImage: "gauge.with.needle")
             }
+
+            if let onLogout {
+                Divider()
+
+                Button(role: .destructive) {
+                    Task {
+                        await onLogout()
+                    }
+                } label: {
+                    Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
         } label: {
             if compact {
                 HStack(spacing: 4) {
@@ -605,6 +656,8 @@ struct ConversationsTabView: View {
             #if os(macOS)
             selectedConversationBinding.wrappedValue = nil
             newConversationProjectIdBinding.wrappedValue = project.id
+            newConversationAgentPubkeyBinding.wrappedValue = nil
+            newConversationSeedState = nil
             #else
             projectForNewConversation = SelectedProjectForComposer(project: project)
             #endif
@@ -633,7 +686,18 @@ struct ConversationsTabView: View {
         let canonical = coreManager.conversationById[conversation.thread.id] ?? conversation
         selectedConversationBinding.wrappedValue = canonical
         newConversationProjectIdBinding.wrappedValue = nil
+        newConversationAgentPubkeyBinding.wrappedValue = nil
+        newConversationSeedState = nil
         pendingCreatedConversationId = nil
+    }
+
+    private func handleReferenceConversationLaunch(_ payload: ReferenceConversationLaunchPayload) {
+        selectedConversationBinding.wrappedValue = nil
+        newConversationProjectIdBinding.wrappedValue = payload.seed.projectId
+        newConversationAgentPubkeyBinding.wrappedValue = payload.seed.agentPubkey
+        newConversationSeedState = payload.seed
+        pendingCreatedConversationId = nil
+        detailNavigationPath.removeAll()
     }
 
     private func pushConversationInDetailStack(_ conversationId: String) {
