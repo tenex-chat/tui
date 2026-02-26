@@ -793,7 +793,7 @@ private struct AISettingsSectionView: View {
                     }
                 }
                 #if os(macOS)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(Color.systemBackground)
                 #else
                 .background(Color(.secondarySystemGroupedBackground))
                 #endif
@@ -831,7 +831,7 @@ private struct AISettingsSectionView: View {
                     .padding(12)
                 }
                 #if os(macOS)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(Color.systemBackground)
                 #else
                 .background(Color(.secondarySystemGroupedBackground))
                 #endif

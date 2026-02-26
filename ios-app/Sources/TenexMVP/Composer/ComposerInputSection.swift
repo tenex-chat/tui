@@ -35,6 +35,10 @@ extension MessageComposerView {
         (isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject
     }
 
+    var workspaceEditorHeight: CGFloat {
+        max(workspaceBottomRowHeight + 88, 140)
+    }
+
     @ViewBuilder
     var contentEditorView: some View {
         if usesWorkspaceInlineLayout {
@@ -43,6 +47,7 @@ extension MessageComposerView {
                 .onTapGesture {
                     composerFieldFocused = true
                 }
+                .frame(height: workspaceEditorHeight, alignment: .top)
         } else {
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $localText)
