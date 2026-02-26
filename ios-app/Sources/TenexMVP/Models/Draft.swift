@@ -8,6 +8,14 @@ struct ImageAttachment: Codable, Identifiable, Equatable {
     let url: String
 }
 
+/// A text attachment created from pasted content.
+struct TextAttachment: Codable, Identifiable, Equatable {
+    /// Unique identifier for the attachment
+    let id: Int
+    /// Full text content for the attachment
+    let content: String
+}
+
 /// A draft message for composition.
 /// Can be for a new conversation (thread) or an existing conversation.
 struct Draft: Codable, Identifiable, Equatable {
@@ -27,6 +35,7 @@ struct Draft: Codable, Identifiable, Equatable {
         case referenceConversationId
         case referenceReportATag
         case imageAttachments
+        case textAttachments
     }
     /// Unique identifier for the draft
     var id: String
@@ -73,6 +82,12 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Next image attachment ID (for generating unique IDs)
     private var nextImageId: Int = 1
 
+    /// Pasted text attachments (TUI-style [Text Attachment N] payloads)
+    var textAttachments: [TextAttachment]
+
+    /// Next text attachment ID (for generating unique IDs)
+    private var nextTextAttachmentId: Int = 1
+
     // MARK: - Initialization
 
     /// Create a new draft for a new conversation
@@ -90,6 +105,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
         self.imageAttachments = []
+        self.textAttachments = []
     }
 
     /// Create a new draft for an existing conversation
@@ -107,12 +123,13 @@ struct Draft: Codable, Identifiable, Equatable {
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
         self.imageAttachments = []
+        self.textAttachments = []
     }
 
     // MARK: - Migration Support
 
     /// Custom decoder for backward compatibility
-    /// Handles drafts from before projectId, selectedNudgeIds, referenceConversationId, referenceReportATag, and imageAttachments were added
+    /// Handles drafts from before projectId, selectedNudgeIds, referenceConversationId, referenceReportATag, imageAttachments, and textAttachments were added
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -138,10 +155,16 @@ struct Draft: Codable, Identifiable, Equatable {
         self.referenceReportATag = try container.decodeIfPresent(String.self, forKey: .referenceReportATag)
         // Migration: imageAttachments is new, default to empty array
         self.imageAttachments = try container.decodeIfPresent([ImageAttachment].self, forKey: .imageAttachments) ?? []
+        // Migration: textAttachments is new, default to empty array
+        self.textAttachments = try container.decodeIfPresent([TextAttachment].self, forKey: .textAttachments) ?? []
 
         // Restore nextImageId from existing attachments
         if let maxId = self.imageAttachments.map(\.id).max() {
             self.nextImageId = maxId + 1
+        }
+        // Restore nextTextAttachmentId from existing attachments
+        if let maxId = self.textAttachments.map(\.id).max() {
+            self.nextTextAttachmentId = maxId + 1
         }
     }
 
@@ -150,13 +173,17 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Whether the draft has meaningful content
     var hasContent: Bool {
         // Check content OR images - either is valid
-        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageAttachments.isEmpty
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !imageAttachments.isEmpty
+            || !textAttachments.isEmpty
     }
 
     /// Whether the draft is valid for sending
     var isValid: Bool {
         // Both new conversations and replies need content OR images
-        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageAttachments.isEmpty
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !imageAttachments.isEmpty
+            || !textAttachments.isEmpty
     }
 
     /// Whether the draft has any image attachments
@@ -207,6 +234,8 @@ struct Draft: Codable, Identifiable, Equatable {
         referenceReportATag = nil
         imageAttachments = []
         nextImageId = 1
+        textAttachments = []
+        nextTextAttachmentId = 1
         lastEdited = Date()
     }
 
@@ -294,6 +323,41 @@ struct Draft: Codable, Identifiable, Equatable {
         lastEdited = Date()
     }
 
+    // MARK: - Text Attachments
+
+    /// Add a text attachment and return its ID
+    mutating func addTextAttachment(content: String) -> Int {
+        let id = nextTextAttachmentId
+        nextTextAttachmentId += 1
+        textAttachments.append(TextAttachment(id: id, content: content))
+        lastEdited = Date()
+        return id
+    }
+
+    /// Remove a text attachment by ID
+    mutating func removeTextAttachment(id: Int) {
+        textAttachments.removeAll { $0.id == id }
+        lastEdited = Date()
+    }
+
+    /// Replace text attachments while preserving ID generation continuity
+    mutating func setTextAttachments(_ attachments: [TextAttachment]) {
+        textAttachments = attachments
+        if let maxId = attachments.map(\.id).max() {
+            nextTextAttachmentId = maxId + 1
+        } else {
+            nextTextAttachmentId = 1
+        }
+        lastEdited = Date()
+    }
+
+    /// Clear all text attachments
+    mutating func clearTextAttachments() {
+        textAttachments = []
+        nextTextAttachmentId = 1
+        lastEdited = Date()
+    }
+
     /// Build the full message content including image URLs
     /// Replaces [Image #N] markers with actual URLs (matching TUI behavior)
     func buildFullContent() -> String {
@@ -303,6 +367,21 @@ struct Draft: Codable, Identifiable, Equatable {
         for attachment in imageAttachments {
             let marker = "[Image #\(attachment.id)]"
             fullContent = fullContent.replacingOccurrences(of: marker, with: attachment.url)
+        }
+
+        // Append text attachments at end while preserving inline [Text Attachment N] markers
+        if !textAttachments.isEmpty {
+            if !fullContent.isEmpty && !fullContent.hasSuffix("\n") {
+                fullContent.append("\n")
+            }
+            fullContent.append("\n----\n")
+            for attachment in textAttachments {
+                fullContent.append("-- Text Attachment \(attachment.id) --\n")
+                fullContent.append(attachment.content)
+                if !attachment.content.hasSuffix("\n") {
+                    fullContent.append("\n")
+                }
+            }
         }
 
         return fullContent

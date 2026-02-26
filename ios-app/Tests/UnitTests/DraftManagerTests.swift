@@ -29,6 +29,8 @@ final class DraftManagerTests: XCTestCase {
         )
         _ = original.addImageAttachment(url: "https://example.com/img1.png")
         _ = original.addImageAttachment(url: "https://example.com/img2.png")
+        _ = original.addTextAttachment(content: "attachment one")
+        _ = original.addTextAttachment(content: "attachment two")
 
         let data = try encoder.encode(original)
         let decoded = try decoder.decode(Draft.self, from: data)
@@ -47,6 +49,9 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(decoded.imageAttachments.count, 2)
         XCTAssertEqual(decoded.imageAttachments[0].url, "https://example.com/img1.png")
         XCTAssertEqual(decoded.imageAttachments[1].url, "https://example.com/img2.png")
+        XCTAssertEqual(decoded.textAttachments.count, 2)
+        XCTAssertEqual(decoded.textAttachments[0].content, "attachment one")
+        XCTAssertEqual(decoded.textAttachments[1].content, "attachment two")
     }
 
     func testExistingConversationDraftRoundTrips() throws {
@@ -174,6 +179,24 @@ final class DraftManagerTests: XCTestCase {
 
         XCTAssertTrue(draft.imageAttachments.isEmpty)
         XCTAssertFalse(draft.hasImages)
+        XCTAssertTrue(draft.textAttachments.isEmpty)
+    }
+
+    func testDecodingWithoutTextAttachmentsDefaultsToEmptyArray() throws {
+        let json = """
+        {
+            "id": "draft-5b",
+            "projectId": "proj-1",
+            "title": "",
+            "content": "",
+            "isNewConversation": true,
+            "lastEdited": 0
+        }
+        """
+        let data = Data(json.utf8)
+        let draft = try decoder.decode(Draft.self, from: data)
+
+        XCTAssertTrue(draft.textAttachments.isEmpty)
     }
 
     func testDecodingPreV2JsonWithAllFieldsMissing() throws {
@@ -199,6 +222,7 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertNil(draft.referenceConversationId)
         XCTAssertNil(draft.referenceReportATag)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
+        XCTAssertTrue(draft.textAttachments.isEmpty)
     }
 
     func testDecodingWithImageAttachmentsRestoresNextImageId() throws {
@@ -306,6 +330,19 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(nextId, 1)
     }
 
+    func testClearTextAttachmentsResetsAndNextIdRestartsAt1() {
+        var draft = Draft(projectId: "p")
+        _ = draft.addTextAttachment(content: "one")
+        _ = draft.addTextAttachment(content: "two")
+        XCTAssertEqual(draft.textAttachments.count, 2)
+
+        draft.clearTextAttachments()
+
+        XCTAssertTrue(draft.textAttachments.isEmpty)
+        let nextId = draft.addTextAttachment(content: "new")
+        XCTAssertEqual(nextId, 1)
+    }
+
     func testUpdateProjectIdChangesProjectAndUpdatesTimestamp() {
         var draft = Draft(projectId: "old-proj")
         let before = draft.lastEdited
@@ -334,7 +371,8 @@ final class DraftManagerTests: XCTestCase {
 
     func testDraftStoreSaveAndLoadRoundTrips() async throws {
         let store = DraftStore()
-        let draft1 = Draft(projectId: "proj-a", content: "first draft")
+        var draft1 = Draft(projectId: "proj-a", content: "first draft")
+        _ = draft1.addTextAttachment(content: "seed attachment")
         let draft2 = Draft(conversationId: "conv-1", projectId: "proj-a", content: "reply draft")
         let drafts: [String: Draft] = [
             draft1.storageKey: draft1,
@@ -347,6 +385,7 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertFalse(result.loadFailed)
         XCTAssertEqual(result.drafts.count, 2)
         XCTAssertEqual(result.drafts[draft1.storageKey]?.content, "first draft")
+        XCTAssertEqual(result.drafts[draft1.storageKey]?.textAttachments.count, 1)
         XCTAssertEqual(result.drafts[draft2.storageKey]?.content, "reply draft")
 
         // Clean up
@@ -426,6 +465,15 @@ final class DraftManagerTests: XCTestCase {
 
         XCTAssertEqual(decoded.id, 42)
         XCTAssertEqual(decoded.url, "https://cdn.example.com/test.jpg")
+    }
+
+    func testTextAttachmentCodableRoundTrip() throws {
+        let original = TextAttachment(id: 7, content: "pasted text payload")
+        let data = try encoder.encode(original)
+        let decoded = try decoder.decode(TextAttachment.self, from: data)
+
+        XCTAssertEqual(decoded.id, 7)
+        XCTAssertEqual(decoded.content, "pasted text payload")
     }
 
     // MARK: - Storage Key Edge Cases
@@ -566,6 +614,7 @@ final class DraftManagerTests: XCTestCase {
             referenceReportATag: "tag"
         )
         _ = draft.addImageAttachment(url: "https://example.com/img.png")
+        _ = draft.addTextAttachment(content: "context payload")
 
         draft.clear()
 
@@ -578,6 +627,7 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertNil(draft.referenceConversationId)
         XCTAssertNil(draft.referenceReportATag)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
+        XCTAssertTrue(draft.textAttachments.isEmpty)
 
         // Should be rebuildable from scratch
         draft.updateContent("Rebuilt")
@@ -587,6 +637,7 @@ final class DraftManagerTests: XCTestCase {
         draft.setReferenceConversation("new-ref")
         draft.setReferenceReportATag("new-tag")
         _ = draft.addImageAttachment(url: "https://example.com/rebuilt.png")
+        _ = draft.addTextAttachment(content: "rebuilt payload")
 
         XCTAssertEqual(draft.content, "Rebuilt")
         XCTAssertEqual(draft.agentPubkey, "new-agent")
@@ -595,5 +646,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(draft.referenceConversationId, "new-ref")
         XCTAssertEqual(draft.referenceReportATag, "new-tag")
         XCTAssertEqual(draft.imageAttachments.count, 1)
+        XCTAssertEqual(draft.textAttachments.count, 1)
     }
 }
