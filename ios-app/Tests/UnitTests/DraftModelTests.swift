@@ -17,6 +17,7 @@ final class DraftModelTests: XCTestCase {
         XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
+        XCTAssertTrue(draft.textAttachments.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
         XCTAssertNil(draft.referenceReportATag)
     }
@@ -216,6 +217,32 @@ final class DraftModelTests: XCTestCase {
         XCTAssertEqual(draft.buildFullContent(), "plain text without images")
     }
 
+    func testBuildFullContentWithTextAttachmentsAppendsSections() {
+        var draft = Draft(projectId: "p")
+        let textAttachmentId = draft.addTextAttachment(content: "alpha\\nbeta")
+        draft.updateContent("Please review [Text Attachment \(textAttachmentId)]")
+
+        let result = draft.buildFullContent()
+
+        XCTAssertTrue(result.contains("Please review [Text Attachment 1]"))
+        XCTAssertTrue(result.contains("----"))
+        XCTAssertTrue(result.contains("-- Text Attachment 1 --"))
+        XCTAssertTrue(result.contains("alpha\\nbeta"))
+    }
+
+    func testBuildFullContentWithMixedImageAndTextAttachments() {
+        var draft = Draft(projectId: "p")
+        let imageId = draft.addImageAttachment(url: "https://cdn.example.com/img1.png")
+        let textId = draft.addTextAttachment(content: "large paste payload")
+        draft.updateContent("img [Image #\(imageId)] text [Text Attachment \(textId)]")
+
+        let result = draft.buildFullContent()
+
+        XCTAssertTrue(result.contains("img https://cdn.example.com/img1.png text [Text Attachment 1]"))
+        XCTAssertTrue(result.contains("-- Text Attachment 1 --"))
+        XCTAssertTrue(result.contains("large paste payload"))
+    }
+
     // MARK: - storageKey
 
     func testStorageKeyForNewConversation() {
@@ -255,6 +282,10 @@ final class DraftModelTests: XCTestCase {
         var withImage = Draft(projectId: "p")
         _ = withImage.addImageAttachment(url: "https://example.com/img.png")
         XCTAssertTrue(withImage.hasContent)
+
+        var withTextAttachment = Draft(projectId: "p")
+        _ = withTextAttachment.addTextAttachment(content: "context payload")
+        XCTAssertTrue(withTextAttachment.hasContent)
     }
 
     func testIsValidMatchesHasContentBehavior() {
@@ -268,6 +299,10 @@ final class DraftModelTests: XCTestCase {
         var imageOnly = Draft(projectId: "p")
         _ = imageOnly.addImageAttachment(url: "https://example.com/img.png")
         XCTAssertTrue(imageOnly.isValid)
+
+        var textAttachmentOnly = Draft(projectId: "p")
+        _ = textAttachmentOnly.addTextAttachment(content: "context payload")
+        XCTAssertTrue(textAttachmentOnly.isValid)
     }
 
     func testHasImages() {
@@ -285,6 +320,7 @@ final class DraftModelTests: XCTestCase {
                           selectedNudgeIds: ["n"], selectedSkillIds: ["s"],
                           referenceConversationId: "ref", referenceReportATag: "atag")
         _ = draft.addImageAttachment(url: "https://example.com/img.png")
+        _ = draft.addTextAttachment(content: "context payload")
 
         draft.clear()
 
@@ -296,8 +332,37 @@ final class DraftModelTests: XCTestCase {
         XCTAssertNil(draft.referenceConversationId)
         XCTAssertNil(draft.referenceReportATag)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
+        XCTAssertTrue(draft.textAttachments.isEmpty)
         // nextImageId resets to 1, so next add should return 1
         let nextId = draft.addImageAttachment(url: "https://example.com/new.png")
         XCTAssertEqual(nextId, 1)
+        let nextTextAttachmentId = draft.addTextAttachment(content: "new payload")
+        XCTAssertEqual(nextTextAttachmentId, 1)
+    }
+
+    // MARK: - Text Attachments
+
+    func testAddTextAttachmentReturnsIncrementingIds() {
+        var draft = Draft(projectId: "p")
+
+        let id1 = draft.addTextAttachment(content: "one")
+        let id2 = draft.addTextAttachment(content: "two")
+
+        XCTAssertEqual(id1, 1)
+        XCTAssertEqual(id2, 2)
+        XCTAssertEqual(draft.textAttachments.count, 2)
+        XCTAssertEqual(draft.textAttachments[0].content, "one")
+        XCTAssertEqual(draft.textAttachments[1].content, "two")
+    }
+
+    func testRemoveTextAttachmentById() {
+        var draft = Draft(projectId: "p")
+        let id1 = draft.addTextAttachment(content: "one")
+        _ = draft.addTextAttachment(content: "two")
+
+        draft.removeTextAttachment(id: id1)
+
+        XCTAssertEqual(draft.textAttachments.count, 1)
+        XCTAssertEqual(draft.textAttachments[0].content, "two")
     }
 }
