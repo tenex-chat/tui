@@ -20,6 +20,7 @@ let project = Project(
                 "CFBundleDisplayName": "TENEX",
                 "CFBundleIconFile": "AppIcon",
                 "CFBundleIconName": "AppIcon",
+                "NSCameraUsageDescription": "TENEX needs camera access to scan QR codes for login",
                 "NSMicrophoneUsageDescription": "TENEX needs microphone access for voice dictation",
                 "NSSpeechRecognitionUsageDescription": "TENEX uses speech recognition for voice-to-text dictation",
                 "NSUserNotificationsUsageDescription": "TENEX sends notifications when agents ask questions that need your attention",

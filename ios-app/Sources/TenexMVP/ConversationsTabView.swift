@@ -218,7 +218,7 @@ struct ConversationsTabView: View {
                 .environment(coreManager)
         }
         .sheet(isPresented: $showAISettings) {
-            AppSettingsView(defaultSection: .audio)
+            AppSettingsView(defaultSection: .audio, onLogout: onLogout)
                 .tenexModalPresentation(detents: [.large])
                 #if os(macOS)
                 .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
@@ -291,6 +291,7 @@ struct ConversationsTabView: View {
                 isShellColumn: layoutMode == .shellList || layoutMode == .shellComposite
             )
         )
+        .tenexListSurfaceBackground()
         .refreshable {
             await coreManager.manualRefresh()
         }
@@ -423,6 +424,7 @@ struct ConversationsTabView: View {
             conversationRows(isSplitInteraction: false)
         }
         .listStyle(.plain)
+        .tenexListSurfaceBackground()
         .refreshable {
             await coreManager.manualRefresh()
         }
@@ -454,7 +456,10 @@ struct ConversationsTabView: View {
                         isPlayingAudio: isPlayingAudio,
                         isAudioPlaying: audioPlayer.isPlaying,
                         showsChevron: false,
-                        onSelect: nil
+                        onSelect: nil,
+                        onToggleArchive: { target in
+                            toggleArchive(target)
+                        }
                     )
                     .equatable()
                     .tag(conversation)
@@ -488,6 +493,9 @@ struct ConversationsTabView: View {
                         showsChevron: true,
                         onSelect: { selected in
                             selectedConversationBinding.wrappedValue = selected
+                        },
+                        onToggleArchive: { target in
+                            toggleArchive(target)
                         }
                     )
                     .equatable()
@@ -521,7 +529,10 @@ struct ConversationsTabView: View {
                     isPlayingAudio: isPlayingAudio,
                     isAudioPlaying: audioPlayer.isPlaying,
                     showsChevron: false,
-                    onSelect: nil
+                    onSelect: nil,
+                    onToggleArchive: { target in
+                        toggleArchive(target)
+                    }
                 )
                 .equatable()
                 .tag(conversation)
@@ -771,6 +782,7 @@ private struct ConversationRowFull: View, Equatable {
     let isAudioPlaying: Bool
     let showsChevron: Bool
     let onSelect: ((ConversationFullInfo) -> Void)?
+    let onToggleArchive: ((ConversationFullInfo) -> Void)?
 
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
@@ -824,9 +836,27 @@ private struct ConversationRowFull: View, Equatable {
 
                     Spacer()
 
+                    #if os(macOS)
+                    if isHovered {
+                        Button {
+                            onToggleArchive?(conversation)
+                        } label: {
+                            Image(systemName: conversation.isArchived ? "tray.and.arrow.up" : "archivebox")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(conversation.isArchived ? "Unarchive conversation" : "Archive conversation")
+                    } else {
+                        RelativeTimeText(timestamp: conversation.thread.effectiveLastActivity, style: .localizedAbbreviated)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    #else
                     RelativeTimeText(timestamp: conversation.thread.effectiveLastActivity, style: .localizedAbbreviated)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    #endif
                 }
 
                 // Row 2: Summary or current activity
