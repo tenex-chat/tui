@@ -109,7 +109,7 @@ private struct AudioNotificationRow: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Text(relativeTimestamp(notification.createdAt))
+                RelativeTimeText(timestamp: notification.createdAt, style: .localizedAbbreviated)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -169,7 +169,10 @@ private struct AudioNotificationDetailView: View {
                         .monospaced()
                         .textSelection(.enabled)
                 }
-                LabeledContent("Created", value: relativeTimestamp(notification.createdAt))
+                LabeledContent("Created") {
+                    RelativeTimeText(timestamp: notification.createdAt, style: .localizedAbbreviated)
+                        .foregroundStyle(.secondary)
+                }
                 LabeledContent("Audio File") {
                     Text(notification.audioFilePath)
                         .font(.caption2)
@@ -185,13 +188,4 @@ private struct AudioNotificationDetailView: View {
         .toolbarTitleDisplayMode(.inline)
         #endif
     }
-}
-
-// MARK: - Helpers
-
-private func relativeTimestamp(_ epoch: UInt64) -> String {
-    let date = Date(timeIntervalSince1970: TimeInterval(epoch))
-    let formatter = RelativeDateTimeFormatter()
-    formatter.unitsStyle = .short
-    return formatter.localizedString(for: date, relativeTo: Date())
 }

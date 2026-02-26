@@ -540,7 +540,7 @@ struct DraftSearchRow: View {
 
                     Spacer()
 
-                    Text(result.lastModified, style: .relative)
+                    RelativeTimeText(date: result.lastModified, style: .localizedAbbreviated)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -617,7 +617,7 @@ struct MatchingMessageRow: View {
 
                     Spacer()
 
-                    Text(relativeTime(from: result.createdAt))
+                    RelativeTimeText(timestamp: result.createdAt, style: .localizedAbbreviated)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -640,13 +640,6 @@ struct MatchingMessageRow: View {
                 }
             }
         }
-    }
-
-    private func relativeTime(from timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     /// Build highlighted text with search term emphasized using AttributedString

@@ -101,7 +101,7 @@ private struct DraftRow: View {
 
                 Spacer()
 
-                Text(draft.lastModified, style: .relative)
+                RelativeTimeText(date: draft.lastModified, style: .localizedAbbreviated)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

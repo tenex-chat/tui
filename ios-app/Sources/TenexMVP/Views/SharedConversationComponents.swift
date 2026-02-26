@@ -101,7 +101,7 @@ struct SharedMessageBubble: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(ConversationFormatters.formatRelativeTime(message.createdAt))
+                    RelativeTimeText(timestamp: message.createdAt, style: .localizedAbbreviated)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
 
@@ -250,7 +250,7 @@ struct SharedConversationRow: View {
 
                     Spacer()
 
-                    Text(ConversationFormatters.formatRelativeTime(conversation.thread.effectiveLastActivity))
+                    RelativeTimeText(timestamp: conversation.thread.effectiveLastActivity, style: .localizedAbbreviated)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

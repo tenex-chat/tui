@@ -138,7 +138,7 @@ struct NudgeTableRow: View {
             .frame(width: 120, alignment: .leading)
 
             // Age
-            Text(relativeTimeString(from: item.nudge.createdAt))
+            RelativeTimeText(timestamp: item.nudge.createdAt, style: .compact)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(width: 50, alignment: .trailing)
@@ -146,21 +146,5 @@ struct NudgeTableRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .contentShape(Rectangle())
-    }
-
-    private func relativeTimeString(from timestamp: UInt64) -> String {
-        let now = UInt64(Date().timeIntervalSince1970)
-        let diff = now > timestamp ? now - timestamp : 0
-
-        if diff < 60 {
-            return "now"
-        }
-        if diff < 3_600 {
-            return "\(diff / 60)m"
-        }
-        if diff < 86_400 {
-            return "\(diff / 3_600)h"
-        }
-        return "\(diff / 86_400)d"
     }
 }

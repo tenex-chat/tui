@@ -824,7 +824,7 @@ private struct ConversationRowFull: View, Equatable {
 
                     Spacer()
 
-                    Text(ConversationFormatters.formatRelativeTime(conversation.thread.effectiveLastActivity))
+                    RelativeTimeText(timestamp: conversation.thread.effectiveLastActivity, style: .localizedAbbreviated)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

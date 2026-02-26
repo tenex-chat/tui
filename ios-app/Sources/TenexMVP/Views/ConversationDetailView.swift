@@ -236,7 +236,7 @@ struct ConversationDetailView: View {
 
                 Spacer()
 
-                Text(ConversationFormatters.formatRelativeTime(reply.createdAt))
+                RelativeTimeText(timestamp: reply.createdAt, style: .localizedAbbreviated)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

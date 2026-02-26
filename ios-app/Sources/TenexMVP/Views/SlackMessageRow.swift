@@ -113,7 +113,7 @@ struct SlackMessageRow: View, Equatable {
                                 .foregroundStyle(authorColor)
                         }
 
-                        Text(ConversationFormatters.formatRelativeTime(message.createdAt))
+                        RelativeTimeText(timestamp: message.createdAt, style: .localizedAbbreviated)
                             .font(.caption)
                             .foregroundStyle(.secondary)
 

@@ -24,6 +24,7 @@ class DiagnosticsViewModel: ObservableObject {
     /// Current diagnostics snapshot from Rust core
     /// Note: sectionErrors are accessed directly from snapshot (single source of truth)
     @Published var snapshot: DiagnosticsSnapshot?
+    @Published var snapshotCapturedAt = Date()
 
     /// Loading state
     @Published var isLoading = false
@@ -146,6 +147,7 @@ class DiagnosticsViewModel: ObservableObject {
                 await MainActor.run { [weak self] in
                     guard self?.currentFetchID == fetchID else { return }
                     self?.snapshot = cachedSnapshot
+                    self?.snapshotCapturedAt = Date()
                     self?.error = nil
                 }
 
@@ -159,6 +161,7 @@ class DiagnosticsViewModel: ObservableObject {
                 await MainActor.run { [weak self] in
                     guard self?.currentFetchID == fetchID else { return }
                     self?.snapshot = freshSnapshot
+                    self?.snapshotCapturedAt = Date()
                     self?.error = nil
                 }
             } catch is CancellationError {
@@ -307,22 +310,6 @@ extension DiagnosticsSnapshot {
         }
     }
 
-    /// Format seconds since last sync
-    static func formatTimeSince(_ seconds: UInt64?) -> String {
-        guard let seconds = seconds else {
-            return "Never"
-        }
-
-        if seconds < 60 {
-            return "\(seconds)s ago"
-        } else if seconds < 3600 {
-            let mins = seconds / 60
-            return "\(mins)m ago"
-        } else {
-            let hours = seconds / 3600
-            return "\(hours)h ago"
-        }
-    }
 }
 
 // MARK: - Business Logic Extensions

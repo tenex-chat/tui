@@ -222,8 +222,17 @@ private struct RelaysSettingsSectionView: View {
                 HStack {
                     Text("Last Sync")
                     Spacer()
-                    Text(lastSyncText(sync?.secondsSinceLastCycle))
+                    if let secondsSinceLastCycle = sync?.secondsSinceLastCycle {
+                        RelativeTimeText(
+                            ageSeconds: secondsSinceLastCycle,
+                            referenceNow: viewModel.diagnosticsSnapshotCapturedAt,
+                            style: .compact
+                        )
                         .foregroundStyle(.secondary)
+                    } else {
+                        Text("Never")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 HStack {
                     Text("Success Rate")
@@ -247,13 +256,6 @@ private struct RelaysSettingsSectionView: View {
         #if os(macOS)
         .formStyle(.grouped)
         #endif
-    }
-
-    private func lastSyncText(_ seconds: UInt64?) -> String {
-        guard let seconds else { return "Never" }
-        if seconds < 60 { return "\(seconds)s ago" }
-        if seconds < 3600 { return "\(seconds / 60)m ago" }
-        return "\(seconds / 3600)h ago"
     }
 
     private func successRateText(_ sync: NegentropySyncDiagnostics?) -> String {
