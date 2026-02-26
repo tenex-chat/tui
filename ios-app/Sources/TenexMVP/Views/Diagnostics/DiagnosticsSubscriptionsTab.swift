@@ -6,6 +6,7 @@ struct DiagnosticsSubscriptionsTab: View {
     /// Sorting is handled by DiagnosticsSnapshot.sortedSubscriptions to keep business logic out of views
     let subscriptions: [SubscriptionDiagnostics]
     let totalEvents: UInt64
+    let snapshotCapturedAt: Date
 
     var body: some View {
         VStack(spacing: 16) {
@@ -58,7 +59,7 @@ struct DiagnosticsSubscriptionsTab: View {
 
             VStack(spacing: 8) {
                 ForEach(subscriptions, id: \.subId) { sub in
-                    SubscriptionRow(subscription: sub)
+                    SubscriptionRow(subscription: sub, snapshotCapturedAt: snapshotCapturedAt)
                 }
             }
         }
@@ -91,6 +92,7 @@ struct DiagnosticsSubscriptionsTab: View {
 
 struct SubscriptionRow: View {
     let subscription: SubscriptionDiagnostics
+    let snapshotCapturedAt: Date
     @State private var isExpanded = false
 
     var body: some View {
@@ -105,9 +107,16 @@ struct SubscriptionRow: View {
                             .foregroundColor(.primary)
                             .lineLimit(1)
 
-                        Text("Created \(formatAge(subscription.ageSecs)) ago")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Text("Created")
+                            RelativeTimeText(
+                                ageSeconds: subscription.ageSecs,
+                                referenceNow: snapshotCapturedAt,
+                                style: .compact
+                            )
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
 
                         // Kind chips
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -153,22 +162,29 @@ struct SubscriptionRow: View {
 
                     Divider()
 
-                    DetailRow(label: "Age", value: formatAge(subscription.ageSecs))
+                    HStack {
+                        Text("Age")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+
+                        RelativeTimeText(
+                            ageSeconds: subscription.ageSecs,
+                            referenceNow: snapshotCapturedAt,
+                            style: .compact
+                        )
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                        .fontWeight(.medium)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
                 }
                 .background(Color.systemGray6)
             }
         }
         .diagnosticCardStyle()
-    }
-
-    private func formatAge(_ seconds: UInt64) -> String {
-        if seconds < 60 {
-            return "\(seconds)s"
-        } else if seconds < 3600 {
-            return "\(seconds / 60)m"
-        } else {
-            return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
-        }
     }
 }
 
@@ -242,7 +258,8 @@ struct DetailRow: View {
                     ageSecs: 1800
                 )
             ],
-            totalEvents: 1678
+            totalEvents: 1678,
+            snapshotCapturedAt: Date()
         )
         .padding()
     }

@@ -294,7 +294,7 @@ private struct DelegationNodeCard: View {
 
                 Spacer()
 
-                Text(ConversationFormatters.formatRelativeTime(conversation.thread.effectiveLastActivity))
+                RelativeTimeText(timestamp: conversation.thread.effectiveLastActivity, style: .localizedAbbreviated)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

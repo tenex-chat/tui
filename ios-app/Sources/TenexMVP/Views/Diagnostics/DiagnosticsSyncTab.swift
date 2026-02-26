@@ -4,6 +4,7 @@ import SwiftUI
 struct DiagnosticsSyncTab: View {
     /// Sync data passed directly (already unwrapped from optional)
     let syncData: NegentropySyncDiagnostics
+    let snapshotCapturedAt: Date
 
     var body: some View {
         VStack(spacing: 16) {
@@ -83,9 +84,18 @@ struct DiagnosticsSyncTab: View {
 
                 StatusRow(
                     label: "Last Sync",
-                    value: DiagnosticsSnapshot.formatTimeSince(syncData.secondsSinceLastCycle),
                     valueColor: .primary
-                )
+                ) {
+                    if let secondsSinceLastCycle = syncData.secondsSinceLastCycle {
+                        RelativeTimeText(
+                            ageSeconds: secondsSinceLastCycle,
+                            referenceNow: snapshotCapturedAt,
+                            style: .compact
+                        )
+                    } else {
+                        Text("Never")
+                    }
+                }
 
                 Divider()
 
@@ -202,7 +212,11 @@ struct DiagnosticsSyncTab: View {
                         .foregroundColor(Color.healthGood)
                 }
                 Spacer()
-                Text("\(result.secondsAgo)s ago")
+                RelativeTimeText(
+                    ageSeconds: result.secondsAgo,
+                    referenceNow: snapshotCapturedAt,
+                    style: .compact
+                )
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -272,7 +286,8 @@ struct DiagnosticsSyncTab: View {
                     SyncResultDiagnostic(kindLabel: "4199", eventsReceived: 0, status: "failed", error: "Connection timeout", secondsAgo: 10),
                     SyncResultDiagnostic(kindLabel: "513", eventsReceived: 0, status: "unsupported", error: nil, secondsAgo: 15),
                 ]
-            )
+            ),
+            snapshotCapturedAt: Date()
         )
         .padding()
     }

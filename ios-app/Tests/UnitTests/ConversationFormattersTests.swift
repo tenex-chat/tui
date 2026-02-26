@@ -241,49 +241,6 @@ final class ConversationFormattersTests: XCTestCase {
         XCTAssertTrue(result.contains("report_read"))
     }
 
-    // MARK: - formatRelativeTime
-
-    func testFormatRelativeTimeRecentTimestamp() {
-        // Use a timestamp that is 30 seconds ago
-        let now = UInt64(Date().timeIntervalSince1970)
-        let thirtySecondsAgo = now - 30
-        let result = ConversationFormatters.formatRelativeTime(thirtySecondsAgo)
-        // RelativeDateTimeFormatter with abbreviated style produces locale-dependent output,
-        // but it should not be empty and should contain "ago" or a time indicator
-        XCTAssertFalse(result.isEmpty)
-    }
-
-    func testFormatRelativeTimeFutureTimestamp() {
-        // A timestamp in the future
-        let now = UInt64(Date().timeIntervalSince1970)
-        let future = now + 3600
-        let result = ConversationFormatters.formatRelativeTime(future)
-        // Should return a non-empty string (e.g., "in 1 hr.")
-        XCTAssertFalse(result.isEmpty)
-    }
-
-    func testFormatRelativeTimeOldTimestamp() {
-        // A timestamp from 2 days ago
-        let now = UInt64(Date().timeIntervalSince1970)
-        let twoDaysAgo = now - 172800
-        let result = ConversationFormatters.formatRelativeTime(twoDaysAgo)
-        XCTAssertFalse(result.isEmpty)
-    }
-
-    func testFormatRelativeTimeZeroTimestamp() {
-        // Epoch timestamp (1970) - should return something like "54 yr. ago"
-        let result = ConversationFormatters.formatRelativeTime(0)
-        XCTAssertFalse(result.isEmpty)
-    }
-
-    func testFormatRelativeTimeVeryRecentReturnsShortString() {
-        // 1 second ago - should be very short abbreviated string
-        let now = UInt64(Date().timeIntervalSince1970)
-        let result = ConversationFormatters.formatRelativeTime(now - 1)
-        // Abbreviated style should produce something compact (e.g., "1 sec. ago")
-        XCTAssertLessThan(result.count, 30, "Abbreviated relative time should be compact")
-    }
-
     // MARK: - Helpers
 
     private func makeMessage(content: String) -> Message {

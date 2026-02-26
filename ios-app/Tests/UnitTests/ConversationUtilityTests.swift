@@ -293,75 +293,75 @@ final class LastAgentFinderTests: XCTestCase {
     func testEmptyMessagesReturnsNil() {
         let result = LastAgentFinder.findLastAgentPubkey(
             messages: [],
-            availableAgents: [makeAgent(pubkey: "agent-1")]
+            currentUserPubkey: "user-1"
         )
         XCTAssertNil(result)
     }
 
-    func testEmptyAvailableAgentsReturnsNil() {
+    func testNoCurrentUserReturnsLatestAuthor() {
         let messages = [
-            makeMessage(id: "1", content: "Hello", pubkey: "agent-1"),
+            makeMessage(id: "1", content: "First", pubkey: "agent-1", createdAt: 100),
+            makeMessage(id: "2", content: "Second", pubkey: "agent-2", createdAt: 200),
         ]
 
         let result = LastAgentFinder.findLastAgentPubkey(
             messages: messages,
-            availableAgents: []
+            currentUserPubkey: nil
+        )
+        XCTAssertEqual(result, "agent-2")
+    }
+
+    func testExcludesCurrentUserMessages() {
+        let messages = [
+            makeMessage(id: "1", content: "Agent msg", pubkey: "agent-1", createdAt: 100),
+            makeMessage(id: "2", content: "User msg", pubkey: "user-1", createdAt: 200),
+            makeMessage(id: "3", content: "Agent msg 2", pubkey: "agent-2", createdAt: 300),
+        ]
+
+        let result = LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            currentUserPubkey: "user-1"
+        )
+        XCTAssertEqual(result, "agent-2")
+    }
+
+    func testFindsLatestNonUserByTimestamp() {
+        let messages = [
+            makeMessage(id: "1", content: "Agent one", pubkey: "agent-1", createdAt: 100),
+            makeMessage(id: "2", content: "User msg", pubkey: "user-1", createdAt: 200),
+            makeMessage(id: "3", content: "Agent two", pubkey: "agent-2", createdAt: 300),
+        ]
+
+        let result = LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            currentUserPubkey: "user-1"
+        )
+        XCTAssertEqual(result, "agent-2")
+    }
+
+    func testAllMessagesFromCurrentUserReturnsNil() {
+        let messages = [
+            makeMessage(id: "1", content: "User msg", pubkey: "user-1", createdAt: 100),
+            makeMessage(id: "2", content: "User msg 2", pubkey: "user-1", createdAt: 200),
+        ]
+
+        let result = LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            currentUserPubkey: "user-1"
         )
         XCTAssertNil(result)
     }
 
-    func testFindsLastAgentByTimestamp() {
-        let messages = [
-            makeMessage(id: "1", content: "First", pubkey: "agent-1", createdAt: 100),
-            makeMessage(id: "2", content: "Second", pubkey: "agent-2", createdAt: 200),
-            makeMessage(id: "3", content: "Third", pubkey: "agent-1", createdAt: 300),
-        ]
-        let agents = [
-            makeAgent(pubkey: "agent-1"),
-            makeAgent(pubkey: "agent-2"),
-        ]
-
-        let result = LastAgentFinder.findLastAgentPubkey(messages: messages, availableAgents: agents)
-        XCTAssertEqual(result, "agent-1")
-    }
-
-    func testIgnoresMessagesFromUnknownPubkeys() {
-        let messages = [
-            makeMessage(id: "1", content: "Agent msg", pubkey: "agent-1", createdAt: 100),
-            makeMessage(id: "2", content: "User msg", pubkey: "user-pubkey", createdAt: 200),
-            makeMessage(id: "3", content: "Unknown msg", pubkey: "unknown-agent", createdAt: 300),
-        ]
-        let agents = [
-            makeAgent(pubkey: "agent-1"),
-        ]
-
-        let result = LastAgentFinder.findLastAgentPubkey(messages: messages, availableAgents: agents)
-        XCTAssertEqual(result, "agent-1")
-    }
-
-    func testSingleAgentMessage() {
+    func testSingleNonUserMessage() {
         let messages = [
             makeMessage(id: "1", content: "Hello", pubkey: "agent-1", createdAt: 100),
         ]
-        let agents = [
-            makeAgent(pubkey: "agent-1"),
-        ]
 
-        let result = LastAgentFinder.findLastAgentPubkey(messages: messages, availableAgents: agents)
+        let result = LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            currentUserPubkey: "user-1"
+        )
         XCTAssertEqual(result, "agent-1")
-    }
-
-    func testAllMessagesFromNonAgentsReturnsNil() {
-        let messages = [
-            makeMessage(id: "1", content: "User msg", pubkey: "user-1", createdAt: 100),
-            makeMessage(id: "2", content: "User msg 2", pubkey: "user-2", createdAt: 200),
-        ]
-        let agents = [
-            makeAgent(pubkey: "agent-1"),
-        ]
-
-        let result = LastAgentFinder.findLastAgentPubkey(messages: messages, availableAgents: agents)
-        XCTAssertNil(result)
     }
 
     func testEqualTimestampsTakesLastEncountered() {
@@ -369,12 +369,11 @@ final class LastAgentFinderTests: XCTestCase {
             makeMessage(id: "1", content: "First", pubkey: "agent-1", createdAt: 100),
             makeMessage(id: "2", content: "Second", pubkey: "agent-2", createdAt: 100),
         ]
-        let agents = [
-            makeAgent(pubkey: "agent-1"),
-            makeAgent(pubkey: "agent-2"),
-        ]
 
-        let result = LastAgentFinder.findLastAgentPubkey(messages: messages, availableAgents: agents)
+        let result = LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            currentUserPubkey: "user-1"
+        )
         // With >= comparison and forward iteration, equal timestamps pick the last in array
         XCTAssertEqual(result, "agent-2")
     }
@@ -385,12 +384,11 @@ final class LastAgentFinderTests: XCTestCase {
             makeMessage(id: "1", content: "Hello", pubkey: "agent-1", createdAt: 100),
             makeMessage(id: "2", content: "", pubkey: "agent-2", createdAt: 200, toolName: "fs_read"),
         ]
-        let agents = [
-            makeAgent(pubkey: "agent-1"),
-            makeAgent(pubkey: "agent-2"),
-        ]
 
-        let result = LastAgentFinder.findLastAgentPubkey(messages: messages, availableAgents: agents)
+        let result = LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            currentUserPubkey: "user-1"
+        )
         XCTAssertEqual(result, "agent-2")
     }
 }

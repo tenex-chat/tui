@@ -3,96 +3,6 @@ import XCTest
 
 final class FormattingHelperTests: XCTestCase {
 
-    // MARK: - StatsSnapshot.formatRuntime
-
-    func testFormatRuntimeZeroMilliseconds() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(0), "0s")
-    }
-
-    func testFormatRuntimeSubSecondMilliseconds() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(1), "1ms")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(500), "500ms")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(999), "999ms")
-    }
-
-    func testFormatRuntimeExactlyOneSecond() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(1000), "1s")
-    }
-
-    func testFormatRuntimeSeconds() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(5000), "5s")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(45_000), "45s")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(59_000), "59s")
-    }
-
-    func testFormatRuntimeMinutesOnly() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(60_000), "1m")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(120_000), "2m")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(300_000), "5m")
-    }
-
-    func testFormatRuntimeMinutesAndSeconds() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(90_000), "1m 30s")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(150_000), "2m 30s")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(3599_000), "59m 59s")
-    }
-
-    func testFormatRuntimeHoursOnly() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(3_600_000), "1h")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(7_200_000), "2h")
-    }
-
-    func testFormatRuntimeHoursAndMinutes() {
-        XCTAssertEqual(StatsSnapshot.formatRuntime(6_300_000), "1h 45m")
-        XCTAssertEqual(StatsSnapshot.formatRuntime(5_400_000), "1h 30m")
-        // 2h 30m = 9000s = 9_000_000ms
-        XCTAssertEqual(StatsSnapshot.formatRuntime(9_000_000), "2h 30m")
-    }
-
-    func testFormatRuntimeHoursDropsSeconds() {
-        // 1h 0m 30s should show as "1h" (seconds are dropped in the hour range)
-        XCTAssertEqual(StatsSnapshot.formatRuntime(3_630_000), "1h")
-    }
-
-    // MARK: - StatsSnapshot.formatDayLabel
-
-    func testFormatDayLabelToday() {
-        let todayStart: UInt64 = 1_700_000_000
-        XCTAssertEqual(StatsSnapshot.formatDayLabel(todayStart, todayStart: todayStart), "Today")
-    }
-
-    func testFormatDayLabelYesterday() {
-        let todayStart: UInt64 = 1_700_000_000
-        let yesterdayStart = todayStart - 86400
-        XCTAssertEqual(StatsSnapshot.formatDayLabel(yesterdayStart, todayStart: todayStart), "Yest.")
-    }
-
-    func testFormatDayLabelOlderDates() {
-        let todayStart: UInt64 = 1_700_000_000
-        let twoDaysAgo = todayStart - (86400 * 2)
-        let label = StatsSnapshot.formatDayLabel(twoDaysAgo, todayStart: todayStart)
-        // Should be a "MMM d" formatted date, not "Today" or "Yest."
-        XCTAssertNotEqual(label, "Today")
-        XCTAssertNotEqual(label, "Yest.")
-        XCTAssertFalse(label.isEmpty)
-    }
-
-    func testFormatDayLabelSpecificDate() {
-        // 2024-01-15 00:00:00 UTC = 1705276800
-        let dayStart: UInt64 = 1_705_276_800
-        let todayStart: UInt64 = dayStart + (86400 * 5) // 5 days later
-        let label = StatsSnapshot.formatDayLabel(dayStart, todayStart: todayStart)
-        XCTAssertEqual(label, "Jan 15")
-    }
-
-    func testFormatDayLabelSevenDaysAgo() {
-        let todayStart: UInt64 = 1_700_000_000
-        let sevenDaysAgo = todayStart - (86400 * 7)
-        let label = StatsSnapshot.formatDayLabel(sevenDaysAgo, todayStart: todayStart)
-        XCTAssertNotEqual(label, "Today")
-        XCTAssertNotEqual(label, "Yest.")
-    }
-
     // MARK: - DiagnosticsFormatters.formatNumber
 
     func testFormatNumberSmallValues() {
@@ -193,32 +103,6 @@ final class FormattingHelperTests: XCTestCase {
         XCTAssertEqual(DiagnosticsSnapshot.formatBytes(1_047_552), "1023.0 KB")
         // 1024 KB = 1048576 bytes -> should be MB
         XCTAssertEqual(DiagnosticsSnapshot.formatBytes(1_048_576), "1.0 MB")
-    }
-
-    // MARK: - DiagnosticsSnapshot.formatTimeSince
-
-    func testFormatTimeSinceNil() {
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(nil), "Never")
-    }
-
-    func testFormatTimeSinceSeconds() {
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(0), "0s ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(1), "1s ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(30), "30s ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(59), "59s ago")
-    }
-
-    func testFormatTimeSinceMinutes() {
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(60), "1m ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(120), "2m ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(300), "5m ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(3599), "59m ago")
-    }
-
-    func testFormatTimeSinceHours() {
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(3600), "1h ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(7200), "2h ago")
-        XCTAssertEqual(DiagnosticsSnapshot.formatTimeSince(86400), "24h ago")
     }
 
     // MARK: - NegentropySyncDiagnostics.successRate

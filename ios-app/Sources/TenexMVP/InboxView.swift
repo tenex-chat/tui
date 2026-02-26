@@ -81,26 +81,15 @@ enum InboxFilter: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Date Formatters (cached as static for performance)
+// MARK: - Date Formatter (cached as static for performance)
 
 private enum InboxDateFormatters {
-    static let relativeDateFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
     static let fullDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter
     }()
-
-    static func relativeTime(from timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return relativeDateFormatter.localizedString(for: date, relativeTo: Date())
-    }
 
     static func fullDate(from timestamp: UInt64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
@@ -488,7 +477,7 @@ struct InboxItemRow: View {
 
                     Spacer()
 
-                    Text(InboxDateFormatters.relativeTime(from: item.createdAt))
+                    RelativeTimeText(timestamp: item.createdAt, style: .localizedAbbreviated)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -841,7 +830,7 @@ struct InboxMessageBubble: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
-                    Text(InboxDateFormatters.relativeTime(from: message.createdAt))
+                    RelativeTimeText(timestamp: message.createdAt, style: .localizedAbbreviated)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
 

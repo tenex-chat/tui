@@ -48,6 +48,7 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var availableModels: [ModelInfo] = []
     @Published var relayUrls: [String] = []
     @Published var diagnosticsSnapshot: DiagnosticsSnapshot?
+    @Published var diagnosticsSnapshotCapturedAt = Date()
     @Published var backendSnapshot: BackendTrustSnapshot?
     @Published var pushDebugInfo: PushRegistrationDebugInfo?
     @Published var pushAuthorizationStatusDescription = "notDetermined"
@@ -108,6 +109,7 @@ final class AppSettingsViewModel: ObservableObject {
     func reloadRelays(coreManager: TenexCoreManager) async {
         relayUrls = await coreManager.safeCore.getConfiguredRelays()
         diagnosticsSnapshot = await coreManager.safeCore.getDiagnosticsSnapshot(includeDatabaseStats: false)
+        diagnosticsSnapshotCapturedAt = Date()
     }
 
     func reconnectRelays(coreManager: TenexCoreManager) async {

@@ -332,12 +332,6 @@ struct ProjectRowView: View {
     let toolCount: Int
     var showsChevron: Bool = true
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
     var body: some View {
         HStack(spacing: 12) {
             // Color-coded folder icon
@@ -359,7 +353,7 @@ struct ProjectRowView: View {
 
                     Spacer()
 
-                    Text(formatRelativeDate(project.createdAt))
+                    RelativeTimeText(timestamp: project.createdAt, style: .localizedAbbreviated)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -411,8 +405,4 @@ struct ProjectRowView: View {
         .padding(.vertical, 8)
     }
 
-    private func formatRelativeDate(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return Self.relativeFormatter.localizedString(for: date, relativeTo: Date())
-    }
 }

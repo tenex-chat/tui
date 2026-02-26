@@ -4,6 +4,7 @@ import SwiftUI
 /// Handles optional sections gracefully with fallback displays
 struct DiagnosticsOverviewTab: View {
     let snapshot: DiagnosticsSnapshot
+    let snapshotCapturedAt: Date
 
     var body: some View {
         VStack(spacing: 16) {
@@ -167,9 +168,18 @@ struct DiagnosticsOverviewTab: View {
                 if let sync = snapshot.sync {
                     StatusRow(
                         label: "Last Sync",
-                        value: DiagnosticsSnapshot.formatTimeSince(sync.secondsSinceLastCycle),
                         valueColor: .primary
-                    )
+                    ) {
+                        if let secondsSinceLastCycle = sync.secondsSinceLastCycle {
+                            RelativeTimeText(
+                                ageSeconds: secondsSinceLastCycle,
+                                referenceNow: snapshotCapturedAt,
+                                style: .compact
+                            )
+                        } else {
+                            Text("Never")
+                        }
+                    }
 
                     Divider()
 
@@ -303,10 +313,26 @@ struct SectionHeader: View {
 
 // MARK: - Status Row
 
-struct StatusRow: View {
+struct StatusRow<ValueContent: View>: View {
     let label: String
-    let value: String
     let valueColor: Color
+    @ViewBuilder let valueContent: ValueContent
+
+    init(label: String, value: String, valueColor: Color) where ValueContent == Text {
+        self.label = label
+        self.valueColor = valueColor
+        self.valueContent = Text(value)
+    }
+
+    init(
+        label: String,
+        valueColor: Color,
+        @ViewBuilder value: () -> ValueContent
+    ) {
+        self.label = label
+        self.valueColor = valueColor
+        self.valueContent = value()
+    }
 
     var body: some View {
         HStack {
@@ -316,7 +342,7 @@ struct StatusRow: View {
 
             Spacer()
 
-            Text(value)
+            valueContent
                 .font(.subheadline)
                 .foregroundColor(valueColor)
                 .fontWeight(.medium)
@@ -357,7 +383,8 @@ struct StatusRow: View {
                     totalEvents: 1963
                 ),
                 sectionErrors: []
-            )
+            ),
+            snapshotCapturedAt: Date()
         )
         .padding()
     }
@@ -381,7 +408,8 @@ struct StatusRow: View {
                 totalSubscriptionEvents: 0,
                 database: nil,  // Database not loaded
                 sectionErrors: ["Sync: Failed to acquire lock", "Database: Not loaded"]
-            )
+            ),
+            snapshotCapturedAt: Date()
         )
         .padding()
     }

@@ -199,7 +199,8 @@ struct DiagnosticsView: View {
                     if let snapshot = viewModel.snapshot {
                         DiagnosticsTabContent(
                             snapshot: snapshot,
-                            selectedTab: section
+                            selectedTab: section,
+                            snapshotCapturedAt: viewModel.snapshotCapturedAt
                         )
                         .padding()
                     } else if let error = viewModel.error {
@@ -230,15 +231,16 @@ struct DiagnosticsView: View {
 struct DiagnosticsTabContent: View {
     let snapshot: DiagnosticsSnapshot
     let selectedTab: DiagnosticsTab
+    let snapshotCapturedAt: Date
 
     var body: some View {
         Group {
             switch selectedTab {
             case .overview:
-                DiagnosticsOverviewTab(snapshot: snapshot)
+                DiagnosticsOverviewTab(snapshot: snapshot, snapshotCapturedAt: snapshotCapturedAt)
             case .sync:
                 if let sync = snapshot.sync {
-                    DiagnosticsSyncTab(syncData: sync)
+                    DiagnosticsSyncTab(syncData: sync, snapshotCapturedAt: snapshotCapturedAt)
                 } else {
                     DiagnosticsSectionUnavailableView(
                         title: "Sync Data Unavailable",
@@ -250,7 +252,8 @@ struct DiagnosticsTabContent: View {
                 if snapshot.subscriptions != nil {
                     DiagnosticsSubscriptionsTab(
                         subscriptions: snapshot.sortedSubscriptions,
-                        totalEvents: snapshot.totalSubscriptionEvents
+                        totalEvents: snapshot.totalSubscriptionEvents,
+                        snapshotCapturedAt: snapshotCapturedAt
                     )
                 } else {
                     DiagnosticsSectionUnavailableView(

@@ -101,7 +101,7 @@ private struct PinnedPromptRow: View {
 
                 Spacer()
 
-                Text(prompt.lastUsedAt, style: .relative)
+                RelativeTimeText(date: prompt.lastUsedAt, style: .localizedAbbreviated)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

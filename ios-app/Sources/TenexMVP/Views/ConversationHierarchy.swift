@@ -552,21 +552,8 @@ struct AgentAvatarWithPicture: View {
 
 // MARK: - Shared Formatters
 
-/// Utility for shared date/time formatting across conversation views
+/// Utility for shared formatting across conversation views
 enum ConversationFormatters {
-    /// Shared RelativeDateTimeFormatter instance (expensive to create)
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter
-    }()
-
-    /// Format a timestamp as relative time (e.g., "5m ago")
-    static func formatRelativeTime(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        return relativeFormatter.localizedString(for: date, relativeTo: Date())
-    }
-
     /// Format a duration in seconds as human-readable (e.g., "2h 30m")
     static func formatDuration(_ seconds: TimeInterval) -> String {
         let hours = Int(seconds) / 3600
