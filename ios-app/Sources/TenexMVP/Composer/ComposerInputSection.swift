@@ -1,6 +1,23 @@
 import SwiftUI
 
 extension MessageComposerView {
+    enum PinControlMode: Equatable {
+        case hidden
+        case menu
+        case pinAction
+    }
+
+    static func canPinCurrentPrompt(forInputText text: String) -> Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func pinControlMode(forInputText text: String, pinnedPromptCount: Int) -> PinControlMode {
+        if canPinCurrentPrompt(forInputText: text) {
+            return .pinAction
+        }
+        return pinnedPromptCount > 0 ? .menu : .hidden
+    }
+
     var composerPlaceholderText: String {
         if isNewConversation && selectedProject == nil {
             return "Select a project to start composing"
@@ -12,6 +29,10 @@ extension MessageComposerView {
             return "Ask for follow-up changes"
         }
         return isNewConversation ? "What would you like to discuss?" : "Type your reply..."
+    }
+
+    var isComposerInputDisabled: Bool {
+        (isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject
     }
 
     @ViewBuilder
@@ -48,7 +69,63 @@ extension MessageComposerView {
         }
     }
 
+    @ViewBuilder
     private var workspaceTextField: some View {
+        #if os(macOS)
+        ZStack(alignment: .topLeading) {
+            WorkspaceComposerTextView(
+                text: $localText,
+                isFocused: Binding(
+                    get: { composerFieldFocused },
+                    set: { composerFieldFocused = $0 }
+                ),
+                isEnabled: !isComposerInputDisabled,
+                onSubmit: {
+                    if canSend {
+                        sendMessage()
+                    }
+                },
+                onHistoryPrevious: {
+                    guard localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        return false
+                    }
+                    guard let previous = messageHistory.previous(currentText: localText) else {
+                        return false
+                    }
+                    isProgrammaticUpdate = true
+                    localText = previous
+                    return true
+                },
+                onHistoryNext: {
+                    guard messageHistory.currentIndex != nil else { return false }
+                    guard let next = messageHistory.next() else { return false }
+                    isProgrammaticUpdate = true
+                    localText = next
+                    return true
+                },
+                transformPaste: { pastedText in
+                    transformWorkspacePasteText(pastedText)
+                }
+            )
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 14)
+            .opacity(isComposerInputDisabled ? 0.5 : 1.0)
+
+            if localText.isEmpty {
+                Text(composerPlaceholderText)
+                    .font(.title3)
+                    .foregroundStyle(.secondary.opacity(0.6))
+                    .padding(.horizontal, 24)
+                    .padding(.top, 19)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onChange(of: localText) { oldValue, newValue in
+            scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
+            scheduleContentSync(newValue)
+        }
+        #else
         TextField(
             "",
             text: $localText,
@@ -69,36 +146,30 @@ extension MessageComposerView {
             scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
             scheduleContentSync(newValue)
         }
-        #if os(macOS)
-        .onKeyPress(.return, phases: .down) { keyPress in
-            if keyPress.modifiers.contains(.shift) {
-                localText += "\n"
-                return .handled
-            }
-            if canSend {
-                sendMessage()
-            }
-            return .handled
-        }
-        .onKeyPress(.upArrow, phases: .down) { _ in
-            guard localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return .ignored
-            }
-            if let previous = messageHistory.previous(currentText: localText) {
-                isProgrammaticUpdate = true
-                localText = previous
-            }
-            return .handled
-        }
-        .onKeyPress(.downArrow, phases: .down) { _ in
-            guard messageHistory.currentIndex != nil else { return .ignored }
-            if let next = messageHistory.next() {
-                isProgrammaticUpdate = true
-                localText = next
-            }
-            return .handled
-        }
         #endif
+    }
+
+    func transformWorkspacePasteText(_ pastedText: String) -> String {
+        if WorkspacePasteBehavior.shouldBeAttachment(pastedText) {
+            let id = draft.addTextAttachment(content: pastedText)
+            let attachment = TextAttachment(id: id, content: pastedText)
+            localTextAttachments.append(attachment)
+            isDirty = true
+
+            if let projectId = selectedProject?.id {
+                Task {
+                    await draftManager.updateTextAttachments(
+                        localTextAttachments,
+                        conversationId: conversationId,
+                        projectId: projectId
+                    )
+                }
+            }
+
+            return "[Text Attachment \(id)]"
+        }
+
+        return WorkspacePasteBehavior.smartFormatPaste(pastedText)
     }
 
     /// Immediately flush localText to DraftManager, canceling any pending debounced sync.
@@ -238,13 +309,23 @@ extension MessageComposerView {
                 .foregroundStyle(Color.composerAction)
             }
 
+            if !localTextAttachments.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.text.fill")
+                        .font(.caption2)
+                    Text("\(localTextAttachments.count)")
+                        .font(.caption)
+                }
+                .foregroundStyle(Color.composerAction)
+            }
+
             if localText.count > 0 {
                 Text("\(localText.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty {
+            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty || !localTextAttachments.isEmpty {
                 Button(action: clearDraft) {
                     Image(systemName: "trash")
                         .foregroundStyle(Color.composerDestructive)
@@ -290,7 +371,11 @@ extension MessageComposerView {
     }
 
     var canPinCurrentPrompt: Bool {
-        isNewConversation && !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        Self.canPinCurrentPrompt(forInputText: localText)
+    }
+
+    var pinControlMode: PinControlMode {
+        Self.pinControlMode(forInputText: localText, pinnedPromptCount: recentPinnedPrompts.count)
     }
 
     var recentPinnedPrompts: [PinnedPrompt] {

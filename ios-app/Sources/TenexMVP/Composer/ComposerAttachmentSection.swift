@@ -22,6 +22,21 @@ extension MessageComposerView {
         .background(.bar)
     }
 
+    var textAttachmentChipsView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(localTextAttachments) { attachment in
+                    TextAttachmentChipView(attachment: attachment) {
+                        removeTextAttachment(id: attachment.id)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 12)
+        .background(.bar)
+    }
+
     /// Handle image selected from picker - upload to Blossom.
     func handleImageSelected(data: Data, mimeType: String) {
         isUploadingImage = true
@@ -70,6 +85,24 @@ extension MessageComposerView {
             Task {
                 await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
                 await draftManager.updateImageAttachments(localImageAttachments, conversationId: conversationId, projectId: projectId)
+            }
+        }
+    }
+
+    /// Remove a text attachment and its marker token from message text.
+    func removeTextAttachment(id: Int) {
+        localTextAttachments.removeAll { $0.id == id }
+
+        let marker = "[Text Attachment \(id)]"
+        localText = localText.replacingOccurrences(of: marker + " ", with: "")
+        localText = localText.replacingOccurrences(of: marker, with: "")
+
+        draft.removeTextAttachment(id: id)
+        isDirty = true
+        if let projectId = selectedProject?.id {
+            Task {
+                await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
+                await draftManager.updateTextAttachments(localTextAttachments, conversationId: conversationId, projectId: projectId)
             }
         }
     }
@@ -168,6 +201,36 @@ struct ImageAttachmentChipView: View {
                 .foregroundStyle(Color.composerAction)
 
             Text("Image #\(attachment.id)")
+                .font(.caption)
+                .foregroundStyle(.primary)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color.composerAction.opacity(0.1))
+        )
+    }
+}
+
+struct TextAttachmentChipView: View {
+    let attachment: TextAttachment
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc.text.fill")
+                .font(.caption)
+                .foregroundStyle(Color.composerAction)
+
+            Text("Text Attachment \(attachment.id)")
                 .font(.caption)
                 .foregroundStyle(.primary)
 

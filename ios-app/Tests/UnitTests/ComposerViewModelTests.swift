@@ -54,6 +54,7 @@ final class ComposerViewModelTests: XCTestCase {
             projectId: "project-a",
             conversationId: nil,
             initialContent: "new content",
+            initialTextAttachments: [],
             referenceConversationId: "conv-ref",
             referenceReportATag: "30023:pubkey:slug",
             isDirty: false
@@ -75,6 +76,7 @@ final class ComposerViewModelTests: XCTestCase {
             projectId: "project-a",
             conversationId: nil,
             initialContent: "ignored",
+            initialTextAttachments: [],
             referenceConversationId: "conv-ref",
             referenceReportATag: "30023:pubkey:slug",
             isDirty: true
@@ -119,12 +121,14 @@ final class ComposerViewModelTests: XCTestCase {
             content: "hello",
             agentPubkey: "agent",
             nudgeIds: ["n1"],
-            skillIds: ["s1"]
+            skillIds: ["s1"],
+            referenceConversationId: "conv-ref"
         )
 
         XCTAssertEqual(result.eventId, "evt-thread")
         XCTAssertEqual(core.sendThreadCalls.count, 1)
         XCTAssertEqual(core.sendMessageCalls.count, 0)
+        XCTAssertEqual(core.sendThreadCalls.first?.referenceConversationId, "conv-ref")
     }
 
     func testSendMessageUsesReplyEndpointForExistingConversation() async throws {
@@ -139,12 +143,51 @@ final class ComposerViewModelTests: XCTestCase {
             content: "hello",
             agentPubkey: nil,
             nudgeIds: [],
-            skillIds: []
+            skillIds: [],
+            referenceConversationId: nil
         )
 
         XCTAssertEqual(result.eventId, "evt-reply")
         XCTAssertEqual(core.sendThreadCalls.count, 0)
         XCTAssertEqual(core.sendMessageCalls.count, 1)
+    }
+
+    func testLoadDraftSeedsTextAttachmentsWhenNotDirty() async {
+        let draftStore = MockDraftStore()
+        let viewModel = makeViewModel(core: MockCoreGateway(), drafts: draftStore)
+        let seedAttachments = [TextAttachment(id: 1, content: "seeded context")]
+
+        let result = await viewModel.loadDraft(
+            projectId: "project-a",
+            conversationId: nil,
+            initialContent: "[Text Attachment 1]",
+            initialTextAttachments: seedAttachments,
+            referenceConversationId: "conv-ref",
+            referenceReportATag: nil,
+            isDirty: false
+        )
+
+        XCTAssertEqual(result.localText, "[Text Attachment 1]")
+        XCTAssertEqual(result.textAttachments, seedAttachments)
+        XCTAssertEqual(draftStore.updatedTextAttachments.last ?? [], seedAttachments)
+    }
+
+    func testLoadDraftDirtyPathDoesNotPersistSeedTextAttachments() async {
+        let draftStore = MockDraftStore()
+        let viewModel = makeViewModel(core: MockCoreGateway(), drafts: draftStore)
+
+        _ = await viewModel.loadDraft(
+            projectId: "project-a",
+            conversationId: nil,
+            initialContent: "[Text Attachment 1]",
+            initialTextAttachments: [TextAttachment(id: 1, content: "seeded context")],
+            referenceConversationId: "conv-ref",
+            referenceReportATag: nil,
+            isDirty: true
+        )
+
+        XCTAssertTrue(draftStore.updatedContents.isEmpty)
+        XCTAssertTrue(draftStore.updatedTextAttachments.isEmpty)
     }
 
     func testValidatedAgentPubkeyClearsInvalidSelectionWhenAgentListIsLoaded() async {
@@ -238,6 +281,7 @@ private struct SendInvocation: Equatable {
     let agentPubkey: String?
     let nudgeIds: [String]
     let skillIds: [String]
+    let referenceConversationId: String?
 }
 
 @MainActor
@@ -273,7 +317,8 @@ private final class MockCoreGateway: CoreGateway {
         content: String,
         agentPubkey: String?,
         nudgeIds: [String],
-        skillIds: [String]
+        skillIds: [String],
+        referenceConversationId: String?
     ) async throws -> SendMessageResult {
         sendThreadCalls.append(
             SendInvocation(
@@ -282,7 +327,8 @@ private final class MockCoreGateway: CoreGateway {
                 content: content,
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
-                skillIds: skillIds
+                skillIds: skillIds,
+                referenceConversationId: referenceConversationId
             )
         )
         return threadSendResult
@@ -303,7 +349,8 @@ private final class MockCoreGateway: CoreGateway {
                 content: content,
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
-                skillIds: skillIds
+                skillIds: skillIds,
+                referenceConversationId: nil
             )
         )
         return replySendResult
@@ -326,6 +373,7 @@ private final class MockDraftStore: DraftPersisting {
     var updatedAgentPubkeys: [String?] = []
     var updatedReferenceConversationIds: [String?] = []
     var updatedReferenceReportATags: [String?] = []
+    var updatedTextAttachments: [[TextAttachment]] = []
 
     func seedDraft(_ draft: Draft, conversationId: String?, projectId: String) {
         drafts[Draft.storageKey(for: conversationId, projectId: projectId)] = draft
@@ -391,6 +439,14 @@ private final class MockDraftStore: DraftPersisting {
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
         var draft = drafts[key] ?? (conversationId.map { Draft(conversationId: $0, projectId: projectId) } ?? Draft(projectId: projectId))
         draft.imageAttachments = imageAttachments
+        drafts[key] = draft
+    }
+
+    func updateTextAttachments(_ textAttachments: [TextAttachment], conversationId: String?, projectId: String) async {
+        updatedTextAttachments.append(textAttachments)
+        let key = Draft.storageKey(for: conversationId, projectId: projectId)
+        var draft = drafts[key] ?? (conversationId.map { Draft(conversationId: $0, projectId: projectId) } ?? Draft(projectId: projectId))
+        draft.setTextAttachments(textAttachments)
         drafts[key] = draft
     }
 

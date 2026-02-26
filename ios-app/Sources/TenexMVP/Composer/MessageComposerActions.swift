@@ -11,6 +11,7 @@ extension MessageComposerView {
             projectId: projectId,
             conversationId: conversationId,
             initialContent: initialContent,
+            initialTextAttachments: initialTextAttachments,
             referenceConversationId: referenceConversationId,
             referenceReportATag: referenceReportATag,
             isDirty: isDirty
@@ -29,6 +30,7 @@ extension MessageComposerView {
             localText = loadedText
         }
         localImageAttachments = result.imageAttachments
+        localTextAttachments = result.textAttachments
     }
 
     func loadAgents() async {
@@ -101,6 +103,7 @@ extension MessageComposerView {
                 localText = projectDraft.content
             }
             localImageAttachments = projectDraft.imageAttachments
+            localTextAttachments = projectDraft.textAttachments
             contentSyncTask?.cancel()
 
             draft.clearAgent()
@@ -121,11 +124,10 @@ extension MessageComposerView {
         contentSyncTask?.cancel()
         triggerDetectionTask?.cancel()
 
-        var contentToSend = localText
-        for attachment in localImageAttachments {
-            let marker = "[Image #\(attachment.id)]"
-            contentToSend = contentToSend.replacingOccurrences(of: marker, with: attachment.url)
-        }
+        draft.updateContent(localText)
+        draft.imageAttachments = localImageAttachments
+        draft.setTextAttachments(localTextAttachments)
+        let contentToSend = draft.buildFullContent()
 
         // OPTIMISTIC DISMISS FIX: Dismiss immediately for snappy UX
         // Then post in background with error recovery
@@ -156,11 +158,12 @@ extension MessageComposerView {
                     content: contentToSend,
                     agentPubkey: validatedAgentPubkey,
                     nudgeIds: Array(draft.selectedNudgeIds),
-                    skillIds: Array(draft.selectedSkillIds)
+                    skillIds: Array(draft.selectedSkillIds),
+                    referenceConversationId: draft.referenceConversationId
                 )
 
                 isSending = false
-                messageHistory.add(contentToSend)
+                messageHistory.add(localText)
                 messageHistory.reset()
 
                 if let convId = conversationId {
@@ -203,6 +206,7 @@ extension MessageComposerView {
         contentSyncTask?.cancel()
         triggerDetectionTask?.cancel()
         localImageAttachments = []
+        localTextAttachments = []
 
         draft.clear()
         if let projectId = selectedProject?.id {
@@ -241,12 +245,15 @@ extension MessageComposerView {
     func clearDraftAfterInlineSend(projectId: String) async {
         draft.updateContent("")
         draft.clearImageAttachments()
+        draft.clearTextAttachments()
         localText = ""
         localImageAttachments = []
+        localTextAttachments = []
         isDirty = false
         contentSyncTask?.cancel()
         triggerDetectionTask?.cancel()
         await draftManager.updateContent("", conversationId: conversationId, projectId: projectId)
         await draftManager.updateImageAttachments([], conversationId: conversationId, projectId: projectId)
+        await draftManager.updateTextAttachments([], conversationId: conversationId, projectId: projectId)
     }
 }
