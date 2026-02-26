@@ -180,7 +180,7 @@ struct SlackMessageRow: View, Equatable {
                 Button {
                     onViewRawEvent(message.id)
                 } label: {
-                    Label("View Raw Event", systemImage: "doc.text.magnifyingglass")
+                    Text("View Raw Event")
                 }
             }
         }
@@ -295,11 +295,12 @@ struct SlackMessageRow: View, Equatable {
             Button {
                 onViewRawEvent(message.id)
             } label: {
-                Label("View Raw Event", systemImage: "doc.text.magnifyingglass")
+                Text("View Raw Event")
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .font(.subheadline)
+            Text("...")
+                .font(.callout)
+                .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)

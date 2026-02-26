@@ -156,6 +156,14 @@ final class ConversationFormattersTests: XCTestCase {
         XCTAssertTrue(result.contains("conversation_get"))
     }
 
+    func testGenerateContextMessageUsesReferenceWording() {
+        let result = ConversationFormatters.generateContextMessage(
+            conversationId: "test-id",
+            messages: []
+        )
+        XCTAssertTrue(result.contains("This is in reference to conversation id"))
+    }
+
     // MARK: - generateContextMessage (with ConversationFullInfo)
 
     func testGenerateContextMessageConversationInfoIncludesShortId() {
@@ -191,6 +199,12 @@ final class ConversationFormattersTests: XCTestCase {
         let conversation = makeConversation(id: "test", messageCount: 0)
         let result = ConversationFormatters.generateContextMessage(conversation: conversation)
         XCTAssertTrue(result.contains("0 tokens"))
+    }
+
+    func testGenerateContextMessageConversationInfoUsesReferenceWording() {
+        let conversation = makeConversation(id: "test", messageCount: 1)
+        let result = ConversationFormatters.generateContextMessage(conversation: conversation)
+        XCTAssertTrue(result.contains("This is in reference to conversation id"))
     }
 
     // MARK: - generateReportContextMessage

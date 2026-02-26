@@ -603,7 +603,7 @@ enum ConversationFormatters {
         let tokenCount = totalChars / 4
 
         return """
-        This message is in the context of conversation id \(shortConversationId) (full: \(conversationId)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
+        This is in reference to conversation id \(shortConversationId) (full: \(conversationId)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
         """
     }
 
@@ -621,7 +621,7 @@ enum ConversationFormatters {
         let tokenCount = Int(conversation.messageCount) * estimatedTokensPerMessage
 
         return """
-        This message is in the context of conversation id \(shortConversationId) (full: \(conversation.thread.id)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
+        This is in reference to conversation id \(shortConversationId) (full: \(conversation.thread.id)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
         """
     }
 
@@ -642,4 +642,3 @@ enum ConversationFormatters {
         """
     }
 }
-

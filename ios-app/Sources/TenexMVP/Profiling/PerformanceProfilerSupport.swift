@@ -217,7 +217,8 @@ final class MainThreadStallMonitor {
     private let stallThreshold: TimeInterval = 0.2
     private let stallLogRepeatInterval: TimeInterval = 1.0
     private let stallSampleThresholdMs: Double = 750
-    private let stallSampleCooldown: TimeInterval = 8.0
+    private let stallSampleCooldown: TimeInterval = 20.0
+    private let maxSamplesPerStallSequence: UInt64 = 6
 
     private let stateLock = NSLock()
     private let watchdogQueue = DispatchQueue(label: "com.tenex.app.stall-watchdog", qos: .userInitiated)
@@ -228,6 +229,7 @@ final class MainThreadStallMonitor {
     private var lastHeartbeatUptime: TimeInterval = 0
     private var currentStallStartUptime: TimeInterval?
     private var currentStallSequence: UInt64 = 0
+    private var currentStallSampleCount: UInt64 = 0
     private var lastStallLogUptime: TimeInterval = 0
     private var lastSampleUptime: TimeInterval = 0
     private var sampleCaptureCount: UInt64 = 0
@@ -246,6 +248,7 @@ final class MainThreadStallMonitor {
         currentStallStartUptime = nil
         lastStallLogUptime = 0
         lastSampleUptime = 0
+        currentStallSampleCount = 0
         stateLock.unlock()
 
         let heartbeat = DispatchSource.makeTimerSource(queue: .main)
@@ -318,6 +321,7 @@ final class MainThreadStallMonitor {
             if currentStallStartUptime == nil {
                 currentStallStartUptime = lastHeartbeatUptime
                 currentStallSequence &+= 1
+                currentStallSampleCount = 0
                 lastStallLogUptime = 0
             }
 
@@ -328,9 +332,12 @@ final class MainThreadStallMonitor {
                 inProgressLogLevel = stallMs >= 1000 ? .error : .info
             }
 
-            if stallMs >= stallSampleThresholdMs && (now - lastSampleUptime) >= stallSampleCooldown {
+            if stallMs >= stallSampleThresholdMs &&
+                (now - lastSampleUptime) >= stallSampleCooldown &&
+                currentStallSampleCount < maxSamplesPerStallSequence {
                 lastSampleUptime = now
                 sampleCaptureCount &+= 1
+                currentStallSampleCount &+= 1
                 sampleRequest = (stallMs, currentStallSequence, sampleCaptureCount)
             }
         } else if let stallStart = currentStallStartUptime {
@@ -338,6 +345,7 @@ final class MainThreadStallMonitor {
             recoveryLog = "Main thread stall recovered seq=\(currentStallSequence) totalMs=\(String(format: "%.1f", totalMs))"
             recoveryLogLevel = totalMs >= 1000 ? .error : .info
             currentStallStartUptime = nil
+            currentStallSampleCount = 0
             lastStallLogUptime = 0
         }
         stateLock.unlock()
@@ -416,6 +424,7 @@ final class MainThreadStallMonitor {
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
                 if process.terminationStatus == 0 {
+                    Self.pruneStallSamples(maxFiles: 200, maxTotalBytes: 256 * 1024 * 1024)
                     PerformanceProfiler.shared.logEvent(
                         "stall sample captured seq=\(sequence) stallMs=\(String(format: "%.1f", stallMs)) capture=\(captureCount) elapsedMs=\(String(format: "%.1f", elapsedMs)) file=\(sampleURL.path)",
                         category: .general,
@@ -435,6 +444,56 @@ final class MainThreadStallMonitor {
                     category: .general,
                     level: .error
                 )
+            }
+        }
+    }
+
+    private static func pruneStallSamples(maxFiles: Int, maxTotalBytes: UInt64) {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: stallSamplesDirectory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        let sampleFiles = contents.filter { $0.lastPathComponent.hasPrefix("sample-") }
+        if sampleFiles.count <= maxFiles {
+            let totalSize = sampleFiles.reduce(UInt64(0)) { partial, url in
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                return partial + UInt64(max(size, 0))
+            }
+            if totalSize <= maxTotalBytes {
+                return
+            }
+        }
+
+        let sortedByAge = sampleFiles.sorted { lhs, rhs in
+            let lhsDate = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rhsDate = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return lhsDate < rhsDate
+        }
+
+        var keptCount = sortedByAge.count
+        var totalSize = sortedByAge.reduce(UInt64(0)) { partial, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return partial + UInt64(max(size, 0))
+        }
+
+        for url in sortedByAge {
+            let size = UInt64(max((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0, 0))
+            let overFileLimit = keptCount > maxFiles
+            let overByteLimit = totalSize > maxTotalBytes
+            if !overFileLimit && !overByteLimit {
+                break
+            }
+
+            do {
+                try FileManager.default.removeItem(at: url)
+                keptCount -= 1
+                totalSize = totalSize >= size ? (totalSize - size) : 0
+            } catch {
+                continue
             }
         }
     }
