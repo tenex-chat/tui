@@ -14,6 +14,7 @@ impl TenexCore {
         agent_pubkey: Option<String>,
         nudge_ids: Vec<String>,
         skill_ids: Vec<String>,
+        reference_conversation_id: Option<String>,
     ) -> Result<SendMessageResult, TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -30,7 +31,7 @@ impl TenexCore {
                 agent_pubkey,
                 nudge_ids,
                 skill_ids,
-                reference_conversation_id: None,
+                reference_conversation_id,
                 fork_message_id: None,
                 response_tx: Some(response_tx),
             })
