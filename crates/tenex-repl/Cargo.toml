@@ -1,0 +1,23 @@
+[package]
+name = "tenex-repl"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "tenex-repl"
+path = "src/main.rs"
+
+[dependencies]
+tenex-core = { path = "../tenex-core" }
+tokio = { workspace = true, features = ["full"] }
+nostr-sdk.workspace = true
+nostr.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+chrono.workspace = true
+dirs.workspace = true
+crossterm.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+arboard.workspace = true
+png.workspace = true
