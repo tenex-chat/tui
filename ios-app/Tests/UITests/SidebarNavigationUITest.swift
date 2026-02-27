@@ -32,7 +32,8 @@ final class SidebarNavigationUITest: XCTestCase {
             ("section_row_search", "section_content_search"),
             ("section_row_teams", "section_content_teams"),
             ("section_row_agentDefinitions", "section_content_agentDefinitions"),
-            ("section_row_nudges", "section_content_nudges")
+            ("section_row_nudges", "section_content_nudges"),
+            ("section_row_skills", "section_content_skills")
         ]
 
         for section in sections {

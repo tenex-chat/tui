@@ -874,6 +874,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getDiagnosticsSnapshot(includeDatabaseStats: Bool)  -> DiagnosticsSnapshot
     
     /**
+     * Get root threads that reference a report a-tag (`30023:pubkey:slug`).
+     */
+    func getDocumentThreads(reportATag: String)  -> [Thread]
+    
+    /**
      * Get inbox items for the current user.
      */
     func getInbox()  -> [InboxItem]
@@ -886,7 +891,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Get all nudges (kind:4201 events).
      *
-     * Returns all nudges sorted by created_at descending (most recent first).
+     * Returns nudges deduplicated by `author + d-tag`, sorted by created_at
+     * descending (most recent first).
      * Used by iOS for nudge selection in new conversations.
      */
     func getNudges() throws  -> [Nudge]
@@ -1121,7 +1127,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?) throws  -> SendMessageResult
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?, referenceReportATag: String?) throws  -> SendMessageResult
     
     /**
      * Enable or disable audio notifications
@@ -1859,6 +1865,17 @@ open func getDiagnosticsSnapshot(includeDatabaseStats: Bool) -> DiagnosticsSnaps
 }
     
     /**
+     * Get root threads that reference a report a-tag (`30023:pubkey:slug`).
+     */
+open func getDocumentThreads(reportATag: String) -> [Thread]  {
+    return try!  FfiConverterSequenceTypeThread.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_document_threads(self.uniffiClonePointer(),
+        FfiConverterString.lower(reportATag),$0
+    )
+})
+}
+    
+    /**
      * Get inbox items for the current user.
      */
 open func getInbox() -> [InboxItem]  {
@@ -1882,7 +1899,8 @@ open func getMessages(conversationId: String) -> [Message]  {
     /**
      * Get all nudges (kind:4201 events).
      *
-     * Returns all nudges sorted by created_at descending (most recent first).
+     * Returns nudges deduplicated by `author + d-tag`, sorted by created_at
+     * descending (most recent first).
      * Used by iOS for nudge selection in new conversations.
      */
 open func getNudges()throws  -> [Nudge]  {
@@ -2314,7 +2332,7 @@ open func sendMessage(conversationId: String, projectId: String, content: String
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?)throws  -> SendMessageResult  {
+open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?, referenceReportATag: String?)throws  -> SendMessageResult  {
     return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_send_thread(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
@@ -2323,7 +2341,8 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
         FfiConverterOptionString.lower(agentPubkey),
         FfiConverterSequenceString.lower(nudgeIds),
         FfiConverterSequenceString.lower(skillIds),
-        FfiConverterOptionString.lower(referenceConversationId),$0
+        FfiConverterOptionString.lower(referenceConversationId),
+        FfiConverterOptionString.lower(referenceReportATag),$0
     )
 })
 }
@@ -3886,6 +3905,91 @@ public func FfiConverterTypeDayMessages_lift(_ buf: RustBuffer) throws -> DayMes
 #endif
 public func FfiConverterTypeDayMessages_lower(_ value: DayMessages) -> RustBuffer {
     return FfiConverterTypeDayMessages.lower(value)
+}
+
+
+/**
+ * Runtime for a single day (unix timestamp for day start, runtime in milliseconds)
+ */
+public struct DayRuntime {
+    /**
+     * Unix timestamp (seconds) for the start of the day (UTC)
+     */
+    public var dayStart: UInt64
+    /**
+     * Total LLM runtime for this day in milliseconds
+     */
+    public var runtimeMs: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unix timestamp (seconds) for the start of the day (UTC)
+         */dayStart: UInt64, 
+        /**
+         * Total LLM runtime for this day in milliseconds
+         */runtimeMs: UInt64) {
+        self.dayStart = dayStart
+        self.runtimeMs = runtimeMs
+    }
+}
+
+#if compiler(>=6)
+extension DayRuntime: Sendable {}
+#endif
+
+
+extension DayRuntime: Equatable, Hashable {
+    public static func ==(lhs: DayRuntime, rhs: DayRuntime) -> Bool {
+        if lhs.dayStart != rhs.dayStart {
+            return false
+        }
+        if lhs.runtimeMs != rhs.runtimeMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dayStart)
+        hasher.combine(runtimeMs)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDayRuntime: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DayRuntime {
+        return
+            try DayRuntime(
+                dayStart: FfiConverterUInt64.read(from: &buf), 
+                runtimeMs: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DayRuntime, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.dayStart, into: &buf)
+        FfiConverterUInt64.write(value.runtimeMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayRuntime_lift(_ buf: RustBuffer) throws -> DayRuntime {
+    return try FfiConverterTypeDayRuntime.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayRuntime_lower(_ value: DayRuntime) -> RustBuffer {
+    return FfiConverterTypeDayRuntime.lower(value)
 }
 
 
@@ -5646,6 +5750,11 @@ public func FfiConverterTypeNegentropySyncDiagnostics_lower(_ value: NegentropyS
 public struct Nudge {
     public var id: String
     public var pubkey: String
+    /**
+     * Replaceable identifier (NIP-33 `d` tag).
+     * Used to group multiple versions of the same logical nudge.
+     */
+    public var dTag: String
     public var title: String
     public var description: String
     public var content: String
@@ -5674,7 +5783,11 @@ public struct Nudge {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, pubkey: String, title: String, description: String, content: String, hashtags: [String], createdAt: UInt64, 
+    public init(id: String, pubkey: String, 
+        /**
+         * Replaceable identifier (NIP-33 `d` tag).
+         * Used to group multiple versions of the same logical nudge.
+         */dTag: String, title: String, description: String, content: String, hashtags: [String], createdAt: UInt64, 
         /**
          * Tools to add to agent's available tools (allow-tool tags)
          * Used in additive/subtractive mode - mutually exclusive with only_tools
@@ -5693,6 +5806,7 @@ public struct Nudge {
          */supersedes: String?) {
         self.id = id
         self.pubkey = pubkey
+        self.dTag = dTag
         self.title = title
         self.description = description
         self.content = content
@@ -5716,6 +5830,9 @@ extension Nudge: Equatable, Hashable {
             return false
         }
         if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
             return false
         }
         if lhs.title != rhs.title {
@@ -5751,6 +5868,7 @@ extension Nudge: Equatable, Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(pubkey)
+        hasher.combine(dTag)
         hasher.combine(title)
         hasher.combine(description)
         hasher.combine(content)
@@ -5774,6 +5892,7 @@ public struct FfiConverterTypeNudge: FfiConverterRustBuffer {
             try Nudge(
                 id: FfiConverterString.read(from: &buf), 
                 pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
                 content: FfiConverterString.read(from: &buf), 
@@ -5789,6 +5908,7 @@ public struct FfiConverterTypeNudge: FfiConverterRustBuffer {
     public static func write(_ value: Nudge, into buf: inout [UInt8]) {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
         FfiConverterString.write(value.content, into: &buf)
@@ -6918,6 +7038,7 @@ public struct Skill {
     public var pubkey: String
     public var title: String
     public var description: String
+    public var image: String?
     public var content: String
     public var hashtags: [String]
     public var createdAt: UInt64
@@ -6928,7 +7049,7 @@ public struct Skill {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, pubkey: String, title: String, description: String, content: String, hashtags: [String], createdAt: UInt64, 
+    public init(id: String, pubkey: String, title: String, description: String, image: String?, content: String, hashtags: [String], createdAt: UInt64, 
         /**
          * File attachment event IDs (e-tags referencing NIP-94 kind:1063 events)
          */fileIds: [String]) {
@@ -6936,6 +7057,7 @@ public struct Skill {
         self.pubkey = pubkey
         self.title = title
         self.description = description
+        self.image = image
         self.content = content
         self.hashtags = hashtags
         self.createdAt = createdAt
@@ -6962,6 +7084,9 @@ extension Skill: Equatable, Hashable {
         if lhs.description != rhs.description {
             return false
         }
+        if lhs.image != rhs.image {
+            return false
+        }
         if lhs.content != rhs.content {
             return false
         }
@@ -6982,6 +7107,7 @@ extension Skill: Equatable, Hashable {
         hasher.combine(pubkey)
         hasher.combine(title)
         hasher.combine(description)
+        hasher.combine(image)
         hasher.combine(content)
         hasher.combine(hashtags)
         hasher.combine(createdAt)
@@ -7002,6 +7128,7 @@ public struct FfiConverterTypeSkill: FfiConverterRustBuffer {
                 pubkey: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
+                image: FfiConverterOptionString.read(from: &buf), 
                 content: FfiConverterString.read(from: &buf), 
                 hashtags: FfiConverterSequenceString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf), 
@@ -7014,6 +7141,7 @@ public struct FfiConverterTypeSkill: FfiConverterRustBuffer {
         FfiConverterString.write(value.pubkey, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
+        FfiConverterOptionString.write(value.image, into: &buf)
         FfiConverterString.write(value.content, into: &buf)
         FfiConverterSequenceString.write(value.hashtags, into: &buf)
         FfiConverterUInt64.write(value.createdAt, into: &buf)
@@ -7055,6 +7183,10 @@ public struct StatsSnapshot {
      */
     public var messagesByDay: [DayMessages]
     /**
+     * Last 14 days of runtime totals (newest first)
+     */
+    public var runtimeByDay: [DayRuntime]
+    /**
      * Last 720 hours of activity data with pre-computed intensities
      * Pre-normalized to 0-255 intensity scale for direct visualization
      */
@@ -7082,6 +7214,9 @@ public struct StatsSnapshot {
          * Last 14 days of message counts (user vs all, newest first)
          */messagesByDay: [DayMessages], 
         /**
+         * Last 14 days of runtime totals (newest first)
+         */runtimeByDay: [DayRuntime], 
+        /**
          * Last 720 hours of activity data with pre-computed intensities
          * Pre-normalized to 0-255 intensity scale for direct visualization
          */activityByHour: [HourActivity], 
@@ -7094,6 +7229,7 @@ public struct StatsSnapshot {
         self.totalCost14Days = totalCost14Days
         self.costByProject = costByProject
         self.messagesByDay = messagesByDay
+        self.runtimeByDay = runtimeByDay
         self.activityByHour = activityByHour
         self.maxTokens = maxTokens
         self.maxMessages = maxMessages
@@ -7116,6 +7252,9 @@ extension StatsSnapshot: Equatable, Hashable {
         if lhs.messagesByDay != rhs.messagesByDay {
             return false
         }
+        if lhs.runtimeByDay != rhs.runtimeByDay {
+            return false
+        }
         if lhs.activityByHour != rhs.activityByHour {
             return false
         }
@@ -7132,6 +7271,7 @@ extension StatsSnapshot: Equatable, Hashable {
         hasher.combine(totalCost14Days)
         hasher.combine(costByProject)
         hasher.combine(messagesByDay)
+        hasher.combine(runtimeByDay)
         hasher.combine(activityByHour)
         hasher.combine(maxTokens)
         hasher.combine(maxMessages)
@@ -7150,6 +7290,7 @@ public struct FfiConverterTypeStatsSnapshot: FfiConverterRustBuffer {
                 totalCost14Days: FfiConverterDouble.read(from: &buf), 
                 costByProject: FfiConverterSequenceTypeProjectCost.read(from: &buf), 
                 messagesByDay: FfiConverterSequenceTypeDayMessages.read(from: &buf), 
+                runtimeByDay: FfiConverterSequenceTypeDayRuntime.read(from: &buf), 
                 activityByHour: FfiConverterSequenceTypeHourActivity.read(from: &buf), 
                 maxTokens: FfiConverterUInt64.read(from: &buf), 
                 maxMessages: FfiConverterUInt64.read(from: &buf)
@@ -7160,6 +7301,7 @@ public struct FfiConverterTypeStatsSnapshot: FfiConverterRustBuffer {
         FfiConverterDouble.write(value.totalCost14Days, into: &buf)
         FfiConverterSequenceTypeProjectCost.write(value.costByProject, into: &buf)
         FfiConverterSequenceTypeDayMessages.write(value.messagesByDay, into: &buf)
+        FfiConverterSequenceTypeDayRuntime.write(value.runtimeByDay, into: &buf)
         FfiConverterSequenceTypeHourActivity.write(value.activityByHour, into: &buf)
         FfiConverterUInt64.write(value.maxTokens, into: &buf)
         FfiConverterUInt64.write(value.maxMessages, into: &buf)
@@ -8651,6 +8793,11 @@ public enum DataChangeType {
      */
     case teamsChanged
     /**
+     * Agent definitions / nudges / skills / MCP tools changed
+     * (kinds:4199, 4200, 4201, 4202)
+     */
+    case contentCatalogChanged
+    /**
      * Stats snapshot should be refreshed
      */
     case statsUpdated
@@ -8720,16 +8867,18 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         
         case 11: return .teamsChanged
         
-        case 12: return .statsUpdated
+        case 12: return .contentCatalogChanged
         
-        case 13: return .diagnosticsUpdated
+        case 13: return .statsUpdated
         
-        case 14: return .general
+        case 14: return .diagnosticsUpdated
         
-        case 15: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
+        case 15: return .general
+        
+        case 16: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
         )
         
-        case 16: return .bookmarkListChanged(bookmarkedIds: try FfiConverterSequenceString.read(from: &buf)
+        case 17: return .bookmarkListChanged(bookmarkedIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -8802,25 +8951,29 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
             writeInt(&buf, Int32(11))
         
         
-        case .statsUpdated:
+        case .contentCatalogChanged:
             writeInt(&buf, Int32(12))
         
         
-        case .diagnosticsUpdated:
+        case .statsUpdated:
             writeInt(&buf, Int32(13))
         
         
-        case .general:
+        case .diagnosticsUpdated:
             writeInt(&buf, Int32(14))
         
         
-        case let .bunkerSignRequest(request):
+        case .general:
             writeInt(&buf, Int32(15))
+        
+        
+        case let .bunkerSignRequest(request):
+            writeInt(&buf, Int32(16))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
             
         
         case let .bookmarkListChanged(bookmarkedIds):
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(17))
             FfiConverterSequenceString.write(bookmarkedIds, into: &buf)
             
         }
@@ -9718,6 +9871,31 @@ fileprivate struct FfiConverterSequenceTypeDayMessages: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeDayRuntime: FfiConverterRustBuffer {
+    typealias SwiftType = [DayRuntime]
+
+    public static func write(_ value: [DayRuntime], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDayRuntime.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DayRuntime] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DayRuntime]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDayRuntime.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeFfiBunkerAuditEntry: FfiConverterRustBuffer {
     typealias SwiftType = [FfiBunkerAuditEntry]
 
@@ -10243,6 +10421,31 @@ fileprivate struct FfiConverterSequenceTypeTeamInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeThread: FfiConverterRustBuffer {
+    typealias SwiftType = [Thread]
+
+    public static func write(_ value: [Thread], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeThread.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [Thread] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [Thread]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeThread.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeVoiceInfo: FfiConverterRustBuffer {
     typealias SwiftType = [VoiceInfo]
 
@@ -10495,13 +10698,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_diagnostics_snapshot() != 40427) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_document_threads() != 33934) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_inbox() != 40776) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 37498) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_nudges() != 8935) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_nudges() != 58735) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 25307) {
@@ -10597,7 +10803,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 31521) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 44798) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 45032) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_audio_notifications_enabled() != 31649) {

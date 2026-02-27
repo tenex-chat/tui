@@ -417,10 +417,7 @@ pub(super) fn handle_agent_deletion_key(app: &mut App, key: KeyEvent) {
                         reason: None,
                         client: Some("tenex-tui".to_string()),
                     }) {
-                        app.set_warning_status(&format!(
-                            "Failed to publish agent deletion: {}",
-                            e
-                        ));
+                        app.set_warning_status(&format!("Failed to publish agent deletion: {}", e));
                     } else {
                         let scope_str = match state.scope {
                             ui::modal::AgentDeletionScope::Project => "project",

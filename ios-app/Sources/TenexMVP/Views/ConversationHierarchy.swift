@@ -628,4 +628,20 @@ enum ConversationFormatters {
         I'd like to discuss the report "\(report.title)" (slug: \(report.slug)). The report is approximately \(tokenCount) tokens and is already in your context via the report_read tool or your memorized knowledge. Let me know if you need me to share any specific parts.
         """
     }
+
+    // MARK: - Nudge Reference
+
+    /// Generate a context message for commenting on a nudge event.
+    ///
+    /// - Parameter nudge: The nudge being discussed
+    /// - Returns: A formatted context message string
+    static func generateNudgeContextMessage(nudge: Nudge) -> String {
+        let title = nudge.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled Nudge" : nudge.title
+        let tokenCount = nudge.content.count / 4
+        let nevent = Bech32.hexEventIdToNevent(nudge.id) ?? nudge.id
+
+        return """
+        I'd like to comment on the nudge "\(title)" (\(nevent)). The nudge content is approximately \(tokenCount) tokens.
+        """
+    }
 }

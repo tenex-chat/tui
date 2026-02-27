@@ -2,18 +2,28 @@ import Foundation
 
 // MARK: - Delegation Tree Node
 
+enum DelegationTreeNodeRole {
+    case rootAuthor
+    case recipient
+}
+
 /// Pure data model for a node in the delegation tree.
 /// No ViewModel logic — this is only data.
 struct DelegationTreeNode: Identifiable {
-    /// The conversation this node represents
+    /// Stable node identifier.
+    let id: String
+    /// Conversation opened when this node is selected.
     let conversation: ConversationFullInfo
-    /// The delegate tool-call message in the *parent's* conversation (outgoing arrow content)
-    let delegationMessage: Message?
-    /// The kind:1 in *this* conversation where this agent p-tags the parent's author (return arrow)
+    /// Participant shown in this node.
+    let participantPubkey: String
+    /// Role of this participant card in the rendered tree.
+    let role: DelegationTreeNodeRole
+    /// Last non-tool message from the conversation author, used as completion signal.
     let returnMessage: Message?
+    /// Most recent non-tool, non-reasoning message in the conversation (any author).
+    let lastMessage: Message?
     var children: [DelegationTreeNode]
 
-    var id: String { conversation.thread.id }
     /// Set during layout computation
     var depth: Int = 0
 }

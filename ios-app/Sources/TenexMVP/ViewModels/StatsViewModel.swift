@@ -97,6 +97,7 @@ class StatsViewModel: ObservableObject {
 
 enum StatsTab: String, CaseIterable, Identifiable {
     case rankings = "Rankings"
+    case runtime = "Runtime"
     case messages = "Messages"
     case activity = "Activity"
 
@@ -105,6 +106,7 @@ enum StatsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .rankings: return "list.number"
+        case .runtime: return "clock.badge.checkmark"
         case .messages: return "bubble.left.and.bubble.right.fill"
         case .activity: return "square.grid.3x3.fill"
         }

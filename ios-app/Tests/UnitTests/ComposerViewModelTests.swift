@@ -122,13 +122,15 @@ final class ComposerViewModelTests: XCTestCase {
             agentPubkey: "agent",
             nudgeIds: ["n1"],
             skillIds: ["s1"],
-            referenceConversationId: "conv-ref"
+            referenceConversationId: "conv-ref",
+            referenceReportATag: "30023:pubkey:slug"
         )
 
         XCTAssertEqual(result.eventId, "evt-thread")
         XCTAssertEqual(core.sendThreadCalls.count, 1)
         XCTAssertEqual(core.sendMessageCalls.count, 0)
         XCTAssertEqual(core.sendThreadCalls.first?.referenceConversationId, "conv-ref")
+        XCTAssertEqual(core.sendThreadCalls.first?.referenceReportATag, "30023:pubkey:slug")
     }
 
     func testSendMessageUsesReplyEndpointForExistingConversation() async throws {
@@ -144,7 +146,8 @@ final class ComposerViewModelTests: XCTestCase {
             agentPubkey: nil,
             nudgeIds: [],
             skillIds: [],
-            referenceConversationId: nil
+            referenceConversationId: nil,
+            referenceReportATag: nil
         )
 
         XCTAssertEqual(result.eventId, "evt-reply")
@@ -282,6 +285,7 @@ private struct SendInvocation: Equatable {
     let nudgeIds: [String]
     let skillIds: [String]
     let referenceConversationId: String?
+    let referenceReportATag: String?
 }
 
 @MainActor
@@ -318,7 +322,8 @@ private final class MockCoreGateway: CoreGateway {
         agentPubkey: String?,
         nudgeIds: [String],
         skillIds: [String],
-        referenceConversationId: String?
+        referenceConversationId: String?,
+        referenceReportATag: String?
     ) async throws -> SendMessageResult {
         sendThreadCalls.append(
             SendInvocation(
@@ -328,7 +333,8 @@ private final class MockCoreGateway: CoreGateway {
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
                 skillIds: skillIds,
-                referenceConversationId: referenceConversationId
+                referenceConversationId: referenceConversationId,
+                referenceReportATag: referenceReportATag
             )
         )
         return threadSendResult
@@ -350,7 +356,8 @@ private final class MockCoreGateway: CoreGateway {
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
                 skillIds: skillIds,
-                referenceConversationId: nil
+                referenceConversationId: nil,
+                referenceReportATag: nil
             )
         )
         return replySendResult

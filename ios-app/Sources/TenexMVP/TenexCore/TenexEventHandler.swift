@@ -12,6 +12,7 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
     private let lock = NSLock()
     private var pendingDiagnosticsUpdate = false
     private var pendingTeamsUpdate = false
+    private var pendingContentCatalogUpdate = false
     private var pendingStatsUpdate = false
     private var pendingGeneralUpdate = false
     private var isFlushScheduled = false
@@ -28,6 +29,9 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
             return
         case .teamsChanged:
             queueCoalescedUpdate(teams: true)
+            return
+        case .contentCatalogChanged:
+            queueCoalescedUpdate(contentCatalog: true)
             return
         case .statsUpdated:
             queueCoalescedUpdate(stats: true)
@@ -124,7 +128,7 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
             case .bookmarkListChanged(let bookmarkedIds):
                 coreManager.applyBookmarkListChanged(bookmarkedIds: bookmarkedIds)
 
-            case .mcpToolsChanged, .teamsChanged, .statsUpdated, .diagnosticsUpdated, .general:
+            case .mcpToolsChanged, .teamsChanged, .contentCatalogChanged, .statsUpdated, .diagnosticsUpdated, .general:
                 break
             }
         }
@@ -133,6 +137,7 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
     private func queueCoalescedUpdate(
         diagnostics: Bool = false,
         teams: Bool = false,
+        contentCatalog: Bool = false,
         stats: Bool = false,
         general: Bool = false
     ) {
@@ -141,6 +146,7 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
         lock.lock()
         pendingDiagnosticsUpdate = pendingDiagnosticsUpdate || diagnostics
         pendingTeamsUpdate = pendingTeamsUpdate || teams
+        pendingContentCatalogUpdate = pendingContentCatalogUpdate || contentCatalog
         pendingStatsUpdate = pendingStatsUpdate || stats
         pendingGeneralUpdate = pendingGeneralUpdate || general
         if !isFlushScheduled {
@@ -162,17 +168,20 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
     private func flushCoalescedUpdates() {
         let shouldSignalDiagnostics: Bool
         let shouldSignalTeams: Bool
+        let shouldSignalContentCatalog: Bool
         let shouldSignalStats: Bool
         let shouldSignalGeneral: Bool
 
         lock.lock()
         shouldSignalDiagnostics = pendingDiagnosticsUpdate
         shouldSignalTeams = pendingTeamsUpdate
+        shouldSignalContentCatalog = pendingContentCatalogUpdate
         shouldSignalStats = pendingStatsUpdate
         shouldSignalGeneral = pendingGeneralUpdate
 
         pendingDiagnosticsUpdate = false
         pendingTeamsUpdate = false
+        pendingContentCatalogUpdate = false
         pendingStatsUpdate = false
         pendingGeneralUpdate = false
         isFlushScheduled = false
@@ -182,6 +191,9 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
 
         if shouldSignalTeams {
             coreManager.signalTeamsUpdate()
+        }
+        if shouldSignalContentCatalog {
+            coreManager.signalContentCatalogUpdate()
         }
         if shouldSignalStats {
             coreManager.signalStatsUpdate()

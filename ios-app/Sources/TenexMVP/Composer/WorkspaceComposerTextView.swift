@@ -113,9 +113,29 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
 
     let isEnabled: Bool
     let onSubmit: () -> Void
+    let useNewlineForReturn: Bool
     let onHistoryPrevious: () -> Bool
     let onHistoryNext: () -> Bool
     let transformPaste: (String) -> String
+
+    private var composerFont: NSFont {
+        NSFont.preferredFont(forTextStyle: .title3)
+    }
+
+    private var composerTextColor: NSColor {
+        NSColor.labelColor.withAlphaComponent(0.94)
+    }
+
+    private func applyTextStyle(to textView: WorkspaceTextView) {
+        textView.font = composerFont
+        textView.textColor = composerTextColor
+        textView.insertionPointColor = composerTextColor
+
+        var typingAttributes = textView.typingAttributes
+        typingAttributes[.font] = composerFont
+        typingAttributes[.foregroundColor] = composerTextColor
+        textView.typingAttributes = typingAttributes
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -131,8 +151,7 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
         textView.isEditable = isEnabled
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.font = NSFont.systemFont(ofSize: 19)
-        textView.textColor = NSColor.labelColor.withAlphaComponent(0.94)
+        applyTextStyle(to: textView)
         textView.string = text
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -152,6 +171,7 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
 
         textView.onSubmit = onSubmit
+        textView.useNewlineForReturn = useNewlineForReturn
         textView.onHistoryPrevious = onHistoryPrevious
         textView.onHistoryNext = onHistoryNext
         textView.transformPaste = transformPaste
@@ -171,10 +191,12 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
         guard let textView = nsView.documentView as? WorkspaceTextView else { return }
 
         textView.onSubmit = onSubmit
+        textView.useNewlineForReturn = useNewlineForReturn
         textView.onHistoryPrevious = onHistoryPrevious
         textView.onHistoryNext = onHistoryNext
         textView.transformPaste = transformPaste
         textView.isEditable = isEnabled
+        applyTextStyle(to: textView)
 
         if textView.string != text {
             context.coordinator.isProgrammaticTextUpdate = true
@@ -189,8 +211,6 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
 
         if isFocused && !isFirstResponder {
             window.makeFirstResponder(textView)
-        } else if !isFocused && isFirstResponder {
-            window.makeFirstResponder(nil)
         }
     }
 
@@ -209,7 +229,8 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
         }
 
         func textDidEndEditing(_ notification: Notification) {
-            if parent.isFocused {
+            guard let textView = notification.object as? NSTextView else { return }
+            if textView.window?.firstResponder !== textView, parent.isFocused {
                 parent.isFocused = false
             }
         }
@@ -220,6 +241,9 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
             else {
                 return
             }
+            if !parent.isFocused {
+                parent.isFocused = true
+            }
             parent.text = textView.string
         }
     }
@@ -227,6 +251,7 @@ struct WorkspaceComposerTextView: NSViewRepresentable {
 
 private final class WorkspaceTextView: NSTextView {
     var onSubmit: (() -> Void)?
+    var useNewlineForReturn = false
     var onHistoryPrevious: (() -> Bool)?
     var onHistoryNext: (() -> Bool)?
     var transformPaste: ((String) -> String)?
@@ -237,12 +262,19 @@ private final class WorkspaceTextView: NSTextView {
 
         switch event.keyCode {
         case 36, 76:
+            if modifiers.contains(.command) {
+                onSubmit?()
+                return
+            }
+            if modifiers.contains(.option) || modifiers.contains(.control) {
+                break
+            }
+            if modifiers.contains(.shift) || useNewlineForReturn {
+                insertNewline(nil)
+            } else {
+                onSubmit?()
+            }
             if !hasNonShiftModifier {
-                if modifiers.contains(.shift) {
-                    insertNewline(nil)
-                } else {
-                    onSubmit?()
-                }
                 return
             }
         case 126:

@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Delegation Tree Algorithm Mock</title>
+  <style>
+    :root {
+      --bg: #111317;
+      --panel: #171a20;
+      --card: #1b1f26;
+      --border: #2a3140;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #86efac;
+      --edge: #93c5fd;
+      --selected: #60a5fa;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .page {
+      display: grid;
+      grid-template-columns: 1fr min(520px, 40vw);
+      min-height: 100vh;
+    }
+
+    .left {
+      border-right: 1px solid var(--border);
+      min-width: 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: #0f1217;
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0.2px;
+      font-weight: 700;
+    }
+
+    .case-select {
+      margin-left: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: #11151c;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+
+    .canvas-wrap {
+      overflow: auto;
+      height: calc(100vh - 54px);
+      padding: 12px;
+    }
+
+    .canvas {
+      position: relative;
+      min-width: 1100px;
+      min-height: 640px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background:
+        radial-gradient(1200px 700px at 20% -20%, #172030 0%, #111317 55%),
+        #111317;
+    }
+
+    svg.edges {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .edge-label {
+      fill: #f1f5f9;
+      font-size: 11px;
+      opacity: 0.9;
+    }
+
+    .node {
+      position: absolute;
+      width: 230px;
+      min-height: 96px;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: linear-gradient(180deg, #202633 0%, var(--card) 100%);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+      cursor: pointer;
+    }
+
+    .node.selected {
+      border-color: var(--selected);
+      box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.25), 0 8px 24px rgba(0, 0, 0, 0.32);
+    }
+
+    .role {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      color: #d1d5db;
+      border: 1px solid #3b4251;
+      margin-bottom: 6px;
+    }
+
+    .name {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.15;
+      margin-bottom: 6px;
+      word-break: break-word;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .right {
+      padding: 16px;
+      background: #0f1217;
+      overflow: auto;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+
+    .card h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    .card p {
+      margin: 0 0 10px;
+      color: #d1d5db;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: #121620;
+      border: 1px solid #2c3546;
+      border-radius: 8px;
+      padding: 8px 10px;
+      color: #dbeafe;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+      color: #d1d5db;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="left">
+      <div class="topbar">
+        <h1>Delegation Tree Mock (Recipient-Chain Model)</h1>
+        <select id="caseSelect" class="case-select"></select>
+      </div>
+      <div class="canvas-wrap">
+        <div id="canvas" class="canvas">
+          <svg id="edges" class="edges"></svg>
+        </div>
+      </div>
+    </section>
+
+    <aside class="right">
+      <div class="card">
+        <h2>Algorithm Modeled</h2>
+        <ul>
+          <li>Root conversation creates two cards: root author and root recipient (first p-tag).</li>
+          <li>Each delegated conversation contributes one additional card: its recipient (first p-tag).</li>
+          <li>Edge direction is recipient(parent conversation) -> recipient(child conversation).</li>
+          <li>Card click opens the conversation tied to that card.</li>
+          <li>Root author card opens root conversation.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>Selected Card</h2>
+        <p id="selectionHint">Click a card on the graph.</p>
+        <div id="selectionBox" class="mono">No selection</div>
+      </div>
+
+      <div class="card">
+        <h2>Case Data</h2>
+        <div id="caseData" class="mono"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const CASES = {
+      linear_chain: {
+        name: "Case A: Linear Chain (U1 -> U2 -> U3)",
+        rootConversationId: "c1",
+        conversations: [
+          { id: "c1", author: "Pablo", recipient: "Architect Orchestrator", project: "TENEX", delegates: ["c2"] },
+          { id: "c2", author: "Architect Orchestrator", recipient: "Execution Coordinator", project: "TENEX", delegates: ["c3"] },
+          { id: "c3", author: "Execution Coordinator", recipient: "Claude Code", project: "TENEX", delegates: [] }
+        ]
+      },
+      fan_out_same_parent: {
+        name: "Case B: One Delegation to Exec, Exec Fans Out 5x",
+        rootConversationId: "c1",
+        conversations: [
+          { id: "c1", author: "Pablo", recipient: "Architect Orchestrator", project: "TENEX", delegates: ["c2"] },
+          { id: "c2", author: "Architect Orchestrator", recipient: "Execution Coordinator", project: "TENEX", delegates: ["c3", "c4", "c5", "c6", "c7"] },
+          { id: "c3", author: "Execution Coordinator", recipient: "Claude Code", project: "TENEX", delegates: [] },
+          { id: "c4", author: "Execution Coordinator", recipient: "Clean Code Nazi", project: "TENEX", delegates: [] },
+          { id: "c5", author: "Execution Coordinator", recipient: "Claude Code", project: "TENEX", delegates: [] },
+          { id: "c6", author: "Execution Coordinator", recipient: "Clean Code Nazi", project: "TENEX", delegates: [] },
+          { id: "c7", author: "Execution Coordinator", recipient: "Claude Code", project: "TENEX", delegates: [] }
+        ]
+      },
+      cross_project_jump: {
+        name: "Case C: Cross-Project Jump Label",
+        rootConversationId: "c1",
+        conversations: [
+          { id: "c1", author: "Pablo", recipient: "Architect Orchestrator", project: "project-alpha", delegates: ["c2"] },
+          { id: "c2", author: "Architect Orchestrator", recipient: "Execution Coordinator", project: "project-alpha", delegates: ["c3", "c4"] },
+          { id: "c3", author: "Execution Coordinator", recipient: "Claude Code", project: "project-beta", delegates: [] },
+          { id: "c4", author: "Execution Coordinator", recipient: "Research Agent", project: "project-alpha", delegates: [] }
+        ]
+      },
+      complex_realistic: {
+        name: "Case D: Complex (Deep + Fanout + Cross-Project + Repeated Recipients)",
+        rootConversationId: "c1",
+        conversations: [
+          { id: "c1", author: "Pablo", recipient: "Architect Orchestrator", project: "tenex-client", delegates: ["c2", "c3", "c4"] },
+
+          { id: "c2", author: "Architect Orchestrator", recipient: "Execution Coordinator", project: "tenex-client", delegates: ["c5", "c6", "c7"] },
+          { id: "c3", author: "Architect Orchestrator", recipient: "Security Expert", project: "tenex-client", delegates: ["c8"] },
+          { id: "c4", author: "Architect Orchestrator", recipient: "Docs Agent", project: "tenex-client", delegates: [] },
+
+          { id: "c5", author: "Execution Coordinator", recipient: "Claude Code", project: "tenex-client", delegates: ["c9"] },
+          { id: "c6", author: "Execution Coordinator", recipient: "Clean Code Nazi", project: "tenex-client", delegates: [] },
+          { id: "c7", author: "Execution Coordinator", recipient: "Claude Code", project: "tenex-core", delegates: ["c10", "c11"] },
+
+          { id: "c8", author: "Security Expert", recipient: "Audit Bot", project: "tenex-security", delegates: ["c12"] },
+
+          { id: "c9", author: "Claude Code", recipient: "Verifier AI", project: "tenex-client", delegates: [] },
+          { id: "c10", author: "Claude Code", recipient: "Test Runner", project: "tenex-core", delegates: [] },
+          { id: "c11", author: "Claude Code", recipient: "Release Coordinator", project: "tenex-release", delegates: ["c13"] },
+          { id: "c12", author: "Audit Bot", recipient: "Security Expert", project: "tenex-security", delegates: [] },
+          { id: "c13", author: "Release Coordinator", recipient: "Claude Code", project: "tenex-release", delegates: [] }
+        ]
+      }
+    };
+
+    const H_SPACING = 280;
+    const V_SPACING = 130;
+    const START_X = 32;
+    const START_Y = 36;
+    const CARD_W = 230;
+    const CARD_H = 96;
+
+    const select = document.getElementById("caseSelect");
+    const canvas = document.getElementById("canvas");
+    const edgesSvg = document.getElementById("edges");
+    const selectionHint = document.getElementById("selectionHint");
+    const selectionBox = document.getElementById("selectionBox");
+    const caseData = document.getElementById("caseData");
+
+    for (const [id, c] of Object.entries(CASES)) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = c.name;
+      select.appendChild(option);
+    }
+
+    function buildRecipientChainCase(c) {
+      const byId = new Map(c.conversations.map(conv => [conv.id, conv]));
+      const root = byId.get(c.rootConversationId);
+      if (!root) return null;
+
+      const nodes = new Map();
+      const edges = [];
+
+      const rootAuthorNodeId = `root-author:${root.id}`;
+      const rootRecipientNodeId = `recipient:${root.id}`;
+
+      nodes.set(rootAuthorNodeId, {
+        id: rootAuthorNodeId,
+        label: root.author,
+        role: "root-author",
+        conversationId: root.id,
+        project: root.project
+      });
+      nodes.set(rootRecipientNodeId, {
+        id: rootRecipientNodeId,
+        label: root.recipient,
+        role: "recipient",
+        conversationId: root.id,
+        project: root.project
+      });
+      edges.push({ from: rootAuthorNodeId, to: rootRecipientNodeId, label: null });
+
+      const queue = [root.id];
+      const expanded = new Set();
+      while (queue.length > 0) {
+        const parentConversationId = queue.shift();
+        if (expanded.has(parentConversationId)) continue;
+        expanded.add(parentConversationId);
+
+        const parentConv = byId.get(parentConversationId);
+        if (!parentConv) continue;
+        const parentRecipientNode = `recipient:${parentConv.id}`;
+
+        for (const childId of parentConv.delegates || []) {
+          const childConv = byId.get(childId);
+          if (!childConv) continue;
+
+          const childRecipientNode = `recipient:${childConv.id}`;
+          if (!nodes.has(childRecipientNode)) {
+            nodes.set(childRecipientNode, {
+              id: childRecipientNode,
+              label: childConv.recipient,
+              role: "recipient",
+              conversationId: childConv.id,
+              project: childConv.project
+            });
+          }
+
+          let edgeLabel = null;
+          if ((parentConv.project || "") !== (childConv.project || "")) {
+            edgeLabel = `to ${childConv.project}`;
+          }
+
+          edges.push({ from: parentRecipientNode, to: childRecipientNode, label: edgeLabel });
+          queue.push(childConv.id);
+        }
+      }
+
+      // Deduplicate edges by pair
+      const edgeMap = new Map();
+      for (const edge of edges) {
+        const key = `${edge.from}->${edge.to}`;
+        if (!edgeMap.has(key)) edgeMap.set(key, edge);
+      }
+
+      return {
+        rootNodeId: rootAuthorNodeId,
+        nodes: [...nodes.values()],
+        edges: [...edgeMap.values()]
+      };
+    }
+
+    function treeLayout(model) {
+      const children = new Map();
+      for (const node of model.nodes) children.set(node.id, []);
+      for (const edge of model.edges) {
+        if (children.has(edge.from)) children.get(edge.from).push(edge.to);
+      }
+
+      const xByDepth = {};
+      const pos = {};
+      let leafIndex = 0;
+
+      function walk(nodeId, depth) {
+        if (xByDepth[depth] == null) xByDepth[depth] = START_X + depth * H_SPACING;
+        const childIds = children.get(nodeId) || [];
+        if (childIds.length === 0) {
+          const y = START_Y + leafIndex * V_SPACING;
+          pos[nodeId] = { x: xByDepth[depth], y };
+          leafIndex += 1;
+          return y;
+        }
+
+        const ys = childIds.map(childId => walk(childId, depth + 1));
+        const y = ys.reduce((a, b) => a + b, 0) / ys.length;
+        pos[nodeId] = { x: xByDepth[depth], y };
+        return y;
+      }
+
+      walk(model.rootNodeId, 0);
+      return pos;
+    }
+
+    function cardHtml(node) {
+      const roleText = node.role === "root-author" ? "Root Author" : "Recipient";
+      return `
+        <div class="role">${roleText}</div>
+        <div class="name">${escapeHtml(node.label)}</div>
+        <div class="meta">Opens conversation: ${escapeHtml(node.conversationId)}</div>
+        <div class="meta">Project: ${escapeHtml(node.project || "n/a")}</div>
+      `;
+    }
+
+    function render(caseId) {
+      const c = CASES[caseId];
+      const model = buildRecipientChainCase(c);
+      if (!model) return;
+      const positions = treeLayout(model);
+
+      for (const el of canvas.querySelectorAll(".node")) el.remove();
+      edgesSvg.innerHTML = "";
+
+      // Compute canvas bounds
+      let maxX = 0;
+      let maxY = 0;
+      for (const p of Object.values(positions)) {
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+      canvas.style.minWidth = `${Math.max(1100, maxX + CARD_W + 80)}px`;
+      canvas.style.minHeight = `${Math.max(640, maxY + CARD_H + 60)}px`;
+
+      // Draw edges
+      const ns = "http://www.w3.org/2000/svg";
+      edgesSvg.setAttribute("width", canvas.clientWidth);
+      edgesSvg.setAttribute("height", canvas.clientHeight);
+
+      for (const edge of model.edges) {
+        const from = positions[edge.from];
+        const to = positions[edge.to];
+        if (!from || !to) continue;
+
+        const x1 = from.x + CARD_W;
+        const y1 = from.y + CARD_H / 2;
+        const x2 = to.x;
+        const y2 = to.y + CARD_H / 2;
+        const dx = Math.abs(x2 - x1) * 0.55;
+
+        const path = document.createElementNS(ns, "path");
+        path.setAttribute("d", `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+        path.setAttribute("stroke", "var(--accent)");
+        path.setAttribute("stroke-width", "2");
+        path.setAttribute("fill", "none");
+        edgesSvg.appendChild(path);
+
+        // Arrowhead
+        const arrow = document.createElementNS(ns, "path");
+        arrow.setAttribute(
+          "d",
+          `M ${x2} ${y2} L ${x2 - 8} ${y2 - 4} L ${x2 - 8} ${y2 + 4} Z`
+        );
+        arrow.setAttribute("fill", "var(--accent)");
+        edgesSvg.appendChild(arrow);
+
+        if (edge.label) {
+          const tx = (x1 + x2) / 2;
+          const ty = (y1 + y2) / 2 - 10;
+          const text = document.createElementNS(ns, "text");
+          text.setAttribute("x", tx);
+          text.setAttribute("y", ty);
+          text.setAttribute("text-anchor", "middle");
+          text.setAttribute("class", "edge-label");
+          text.textContent = edge.label;
+          edgesSvg.appendChild(text);
+        }
+      }
+
+      // Draw nodes
+      for (const node of model.nodes) {
+        const p = positions[node.id];
+        if (!p) continue;
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "node";
+        card.style.left = `${p.x}px`;
+        card.style.top = `${p.y}px`;
+        card.innerHTML = cardHtml(node);
+        card.addEventListener("click", () => {
+          for (const n of canvas.querySelectorAll(".node")) n.classList.remove("selected");
+          card.classList.add("selected");
+          selectionHint.textContent = `${node.label}`;
+          selectionBox.textContent =
+`node_id: ${node.id}
+role: ${node.role}
+opens_conversation: ${node.conversationId}
+project: ${node.project || "n/a"}`;
+        });
+        canvas.appendChild(card);
+      }
+
+      caseData.textContent = JSON.stringify(c, null, 2);
+      selectionHint.textContent = "Click a card on the graph.";
+      selectionBox.textContent = "No selection";
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    select.addEventListener("change", () => render(select.value));
+    select.value = "complex_realistic";
+    render(select.value);
+  </script>
+</body>
+</html>

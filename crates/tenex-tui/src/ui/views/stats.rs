@@ -1,11 +1,13 @@
 //! Stats tab view - displays LLM usage statistics including:
 //! - Total running cost with metric cards
+//! - Per-day runtime bar chart with 14-day accumulated runtime
 //! - Cost per project table
 //! - Per-day message counts (user vs all) bar chart
 //! - Activity grid (GitHub-style) showing LLM activity by hour
 //!
-//! The Stats view has three subtabs:
+//! The Stats view has four subtabs:
 //! - Rankings: Shows Cost by Project table
+//! - Runtime: Shows the 14-day LLM runtime chart
 //! - Messages: Shows message counts per day (current user vs all project messages)
 //! - Activity: Shows GitHub-style activity grid for LLM usage per hour
 //!
@@ -103,7 +105,10 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // 2. Cost by project
     let cost_by_project = data_store.get_cost_by_project();
 
-    // 3. Messages by day (user vs all)
+    // 3. Runtime by day
+    let runtime_by_day = data_store.statistics.get_runtime_by_day(STATS_WINDOW_DAYS);
+
+    // 4. Messages by day (user vs all)
     let (user_messages_by_day, all_messages_by_day) =
         data_store.get_messages_by_day(STATS_WINDOW_DAYS);
 
@@ -113,7 +118,7 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // ┌─────────────────────────────────────────────────────────────┐
     // │  [Total Cost]                                               │ <- Metric Cards Row
     // ├─────────────────────────────────────────────────────────────┤
-    // │  [Rankings] [Messages] [Activity]                           │ <- Subtab Navigation
+    // │  [Rankings] [Runtime] [Messages] [Activity]                 │ <- Subtab Navigation
     // ├─────────────────────────────────────────────────────────────┤
     // │                                                             │
     // │  Content Area (changes based on active subtab)              │
@@ -144,6 +149,9 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     match app.stats_subtab {
         StatsSubtab::Rankings => {
             render_cost_by_project_table(f, &cost_by_project, vertical_chunks[2]);
+        }
+        StatsSubtab::Runtime => {
+            render_runtime_chart(f, &runtime_by_day, vertical_chunks[2]);
         }
         StatsSubtab::Messages => {
             // Messages per day bar chart (user vs all)
@@ -184,6 +192,7 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
 
     // Build the subtab pills
     let rankings_active = active_subtab == StatsSubtab::Rankings;
+    let runtime_active = active_subtab == StatsSubtab::Runtime;
     let messages_active = active_subtab == StatsSubtab::Messages;
     let activity_active = active_subtab == StatsSubtab::Activity;
 
@@ -201,6 +210,26 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
     } else {
         spans.push(Span::styled(
             " Rankings ",
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .bg(theme::BG_SECONDARY),
+        ));
+    }
+
+    spans.push(Span::raw("  "));
+
+    // Runtime tab
+    if runtime_active {
+        spans.push(Span::styled(
+            " Runtime ",
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::BG_TAB_ACTIVE)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            " Runtime ",
             Style::default()
                 .fg(theme::TEXT_MUTED)
                 .bg(theme::BG_SECONDARY),
@@ -307,6 +336,95 @@ fn render_metric_card(
 
     let paragraph = Paragraph::new(lines).alignment(Alignment::Center);
     f.render_widget(paragraph, inner);
+}
+
+/// Render the runtime bar chart using Unicode block characters
+fn render_runtime_chart(f: &mut Frame, runtime_by_day: &[(u64, u64)], area: Rect) {
+    let total_runtime: u64 = runtime_by_day.iter().map(|(_, runtime)| *runtime).sum();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+        .title(format!(
+            " Runtime (Last {} Days, Total {}) ",
+            STATS_WINDOW_DAYS,
+            format_runtime(total_runtime)
+        ))
+        .title_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.height < 3 || inner.width < MIN_CHART_WIDTH {
+        render_empty_state(f, "Insufficient space for chart", inner);
+        return;
+    }
+
+    if runtime_by_day.is_empty() {
+        render_empty_state(f, "No runtime data available", inner);
+        return;
+    }
+
+    let max_runtime = runtime_by_day
+        .iter()
+        .map(|(_, runtime)| *runtime)
+        .max()
+        .unwrap_or(1);
+    let bar_max_width = inner.width.saturating_sub(CHART_LABEL_WIDTH) as usize;
+
+    let seconds_per_day: u64 = 86400;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let today_start = (now / seconds_per_day) * seconds_per_day;
+    let runtime_map: std::collections::HashMap<u64, u64> = runtime_by_day.iter().cloned().collect();
+
+    let mut lines: Vec<Line> = Vec::new();
+    for i in 0..STATS_WINDOW_DAYS {
+        let day_start = today_start - i as u64 * seconds_per_day;
+        let runtime = runtime_map.get(&day_start).copied().unwrap_or(0);
+        let day_label = format_day_label_from_timestamp(day_start, today_start);
+
+        if runtime > 0 {
+            let bar = create_unicode_bar(runtime, max_runtime, bar_max_width);
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:>7} ", day_label),
+                    Style::default().fg(theme::TEXT_MUTED),
+                ),
+                Span::styled(bar, Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::styled(
+                    format!(" {}", format_runtime(runtime)),
+                    Style::default().fg(theme::TEXT_PRIMARY),
+                ),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:>7} ", day_label),
+                    Style::default().fg(theme::TEXT_MUTED),
+                ),
+                Span::styled(
+                    format!("{} ", card::LIST_BULLET_GLYPH),
+                    Style::default().fg(theme::TEXT_DIM),
+                ),
+                Span::styled("—", Style::default().fg(theme::TEXT_DIM)),
+            ]));
+        }
+    }
+
+    let chart_area = Rect::new(
+        inner.x + 1,
+        inner.y + 1,
+        inner.width.saturating_sub(2),
+        inner.height.saturating_sub(2),
+    );
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, chart_area);
 }
 
 /// Render the messages bar chart showing user messages vs all messages per day
@@ -630,6 +748,34 @@ fn render_empty_state(f: &mut Frame, message: &str, area: Rect) {
     f.render_widget(paragraph, centered_area);
 }
 
+/// Format runtime in milliseconds to human-readable string.
+fn format_runtime(ms: u64) -> String {
+    let seconds = ms / 1000;
+    if seconds == 0 && ms > 0 {
+        format!("{}ms", ms)
+    } else if seconds == 0 {
+        "0s".to_string()
+    } else if seconds < 60 {
+        format!("{}s", seconds)
+    } else if seconds < 3600 {
+        let mins = seconds / 60;
+        let secs = seconds % 60;
+        if secs > 0 {
+            format!("{}m {}s", mins, secs)
+        } else {
+            format!("{}m", mins)
+        }
+    } else {
+        let hours = seconds / 3600;
+        let mins = (seconds % 3600) / 60;
+        if mins > 0 {
+            format!("{}h {}m", hours, mins)
+        } else {
+            format!("{}h", hours)
+        }
+    }
+}
+
 /// Render the activity grid (GitHub-style contribution graph)
 fn render_activity_grid(
     f: &mut Frame,
@@ -819,6 +965,18 @@ fn get_activity_color(value: u64, max_value: u64) -> ratatui::style::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_runtime() {
+        assert_eq!(format_runtime(0), "0s");
+        assert_eq!(format_runtime(500), "500ms");
+        assert_eq!(format_runtime(1000), "1s");
+        assert_eq!(format_runtime(30000), "30s");
+        assert_eq!(format_runtime(60000), "1m");
+        assert_eq!(format_runtime(90000), "1m 30s");
+        assert_eq!(format_runtime(3600000), "1h");
+        assert_eq!(format_runtime(5400000), "1h 30m");
+    }
 
     #[test]
     fn test_create_unicode_bar() {

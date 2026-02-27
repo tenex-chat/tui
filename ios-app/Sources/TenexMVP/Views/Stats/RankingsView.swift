@@ -119,6 +119,7 @@ struct EmptyTableView: View {
                 ProjectCost(aTag: "31933:abc:project3", name: "Backend API", cost: 12.34)
             ],
             messagesByDay: [],
+            runtimeByDay: [],
             activityByHour: [],
             maxTokens: 0,
             maxMessages: 0

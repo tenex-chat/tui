@@ -89,7 +89,8 @@ struct MessageComposerView: View {
     @State var showSaveFailedAlert = false
     @State var saveFailedError: String?
     @State var dictationManager = DictationManager()
-    @State var showDictationOverlay = false
+    /// Captures localText before dictation starts, so partial results can replace from this point
+    @State var preDictationText: String?
     @State var showDraftBrowser = false
     @State var draftSavedConfirmation = false
     @State var pinnedPromptManager = PinnedPromptManager.shared
@@ -650,30 +651,27 @@ struct MessageComposerView: View {
                 toolbarView
             }
         }
-        .overlay {
-            if showDictationOverlay {
-                DictationOverlayView(
-                    manager: dictationManager,
-                    onComplete: { text in
-                        // Append dictated text to localText (instant update)
-                        let appendedText = localText + (localText.isEmpty ? "" : " ") + text
-                        localText = appendedText
-                        // Dictation is user-initiated content, so mark dirty and sync
-                        isDirty = true
-                        // Sync to draft directly (bypass onChange which is suppressed during programmatic updates)
-                        if let projectId = selectedProject?.id {
-                            Task {
-                                await draftManager.updateContent(appendedText, conversationId: conversationId, projectId: projectId)
-                            }
+        .onChange(of: dictationManager.state) { _, newState in
+            // Stream dictated text directly into the editor
+            switch newState {
+            case .recording(let partialText):
+                guard !partialText.isEmpty else { return }
+                isProgrammaticUpdate = true
+                let prefix = preDictationText ?? ""
+                localText = prefix + (prefix.isEmpty ? "" : " ") + partialText
+                isDirty = true
+            case .idle:
+                // Recording stopped — commit whatever text is in the editor
+                if preDictationText != nil {
+                    let currentText = localText
+                    preDictationText = nil
+                    if let projectId = selectedProject?.id {
+                        Task {
+                            await draftManager.updateContent(currentText, conversationId: conversationId, projectId: projectId)
                         }
-                        showDictationOverlay = false
-                        dictationManager.reset()
-                    },
-                    onCancel: {
-                        dictationManager.cancelRecording()
-                        showDictationOverlay = false
                     }
-                )
+                    dictationManager.reset()
+                }
             }
         }
         #if os(macOS)

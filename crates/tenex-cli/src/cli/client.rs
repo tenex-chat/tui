@@ -366,7 +366,9 @@ fn watch_bunker_requests(data_dir: &Path, config: Option<&CliConfig>) -> Result<
         anyhow::bail!("Bunker is not running. Start it with `tenex-cli bunker start`.");
     }
 
-    eprintln!("Watching bunker requests. Actions: a=approve, A=approve+rule, r=reject, s=skip, q=quit");
+    eprintln!(
+        "Watching bunker requests. Actions: a=approve, A=approve+rule, r=reject, s=skip, q=quit"
+    );
 
     let mut seen_request_ids = HashSet::new();
     loop {

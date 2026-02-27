@@ -384,6 +384,7 @@ async fn responses_handler(
         nudge_ids: Vec::new(),
         skill_ids: Vec::new(),
         reference_conversation_id,
+        reference_report_a_tag: None,
         fork_message_id: None,
         response_tx: Some(response_tx),
     });

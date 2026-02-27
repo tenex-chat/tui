@@ -149,16 +149,11 @@ pub enum CliCommand {
         event_kind: Option<u16>,
     },
     /// Get bunker session audit entries
-    BunkerAudit {
-        limit: Option<usize>,
-    },
+    BunkerAudit { limit: Option<usize> },
     /// Internal: list pending bunker signing requests
     BunkerListPending,
     /// Internal: respond to pending bunker signing request
-    BunkerRespond {
-        request_id: String,
-        approved: bool,
-    },
+    BunkerRespond { request_id: String, approved: bool },
 }
 
 impl CliCommand {
@@ -281,10 +276,9 @@ impl CliCommand {
             CliCommand::BunkerStart => ("bunker_start", serde_json::json!({})),
             CliCommand::BunkerStop => ("bunker_stop", serde_json::json!({})),
             CliCommand::BunkerStatus => ("bunker_status", serde_json::json!({})),
-            CliCommand::BunkerEnable => (
-                "bunker_set_enabled",
-                serde_json::json!({ "enabled": true }),
-            ),
+            CliCommand::BunkerEnable => {
+                ("bunker_set_enabled", serde_json::json!({ "enabled": true }))
+            }
             CliCommand::BunkerDisable => (
                 "bunker_set_enabled",
                 serde_json::json!({ "enabled": false }),
@@ -433,7 +427,9 @@ mod tests {
 
     #[test]
     fn bunker_list_pending_to_request_mapping() {
-        let req = CliCommand::BunkerListPending.to_request(15).expect("request");
+        let req = CliCommand::BunkerListPending
+            .to_request(15)
+            .expect("request");
         assert_eq!(req.method, "bunker_list_pending");
         assert_eq!(req.params, serde_json::json!({}));
     }

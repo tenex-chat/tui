@@ -32,7 +32,20 @@ impl TenexCore {
             .map(|(a_tag, name, cost)| ProjectCost { a_tag, name, cost })
             .collect();
 
-        // ===== 3. Messages Chart Data (CHART_WINDOW_DAYS) =====
+        // ===== 3. Runtime Chart Data (CHART_WINDOW_DAYS) =====
+        let runtime_by_day_raw = store.statistics.get_runtime_by_day(CHART_WINDOW_DAYS);
+        let mut runtime_by_day: Vec<DayRuntime> = runtime_by_day_raw
+            .into_iter()
+            .map(|(day_start, runtime_ms)| DayRuntime {
+                day_start,
+                runtime_ms,
+            })
+            .collect();
+
+        // Sort by day_start descending (newest first)
+        runtime_by_day.sort_by(|a, b| b.day_start.cmp(&a.day_start));
+
+        // ===== 4. Messages Chart Data (CHART_WINDOW_DAYS) =====
         let (user_messages_raw, all_messages_raw) = store.get_messages_by_day(CHART_WINDOW_DAYS);
 
         // Combine into single vector with day_start as key
@@ -121,6 +134,7 @@ impl TenexCore {
             total_cost_14_days: total_cost,
             cost_by_project,
             messages_by_day,
+            runtime_by_day,
             activity_by_hour,
             max_tokens,
             max_messages,

@@ -135,6 +135,7 @@ struct LegendItem: View {
             totalCost14Days: 0,
             costByProject: [],
             messagesByDay: sampleData,
+            runtimeByDay: [],
             activityByHour: [],
             maxTokens: 0,
             maxMessages: 0
