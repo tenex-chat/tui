@@ -342,7 +342,8 @@ impl TenexCore {
 
     /// Get all nudges (kind:4201 events).
     ///
-    /// Returns all nudges sorted by created_at descending (most recent first).
+    /// Returns nudges deduplicated by `author + d-tag`, sorted by created_at
+    /// descending (most recent first).
     /// Used by iOS for nudge selection in new conversations.
     pub fn get_nudges(&self) -> Result<Vec<Nudge>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
@@ -358,7 +359,8 @@ impl TenexCore {
 
     /// Get all skills (kind:4202 events).
     ///
-    /// Returns all skills sorted by created_at descending (most recent first).
+    /// Returns skills deduplicated by `author + d-tag`, sorted by created_at
+    /// descending (most recent first).
     /// Used by iOS/CLI for skill selection in new conversations.
     pub fn get_skills(&self) -> Result<Vec<Skill>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {

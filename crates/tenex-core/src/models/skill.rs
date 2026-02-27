@@ -9,8 +9,13 @@ use crate::constants::DEFAULT_SKILL_TITLE;
 pub struct Skill {
     pub id: String,
     pub pubkey: String,
+    /// Replaceable identifier (NIP-33 `d` tag).
+    /// Used to group multiple versions of the same logical skill.
+    #[serde(default)]
+    pub d_tag: String,
     pub title: String,
     pub description: String,
+    pub image: Option<String>,
     pub content: String,
     pub hashtags: Vec<String>,
     pub created_at: u64,
@@ -32,6 +37,8 @@ impl Skill {
 
         let mut title: Option<String> = None;
         let mut description: Option<String> = None;
+        let mut d_tag: Option<String> = None;
+        let mut image: Option<String> = None;
         let mut hashtags: Vec<String> = Vec::new();
         let mut file_ids: Vec<String> = Vec::new();
 
@@ -53,6 +60,8 @@ impl Skill {
                         match tag_name {
                             "title" => title = Some(value.to_string()),
                             "description" => description = Some(value.to_string()),
+                            "d" => d_tag = Some(value.to_string()),
+                            "image" | "picture" => image = Some(value.to_string()),
                             "t" => hashtags.push(value.to_string()),
                             _ => {}
                         }
@@ -64,8 +73,10 @@ impl Skill {
         Some(Skill {
             id,
             pubkey,
+            d_tag: d_tag.unwrap_or_default(),
             title: title.unwrap_or_else(|| DEFAULT_SKILL_TITLE.to_string()),
             description: description.unwrap_or_default(),
+            image,
             content,
             hashtags,
             created_at,
@@ -135,6 +146,74 @@ mod tests {
         assert_eq!(skill.title, "My Skill");
         assert_eq!(skill.description, "A helpful skill");
         assert_eq!(skill.content, "Skill content here");
+        assert!(skill.image.is_none());
+    }
+
+    #[test]
+    fn test_from_note_extracts_image_tag() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let image_url = "https://cdn.example.com/skill-icon.png";
+        let event = create_skill_event_builder("Skill content here")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["My Skill".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("image")),
+                vec![image_url.to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
+
+        let filter = Filter::new().kinds([4202]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+        let skill = Skill::from_note(&note).expect("Should parse skill");
+
+        assert_eq!(skill.image.as_deref(), Some(image_url));
+    }
+
+    #[test]
+    fn test_from_note_extracts_d_tag() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = create_skill_event_builder("Skill content here")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["My Skill".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
+                vec!["shared-skill-slug".to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
+
+        let filter = Filter::new().kinds([4202]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+        let skill = Skill::from_note(&note).expect("Should parse skill");
+
+        assert_eq!(skill.d_tag, "shared-skill-slug");
     }
 
     #[test]
@@ -280,8 +359,10 @@ mod tests {
         let skill = Skill {
             id: "test".to_string(),
             pubkey: "pubkey".to_string(),
+            d_tag: String::new(),
             title: "Test".to_string(),
             description: String::new(),
+            image: None,
             content: "Short".to_string(),
             hashtags: vec![],
             created_at: 0,
@@ -295,8 +376,10 @@ mod tests {
         let skill = Skill {
             id: "test".to_string(),
             pubkey: "pubkey".to_string(),
+            d_tag: String::new(),
             title: "Test".to_string(),
             description: String::new(),
+            image: None,
             content: "This is a very long content that should be truncated".to_string(),
             hashtags: vec![],
             created_at: 0,
