@@ -137,12 +137,14 @@ impl CoreRuntime {
             worker.run();
         });
 
-        // NOTE: Ephemeral kinds (24010, 24133) are intentionally excluded
-        // They are processed directly via DataChange channel, not through nostrdb
-        // Kind 30023 = NIP-23 long-form content (reports/articles)
-        // Kind 14202 = bookmark list (regular replaceable event)
+        // NOTE: Ephemeral kinds (24010, 24133) are intentionally excluded.
+        // They are processed directly via DataChange channel, not through nostrdb.
+        // Include content-definition kinds so UI tabs can react live to newly
+        // published agent definitions, nudges, skills, team packs, and MCP tools.
         let ndb_filter = FilterBuilder::new()
-            .kinds([31933, 1, 0, 4199, 513, 4129, 4201, 30023, 14202])
+            .kinds([
+                31933, 1, 0, 513, 4129, 30023, 14202, 34199, 4199, 4200, 4201, 4202,
+            ])
             .build();
         let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
         let ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);

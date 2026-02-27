@@ -275,6 +275,8 @@ struct TabContentView: View {
             switch selectedTab {
             case .rankings:
                 RankingsView(snapshot: snapshot)
+            case .runtime:
+                RuntimeChartView(snapshot: snapshot)
             case .messages:
                 MessagesChartView(snapshot: snapshot)
             case .activity:

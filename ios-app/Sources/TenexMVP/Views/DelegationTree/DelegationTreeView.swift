@@ -13,17 +13,20 @@ struct DelegationTreeView: View {
     @State private var selectedNode: DelegationTreeNode?
 
     var body: some View {
-        HStack(spacing: 0) {
-            canvasArea
-            if let node = selectedNode {
-                DelegationDetailPanel(node: node) {
-                    withAnimation(.spring(response: 0.28)) {
-                        selectedNode = nil
+        GeometryReader { proxy in
+            HStack(spacing: 0) {
+                canvasArea
+                if let node = selectedNode {
+                    DelegationDetailPanel(node: node) {
+                        withAnimation(.spring(response: 0.28)) {
+                            selectedNode = nil
+                        }
                     }
+                    .frame(width: detailPanelWidth(totalWidth: proxy.size.width))
+                    .transition(.move(edge: .trailing))
                 }
-                .frame(width: 390)
-                .transition(.move(edge: .trailing))
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .task {
             viewModel.safeCore = coreManager.safeCore
@@ -43,14 +46,17 @@ struct DelegationTreeView: View {
 
                         // Legend
                         HStack(spacing: 6) {
-                            legendItem(color: Color(hex: "#93c5fd"), label: "Delegated")
-                            legendItem(color: Color(hex: "#86efac"), label: "Returned")
-                            legendItem(color: Color(hex: "#fbbf24"), label: "Pending", dashed: true)
+                            legendItem(color: Color(hex: "#86efac"), label: "Completed")
+                            legendItem(color: Color(hex: "#fbbf24"), label: "Pending")
                         }
                     }
                 }
             }
         }
+    }
+
+    private func detailPanelWidth(totalWidth: CGFloat) -> CGFloat {
+        min(840, totalWidth * 0.5)
     }
 
     @ViewBuilder
@@ -75,7 +81,7 @@ struct DelegationTreeView: View {
         }
     }
 
-    private func legendItem(color: Color, label: String, dashed: Bool = false) -> some View {
+    private func legendItem(color: Color, label: String) -> some View {
         HStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 1)
                 .fill(color)
@@ -92,6 +98,15 @@ struct DelegationTreeView: View {
 private struct DelegationCanvasView: View {
     @ObservedObject var viewModel: DelegationTreeViewModel
     @Binding var selectedNode: DelegationTreeNode?
+    @State private var zoomScale: CGFloat = 1.0
+    @GestureState private var pinchScale: CGFloat = 1.0
+
+    private let minZoom: CGFloat = 0.55
+    private let maxZoom: CGFloat = 2.4
+
+    private var effectiveZoomScale: CGFloat {
+        min(max(zoomScale * pinchScale, minZoom), maxZoom)
+    }
 
     var body: some View {
         ScrollView([.horizontal, .vertical]) {
@@ -126,8 +141,23 @@ private struct DelegationCanvasView: View {
 
             }
             .frame(width: viewModel.canvasSize.width, height: viewModel.canvasSize.height)
+            .scaleEffect(effectiveZoomScale, anchor: .topLeading)
+            .frame(
+                width: viewModel.canvasSize.width * effectiveZoomScale,
+                height: viewModel.canvasSize.height * effectiveZoomScale,
+                alignment: .topLeading
+            )
         }
         .background(Color.systemGroupedBackground)
+        .simultaneousGesture(
+            MagnificationGesture()
+                .updating($pinchScale) { value, state, _ in
+                    state = value
+                }
+                .onEnded { value in
+                    zoomScale = min(max(zoomScale * value, minZoom), maxZoom)
+                }
+        )
     }
 
     private func drawArrows(context: GraphicsContext) {
@@ -135,30 +165,25 @@ private struct DelegationCanvasView: View {
             guard let fromPos = viewModel.nodePositions[edge.parentId],
                   let toPos = viewModel.nodePositions[edge.childId] else { continue }
 
-            // Outgoing arrow (blue): center-right of parent → center-left of child
             let fromCenter = CGPoint(x: fromPos.x + 270, y: fromPos.y + 74)
             let toCenter = CGPoint(x: toPos.x, y: toPos.y + 74)
+            let arrowColor: Color = edge.isComplete ? Color(hex: "#86efac") : Color(hex: "#fbbf24")
 
             drawBezierArrow(
                 context: context,
                 from: fromCenter,
                 to: toCenter,
-                offsetY: -10,
-                color: Color(hex: "#93c5fd"),
-                dashed: false
+                color: arrowColor
             )
 
-            // Return/pending arrow
-            let isDone = edge.returnMessage != nil
-            let arrowColor: Color = isDone ? Color(hex: "#86efac") : Color(hex: "#fbbf24")
-            drawBezierArrow(
-                context: context,
-                from: fromCenter,
-                to: toCenter,
-                offsetY: 10,
-                color: arrowColor,
-                dashed: !isDone
-            )
+            if let targetProjectLabel = edge.crossProjectTargetLabel {
+                drawCrossProjectLabel(
+                    context: context,
+                    from: fromCenter,
+                    to: toCenter,
+                    label: "to \(targetProjectLabel)"
+                )
+            }
         }
     }
 
@@ -166,28 +191,18 @@ private struct DelegationCanvasView: View {
         context: GraphicsContext,
         from: CGPoint,
         to: CGPoint,
-        offsetY: CGFloat,
-        color: Color,
-        dashed: Bool
+        color: Color
     ) {
         let dx = abs(to.x - from.x) * 0.55
         var path = Path()
-        let p0 = CGPoint(x: from.x, y: from.y + offsetY)
-        let p1 = CGPoint(x: from.x + dx, y: from.y + offsetY)
-        let p2 = CGPoint(x: to.x - dx, y: to.y + offsetY)
-        let p3 = CGPoint(x: to.x, y: to.y + offsetY)
+        let p0 = from
+        let p1 = CGPoint(x: from.x + dx, y: from.y)
+        let p2 = CGPoint(x: to.x - dx, y: to.y)
+        let p3 = to
         path.move(to: p0)
         path.addCurve(to: p3, control1: p1, control2: p2)
 
-        if dashed {
-            context.stroke(
-                path,
-                with: .color(color),
-                style: StrokeStyle(lineWidth: 1.5, dash: [6, 4])
-            )
-        } else {
-            context.stroke(path, with: .color(color), lineWidth: 1.5)
-        }
+        context.stroke(path, with: .color(color), lineWidth: 1.8)
 
         // Arrowhead at destination
         let arrowSize: CGFloat = 6
@@ -204,6 +219,38 @@ private struct DelegationCanvasView: View {
         ))
         arrowPath.closeSubpath()
         context.fill(arrowPath, with: .color(color))
+    }
+
+    private func drawCrossProjectLabel(
+        context: GraphicsContext,
+        from: CGPoint,
+        to: CGPoint,
+        label: String
+    ) {
+        let center = CGPoint(
+            x: (from.x + to.x) / 2,
+            y: (from.y + to.y) / 2 - 14
+        )
+
+        let text = Text(label)
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(Color(hex: "#f1f5f9"))
+
+        let resolved = context.resolve(text)
+        let measured = resolved.measure(in: CGSize(width: 220, height: 24))
+
+        let rect = CGRect(
+            x: center.x - measured.width / 2 - 6,
+            y: center.y - measured.height / 2 - 2,
+            width: measured.width + 12,
+            height: measured.height + 4
+        )
+
+        let badgePath = Path(roundedRect: rect, cornerRadius: 6)
+        context.fill(badgePath, with: .color(Color.black.opacity(0.6)))
+        context.stroke(badgePath, with: .color(Color.white.opacity(0.15)), lineWidth: 0.8)
+        context.draw(resolved, at: center)
     }
 
     private func allNodes(from node: DelegationTreeNode) -> [DelegationTreeNode] {
@@ -229,20 +276,28 @@ private struct DelegationNodeCard: View {
         Color.conversationStatus(for: conversation.thread.statusLabel, isActive: conversation.isActive)
     }
 
-    private var recipientPubkey: String? {
-        conversation.thread.pTags.first
+    private var participantPubkey: String {
+        node.participantPubkey
     }
 
-    private var recipientDisplayName: String? {
-        guard let recipientPubkey else { return nil }
-        let resolved = coreManager.displayName(for: recipientPubkey)
-        if !resolved.isEmpty, resolved != recipientPubkey {
+    private var participantDisplayName: String {
+        if node.role == .rootAuthor {
+            return conversation.author
+        }
+
+        let resolved = coreManager.displayName(for: participantPubkey)
+        if !resolved.isEmpty, resolved != participantPubkey {
             return resolved
         }
-        if recipientPubkey.count > 18 {
-            return "\(recipientPubkey.prefix(8))...\(recipientPubkey.suffix(6))"
+
+        if participantPubkey.count > 18 {
+            return "\(participantPubkey.prefix(8))...\(participantPubkey.suffix(6))"
         }
-        return recipientPubkey
+        return participantPubkey
+    }
+
+    private var displayTimestamp: UInt64 {
+        conversation.thread.effectiveLastActivity
     }
 
     var body: some View {
@@ -250,28 +305,18 @@ private struct DelegationNodeCard: View {
             // Header: avatar + name + active pulse
             HStack(spacing: 8) {
                 AgentAvatarView(
-                    agentName: conversation.author,
-                    pubkey: conversation.thread.pubkey,
+                    agentName: participantDisplayName,
+                    pubkey: participantPubkey,
                     size: 28
                 )
                 .environment(coreManager)
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
-                        Text(conversation.author)
+                        Text(participantDisplayName)
                             .font(.caption)
                             .fontWeight(.semibold)
                             .lineLimit(1)
-
-                        if let recipientDisplayName, recipientDisplayName != conversation.author {
-                            Image(systemName: "arrow.right")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                            Text(recipientDisplayName)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
 
                         if conversation.isActive {
                             Circle()
@@ -294,7 +339,7 @@ private struct DelegationNodeCard: View {
 
                 Spacer()
 
-                RelativeTimeText(timestamp: conversation.thread.effectiveLastActivity, style: .localizedAbbreviated)
+                RelativeTimeText(timestamp: displayTimestamp, style: .localizedAbbreviated)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -305,9 +350,15 @@ private struct DelegationNodeCard: View {
                 .fontWeight(.medium)
                 .lineLimit(2)
 
-            // Summary preview
+            // Message preview: summary, last message, or nothing
             if let summary = conversation.thread.summary {
                 Text(summary)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            } else if let lastMessage = node.lastMessage,
+                      !lastMessage.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(lastMessage.content.trimmingCharacters(in: .whitespacesAndNewlines))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -372,6 +423,7 @@ private struct DelegationDetailPanel: View {
                 ConversationAdaptiveDetailView(conversation: node.conversation)
                     .environment(coreManager)
             }
+            .id(node.id)
         }
         .background(Color.systemBackground)
         .overlay(alignment: .leading) {

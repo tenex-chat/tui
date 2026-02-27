@@ -174,6 +174,7 @@ struct ReportsTabView: View {
                 #else
                 .listStyle(.inset)
                 #endif
+                .tenexListSurfaceBackground()
                 .refreshable {
                     await viewModel.refresh()
                 }
@@ -346,7 +347,13 @@ struct ReportsTabDetailView: View {
     let project: Project?
 
     @Environment(TenexCoreManager.self) private var coreManager
+    #if os(macOS)
+    @State private var showsChatPane = false
+    @State private var chatPaneMode: ReportChatPaneMode = .listAndComposer
+    @StateObject private var chatPaneViewModel = ReportChatPaneViewModel()
+    #else
     @State private var showChatWithAuthor = false
+    #endif
 
     /// The report's a-tag for reference (format: 30023:pubkey:slug)
     private var reportATag: String {
@@ -359,18 +366,21 @@ struct ReportsTabDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header
-                headerSection
-
-                Divider()
-
-                // Markdown content
-                MarkdownView(content: report.content)
+        Group {
+            #if os(macOS)
+            if showsChatPane && canChatWithAuthor {
+                HSplitView {
+                    reportContent
+                        .frame(minWidth: 420, idealWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
+                    macReportChatPane
+                        .frame(minWidth: 420, idealWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
+                }
+            } else {
+                reportContent
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
+            #else
+            reportContent
+            #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(report.title)
@@ -382,13 +392,40 @@ struct ReportsTabDetailView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button {
+                    #if os(macOS)
+                    if showsChatPane {
+                        showsChatPane = false
+                    } else {
+                        chatPaneMode = .listAndComposer
+                        showsChatPane = true
+                    }
+                    #else
                     showChatWithAuthor = true
+                    #endif
                 } label: {
-                    Label("Chat with Author", systemImage: "bubble.left.fill")
+                    Label("Chat", systemImage: "bubble.left.fill")
                 }
                 .disabled(!canChatWithAuthor)
             }
         }
+        #if os(macOS)
+        .task(id: reportATag) {
+            guard showsChatPane else { return }
+            await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+        }
+        .onChange(of: showsChatPane) { _, isShown in
+            guard isShown else { return }
+            chatPaneMode = .listAndComposer
+            Task {
+                await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+            }
+        }
+        .onChange(of: coreManager.conversations) { _, _ in
+            guard showsChatPane else { return }
+            chatPaneViewModel.refreshDebounced(reportATag: reportATag, using: reportThreadLoader)
+        }
+        #endif
+        #if os(iOS)
         .sheet(isPresented: $showChatWithAuthor) {
             if let project = project {
                 // TODO(#modal-composer-deprecation): migrate this modal composer entry point to inline flow.
@@ -402,7 +439,143 @@ struct ReportsTabDetailView: View {
                 .tenexModalPresentation(detents: [.large])
             }
         }
+        #endif
     }
+
+    private var reportThreadLoader: ReportChatPaneViewModel.ThreadLoader {
+        { aTag in
+            await coreManager.safeCore.getDocumentThreads(reportATag: aTag)
+        }
+    }
+
+    private var reportContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                headerSection
+                Divider()
+                MarkdownView(content: report.content)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    #if os(macOS)
+    @ViewBuilder
+    private var macReportChatPane: some View {
+        switch chatPaneMode {
+        case .listAndComposer:
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Text("Conversations (\(chatPaneViewModel.threads.count))")
+                        .font(.headline)
+                    Spacer()
+                    if chatPaneViewModel.isLoading {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    }
+                    Button {
+                        Task {
+                            await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh conversations")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+                Divider()
+
+                Group {
+                    if let errorMessage = chatPaneViewModel.errorMessage {
+                        VStack(spacing: 10) {
+                            Text(errorMessage)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                            Button("Retry") {
+                                Task {
+                                    await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
+                    } else if chatPaneViewModel.threads.isEmpty && !chatPaneViewModel.isLoading {
+                        Text("No conversations yet for this report.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding()
+                    } else {
+                        List(chatPaneViewModel.threads, id: \.id) { thread in
+                            Button {
+                                chatPaneMode = .conversation(thread.id)
+                            } label: {
+                                ReportThreadRow(thread: thread)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .listStyle(.inset)
+                    }
+                }
+
+                Divider()
+
+                if let project {
+                    MessageComposerView(
+                        project: project,
+                        initialAgentPubkey: report.author,
+                        referenceReportATag: reportATag,
+                        displayStyle: .inline,
+                        inlineLayoutStyle: .standard,
+                        onSend: { result in
+                            chatPaneMode = .conversation(result.eventId)
+                            Task {
+                                await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+                            }
+                        }
+                    )
+                    .environment(coreManager)
+                    .padding(12)
+                } else {
+                    Text("Unable to compose because the project is unavailable.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        case .conversation(let conversationId):
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        chatPaneMode = .listAndComposer
+                    } label: {
+                        Label("Back", systemImage: "chevron.left")
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Text("Conversation")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+                Divider()
+
+                ConversationByIdAdaptiveDetailView(conversationId: conversationId)
+                    .environment(coreManager)
+            }
+        }
+    }
+    #endif
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -470,6 +643,47 @@ struct ReportsTabDetailView: View {
     }
 
 }
+
+#if os(macOS)
+private enum ReportChatPaneMode: Equatable {
+    case listAndComposer
+    case conversation(String)
+}
+
+private struct ReportThreadRow: View {
+    let thread: Thread
+
+    @Environment(TenexCoreManager.self) private var coreManager
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(thread.title)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                Text(coreManager.displayName(for: thread.pubkey))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            RelativeTimeText(timestamp: thread.lastActivity, style: .localizedAbbreviated)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+    }
+}
+#endif
 
 // MARK: - Report Author Name Helper
 

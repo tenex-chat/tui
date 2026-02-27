@@ -35,8 +35,25 @@ extension MessageComposerView {
         (isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject
     }
 
-    var workspaceEditorHeight: CGFloat {
+    var workspaceContentLineCount: Int {
+        max(localText.split(separator: "\n", omittingEmptySubsequences: false).count, 1)
+    }
+
+    var isWorkspaceEditorExpanded: Bool {
+        localText.count > 200 || workspaceContentLineCount > 4
+    }
+
+    var workspaceEditorBaseHeight: CGFloat {
         max(workspaceBottomRowHeight + 88, 140)
+    }
+
+    var workspaceEditorHeight: CGFloat {
+        guard isWorkspaceEditorExpanded else { return workspaceEditorBaseHeight }
+
+        let charGrowth = CGFloat(max(localText.count - 200, 0) / 80) * 24
+        let lineGrowth = CGFloat(max(workspaceContentLineCount - 4, 0)) * 22
+        let expandedTarget = workspaceEditorBaseHeight + 96 + max(charGrowth, lineGrowth)
+        return min(max(expandedTarget, workspaceEditorBaseHeight + 96), 460)
     }
 
     @ViewBuilder
@@ -90,6 +107,7 @@ extension MessageComposerView {
                         sendMessage()
                     }
                 },
+                useNewlineForReturn: isWorkspaceEditorExpanded,
                 onHistoryPrevious: {
                     guard localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                         return false
@@ -154,6 +172,7 @@ extension MessageComposerView {
         #endif
     }
 
+    #if os(macOS)
     func transformWorkspacePasteText(_ pastedText: String) -> String {
         if WorkspacePasteBehavior.shouldBeAttachment(pastedText) {
             let id = draft.addTextAttachment(content: pastedText)
@@ -176,6 +195,7 @@ extension MessageComposerView {
 
         return WorkspacePasteBehavior.smartFormatPaste(pastedText)
     }
+    #endif
 
     /// Immediately flush localText to DraftManager, canceling any pending debounced sync.
     /// Call this before saveNow() to prevent data loss from the last ~300ms of typing.
@@ -243,99 +263,112 @@ extension MessageComposerView {
 
     var standardToolbarView: some View {
         HStack(spacing: 16) {
-            if agentsLoadError != nil {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(Color.composerWarning)
-                    .font(.caption)
-            }
+            if dictationManager.state.isRecording {
+                DictationRecordingBar(
+                    audioLevelSamples: dictationManager.audioLevelSamples,
+                    recordingStartDate: dictationManager.recordingStartDate,
+                    error: dictationManager.error,
+                    onStop: {
+                        Task {
+                            await dictationManager.stopRecording()
+                        }
+                    }
+                )
+            } else {
+                if agentsLoadError != nil {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(Color.composerWarning)
+                        .font(.caption)
+                }
 
-            #if os(iOS)
-            Button {
-                showImagePicker = true
-            } label: {
-                if isUploadingImage {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                } else {
-                    Image(systemName: "photo")
+                #if os(iOS)
+                Button {
+                    showImagePicker = true
+                } label: {
+                    if isUploadingImage {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "photo")
+                            .foregroundStyle(Color.composerAction)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(selectedProject == nil || isUploadingImage)
+
+                Button {
+                    Task {
+                        preDictationText = localText
+                        try? await dictationManager.startRecording()
+                    }
+                } label: {
+                    Image(systemName: "mic.fill")
                         .foregroundStyle(Color.composerAction)
                 }
-            }
-            .buttonStyle(.borderless)
-            .disabled(selectedProject == nil || isUploadingImage)
+                .buttonStyle(.borderless)
+                .disabled(!dictationManager.state.isIdle || selectedProject == nil)
+                #endif
 
-            Button {
-                Task {
-                    showDictationOverlay = true
-                    try? await dictationManager.startRecording()
+                pinnedPromptsToolbarButton
+
+                if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        saveDraftAsNamed()
+                    } label: {
+                        Image(systemName: draftSavedConfirmation ? "bookmark.fill" : "bookmark")
+                            .foregroundStyle(draftSavedConfirmation ? Color.accentColor : Color.composerAction)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(selectedProject == nil)
+                    .help("Save as reusable draft")
                 }
-            } label: {
-                Image(systemName: "mic.fill")
+
+                if selectedProject != nil {
+                    Button {
+                        showDraftBrowser = true
+                    } label: {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .foregroundStyle(Color.composerAction)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Browse saved drafts")
+                }
+
+                Spacer()
+
+                if !localImageAttachments.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "photo.fill")
+                            .font(.caption2)
+                        Text("\(localImageAttachments.count)")
+                            .font(.caption)
+                    }
                     .foregroundStyle(Color.composerAction)
-            }
-            .buttonStyle(.borderless)
-            .disabled(!dictationManager.state.isIdle || selectedProject == nil)
-            #endif
-
-            pinnedPromptsToolbarButton
-
-            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Button {
-                    saveDraftAsNamed()
-                } label: {
-                    Image(systemName: draftSavedConfirmation ? "bookmark.fill" : "bookmark")
-                        .foregroundStyle(draftSavedConfirmation ? Color.accentColor : Color.composerAction)
                 }
-                .buttonStyle(.borderless)
-                .disabled(selectedProject == nil)
-                .help("Save as reusable draft")
-            }
 
-            if selectedProject != nil {
-                Button {
-                    showDraftBrowser = true
-                } label: {
-                    Image(systemName: "doc.text.magnifyingglass")
-                        .foregroundStyle(Color.composerAction)
+                if !localTextAttachments.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.text.fill")
+                            .font(.caption2)
+                        Text("\(localTextAttachments.count)")
+                            .font(.caption)
+                    }
+                    .foregroundStyle(Color.composerAction)
                 }
-                .buttonStyle(.borderless)
-                .help("Browse saved drafts")
-            }
 
-            Spacer()
-
-            if !localImageAttachments.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "photo.fill")
-                        .font(.caption2)
-                    Text("\(localImageAttachments.count)")
+                if localText.count > 0 {
+                    Text("\(localText.count)")
                         .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(Color.composerAction)
-            }
 
-            if !localTextAttachments.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "doc.text.fill")
-                        .font(.caption2)
-                    Text("\(localTextAttachments.count)")
-                        .font(.caption)
+                if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty || !localTextAttachments.isEmpty {
+                    Button(action: clearDraft) {
+                        Image(systemName: "trash")
+                            .foregroundStyle(Color.composerDestructive)
+                    }
+                    .buttonStyle(.borderless)
                 }
-                .foregroundStyle(Color.composerAction)
-            }
-
-            if localText.count > 0 {
-                Text("\(localText.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty || !localTextAttachments.isEmpty {
-                Button(action: clearDraft) {
-                    Image(systemName: "trash")
-                        .foregroundStyle(Color.composerDestructive)
-                }
-                .buttonStyle(.borderless)
             }
 
             if isInlineComposer {

@@ -32,38 +32,122 @@ final class DelegationTreeViewModel: ObservableObject {
         isLoading = true
         loadError = nil
 
-        // Step 1: Get all descendant IDs
+        // Step 1: Get known descendants from runtime hierarchy
         let descendantIds = await safeCore.getDescendantConversationIds(conversationId: rootConversationId)
 
-        // Step 2: Load full info for root + all descendants
-        var seenConversationIds = Set<String>()
-        let allIds = ([rootConversationId] + descendantIds).filter { seenConversationIds.insert($0).inserted }
-        let allConversations = await safeCore.getConversationsByIds(conversationIds: allIds)
+        // Step 1b: Build a lightweight parent->children index from all visible conversations.
+        // This backfills delegations that may be missing from runtime descendant traversal.
+        let allConversationChildrenByParent: [String: [String]]
+        do {
+            var allConversationsById: [String: ConversationFullInfo] = [:]
 
-        guard let rootConversation = allConversations.first(where: { $0.thread.id == rootConversationId }) else {
+            let allConversations = try await safeCore.getAllConversations(
+                filter: ConversationFilter(
+                    projectIds: [],
+                    showArchived: true,
+                    hideScheduled: false,
+                    timeFilter: .all
+                )
+            )
+            for conversation in allConversations {
+                allConversationsById[conversation.thread.id] = conversation
+            }
+
+            let projects = await safeCore.getProjects()
+            let perProjectConversations = await withTaskGroup(
+                of: [ConversationFullInfo].self,
+                returning: [ConversationFullInfo].self
+            ) { group in
+                for project in projects {
+                    group.addTask { [safeCore] in
+                        await safeCore.getConversations(projectId: project.id)
+                    }
+                }
+
+                var merged: [ConversationFullInfo] = []
+                for await conversations in group {
+                    merged.append(contentsOf: conversations)
+                }
+                return merged
+            }
+
+            for conversation in perProjectConversations {
+                allConversationsById[conversation.thread.id] = conversation
+            }
+
+            var childrenByParent: [String: [String]] = [:]
+            for conversation in allConversationsById.values {
+                guard let parentId = conversation.thread.parentConversationId,
+                      !parentId.isEmpty else { continue }
+                childrenByParent[parentId, default: []].append(conversation.thread.id)
+            }
+            allConversationChildrenByParent = childrenByParent
+        } catch {
+            allConversationChildrenByParent = [:]
+        }
+
+        // Step 2: Expand graph by following q-tags so missing leaves still render
+        // even when runtime hierarchy does not yet include them.
+        var requestedConversationIds = Set([rootConversationId])
+        requestedConversationIds.formUnion(descendantIds)
+        var attemptedConversationIds = Set<String>()
+        var expandedParentConversationIds = Set<String>()
+        var conversationById: [String: ConversationFullInfo] = [:]
+        var messagesByConversation: [String: [Message]] = [:]
+
+        while true {
+            let parentsToExpand = requestedConversationIds.subtracting(expandedParentConversationIds)
+            for parentId in parentsToExpand {
+                expandedParentConversationIds.insert(parentId)
+                for childId in allConversationChildrenByParent[parentId] ?? [] where !childId.isEmpty {
+                    requestedConversationIds.insert(childId)
+                }
+            }
+
+            let idsToFetch = requestedConversationIds.subtracting(attemptedConversationIds)
+            if idsToFetch.isEmpty {
+                break
+            }
+            attemptedConversationIds.formUnion(idsToFetch)
+
+            let fetchedConversations = await safeCore.getConversationsByIds(
+                conversationIds: Array(idsToFetch).sorted()
+            )
+            let newConversations = fetchedConversations.filter { conversationById[$0.thread.id] == nil }
+            if newConversations.isEmpty {
+                continue
+            }
+
+            for conversation in newConversations {
+                conversationById[conversation.thread.id] = conversation
+            }
+
+            await withTaskGroup(of: (String, [Message]).self) { group in
+                for conversation in newConversations {
+                    group.addTask { [safeCore] in
+                        let messages = await safeCore.getMessages(conversationId: conversation.thread.id)
+                        return (conversation.thread.id, messages)
+                    }
+                }
+                for await (conversationId, messages) in group {
+                    messagesByConversation[conversationId] = messages
+                    for message in messages {
+                        guard shouldTreatQTagsAsDelegationReference(message) else { continue }
+                        for qTag in message.qTags where !qTag.isEmpty {
+                            requestedConversationIds.insert(qTag)
+                        }
+                    }
+                }
+            }
+        }
+
+        guard let rootConversation = conversationById[rootConversationId] else {
             loadError = "Root conversation not found"
             isLoading = false
             return
         }
 
-        // Step 3: Load messages for all conversations concurrently
-        var messagesByConversation: [String: [Message]] = [:]
-        await withTaskGroup(of: (String, [Message]).self) { group in
-            for conversation in allConversations {
-                group.addTask { [safeCore] in
-                    let messages = await safeCore.getMessages(conversationId: conversation.thread.id)
-                    return (conversation.thread.id, messages)
-                }
-            }
-            for await (convId, messages) in group {
-                messagesByConversation[convId] = messages
-            }
-        }
-
-        // Step 4: Build conversation lookup map
-        let conversationById = Dictionary(uniqueKeysWithValues: allConversations.map { ($0.thread.id, $0) })
-
-        // Step 5: Build parent->children relationships.
+        // Step 3: Build parent->children relationships.
         // We combine explicit parent tags with q-tag links so delegations still render
         // when child threads are missing parentConversationId.
         let childrenByParentId = buildChildrenByParent(
@@ -72,23 +156,34 @@ final class DelegationTreeViewModel: ObservableObject {
             messagesByConversation: messagesByConversation
         )
 
-        // Step 6: Build tree recursively
+        // Step 4: Build participant tree:
+        // root author node -> root recipient node -> delegated conversation recipients.
         var visitedConversationIds = Set<String>()
-        var root = buildNode(
+        let rootRecipient = buildRecipientSubtree(
             conversation: rootConversation,
-            delegationMessage: nil,
-            returnMessage: nil,
             childrenByParentId: childrenByParentId,
             conversationById: conversationById,
             messagesByConversation: messagesByConversation,
-            depth: 0,
+            depth: 1,
             visitedConversationIds: &visitedConversationIds
+        )
+        var root = DelegationTreeNode(
+            id: rootAuthorNodeId(conversationId: rootConversation.thread.id),
+            conversation: rootConversation,
+            participantPubkey: rootConversation.thread.pubkey,
+            role: .rootAuthor,
+            returnMessage: nil,
+            lastMessage: lastVisibleMessage(
+                for: rootConversation,
+                messagesByConversation: messagesByConversation
+            ),
+            children: [rootRecipient],
+            depth: 0
         )
         assignDepths(&root, depth: 0)
 
-        // Step 7: Compute layout
-        var ySlot = 0
-        computeLayout(node: &root, ySlot: &ySlot)
+        // Step 5: Compute layout
+        computeLayout(node: &root)
 
         rootNode = root
         isLoading = false
@@ -96,10 +191,8 @@ final class DelegationTreeViewModel: ObservableObject {
 
     // MARK: - Tree Building
 
-    private func buildNode(
+    private func buildRecipientSubtree(
         conversation: ConversationFullInfo,
-        delegationMessage: Message?,
-        returnMessage: Message?,
         childrenByParentId: [String: [String]],
         conversationById: [String: ConversationFullInfo],
         messagesByConversation: [String: [Message]],
@@ -109,9 +202,18 @@ final class DelegationTreeViewModel: ObservableObject {
         // Guard against cycles in malformed hierarchy data.
         guard visitedConversationIds.insert(conversation.thread.id).inserted else {
             return DelegationTreeNode(
+                id: recipientNodeId(conversationId: conversation.thread.id),
                 conversation: conversation,
-                delegationMessage: delegationMessage,
-                returnMessage: returnMessage,
+                participantPubkey: recipientPubkey(for: conversation),
+                role: .recipient,
+                returnMessage: completionMessage(
+                    for: conversation,
+                    messagesByConversation: messagesByConversation
+                ),
+                lastMessage: lastVisibleMessage(
+                    for: conversation,
+                    messagesByConversation: messagesByConversation
+                ),
                 children: [],
                 depth: depth
             )
@@ -122,21 +224,8 @@ final class DelegationTreeViewModel: ObservableObject {
 
         var children: [DelegationTreeNode] = []
         for childConv in childConversations {
-            let childMessages = messagesByConversation[childConv.thread.id] ?? []
-
-            // Outgoing arrow: OP of the child conversation (first message = delegation brief)
-            let delegMsg = childMessages.first
-
-            // Return arrow: last message from the child's agent (completion)
-            // The child conversation's thread pubkey identifies the delegated agent.
-            let childReturnMsg = childMessages.last { msg in
-                msg.pubkey == childConv.thread.pubkey && msg.toolName == nil
-            }
-
-            let childNode = buildNode(
+            let childNode = buildRecipientSubtree(
                 conversation: childConv,
-                delegationMessage: delegMsg,
-                returnMessage: childReturnMsg,
                 childrenByParentId: childrenByParentId,
                 conversationById: conversationById,
                 messagesByConversation: messagesByConversation,
@@ -147,12 +236,41 @@ final class DelegationTreeViewModel: ObservableObject {
         }
 
         return DelegationTreeNode(
+            id: recipientNodeId(conversationId: conversation.thread.id),
             conversation: conversation,
-            delegationMessage: delegationMessage,
-            returnMessage: returnMessage,
+            participantPubkey: recipientPubkey(for: conversation),
+            role: .recipient,
+            returnMessage: completionMessage(
+                for: conversation,
+                messagesByConversation: messagesByConversation
+            ),
+            lastMessage: lastVisibleMessage(
+                for: conversation,
+                messagesByConversation: messagesByConversation
+            ),
             children: children,
             depth: depth
         )
+    }
+
+    private func completionMessage(
+        for conversation: ConversationFullInfo,
+        messagesByConversation: [String: [Message]]
+    ) -> Message? {
+        let messages = messagesByConversation[conversation.thread.id] ?? []
+        return messages.last { msg in
+            msg.pubkey == conversation.thread.pubkey && msg.toolName == nil
+        }
+    }
+
+    private func lastVisibleMessage(
+        for conversation: ConversationFullInfo,
+        messagesByConversation: [String: [Message]]
+    ) -> Message? {
+        let messages = messagesByConversation[conversation.thread.id] ?? []
+        return messages.last { msg in
+            msg.toolName == nil && !msg.isReasoning
+        }
     }
 
     private func buildChildrenByParent(
@@ -203,6 +321,7 @@ final class DelegationTreeViewModel: ObservableObject {
         for (parentId, messages) in messagesByConversation {
             guard knownConversationIds.contains(parentId) else { continue }
             for message in messages {
+                guard shouldTreatQTagsAsDelegationReference(message) else { continue }
                 for childId in message.qTags {
                     registerParent(childId: childId, parentId: parentId, priority: 2)
                 }
@@ -215,7 +334,8 @@ final class DelegationTreeViewModel: ObservableObject {
         }
 
         for parentId in Array(childrenByParentId.keys) {
-            childrenByParentId[parentId]?.sort { lhs, rhs in
+            let deduped = Array(Set(childrenByParentId[parentId] ?? []))
+            childrenByParentId[parentId] = deduped.sorted { lhs, rhs in
                 let lhsActivity = conversationById[lhs]?.thread.lastActivity ?? 0
                 let rhsActivity = conversationById[rhs]?.thread.lastActivity ?? 0
                 if lhsActivity != rhsActivity {
@@ -237,12 +357,36 @@ final class DelegationTreeViewModel: ObservableObject {
 
     // MARK: - Reingold-Tilford Simplified Layout
 
-    /// Post-order: assign each leaf a unique y-slot index; internal nodes get midpoint of first/last child.
-    /// Pre-order: assign x from depth.
-    private func computeLayout(node: inout DelegationTreeNode, ySlot: inout Int) {
+    /// Compact layered layout:
+    /// 1) Seed each depth column in DFS order with fixed row spacing.
+    /// 2) Iteratively pull parents toward children.
+    /// 3) Re-compact each depth column to remove oversized vertical gaps.
+    private func computeLayout(node: inout DelegationTreeNode) {
+        var nodesByDepth: [Int: [DelegationTreeNode]] = [:]
+        collectNodesByDepth(node: node, into: &nodesByDepth)
+
         var positions: [String: CGPoint] = [:]
-        var ySlotCounter = 0
-        assignPositions(node: &node, positions: &positions, ySlot: &ySlotCounter)
+        let depthLevels = nodesByDepth.keys.sorted()
+        let rowStep = nodeH + max(16, vGap * 0.35)
+
+        // Pass 1: seed compact columns by DFS order to avoid oversized gaps between sibling branches.
+        for depth in depthLevels {
+            guard let nodesAtDepth = nodesByDepth[depth] else { continue }
+            let x = padding + CGFloat(depth) * (nodeW + hGap)
+            for (index, depthNode) in nodesAtDepth.enumerated() {
+                let y = padding + CGFloat(index) * rowStep
+                positions[depthNode.id] = CGPoint(x: x, y: y)
+            }
+        }
+
+        // Pass 2: iteratively pull parents toward children, then re-compact each depth column.
+        for _ in 0..<4 {
+            relaxParentAnchors(node: node, positions: &positions)
+            for depth in depthLevels {
+                guard let nodesAtDepth = nodesByDepth[depth] else { continue }
+                compactDepthColumn(nodesAtDepth, positions: &positions, rowStep: rowStep)
+            }
+        }
 
         nodePositions = positions
 
@@ -255,28 +399,81 @@ final class DelegationTreeViewModel: ObservableObject {
         )
     }
 
-    private func assignPositions(
-        node: inout DelegationTreeNode,
-        positions: inout [String: CGPoint],
-        ySlot: inout Int
+    private func collectNodesByDepth(
+        node: DelegationTreeNode,
+        into nodesByDepth: inout [Int: [DelegationTreeNode]]
     ) {
-        if node.children.isEmpty {
-            // Leaf node: assign a y-slot
-            let y = padding + CGFloat(ySlot) * (nodeH + vGap)
-            let x = padding + CGFloat(node.depth) * (nodeW + hGap)
-            positions[node.id] = CGPoint(x: x, y: y)
-            ySlot += 1
+        nodesByDepth[node.depth, default: []].append(node)
+        for child in node.children {
+            collectNodesByDepth(node: child, into: &nodesByDepth)
+        }
+    }
+
+    private func relaxParentAnchors(
+        node: DelegationTreeNode,
+        positions: inout [String: CGPoint]
+    ) {
+        for child in node.children {
+            relaxParentAnchors(node: child, positions: &positions)
+        }
+
+        guard !node.children.isEmpty,
+              let firstChildPos = positions[node.children.first!.id],
+              let lastChildPos = positions[node.children.last!.id],
+              var parentPos = positions[node.id] else {
+            return
+        }
+
+        let targetY: CGFloat
+        if node.depth == 0 {
+            targetY = (firstChildPos.y + lastChildPos.y) / 2
         } else {
-            // Internal node: first lay out children
-            for i in node.children.indices {
-                assignPositions(node: &node.children[i], positions: &positions, ySlot: &ySlot)
-            }
-            // Parent y = midpoint of first and last child y
-            let firstChildPos = positions[node.children.first!.id]!
-            let lastChildPos = positions[node.children.last!.id]!
-            let y = (firstChildPos.y + lastChildPos.y) / 2
-            let x = padding + CGFloat(node.depth) * (nodeW + hGap)
-            positions[node.id] = CGPoint(x: x, y: y)
+            let childSpan = lastChildPos.y - firstChildPos.y
+            targetY = firstChildPos.y + childSpan * parentAnchorBias(forChildCount: node.children.count)
+        }
+
+        parentPos.y = targetY
+        positions[node.id] = parentPos
+    }
+
+    private func compactDepthColumn(
+        _ nodesAtDepth: [DelegationTreeNode],
+        positions: inout [String: CGPoint],
+        rowStep: CGFloat
+    ) {
+        guard !nodesAtDepth.isEmpty else { return }
+
+        var startAccumulator: CGFloat = 0
+        var sampleCount: CGFloat = 0
+
+        for (index, node) in nodesAtDepth.enumerated() {
+            guard let pos = positions[node.id] else { continue }
+            startAccumulator += pos.y - CGFloat(index) * rowStep
+            sampleCount += 1
+        }
+
+        guard sampleCount > 0 else { return }
+        let baseline = max(padding, startAccumulator / sampleCount)
+
+        for (index, node) in nodesAtDepth.enumerated() {
+            guard var pos = positions[node.id] else { continue }
+            pos.y = baseline + CGFloat(index) * rowStep
+            positions[node.id] = pos
+        }
+    }
+
+    private func parentAnchorBias(forChildCount childCount: Int) -> CGFloat {
+        switch childCount {
+        case 0, 1:
+            return 0
+        case 2:
+            return 0.45
+        case 3:
+            return 0.4
+        case 4...6:
+            return 0.34
+        default:
+            return 0.28
         }
     }
 
@@ -285,31 +482,107 @@ final class DelegationTreeViewModel: ObservableObject {
     struct Edge {
         let parentId: String
         let childId: String
-        let delegationMessage: Message?
-        let returnMessage: Message?
+        let isComplete: Bool
+        let crossProjectTargetLabel: String?
         let childStatus: String?
         let childIsActive: Bool
     }
 
     var edges: [Edge] {
         guard let root = rootNode else { return [] }
-        var result: [Edge] = []
-        collectEdges(node: root, into: &result)
-        return result
+        var raw: [Edge] = []
+        collectEdges(node: root, into: &raw)
+
+        var byPair: [String: Edge] = [:]
+        for edge in raw {
+            let key = "\(edge.parentId)->\(edge.childId)"
+            if let existing = byPair[key] {
+                byPair[key] = mergeEdges(existing, edge)
+            } else {
+                byPair[key] = edge
+            }
+        }
+
+        return byPair.values.sorted {
+            if $0.parentId != $1.parentId {
+                return $0.parentId < $1.parentId
+            }
+            return $0.childId < $1.childId
+        }
     }
 
     private func collectEdges(node: DelegationTreeNode, into result: inout [Edge]) {
         for child in node.children {
+            let isConversationStartEdge = node.role == .rootAuthor &&
+                child.role == .recipient &&
+                node.conversation.thread.id == child.conversation.thread.id
+            let parentProjectTag = node.conversation.projectATag.trimmingCharacters(in: .whitespacesAndNewlines)
+            let childProjectTag = child.conversation.projectATag.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isCrossProject = !isConversationStartEdge &&
+                !childProjectTag.isEmpty &&
+                parentProjectTag != childProjectTag
+
             result.append(Edge(
                 parentId: node.id,
                 childId: child.id,
-                delegationMessage: child.delegationMessage,
-                returnMessage: child.returnMessage,
+                isComplete: isConversationStartEdge || child.returnMessage != nil,
+                crossProjectTargetLabel: isCrossProject ? projectLabel(fromATag: childProjectTag) : nil,
                 childStatus: child.conversation.thread.statusLabel,
                 childIsActive: child.conversation.isActive
             ))
             collectEdges(node: child, into: &result)
         }
+    }
+
+    private func projectLabel(fromATag aTag: String) -> String {
+        let parts = aTag.split(separator: ":")
+        if let slug = parts.last, !slug.isEmpty {
+            return String(slug)
+        }
+        return aTag
+    }
+
+    private func rootAuthorNodeId(conversationId: String) -> String {
+        "author:\(conversationId)"
+    }
+
+    private func recipientNodeId(conversationId: String) -> String {
+        "recipient:\(conversationId)"
+    }
+
+    private func recipientPubkey(for conversation: ConversationFullInfo) -> String {
+        let candidate = conversation.thread.pTags
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !candidate.isEmpty {
+            return candidate
+        }
+        return conversation.thread.pubkey
+    }
+
+    private func shouldTreatQTagsAsDelegationReference(_ message: Message) -> Bool {
+        guard let toolName = message.toolName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !toolName.isEmpty else {
+            return false
+        }
+        let lowercased = toolName.lowercased()
+        if lowercased == "delegate" || lowercased == "mcp__tenex__delegate" {
+            return true
+        }
+        return lowercased.contains("__delegate") ||
+            lowercased.hasPrefix("delegate_") ||
+            lowercased.hasSuffix("_delegate")
+    }
+
+    private func mergeEdges(_ lhs: Edge, _ rhs: Edge) -> Edge {
+        Edge(
+            parentId: lhs.parentId,
+            childId: lhs.childId,
+            isComplete: lhs.isComplete || rhs.isComplete,
+            crossProjectTargetLabel: lhs.crossProjectTargetLabel ?? rhs.crossProjectTargetLabel,
+            childStatus: lhs.childStatus ?? rhs.childStatus,
+            childIsActive: lhs.childIsActive || rhs.childIsActive
+        )
     }
 
     // MARK: - Summary

@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 enum NudgesLayoutMode {
     case adaptive
@@ -18,6 +23,7 @@ struct NudgesTabView: View {
     @State private var navigationPath: [NudgeListItem] = []
     @State private var showNewNudgeSheet = false
     @State private var sourceNudgeForDraft: Nudge?
+    @State private var detailItem: NudgeListItem?
 
     init(
         layoutMode: NudgesLayoutMode = .adaptive,
@@ -47,7 +53,7 @@ struct NudgesTabView: View {
             }
             await viewModel.loadIfNeeded()
         }
-        .onChange(of: coreManager.diagnosticsVersion) { _, _ in
+        .onChange(of: coreManager.contentCatalogVersion) { _, _ in
             Task { await viewModel.refresh() }
         }
         .sheet(isPresented: $showNewNudgeSheet) {
@@ -67,11 +73,31 @@ struct NudgesTabView: View {
 
                 if created, let newestMine = viewModel.mine.first {
                     selectedNudgeBinding.wrappedValue = newestMine.nudge
+                    #if os(macOS)
+                    detailItem = newestMine
+                    #else
                     navigationPath = [newestMine]
+                    #endif
                 }
 
                 return created
             }
+            .environment(coreManager)
+        }
+        .sheet(item: $detailItem) { item in
+            NudgeDetailView(
+                item: item,
+                canDelete: viewModel.canDelete(item),
+                onFork: {
+                    presentNewNudgeSheet(source: item.nudge)
+                },
+                onDelete: {
+                    await delete(item)
+                }
+            )
+            #if os(macOS)
+            .frame(minWidth: 980, minHeight: 620)
+            #endif
             .environment(coreManager)
         }
         .alert(
@@ -102,6 +128,7 @@ struct NudgesTabView: View {
                 #else
                 .toolbarTitleDisplayMode(.inline)
                 #endif
+                #if os(iOS)
                 .navigationDestination(for: NudgeListItem.self) { item in
                     NudgeDetailView(
                         item: item,
@@ -114,6 +141,7 @@ struct NudgesTabView: View {
                         }
                     )
                 }
+                #endif
                 .searchable(text: $viewModel.searchText, placement: .toolbar, prompt: "Search nudges")
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
@@ -260,7 +288,11 @@ struct NudgesTabView: View {
 
     private func open(_ item: NudgeListItem) {
         selectedNudgeBinding.wrappedValue = item.nudge
+        #if os(macOS)
+        detailItem = item
+        #else
         navigationPath.append(item)
+        #endif
     }
 
     private func presentNewNudgeSheet(source: Nudge?) {
@@ -282,6 +314,7 @@ struct NudgesTabView: View {
         let deleted = await viewModel.deleteNudge(id: item.id)
         if deleted {
             selectedNudgeBinding.wrappedValue = nil
+            detailItem = nil
             navigationPath.removeAll { $0.id == item.id }
         }
         return deleted
@@ -289,6 +322,8 @@ struct NudgesTabView: View {
 }
 
 private struct NudgeDetailView: View {
+    @Environment(TenexCoreManager.self) private var coreManager
+
     let item: NudgeListItem
     let canDelete: Bool
     let onFork: () -> Void
@@ -296,6 +331,8 @@ private struct NudgeDetailView: View {
 
     @State private var showDeleteConfirmation = false
     @State private var isDeleting = false
+    @State private var showCommentComposer = false
+    @State private var hasCopiedNevent = false
 
     private var nudge: Nudge {
         item.nudge
@@ -303,6 +340,10 @@ private struct NudgeDetailView: View {
 
     private var nudgeTitle: String {
         nudge.title.isEmpty ? "Untitled Nudge" : nudge.title
+    }
+
+    private var nudgeNevent: String? {
+        Bech32.hexEventIdToNevent(nudge.id)
     }
 
     var body: some View {
@@ -343,6 +384,15 @@ private struct NudgeDetailView: View {
         } message: {
             Text("This publishes a NIP-09 kind:5 deletion for this nudge event.")
         }
+        .sheet(isPresented: $showCommentComposer) {
+            MessageComposerView(
+                initialAgentPubkey: nudge.pubkey,
+                initialContent: ConversationFormatters.generateNudgeContextMessage(nudge: nudge),
+                displayStyle: .inline
+            )
+            .environment(coreManager)
+            .tenexModalPresentation(detents: [.large])
+        }
     }
 
     private var header: some View {
@@ -360,6 +410,13 @@ private struct NudgeDetailView: View {
                 }
 
                 Spacer(minLength: 0)
+
+                Button {
+                    showCommentComposer = true
+                } label: {
+                    Label("Comment", systemImage: "bubble.left.fill")
+                }
+                .adaptiveGlassButtonStyle()
 
                 Button(action: onFork) {
                     Label("Fork", systemImage: "square.on.square")
@@ -410,12 +467,28 @@ private struct NudgeDetailView: View {
                     Spacer(minLength: 0)
                 }
 
-                metadataRow(title: "Pubkey", value: shortHex(nudge.pubkey))
                 metadataRow(
                     title: "Created",
                     value: TimestampTextFormatter.string(from: nudge.createdAt, style: .mediumDateShortTime)
                 )
-                metadataRow(title: "Event ID", value: shortHex(nudge.id))
+                if let nevent = nudgeNevent {
+                    HStack(alignment: .center, spacing: 10) {
+                        Text("Event")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 110, alignment: .leading)
+
+                        Button {
+                            copyNevent(nevent)
+                        } label: {
+                            Label(hasCopiedNevent ? "Copied nevent1" : "Copy nevent1", systemImage: hasCopiedNevent ? "checkmark" : "doc.on.doc")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderless)
+
+                        Spacer(minLength: 0)
+                    }
+                }
 
                 if let supersedes = nudge.supersedes, !supersedes.isEmpty {
                     metadataRow(title: "Supersedes", value: shortHex(supersedes))
@@ -581,5 +654,19 @@ private struct NudgeDetailView: View {
     private func shortHex(_ value: String) -> String {
         guard value.count > 16 else { return value }
         return "\(value.prefix(8))...\(value.suffix(8))"
+    }
+
+    private func copyNevent(_ nevent: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(nevent, forType: .string)
+        #else
+        UIPasteboard.general.string = nevent
+        #endif
+
+        hasCopiedNevent = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            hasCopiedNevent = false
+        }
     }
 }

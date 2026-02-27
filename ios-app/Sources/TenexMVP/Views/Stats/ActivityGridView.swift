@@ -130,15 +130,17 @@ struct ActivityGridView: View {
                 // Last column: right-align so the label extends left (stays in-bounds).
                 // All others: left-align so the label extends right over adjacent empty cells.
                 let isLast = col == daysToShow - 1
-                ZStack(alignment: isLast ? .trailing : .leading) {
-                    Color.clear.frame(width: Self.cellSize, height: 14)
-                    if col == 0 || isLast || isMonthBoundary(col: col, todayStart: todayStart) {
-                        Text(Self.dateLabel(daysAgo: dayOffset, todayStart: todayStart))
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .fixedSize()
+                let showLabel = col == 0 || isLast || isMonthBoundary(col: col, todayStart: todayStart)
+                Color.clear
+                    .frame(width: Self.cellSize, height: 14)
+                    .overlay(alignment: isLast ? .trailing : .leading) {
+                        if showLabel {
+                            Text(Self.dateLabel(daysAgo: dayOffset, todayStart: todayStart))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
                     }
-                }
             }
         }
     }
@@ -300,6 +302,7 @@ enum ActivityIntensityLevel: CaseIterable, Identifiable {
             totalCost14Days: 0,
             costByProject: [],
             messagesByDay: [],
+            runtimeByDay: [],
             activityByHour: sampleData,
             maxTokens: 10000,
             maxMessages: 50

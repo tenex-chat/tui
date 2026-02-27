@@ -495,9 +495,9 @@ impl PreferencesStorage {
         requester_pubkey: &str,
         event_kind: Option<u16>,
     ) -> Result<(), String> {
-        self.prefs.bunker_auto_approve_rules.retain(|r| {
-            !(r.requester_pubkey == requester_pubkey && r.event_kind == event_kind)
-        });
+        self.prefs
+            .bunker_auto_approve_rules
+            .retain(|r| !(r.requester_pubkey == requester_pubkey && r.event_kind == event_kind));
         self.save_to_file_with_result()
     }
 

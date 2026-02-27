@@ -68,7 +68,7 @@ struct AgentDefinitionsTabView: View {
             async let teamLoad: Void = teamsViewModel.loadIfNeeded()
             _ = await (agentLoad, teamLoad)
         }
-        .onChange(of: coreManager.diagnosticsVersion) { _, _ in
+        .onChange(of: coreManager.contentCatalogVersion) { _, _ in
             Task { await viewModel.refresh() }
         }
         .onChange(of: coreManager.teamsVersion) { _, _ in

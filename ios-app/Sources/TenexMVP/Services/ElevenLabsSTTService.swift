@@ -1,10 +1,13 @@
 #if os(macOS)
 import Foundation
+import OSLog
 
 /// Streaming Speech-to-Text service using ElevenLabs WebSocket API.
-/// Sends binary PCM audio chunks and receives real-time JSON transcription responses.
+/// Sends base64-encoded PCM audio chunks as JSON and receives real-time transcription responses.
 @MainActor
-final class ElevenLabsSTTService {
+final class ElevenLabsSTTService: NSObject {
+
+    private static let logger = Logger(subsystem: "com.tenex.mvp", category: "ElevenLabsSTT")
 
     // MARK: - Types
 
@@ -39,6 +42,7 @@ final class ElevenLabsSTTService {
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
     private var isConnected = false
+    private var openContinuation: CheckedContinuation<Void, Error>?
 
     /// Callback for transcript updates (partial and final)
     var onTranscript: ((TranscriptResult) -> Void)?
@@ -49,6 +53,7 @@ final class ElevenLabsSTTService {
     // MARK: - Connection
 
     /// Connect to ElevenLabs streaming STT WebSocket.
+    /// Awaits the actual WebSocket open handshake before returning.
     /// - Throws: `STTError.noApiKey` if no API key is available
     func connect() async throws {
         let apiKeyResult = await KeychainService.shared.loadElevenLabsApiKeyAsync()
@@ -57,40 +62,50 @@ final class ElevenLabsSTTService {
         switch apiKeyResult {
         case .success(let key):
             apiKey = key
-        case .failure:
+        case .failure(let err):
+            Self.logger.error("connect: keychain load failed: \(err)")
             throw STTError.noApiKey
         }
 
-        let endpoint = "wss://api.elevenlabs.io/v1/stt/streaming?model_id=scribe_v1&language_code=en&encoding=pcm_s16le&sample_rate=16000"
+        let endpoint = "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v1&language_code=en&audio_format=pcm_16000"
 
         guard let url = URL(string: endpoint) else {
             throw STTError.connectionFailed("Invalid endpoint URL")
         }
 
+        Self.logger.info("connect: opening WebSocket to \(url.absoluteString, privacy: .public)")
+
         var request = URLRequest(url: url)
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
 
-        let session = URLSession(configuration: .default)
+        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: request)
-
         self.urlSession = session
         self.webSocketTask = task
 
-        task.resume()
-        isConnected = true
+        // Wait for the handshake to complete before returning — the delegate resolves this.
+        try await withCheckedThrowingContinuation { continuation in
+            self.openContinuation = continuation
+            task.resume()
+        }
 
-        // Start listening for responses
+        isConnected = true
+        Self.logger.info("connect: WebSocket open, starting receive loop")
         startReceiving()
     }
 
-    /// Send a binary audio chunk to the WebSocket.
+    /// Send a PCM audio chunk to the WebSocket as a base64-encoded JSON message.
     /// - Parameter data: Raw PCM audio data (16kHz, mono, 16-bit signed little-endian)
     func sendAudioChunk(_ data: Data) {
         guard isConnected, let task = webSocketTask else { return }
 
-        task.send(.data(data)) { error in
+        let base64Audio = data.base64EncodedString()
+        let json = "{\"message_type\":\"input_audio_chunk\",\"audio_base_64\":\"\(base64Audio)\"}"
+
+        task.send(.string(json)) { error in
             if let error = error {
                 Task { @MainActor in
+                    Self.logger.error("sendAudioChunk: send failed: \(error)")
                     self.onError?(STTError.connectionFailed(error.localizedDescription))
                 }
             }
@@ -100,18 +115,10 @@ final class ElevenLabsSTTService {
     /// Signal end of audio stream and close the connection.
     func endAudioAndDisconnect() {
         guard isConnected else { return }
-
-        // Send end_audio signal as text message
-        let endMessage = "{\"end_audio\": true}"
-        webSocketTask?.send(.string(endMessage)) { [weak self] _ in
-            // Close after sending end signal
-            Task { @MainActor in
-                self?.disconnect()
-            }
-        }
+        disconnect()
     }
 
-    /// Disconnect the WebSocket without sending end signal.
+    /// Disconnect the WebSocket.
     func disconnect() {
         isConnected = false
         webSocketTask?.cancel(with: .goingAway, reason: nil)
@@ -131,13 +138,20 @@ final class ElevenLabsSTTService {
 
                 switch result {
                 case .success(let message):
+                    switch message {
+                    case .string(let text):
+                        Self.logger.debug("receive: \(text, privacy: .public)")
+                    case .data(let data):
+                        Self.logger.debug("receive: data(\(data.count) bytes)")
+                    @unknown default:
+                        break
+                    }
                     self.handleMessage(message)
-                    // Continue receiving
                     self.startReceiving()
 
                 case .failure(let error):
-                    // Only report if still connected (not a deliberate disconnect)
                     if self.isConnected {
+                        Self.logger.error("receive: failed: \(error)")
                         self.onError?(STTError.connectionFailed(error.localizedDescription))
                     }
                 }
@@ -163,43 +177,79 @@ final class ElevenLabsSTTService {
 
         do {
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                Self.logger.warning("parseTranscriptJSON: non-dict JSON: \(jsonString, privacy: .public)")
                 return
             }
 
-            // Check for error messages
             if let errorMessage = json["error"] as? String {
+                Self.logger.error("parseTranscriptJSON: server error: \(errorMessage, privacy: .public)")
                 onError?(STTError.serverError(errorMessage))
                 return
             }
 
-            // Parse transcript response
-            // ElevenLabs Scribe streaming returns: {"type": "transcript", "data": {"text": "...", ...}}
-            // or simpler format: {"text": "...", "is_final": true/false}
             if let text = json["text"] as? String {
                 let isFinal = json["is_final"] as? Bool ?? false
                 let language = json["language"] as? String
-
-                let result = TranscriptResult(
-                    text: text,
-                    isFinal: isFinal,
-                    language: language
-                )
-                onTranscript?(result)
+                onTranscript?(TranscriptResult(text: text, isFinal: isFinal, language: language))
             } else if let type = json["type"] as? String, type == "transcript",
                       let resultData = json["data"] as? [String: Any],
                       let text = resultData["text"] as? String {
                 let isFinal = resultData["is_final"] as? Bool ?? false
                 let language = resultData["language"] as? String
-
-                let result = TranscriptResult(
-                    text: text,
-                    isFinal: isFinal,
-                    language: language
-                )
-                onTranscript?(result)
+                onTranscript?(TranscriptResult(text: text, isFinal: isFinal, language: language))
             }
         } catch {
             // Silently ignore unparseable messages (e.g., keep-alive pings)
+        }
+    }
+}
+
+// MARK: - URLSessionWebSocketDelegate
+
+extension ElevenLabsSTTService: URLSessionWebSocketDelegate {
+    nonisolated func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didOpenWithProtocol protocol: String?
+    ) {
+        Task { @MainActor in
+            Self.logger.info("delegate: didOpen protocol=\((`protocol` ?? "none"), privacy: .public)")
+            self.openContinuation?.resume()
+            self.openContinuation = nil
+        }
+    }
+
+    nonisolated func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
+        reason: Data?
+    ) {
+        let reasonString = reason.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        Task { @MainActor in
+            Self.logger.info("delegate: didClose code=\(closeCode.rawValue) reason=\(reasonString, privacy: .public)")
+            if let continuation = self.openContinuation {
+                continuation.resume(throwing: STTError.connectionFailed("Server closed with code \(closeCode.rawValue): \(reasonString)"))
+                self.openContinuation = nil
+            }
+        }
+    }
+
+    nonisolated func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        guard let error else { return }
+        Task { @MainActor in
+            Self.logger.error("delegate: didCompleteWithError: \(error)")
+            if let continuation = self.openContinuation {
+                continuation.resume(throwing: STTError.connectionFailed(error.localizedDescription))
+                self.openContinuation = nil
+            } else if self.isConnected {
+                self.isConnected = false
+                self.onError?(STTError.connectionFailed(error.localizedDescription))
+            }
         }
     }
 }

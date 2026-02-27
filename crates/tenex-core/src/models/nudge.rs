@@ -7,6 +7,10 @@ use crate::constants::DEFAULT_NUDGE_TITLE;
 pub struct Nudge {
     pub id: String,
     pub pubkey: String,
+    /// Replaceable identifier (NIP-33 `d` tag).
+    /// Used to group multiple versions of the same logical nudge.
+    #[serde(default)]
+    pub d_tag: String,
     pub title: String,
     pub description: String,
     pub content: String,
@@ -40,6 +44,7 @@ impl Nudge {
 
         let mut title: Option<String> = None;
         let mut description: Option<String> = None;
+        let mut d_tag: Option<String> = None;
         let mut hashtags: Vec<String> = Vec::new();
         let mut allowed_tools: Vec<String> = Vec::new();
         let mut denied_tools: Vec<String> = Vec::new();
@@ -62,6 +67,7 @@ impl Nudge {
                         match tag_name {
                             "title" => title = Some(value.to_string()),
                             "description" => description = Some(value.to_string()),
+                            "d" => d_tag = Some(value.to_string()),
                             "t" => hashtags.push(value.to_string()),
                             "allow-tool" => allowed_tools.push(value.to_string()),
                             "deny-tool" => denied_tools.push(value.to_string()),
@@ -76,6 +82,7 @@ impl Nudge {
         Some(Nudge {
             id,
             pubkey,
+            d_tag: d_tag.unwrap_or_default(),
             title: title.unwrap_or_else(|| DEFAULT_NUDGE_TITLE.to_string()),
             description: description.unwrap_or_default(),
             content,
@@ -321,6 +328,8 @@ mod tests {
 
         // Should use default title
         assert_eq!(nudge.title, DEFAULT_NUDGE_TITLE);
+        // d-tag defaults to empty
+        assert_eq!(nudge.d_tag, "");
         // Description defaults to empty
         assert_eq!(nudge.description, "");
         // All tool lists should be empty
@@ -343,6 +352,10 @@ mod tests {
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("title")),
                 vec!["Multi-Tag Nudge".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
+                vec!["my-shared-slug".to_string()],
             ))
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("t")),
@@ -386,6 +399,8 @@ mod tests {
 
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
         let nudge = Nudge::from_note(&note).expect("Should parse nudge");
+
+        assert_eq!(nudge.d_tag, "my-shared-slug");
 
         // Verify accumulation of hashtags
         assert_eq!(nudge.hashtags.len(), 3);

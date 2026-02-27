@@ -461,6 +461,7 @@ fn handle_send_message(app: &mut App) {
                     nudge_ids,
                     skill_ids,
                     reference_conversation_id,
+                    reference_report_a_tag: None,
                     fork_message_id,
                     response_tx: Some(response_tx),
                 }) {

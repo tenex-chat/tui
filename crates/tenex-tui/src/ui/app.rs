@@ -140,6 +140,7 @@ pub enum HomeTab {
 pub enum StatsSubtab {
     #[default]
     Rankings,
+    Runtime,
     Messages,
     Activity,
 }
@@ -148,7 +149,8 @@ impl StatsSubtab {
     /// Get the next subtab (wraps around)
     pub fn next(self) -> Self {
         match self {
-            StatsSubtab::Rankings => StatsSubtab::Messages,
+            StatsSubtab::Rankings => StatsSubtab::Runtime,
+            StatsSubtab::Runtime => StatsSubtab::Messages,
             StatsSubtab::Messages => StatsSubtab::Activity,
             StatsSubtab::Activity => StatsSubtab::Rankings,
         }
@@ -158,7 +160,8 @@ impl StatsSubtab {
     pub fn prev(self) -> Self {
         match self {
             StatsSubtab::Rankings => StatsSubtab::Activity,
-            StatsSubtab::Messages => StatsSubtab::Rankings,
+            StatsSubtab::Runtime => StatsSubtab::Rankings,
+            StatsSubtab::Messages => StatsSubtab::Runtime,
             StatsSubtab::Activity => StatsSubtab::Messages,
         }
     }
@@ -326,7 +329,8 @@ pub struct App {
     /// Dedup set for queued bunker request IDs.
     pub bunker_pending_request_ids: HashSet<String>,
     /// Persisted bunker auto-approve rules from preferences.
-    pub bunker_auto_approve_rules: Vec<tenex_core::models::project_draft::BunkerAutoApproveRulePref>,
+    pub bunker_auto_approve_rules:
+        Vec<tenex_core::models::project_draft::BunkerAutoApproveRulePref>,
     /// Session-scoped bunker audit entries from the running bunker process.
     pub bunker_audit_entries: Vec<tenex_core::nostr::bunker::BunkerAuditEntry>,
 
@@ -4074,7 +4078,11 @@ impl App {
 
     /// Reload persisted bunker auto-approve rules into local UI state.
     pub fn load_bunker_rules_from_preferences(&mut self) {
-        self.bunker_auto_approve_rules = self.preferences.borrow().bunker_auto_approve_rules().to_vec();
+        self.bunker_auto_approve_rules = self
+            .preferences
+            .borrow()
+            .bunker_auto_approve_rules()
+            .to_vec();
     }
 
     /// Return persisted bunker enabled preference.
@@ -4279,10 +4287,9 @@ impl App {
         }
 
         if approved && persist_auto_approve {
-            if let Err(e) = self.add_bunker_auto_approve_rule(
-                request.requester_pubkey.clone(),
-                request.event_kind,
-            ) {
+            if let Err(e) = self
+                .add_bunker_auto_approve_rule(request.requester_pubkey.clone(), request.event_kind)
+            {
                 self.set_warning_status(&format!("Failed to save bunker rule: {}", e));
             }
         }

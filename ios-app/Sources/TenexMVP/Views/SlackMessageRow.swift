@@ -204,7 +204,8 @@ struct SlackMessageRow: View, Equatable {
         MessageContentView(content: message.content)
             .font(.system(size: 14))
             .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
-            .textSelection(.enabled)
+            // Avoid per-row SelectionOverlay NSViewRepresentable churn on large macOS transcripts.
+            .textSelection(.disabled)
         #else
         VStack(alignment: .leading, spacing: 0) {
             // Content with height measurement

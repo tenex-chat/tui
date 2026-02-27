@@ -222,7 +222,8 @@ final class ComposerViewModel {
         agentPubkey: String?,
         nudgeIds: [String],
         skillIds: [String],
-        referenceConversationId: String?
+        referenceConversationId: String?,
+        referenceReportATag: String?
     ) async throws -> SendMessageResult {
         if isNewConversation {
             return try await dependencies.core.sendThread(
@@ -232,7 +233,8 @@ final class ComposerViewModel {
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
                 skillIds: skillIds,
-                referenceConversationId: referenceConversationId
+                referenceConversationId: referenceConversationId,
+                referenceReportATag: referenceReportATag
             )
         }
 

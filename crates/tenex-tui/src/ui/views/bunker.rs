@@ -66,13 +66,16 @@ pub fn render_bunker_approval_modal(f: &mut Frame, area: Rect, state: &BunkerApp
     let mut actions: Vec<ModalItem> = vec![ModalItem::new(checkbox_label)
         .with_shortcut("space".to_string())
         .selected(state.selected_index == 0)];
-    actions.extend(BunkerApprovalAction::ALL.iter().enumerate().map(
-        |(idx, action)| {
-            ModalItem::new(action.label())
-                .with_shortcut(action.hotkey().to_string())
-                .selected(idx + 1 == state.selected_index)
-        },
-    ));
+    actions.extend(
+        BunkerApprovalAction::ALL
+            .iter()
+            .enumerate()
+            .map(|(idx, action)| {
+                ModalItem::new(action.label())
+                    .with_shortcut(action.hotkey().to_string())
+                    .selected(idx + 1 == state.selected_index)
+            }),
+    );
 
     let actions_area = Rect::new(
         content_area.x,

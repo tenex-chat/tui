@@ -67,13 +67,38 @@ enum Bech32 {
     /// Convert hex pubkey to npub (bech32-encoded).
     /// Returns nil if the input is not a valid 32-byte hex string.
     static func hexToNpub(_ hex: String) -> String? {
-        guard hex.count == 64 else {
+        guard let bytes = hexToBytes(hex, expectedByteCount: 32) else { return nil }
+        return encodeBech32(hrp: "npub", payload: bytes)
+    }
+
+    /// Convert hex event ID to nevent (bech32-encoded, NIP-19).
+    /// Encodes as TLV with required type 0 (event id).
+    static func hexEventIdToNevent(_ eventIdHex: String) -> String? {
+        guard let eventIdBytes = hexToBytes(eventIdHex, expectedByteCount: 32) else {
             return nil
         }
 
-        // Convert hex to bytes
+        var tlv = [UInt8]()
+        tlv.append(0) // type: event id
+        tlv.append(UInt8(eventIdBytes.count))
+        tlv.append(contentsOf: eventIdBytes)
+
+        return encodeBech32(hrp: "nevent", payload: tlv)
+    }
+
+    // MARK: - Private Helpers
+
+    private static func hexToBytes(_ hex: String, expectedByteCount: Int? = nil) -> [UInt8]? {
+        guard hex.count.isMultiple(of: 2) else {
+            return nil
+        }
+        if let expectedByteCount, hex.count != expectedByteCount * 2 {
+            return nil
+        }
+
         var bytes = [UInt8]()
         var index = hex.startIndex
+
         while index < hex.endIndex {
             let nextIndex = hex.index(index, offsetBy: 2)
             guard let byte = UInt8(hex[index..<nextIndex], radix: 16) else {
@@ -83,22 +108,19 @@ enum Bech32 {
             index = nextIndex
         }
 
-        // Convert 8-bit bytes to 5-bit values
-        guard let values = convertBits(data: bytes, fromBits: 8, toBits: 5, pad: true) else {
+        return bytes
+    }
+
+    private static func encodeBech32(hrp: String, payload: [UInt8]) -> String? {
+        guard let values = convertBits(data: payload, fromBits: 8, toBits: 5, pad: true) else {
             return nil
         }
 
-        // Add checksum
-        let hrp = "npub"
         let checksum = createChecksum(hrp: hrp, values: values)
         let combined = values + checksum
-
-        // Encode to bech32 string
         let dataString = combined.map { charset[charset.index(charset.startIndex, offsetBy: Int($0))] }
         return "\(hrp)1\(String(dataString))"
     }
-
-    // MARK: - Private Helpers
 
     private static func convertBits(data: [UInt8], fromBits: Int, toBits: Int, pad: Bool) -> [UInt8]? {
         var acc = 0

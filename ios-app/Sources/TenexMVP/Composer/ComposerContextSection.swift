@@ -253,46 +253,59 @@ extension MessageComposerView {
         HStack(spacing: 12) {
             workspaceAccessoryButton
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
-                    if let project = selectedProject {
-                        if isNewConversation {
-                            projectSelectionInlineToken(text: workspaceProjectLabel(project.title))
-                        } else {
-                            Text(workspaceProjectLabel(project.title))
-                                .font(.subheadline)
-                                .lineLimit(1)
-                                .foregroundStyle(.secondary.opacity(0.95))
-                                .padding(.horizontal, 2)
-                                .padding(.vertical, 2)
-                                .frame(height: workspaceContextRowHeight)
-                        }
-                    } else if isNewConversation {
-                        projectSelectionInlineToken(text: "Select project")
-                    }
-
-                    if selectedProject != nil {
-                        agentPopoverToken
-                    }
-
-                    if let agent = selectedAgent, let model = agent.model, !model.isEmpty {
-                        inlineContextToken(text: model, showChevron: false) {
-                            workspaceAgentToConfig = agent
+            if dictationManager.state.isRecording {
+                DictationRecordingBar(
+                    audioLevelSamples: dictationManager.audioLevelSamples,
+                    recordingStartDate: dictationManager.recordingStartDate,
+                    error: dictationManager.error,
+                    onStop: {
+                        Task {
+                            await dictationManager.stopRecording()
                         }
                     }
+                )
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        if let project = selectedProject {
+                            if isNewConversation {
+                                projectSelectionInlineToken(text: workspaceProjectLabel(project.title))
+                            } else {
+                                Text(workspaceProjectLabel(project.title))
+                                    .font(workspaceTokenFont)
+                                    .lineLimit(1)
+                                    .foregroundStyle(workspaceTokenTextColor)
+                                    .padding(.horizontal, 2)
+                                    .padding(.vertical, 2)
+                                    .frame(height: workspaceContextRowHeight)
+                            }
+                        } else if isNewConversation {
+                            projectSelectionInlineToken(text: "Select project")
+                        }
 
-                    nudgeSkillToken
+                        if selectedProject != nil {
+                            agentPopoverToken
+                        }
+
+                        if let agent = selectedAgent, let model = agent.model, !model.isEmpty {
+                            inlineContextToken(text: model, showChevron: false) {
+                                workspaceAgentToConfig = agent
+                            }
+                        }
+
+                        nudgeSkillToken
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            workspaceMicGlyph
-            #if os(macOS)
-            if shouldShowWorkspaceReferenceConversationButton {
-                workspaceReferenceConversationButton
+                workspaceMicGlyph
+                #if os(macOS)
+                if shouldShowWorkspaceReferenceConversationButton {
+                    workspaceReferenceConversationButton
+                }
+                #endif
+                workspacePinnedPromptsControl
             }
-            #endif
-            workspacePinnedPromptsControl
 
             Button(action: sendMessage) {
                 Image(systemName: "arrow.up")
@@ -333,7 +346,7 @@ extension MessageComposerView {
     var workspaceMicGlyph: some View {
         Button {
             Task {
-                showDictationOverlay = true
+                preDictationText = localText
                 try? await dictationManager.startRecording()
             }
         } label: {
@@ -432,18 +445,30 @@ extension MessageComposerView {
         .help("Pin this prompt")
     }
 
+    var workspaceTokenFont: Font {
+        .subheadline
+    }
+
+    var workspaceTokenTextColor: Color {
+        .secondary.opacity(0.92)
+    }
+
+    var workspaceTokenIconColor: Color {
+        .secondary.opacity(0.86)
+    }
+
     var agentPopoverToken: some View {
         Button {
             showWorkspaceAgentPopover.toggle()
         } label: {
             HStack(spacing: 4) {
                 Text(selectedAgent.map { workspaceAgentLabel($0.name) } ?? "Agent")
-                    .font(.subheadline)
+                    .font(workspaceTokenFont)
                     .lineLimit(1)
-                    .foregroundStyle(.secondary.opacity(0.95))
+                    .foregroundStyle(workspaceTokenTextColor)
                 Image(systemName: "chevron.down")
                     .font(.system(size: max(9, workspaceIconSize - 4), weight: .semibold))
-                    .foregroundStyle(.secondary.opacity(0.88))
+                    .foregroundStyle(workspaceTokenIconColor)
             }
             .padding(.horizontal, 2)
             .padding(.vertical, 2)
@@ -490,12 +515,12 @@ extension MessageComposerView {
         } label: {
             HStack(spacing: 4) {
                 Text("/")
-                    .font(.subheadline.monospaced())
-                    .foregroundStyle(.secondary.opacity(0.95))
+                    .font(workspaceTokenFont.monospaced())
+                    .foregroundStyle(workspaceTokenTextColor)
                 if (selectedNudges.count + selectedSkills.count) > 0 {
                     Text("\(selectedNudges.count + selectedSkills.count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary.opacity(0.95))
+                        .font(workspaceTokenFont)
+                        .foregroundStyle(workspaceTokenTextColor)
                 }
             }
             .padding(.horizontal, 2)
@@ -511,13 +536,13 @@ extension MessageComposerView {
         Button(action: action) {
             HStack(spacing: 4) {
                 Text(text)
-                    .font(.subheadline)
+                    .font(workspaceTokenFont)
                     .lineLimit(1)
-                    .foregroundStyle(.secondary.opacity(0.95))
+                    .foregroundStyle(workspaceTokenTextColor)
                 if showChevron {
                     Image(systemName: "chevron.down")
                         .font(.system(size: max(9, workspaceIconSize - 4), weight: .semibold))
-                        .foregroundStyle(.secondary.opacity(0.88))
+                        .foregroundStyle(workspaceTokenIconColor)
                 }
             }
             .padding(.horizontal, 2)
@@ -532,15 +557,10 @@ extension MessageComposerView {
         Menu {
             projectSelectionMenuContent()
         } label: {
-            HStack(spacing: 4) {
-                Text(text)
-                    .font(.subheadline)
-                    .lineLimit(1)
-                    .foregroundStyle(.secondary.opacity(0.95))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: max(9, workspaceIconSize - 4), weight: .semibold))
-                    .foregroundStyle(.secondary.opacity(0.88))
-            }
+            Text(text)
+                .font(workspaceTokenFont)
+                .lineLimit(1)
+                .foregroundStyle(workspaceTokenTextColor)
             .padding(.horizontal, 2)
             .padding(.vertical, 2)
             .frame(height: workspaceContextRowHeight)

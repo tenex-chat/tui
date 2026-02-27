@@ -609,7 +609,9 @@ impl AppDataStore {
         // Query for all event kinds we care about, restricted to events newer than
         // the cache's max_created_at (minus clock-skew window).
         let filter = Filter::new()
-            .kinds([31933, 1, 0, 4199, 34199, 4200, 4201, 4202, 4129, 513, 30023, 14202])
+            .kinds([
+                31933, 1, 0, 4199, 34199, 4200, 4201, 4202, 4129, 513, 30023, 14202,
+            ])
             .since(since)
             .build();
 
@@ -4816,6 +4818,7 @@ mod tests {
         Nudge {
             id: id.to_string(),
             pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
             title: title.to_string(),
             description: String::new(),
             content: String::new(),

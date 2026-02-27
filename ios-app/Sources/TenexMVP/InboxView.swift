@@ -427,6 +427,7 @@ struct InboxView: View {
             }
         }
         .listStyle(.plain)
+        .tenexListSurfaceBackground()
     }
 
 }

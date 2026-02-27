@@ -101,6 +101,7 @@ class TenexCoreManager {
     var messagesByConversation: [String: [Message]] = [:]
     private(set) var statsVersion: UInt64 = 0
     private(set) var teamsVersion: UInt64 = 0
+    private(set) var contentCatalogVersion: UInt64 = 0
     private(set) var diagnosticsVersion: UInt64 = 0
     var streamingBuffers: [String: StreamingBuffer] = [:]
 
@@ -320,6 +321,11 @@ class TenexCoreManager {
     @MainActor
     func bumpTeamsVersion() {
         teamsVersion &+= 1
+    }
+
+    @MainActor
+    func bumpContentCatalogVersion() {
+        contentCatalogVersion &+= 1
     }
 
     @MainActor

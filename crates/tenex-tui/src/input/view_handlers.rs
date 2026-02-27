@@ -775,7 +775,10 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 if let Some(agent) = ds.content.get_agent_definition(&agent_id) {
                     (agent.pubkey.clone(), agent.name.clone())
                 } else {
-                    (String::new(), agent_id[..16.min(agent_id.len())].to_string())
+                    (
+                        String::new(),
+                        agent_id[..16.min(agent_id.len())].to_string(),
+                    )
                 }
             };
 

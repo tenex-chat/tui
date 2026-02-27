@@ -159,7 +159,8 @@ extension MessageComposerView {
                     agentPubkey: validatedAgentPubkey,
                     nudgeIds: Array(draft.selectedNudgeIds),
                     skillIds: Array(draft.selectedSkillIds),
-                    referenceConversationId: draft.referenceConversationId
+                    referenceConversationId: draft.referenceConversationId,
+                    referenceReportATag: draft.referenceReportATag
                 )
 
                 isSending = false

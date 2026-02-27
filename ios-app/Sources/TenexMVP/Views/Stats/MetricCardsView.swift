@@ -65,6 +65,7 @@ struct MetricCard: View {
             totalCost14Days: 123.45,
             costByProject: [],
             messagesByDay: [],
+            runtimeByDay: [],
             activityByHour: [],
             maxTokens: 1000,
             maxMessages: 50

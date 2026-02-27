@@ -407,6 +407,7 @@ struct DeltaSummary {
     stream_chunk: usize,
     mcp_tools_changed: usize,
     teams_changed: usize,
+    content_catalog_changed: usize,
     stats_updated: usize,
     diagnostics_updated: usize,
     general: usize,
@@ -430,6 +431,7 @@ impl DeltaSummary {
             DataChangeType::StreamChunk { .. } => self.stream_chunk += 1,
             DataChangeType::McpToolsChanged => self.mcp_tools_changed += 1,
             DataChangeType::TeamsChanged => self.teams_changed += 1,
+            DataChangeType::ContentCatalogChanged => self.content_catalog_changed += 1,
             DataChangeType::StatsUpdated => self.stats_updated += 1,
             DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
             DataChangeType::General => self.general += 1,
@@ -440,7 +442,7 @@ impl DeltaSummary {
 
     fn compact(&self) -> String {
         format!(
-            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} stats={} diag={} general={} bunker={}",
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} content={} stats={} diag={} general={} bunker={}",
             self.total,
             self.message_appended,
             self.conversation_upsert,
@@ -453,6 +455,7 @@ impl DeltaSummary {
             self.stream_chunk,
             self.mcp_tools_changed,
             self.teams_changed,
+            self.content_catalog_changed,
             self.stats_updated,
             self.diagnostics_updated,
             self.general,
@@ -495,9 +498,14 @@ fn process_note_keys_with_deltas(
     let mut kind_1111 = 0usize;
     let mut kind_31933 = 0usize;
     let mut kind_34199 = 0usize;
+    let mut kind_4199 = 0usize;
+    let mut kind_4200 = 0usize;
+    let mut kind_4201 = 0usize;
+    let mut kind_4202 = 0usize;
     let mut kind_30023 = 0usize;
     let mut other_kinds = 0usize;
     let mut teams_changed = false;
+    let mut definitions_changed = false;
 
     for &note_key in note_keys.iter() {
         if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
@@ -518,6 +526,22 @@ fn process_note_keys_with_deltas(
                 34199 => {
                     kind_34199 += 1;
                     teams_changed = true;
+                }
+                4199 => {
+                    kind_4199 += 1;
+                    definitions_changed = true;
+                }
+                4200 => {
+                    kind_4200 += 1;
+                    definitions_changed = true;
+                }
+                4201 => {
+                    kind_4201 += 1;
+                    definitions_changed = true;
+                }
+                4202 => {
+                    kind_4202 += 1;
+                    definitions_changed = true;
                 }
                 30023 => kind_30023 += 1,
                 _ => other_kinds += 1,
@@ -622,6 +646,11 @@ fn process_note_keys_with_deltas(
     if teams_changed {
         deltas.push(DataChangeType::TeamsChanged);
     }
+    if definitions_changed {
+        // Agent definitions / nudges / skills / MCP tools changed.
+        // Emit a dedicated content-catalog signal for tabs that render this data.
+        deltas.push(DataChangeType::ContentCatalogChanged);
+    }
 
     let conversation_upsert_count = conversations_to_upsert.len();
     for conversation_id in conversations_to_upsert {
@@ -649,7 +678,7 @@ fn process_note_keys_with_deltas(
     let delta_summary = summarize_deltas(&deltas);
     tlog!(
         "PERF",
-        "process_note_keys_with_deltas noteKeys={} notesFound={} kinds={{1:{} 7:{} 513:{} 1111:{} 31933:{} 34199:{} 30023:{} other:{}}} convUpserts={} inboxUpserts={} pendingProjectSubs={} deltas=[{}] elapsedMs={}",
+        "process_note_keys_with_deltas noteKeys={} notesFound={} kinds={{1:{} 7:{} 513:{} 1111:{} 31933:{} 34199:{} 4199:{} 4200:{} 4201:{} 4202:{} 30023:{} other:{}}} convUpserts={} inboxUpserts={} pendingProjectSubs={} deltas=[{}] elapsedMs={}",
         note_keys.len(),
         notes_found,
         kind_1,
@@ -658,6 +687,10 @@ fn process_note_keys_with_deltas(
         kind_1111,
         kind_31933,
         kind_34199,
+        kind_4199,
+        kind_4200,
+        kind_4201,
+        kind_4202,
         kind_30023,
         other_kinds,
         conversation_upsert_count,
@@ -830,6 +863,7 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
             | DataChangeType::TeamsChanged => {
                 diagnostics_changed = true;
             }
+            DataChangeType::ContentCatalogChanged => {}
             DataChangeType::General => {
                 diagnostics_changed = true;
                 stats_changed = true;
@@ -1086,6 +1120,15 @@ pub struct DayMessages {
     pub all_count: u64,
 }
 
+/// Runtime for a single day (unix timestamp for day start, runtime in milliseconds)
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct DayRuntime {
+    /// Unix timestamp (seconds) for the start of the day (UTC)
+    pub day_start: u64,
+    /// Total LLM runtime for this day in milliseconds
+    pub runtime_ms: u64,
+}
+
 /// Activity data for a single hour (unix timestamp for hour start, tokens used, message count)
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct HourActivity {
@@ -1116,6 +1159,10 @@ pub struct StatsSnapshot {
     // === Messages Chart Data (14 days) ===
     /// Last 14 days of message counts (user vs all, newest first)
     pub messages_by_day: Vec<DayMessages>,
+
+    // === Runtime Chart Data (14 days) ===
+    /// Last 14 days of runtime totals (newest first)
+    pub runtime_by_day: Vec<DayRuntime>,
 
     // === Activity Grid Data (30 days × 24 hours = 720 hours) ===
     /// Last 720 hours of activity data with pre-computed intensities
@@ -1619,6 +1666,9 @@ pub enum DataChangeType {
     McpToolsChanged,
     /// Teams content changed (kind:34199, 1111, or 7)
     TeamsChanged,
+    /// Agent definitions / nudges / skills / MCP tools changed
+    /// (kinds:4199, 4200, 4201, 4202)
+    ContentCatalogChanged,
     /// Stats snapshot should be refreshed
     StatsUpdated,
     /// Diagnostics snapshot should be refreshed

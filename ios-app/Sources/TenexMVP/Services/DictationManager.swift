@@ -26,6 +26,8 @@ final class DictationManager {
     private(set) var state: State = .idle
     private(set) var finalText: String = ""
     private(set) var error: String?
+    private(set) var audioLevelSamples: [Float] = []
+    private(set) var recordingStartDate: Date?
 
     private var audioEngine: AVAudioEngine?
     private var transcriptionTask: Task<Void, Never>?
@@ -41,6 +43,8 @@ final class DictationManager {
         guard state.isIdle else { return }
 
         error = nil
+        audioLevelSamples = []
+        recordingStartDate = nil
 
         // Request permissions
         let audioPermission = await requestMicrophonePermission()
@@ -56,6 +60,7 @@ final class DictationManager {
         }
 
         state = .recording(partialText: "")
+        recordingStartDate = Date()
 
         try await startTranscription()
     }
@@ -108,11 +113,15 @@ final class DictationManager {
         transcriptionTask?.cancel()
         transcriptionTask = nil
         finalText = ""
+        audioLevelSamples = []
+        recordingStartDate = nil
         state = .idle
     }
 
     func reset() {
         finalText = ""
+        audioLevelSamples = []
+        recordingStartDate = nil
         state = .idle
         error = nil
     }
@@ -273,12 +282,15 @@ enum DictationError: LocalizedError {
 #elseif os(macOS)
 import Foundation
 import AVFoundation
+import OSLog
 import Observation
 
 /// Manages voice dictation on macOS using AVAudioEngine for capture and ElevenLabs streaming STT for transcription.
 @MainActor
 @Observable
 final class DictationManager {
+
+    private static let logger = Logger(subsystem: "com.tenex.mvp", category: "DictationManager")
     enum State: Equatable {
         case idle
         case recording(partialText: String)
@@ -297,6 +309,8 @@ final class DictationManager {
     private(set) var state: State = .idle
     private(set) var finalText: String = ""
     private(set) var error: String?
+    private(set) var audioLevelSamples: [Float] = []
+    private(set) var recordingStartDate: Date?
 
     private var audioEngine: AVAudioEngine?
     private var sttService: ElevenLabsSTTService?
@@ -309,6 +323,8 @@ final class DictationManager {
 
         error = nil
         accumulatedText = ""
+        audioLevelSamples = []
+        recordingStartDate = nil
 
         // Request microphone permission
         let granted = await requestMicrophonePermission()
@@ -318,10 +334,14 @@ final class DictationManager {
         }
 
         state = .recording(partialText: "")
+        recordingStartDate = Date()
 
         do {
+            Self.logger.info("startRecording: starting streaming")
             try await startStreaming()
+            Self.logger.info("startRecording: streaming started successfully")
         } catch {
+            Self.logger.error("startRecording: failed with error: \(error)")
             self.error = error.localizedDescription
             state = .idle
         }
@@ -369,12 +389,16 @@ final class DictationManager {
 
         finalText = ""
         accumulatedText = ""
+        audioLevelSamples = []
+        recordingStartDate = nil
         state = .idle
     }
 
     func reset() {
         finalText = ""
         accumulatedText = ""
+        audioLevelSamples = []
+        recordingStartDate = nil
         state = .idle
         error = nil
     }
@@ -429,11 +453,14 @@ final class DictationManager {
 
         service.onError = { [weak self] error in
             Task { @MainActor in
+                Self.logger.error("sttService.onError: \(error)")
                 self?.error = error.localizedDescription
             }
         }
 
+        Self.logger.info("startStreaming: connecting to ElevenLabs")
         try await service.connect()
+        Self.logger.info("startStreaming: connected")
 
         // Setup audio engine after connection
         try setupAudioEngine()
@@ -464,6 +491,18 @@ final class DictationManager {
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             guard let self = self else { return }
 
+            // Calculate RMS audio level from input buffer for waveform visualization
+            let frameLength = Int(buffer.frameLength)
+            var rmsLevel: Float = 0
+            if let channelData = buffer.floatChannelData?[0], frameLength > 0 {
+                var sum: Float = 0
+                for i in 0..<frameLength {
+                    let sample = channelData[i]
+                    sum += sample * sample
+                }
+                rmsLevel = min(sqrt(sum / Float(frameLength)) * 4, 1)
+            }
+
             // Calculate output frame count based on sample rate ratio
             let ratio = targetFormat.sampleRate / inputFormat.sampleRate
             let outputFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
@@ -491,11 +530,16 @@ final class DictationManager {
 
             Task { @MainActor in
                 self.sttService?.sendAudioChunk(data)
+                self.audioLevelSamples.append(rmsLevel)
+                if self.audioLevelSamples.count > 80 {
+                    self.audioLevelSamples.removeFirst()
+                }
             }
         }
 
         engine.prepare()
         try engine.start()
+        Self.logger.info("setupAudioEngine: audio engine started, inputFormat=\(inputFormat, privacy: .public)")
     }
 }
 

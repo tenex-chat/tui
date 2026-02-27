@@ -67,6 +67,19 @@ extension View {
         self
         #endif
     }
+
+    /// Applies a unified list surface in macOS so list columns use the grouped
+    /// list tone instead of inheriting the full content background.
+    @ViewBuilder
+    func tenexListSurfaceBackground() -> some View {
+        #if os(macOS)
+        self
+            .scrollContentBackground(.hidden)
+            .background(Color.systemGroupedBackground)
+        #else
+        self
+        #endif
+    }
 }
 
 // MARK: - Availability-Guarded Glass Effect
@@ -102,9 +115,9 @@ extension Color {
         blue: 17.0 / 255.0
     )
     static let systemGroupedBackground = Color(
-        red: 17.0 / 255.0,
-        green: 17.0 / 255.0,
-        blue: 17.0 / 255.0
+        red: 30.0 / 255.0,
+        green: 31.0 / 255.0,
+        blue: 31.0 / 255.0
     )
     static let systemGray4 = Color(.separatorColor)
     static let systemGray5 = Color(.quaternaryLabelColor)

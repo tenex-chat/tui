@@ -347,6 +347,8 @@ pub enum NostrCommand {
         skill_ids: Vec<String>,
         /// Optional reference to another conversation (adds "context" tag for referencing source conversations)
         reference_conversation_id: Option<String>,
+        /// Optional report a-tag reference (adds second "a" tag for report discussions)
+        reference_report_a_tag: Option<String>,
         /// Optional fork message ID (used with reference_conversation_id to create a "fork" tag)
         fork_message_id: Option<String>,
         /// Optional channel to send back the event ID after signing
@@ -729,6 +731,7 @@ impl NostrWorker {
                         nudge_ids,
                         skill_ids,
                         reference_conversation_id,
+                        reference_report_a_tag,
                         fork_message_id,
                         response_tx,
                     } => {
@@ -741,6 +744,7 @@ impl NostrWorker {
                             nudge_ids,
                             skill_ids,
                             reference_conversation_id,
+                            reference_report_a_tag,
                             fork_message_id,
                         )) {
                             Ok(event_id) => {
@@ -1055,7 +1059,11 @@ impl NostrWorker {
                         client,
                     } => {
                         let short_pk: String = agent_pubkey.chars().take(8).collect();
-                        let scope = if project_a_tag.is_some() { "project" } else { "global" };
+                        let scope = if project_a_tag.is_some() {
+                            "project"
+                        } else {
+                            "global"
+                        };
                         debug_log(&format!(
                             "Worker: Deleting agent {} (scope: {})",
                             short_pk, scope
@@ -1814,8 +1822,7 @@ impl NostrWorker {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn handle_publish_thread(
-        &self,
+    fn build_thread_event_builder(
         project_a_tag: String,
         title: String,
         content: String,
@@ -1823,13 +1830,9 @@ impl NostrWorker {
         nudge_ids: Vec<String>,
         skill_ids: Vec<String>,
         reference_conversation_id: Option<String>,
+        reference_report_a_tag: Option<String>,
         fork_message_id: Option<String>,
-    ) -> Result<String> {
-        let client = self
-            .client
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No client"))?;
-
+    ) -> Result<EventBuilder> {
         // Parse project coordinate for proper a-tag
         let coordinate = Coordinate::parse(&project_a_tag)
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
@@ -1847,6 +1850,12 @@ impl NostrWorker {
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
                 vec!["tenex-tui".to_string()],
             ));
+
+        // Optional report a-tag reference for report discussion threads.
+        if let Some(report_a_tag) = reference_report_a_tag {
+            let report_coordinate = Self::parse_report_coordinate(&report_a_tag)?;
+            event = event.tag(Tag::coordinate(report_coordinate, None));
+        }
 
         // Agent p-tag for routing (required for agent to respond)
         if let Some(agent_pk) = agent_pubkey {
@@ -1884,7 +1893,7 @@ impl NostrWorker {
         // Format: ["fork", "<conversation-id>", "<message-id>"]
         // INVARIANT: fork_message_id requires reference_conversation_id - enforce this to prevent silent data loss
         if let Some(msg_id) = fork_message_id {
-            if let Some(conv_id) = reference_conversation_id.clone() {
+            if let Some(conv_id) = reference_conversation_id {
                 event = event.tag(Tag::custom(
                     TagKind::Custom(std::borrow::Cow::Borrowed("fork")),
                     vec![conv_id, msg_id],
@@ -1895,6 +1904,39 @@ impl NostrWorker {
                 // Log the invalid state for debugging but continue execution
             }
         }
+
+        Ok(event)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_publish_thread(
+        &self,
+        project_a_tag: String,
+        title: String,
+        content: String,
+        agent_pubkey: Option<String>,
+        nudge_ids: Vec<String>,
+        skill_ids: Vec<String>,
+        reference_conversation_id: Option<String>,
+        reference_report_a_tag: Option<String>,
+        fork_message_id: Option<String>,
+    ) -> Result<String> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+
+        let event = Self::build_thread_event_builder(
+            project_a_tag,
+            title,
+            content,
+            agent_pubkey,
+            nudge_ids,
+            skill_ids,
+            reference_conversation_id,
+            reference_report_a_tag,
+            fork_message_id,
+        )?;
 
         // Build and sign the event
         let keys = self
@@ -1924,6 +1966,18 @@ impl NostrWorker {
         }
 
         Ok(event_id)
+    }
+
+    fn parse_report_coordinate(report_a_tag: &str) -> Result<Coordinate> {
+        if !report_a_tag.starts_with("30023:") {
+            return Err(anyhow::anyhow!(
+                "Invalid report coordinate kind (expected 30023): {}",
+                report_a_tag
+            ));
+        }
+
+        Coordinate::parse(report_a_tag)
+            .map_err(|e| anyhow::anyhow!("Invalid report coordinate: {}", e))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2617,19 +2671,16 @@ impl NostrWorker {
         };
 
         // Build kind:24030 event
-        let mut event = EventBuilder::new(
-            Kind::Custom(24030),
-            reason.as_deref().unwrap_or(""),
-        )
-        .tag(Tag::public_key(pk))
-        .tag(Tag::custom(
-            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
-            vec![scope.to_string()],
-        ))
-        .tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("client")),
-            vec![client_name],
-        ));
+        let mut event = EventBuilder::new(Kind::Custom(24030), reason.as_deref().unwrap_or(""))
+            .tag(Tag::public_key(pk))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::R)),
+                vec![scope.to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec![client_name],
+            ));
 
         // Add project a-tag when scope is "project"
         if let Some(ref a_tag) = project_a_tag {
@@ -2659,7 +2710,11 @@ impl NostrWorker {
                     output.id()
                 ))
             }
-            Ok(Err(e)) => tlog!("ERROR", "Failed to send agent deletion event to relay: {}", e),
+            Ok(Err(e)) => tlog!(
+                "ERROR",
+                "Failed to send agent deletion event to relay: {}",
+                e
+            ),
             Err(_) => tlog!(
                 "ERROR",
                 "Timeout sending agent deletion event to relay (saved locally)"
@@ -3808,6 +3863,91 @@ mod tests {
         let result = Coordinate::parse(a_tag);
         println!("Parse result: {:?}", result);
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_report_coordinate_accepts_valid_report_coordinate() {
+        let report_a_tag =
+            "30023:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:weekly-report";
+        let result = NostrWorker::parse_report_coordinate(report_a_tag);
+        assert!(result.is_ok(), "expected valid report coordinate");
+    }
+
+    #[test]
+    fn test_parse_report_coordinate_rejects_non_report_coordinate() {
+        let project_a_tag =
+            "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:project";
+        let result = NostrWorker::parse_report_coordinate(project_a_tag);
+        assert!(result.is_err(), "expected non-report coordinate to be rejected");
+    }
+
+    #[test]
+    fn test_build_thread_event_includes_project_and_report_a_tags() {
+        let project_a_tag =
+            "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:project";
+        let report_a_tag =
+            "30023:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:weekly-report";
+
+        let keys = Keys::generate();
+        let event = NostrWorker::build_thread_event_builder(
+            project_a_tag.to_string(),
+            "Report discussion".to_string(),
+            "Let's discuss the report".to_string(),
+            None,
+            vec![],
+            vec![],
+            None,
+            Some(report_a_tag.to_string()),
+            None,
+        )
+        .unwrap()
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let event_json = serde_json::to_value(event).unwrap();
+        let tags = event_json
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let a_tags: Vec<String> = tags
+            .iter()
+            .filter_map(|tag| {
+                let arr = tag.as_array()?;
+                if arr.first().and_then(|v| v.as_str()) == Some("a") {
+                    arr.get(1).and_then(|v| v.as_str()).map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(a_tags.len(), 2, "expected exactly two a-tags");
+        assert!(a_tags.iter().any(|tag| tag == project_a_tag));
+        assert!(a_tags.iter().any(|tag| tag == report_a_tag));
+    }
+
+    #[test]
+    fn test_build_thread_event_rejects_invalid_report_coordinate() {
+        let project_a_tag =
+            "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:project";
+        let invalid_report_a_tag =
+            "30023:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
+
+        let result = NostrWorker::build_thread_event_builder(
+            project_a_tag.to_string(),
+            "Report discussion".to_string(),
+            "Let's discuss the report".to_string(),
+            None,
+            vec![],
+            vec![],
+            None,
+            Some(invalid_report_a_tag.to_string()),
+            None,
+        );
+
+        assert!(result.is_err(), "expected invalid report a-tag to fail");
     }
 
     #[test]

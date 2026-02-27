@@ -1,8 +1,8 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -476,7 +476,9 @@ fn start_bunker_runtime(
     replay_persisted_bunker_rules(core_handle, prefs)?;
 
     {
-        let mut state = bunker_state.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let mut state = bunker_state
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {}", e))?;
         state.running = true;
         state.uri = Some(uri.clone());
         state.expire_stale_pending();
@@ -499,7 +501,9 @@ fn stop_bunker_runtime(
         .map_err(|e| format!("Timed out waiting for bunker stop: {}", e))??;
 
     {
-        let mut state = bunker_state.lock().map_err(|e| format!("Lock poisoned: {}", e))?;
+        let mut state = bunker_state
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {}", e))?;
         state.running = false;
         state.uri = None;
         state.clear_pending();
@@ -551,7 +555,9 @@ fn pending_request_to_json(pending: &PendingBunkerRequest) -> serde_json::Value 
     })
 }
 
-fn bunker_audit_entry_to_json(entry: &tenex_core::nostr::bunker::BunkerAuditEntry) -> serde_json::Value {
+fn bunker_audit_entry_to_json(
+    entry: &tenex_core::nostr::bunker::BunkerAuditEntry,
+) -> serde_json::Value {
     serde_json::json!({
         "timestamp_ms": entry.timestamp_ms,
         "completed_at_ms": entry.completed_at_ms,
@@ -601,16 +607,15 @@ fn handle_connection(
             }
         };
 
-        let (response, should_shutdown) =
-            handle_request(
-                &request,
-                data_store,
-                core_handle,
-                prefs,
-                bunker_state,
-                start_time,
-                logged_in,
-            );
+        let (response, should_shutdown) = handle_request(
+            &request,
+            data_store,
+            core_handle,
+            prefs,
+            bunker_state,
+            start_time,
+            logged_in,
+        );
 
         writeln!(writer, "{}", serde_json::to_string(&response)?)?;
         writer.flush()?;
@@ -1006,6 +1011,7 @@ fn handle_request(
                         nudge_ids,
                         skill_ids,
                         reference_conversation_id: None,
+                        reference_report_a_tag: None,
                         fork_message_id: None,
                         response_tx: Some(response_tx),
                     }) {
@@ -1327,11 +1333,7 @@ fn handle_request(
                 Some(pubkey) => pubkey.to_string(),
                 None => {
                     return (
-                        Response::error(
-                            id,
-                            "INVALID_PARAMS",
-                            "requester_pubkey is required",
-                        ),
+                        Response::error(id, "INVALID_PARAMS", "requester_pubkey is required"),
                         false,
                     );
                 }
@@ -1388,11 +1390,7 @@ fn handle_request(
                 Some(pubkey) => pubkey.to_string(),
                 None => {
                     return (
-                        Response::error(
-                            id,
-                            "INVALID_PARAMS",
-                            "requester_pubkey is required",
-                        ),
+                        Response::error(id, "INVALID_PARAMS", "requester_pubkey is required"),
                         false,
                     );
                 }
@@ -1441,7 +1439,9 @@ fn handle_request(
                 return not_logged_in_response(id);
             }
 
-            let limit = request.params["limit"].as_u64().and_then(|v| usize::try_from(v).ok());
+            let limit = request.params["limit"]
+                .as_u64()
+                .and_then(|v| usize::try_from(v).ok());
             let (response_tx, response_rx) =
                 std::sync::mpsc::channel::<Vec<tenex_core::nostr::bunker::BunkerAuditEntry>>();
 
@@ -2321,7 +2321,10 @@ mod tests {
         state.upsert_pending(make_pending_request("req-1", "pubkey-a", Some(2)));
         assert_eq!(state.pending.len(), 1);
         assert_eq!(
-            state.pending.get("req-1").and_then(|p| p.request.event_kind),
+            state
+                .pending
+                .get("req-1")
+                .and_then(|p| p.request.event_kind),
             Some(2)
         );
 
@@ -2341,10 +2344,8 @@ mod tests {
 
     #[test]
     fn persist_bunker_enabled_roundtrip() {
-        let data_dir = std::env::temp_dir().join(format!(
-            "tenex-cli-daemon-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let data_dir =
+            std::env::temp_dir().join(format!("tenex-cli-daemon-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&data_dir).expect("create temp dir");
 
         let prefs = Arc::new(Mutex::new(PreferencesStorage::new(

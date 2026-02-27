@@ -98,9 +98,7 @@ pub fn save_cache(
     state: CachedState,
     max_created_at: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let saved_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs();
+    let saved_at = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
 
     let envelope = CacheEnvelope {
         schema_version: CACHE_SCHEMA_VERSION,
@@ -145,10 +143,7 @@ pub fn load_cache(data_dir: &Path) -> Option<(CachedState, u64)> {
         return None;
     }
 
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_secs();
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
 
     if now.saturating_sub(envelope.saved_at) > MAX_CACHE_AGE_SECS {
         tracing::info!(

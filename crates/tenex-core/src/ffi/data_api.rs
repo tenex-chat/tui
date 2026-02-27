@@ -239,6 +239,26 @@ impl TenexCore {
             .collect()
     }
 
+    /// Get root threads that reference a report a-tag (`30023:pubkey:slug`).
+    pub fn get_document_threads(&self, report_a_tag: String) -> Vec<Thread> {
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+
+        let store = match store_guard.as_ref() {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        store
+            .reports
+            .get_document_threads(&report_a_tag)
+            .iter()
+            .cloned()
+            .collect()
+    }
+
     /// Get inbox items for the current user.
     pub fn get_inbox(&self) -> Vec<InboxItem> {
         let store_guard = match self.store.read() {

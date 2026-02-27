@@ -394,6 +394,11 @@ extension TenexCoreManager {
         bumpTeamsVersion()
     }
 
+    @MainActor
+    func signalContentCatalogUpdate() {
+        bumpContentCatalogVersion()
+    }
+
     /// Signal that messages for a specific conversation have been updated.
     /// This triggers a refresh of the conversation's messages.
     @MainActor

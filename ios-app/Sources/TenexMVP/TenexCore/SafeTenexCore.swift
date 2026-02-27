@@ -288,7 +288,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a new conversation thread.
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?) throws -> SendMessageResult {
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?, referenceReportATag: String?) throws -> SendMessageResult {
         try profiler.measureFFI("sendThread") {
             do {
                 return try core.sendThread(
@@ -298,7 +298,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     agentPubkey: agentPubkey,
                     nudgeIds: nudgeIds,
                     skillIds: skillIds,
-                    referenceConversationId: referenceConversationId
+                    referenceConversationId: referenceConversationId,
+                    referenceReportATag: referenceReportATag
                 )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
@@ -946,6 +947,14 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     func getReports(projectId: String) -> [Report] {
         profiler.measureFFI("getReports") {
             core.getReports(projectId: projectId)
+        }
+    }
+
+    /// Get root threads that reference a report a-tag.
+    /// Note: Internal `try!` in FFI - can crash on error.
+    func getDocumentThreads(reportATag: String) -> [Thread] {
+        profiler.measureFFI("getDocumentThreads") {
+            core.getDocumentThreads(reportATag: reportATag)
         }
     }
 
