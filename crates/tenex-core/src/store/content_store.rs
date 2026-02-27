@@ -74,8 +74,39 @@ impl ContentStore {
     }
 
     pub fn get_nudges(&self) -> Vec<&Nudge> {
-        let mut nudges: Vec<_> = self.nudges.values().collect();
-        nudges.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        // Deduplicate nudge versions by author + d-tag, keeping the most recent.
+        // If `d_tag` is empty, fall back to event id so standalone nudges remain unique.
+        let mut latest_by_key: HashMap<String, &Nudge> = HashMap::new();
+
+        for nudge in self.nudges.values() {
+            let identifier = if nudge.d_tag.is_empty() {
+                &nudge.id
+            } else {
+                &nudge.d_tag
+            };
+            let key = format!(
+                "{}:{}",
+                nudge.pubkey.to_lowercase(),
+                identifier.to_lowercase()
+            );
+
+            match latest_by_key.get(&key) {
+                Some(existing)
+                    if existing.created_at > nudge.created_at
+                        || (existing.created_at == nudge.created_at && existing.id >= nudge.id) => {
+                }
+                _ => {
+                    latest_by_key.insert(key, nudge);
+                }
+            }
+        }
+
+        let mut nudges: Vec<_> = latest_by_key.into_values().collect();
+        nudges.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         nudges
     }
 
@@ -84,8 +115,39 @@ impl ContentStore {
     }
 
     pub fn get_skills(&self) -> Vec<&Skill> {
-        let mut skills: Vec<_> = self.skills.values().collect();
-        skills.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        // Deduplicate skill versions by author + d-tag, keeping the most recent.
+        // If `d_tag` is empty, fall back to event id so standalone skills remain unique.
+        let mut latest_by_key: HashMap<String, &Skill> = HashMap::new();
+
+        for skill in self.skills.values() {
+            let identifier = if skill.d_tag.is_empty() {
+                &skill.id
+            } else {
+                &skill.d_tag
+            };
+            let key = format!(
+                "{}:{}",
+                skill.pubkey.to_lowercase(),
+                identifier.to_lowercase()
+            );
+
+            match latest_by_key.get(&key) {
+                Some(existing)
+                    if existing.created_at > skill.created_at
+                        || (existing.created_at == skill.created_at && existing.id >= skill.id) => {
+                }
+                _ => {
+                    latest_by_key.insert(key, skill);
+                }
+            }
+        }
+
+        let mut skills: Vec<_> = latest_by_key.into_values().collect();
+        skills.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         skills
     }
 
@@ -317,6 +379,7 @@ mod tests {
         Nudge {
             id: id.to_string(),
             pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
             title: title.to_string(),
             description: String::new(),
             content: String::new(),
@@ -348,8 +411,10 @@ mod tests {
         Skill {
             id: id.to_string(),
             pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
             title: title.to_string(),
             description: String::new(),
+            image: None,
             content: String::new(),
             hashtags: vec![],
             created_at,
@@ -464,6 +529,70 @@ mod tests {
     }
 
     #[test]
+    fn test_nudges_deduplicated_by_author_and_d_tag() {
+        let mut store = ContentStore::new();
+
+        store.nudges.insert(
+            "v1".to_string(),
+            Nudge {
+                id: "v1".to_string(),
+                pubkey: "author-a".to_string(),
+                d_tag: "shared-key".to_string(),
+                title: "Older Version".to_string(),
+                description: String::new(),
+                content: String::new(),
+                hashtags: vec![],
+                created_at: 100,
+                allowed_tools: vec![],
+                denied_tools: vec![],
+                only_tools: vec![],
+                supersedes: None,
+            },
+        );
+
+        store.nudges.insert(
+            "v2".to_string(),
+            Nudge {
+                id: "v2".to_string(),
+                pubkey: "author-a".to_string(),
+                d_tag: "shared-key".to_string(),
+                title: "Newer Version".to_string(),
+                description: String::new(),
+                content: String::new(),
+                hashtags: vec![],
+                created_at: 200,
+                allowed_tools: vec![],
+                denied_tools: vec![],
+                only_tools: vec![],
+                supersedes: None,
+            },
+        );
+
+        store.nudges.insert(
+            "v3".to_string(),
+            Nudge {
+                id: "v3".to_string(),
+                pubkey: "author-b".to_string(),
+                d_tag: "shared-key".to_string(),
+                title: "Different Author".to_string(),
+                description: String::new(),
+                content: String::new(),
+                hashtags: vec![],
+                created_at: 150,
+                allowed_tools: vec![],
+                denied_tools: vec![],
+                only_tools: vec![],
+                supersedes: None,
+            },
+        );
+
+        let nudges = store.get_nudges();
+        assert_eq!(nudges.len(), 2);
+        assert_eq!(nudges[0].title, "Newer Version");
+        assert_eq!(nudges[1].title, "Different Author");
+    }
+
+    #[test]
     fn test_skills_sorted_descending() {
         let mut store = ContentStore::new();
         store
@@ -477,6 +606,64 @@ mod tests {
         assert_eq!(skills.len(), 2);
         assert_eq!(skills[0].title, "New Skill");
         assert_eq!(skills[1].title, "Old Skill");
+    }
+
+    #[test]
+    fn test_skills_deduplicated_by_author_and_d_tag() {
+        let mut store = ContentStore::new();
+
+        store.skills.insert(
+            "v1".to_string(),
+            Skill {
+                id: "v1".to_string(),
+                pubkey: "author-a".to_string(),
+                d_tag: "shared-key".to_string(),
+                title: "Older Version".to_string(),
+                description: String::new(),
+                image: None,
+                content: String::new(),
+                hashtags: vec![],
+                created_at: 100,
+                file_ids: vec![],
+            },
+        );
+
+        store.skills.insert(
+            "v2".to_string(),
+            Skill {
+                id: "v2".to_string(),
+                pubkey: "author-a".to_string(),
+                d_tag: "shared-key".to_string(),
+                title: "Newer Version".to_string(),
+                description: String::new(),
+                image: None,
+                content: String::new(),
+                hashtags: vec![],
+                created_at: 200,
+                file_ids: vec![],
+            },
+        );
+
+        store.skills.insert(
+            "v3".to_string(),
+            Skill {
+                id: "v3".to_string(),
+                pubkey: "author-b".to_string(),
+                d_tag: "shared-key".to_string(),
+                title: "Different Author".to_string(),
+                description: String::new(),
+                image: None,
+                content: String::new(),
+                hashtags: vec![],
+                created_at: 150,
+                file_ids: vec![],
+            },
+        );
+
+        let skills = store.get_skills();
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].title, "Newer Version");
+        assert_eq!(skills[1].title, "Different Author");
     }
 
     #[test]
