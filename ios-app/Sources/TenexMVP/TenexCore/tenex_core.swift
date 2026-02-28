@@ -959,7 +959,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Get all skills (kind:4202 events).
      *
-     * Returns all skills sorted by created_at descending (most recent first).
+     * Returns skills deduplicated by `author + d-tag`, sorted by created_at
+     * descending (most recent first).
      * Used by iOS/CLI for skill selection in new conversations.
      */
     func getSkills() throws  -> [Skill]
@@ -1044,7 +1045,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     
     /**
      * Logout the current user.
-     * Disconnects from relays and clears all session state including in-memory data.
+     * Disconnects from relays, wipes local Nostr cache files, and resets session state.
      * This prevents stale data from previous accounts from leaking to new logins.
      *
      * This method is deterministic - it waits for the disconnect to complete before
@@ -2018,7 +2019,8 @@ open func getReports(projectId: String) -> [Report]  {
     /**
      * Get all skills (kind:4202 events).
      *
-     * Returns all skills sorted by created_at descending (most recent first).
+     * Returns skills deduplicated by `author + d-tag`, sorted by created_at
+     * descending (most recent first).
      * Used by iOS/CLI for skill selection in new conversations.
      */
 open func getSkills()throws  -> [Skill]  {
@@ -2170,7 +2172,7 @@ open func login(nsec: String)throws  -> LoginResult  {
     
     /**
      * Logout the current user.
-     * Disconnects from relays and clears all session state including in-memory data.
+     * Disconnects from relays, wipes local Nostr cache files, and resets session state.
      * This prevents stale data from previous accounts from leaking to new logins.
      *
      * This method is deterministic - it waits for the disconnect to complete before
@@ -6592,6 +6594,79 @@ public func FfiConverterTypeProjectFilterInfo_lower(_ value: ProjectFilterInfo) 
 
 
 /**
+ * Individual relay diagnostic info
+ */
+public struct RelayDiagnosticInfo {
+    public var url: String
+    public var status: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(url: String, status: String) {
+        self.url = url
+        self.status = status
+    }
+}
+
+#if compiler(>=6)
+extension RelayDiagnosticInfo: Sendable {}
+#endif
+
+
+extension RelayDiagnosticInfo: Equatable, Hashable {
+    public static func ==(lhs: RelayDiagnosticInfo, rhs: RelayDiagnosticInfo) -> Bool {
+        if lhs.url != rhs.url {
+            return false
+        }
+        if lhs.status != rhs.status {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(url)
+        hasher.combine(status)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRelayDiagnosticInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RelayDiagnosticInfo {
+        return
+            try RelayDiagnosticInfo(
+                url: FfiConverterString.read(from: &buf), 
+                status: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RelayDiagnosticInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.url, into: &buf)
+        FfiConverterString.write(value.status, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRelayDiagnosticInfo_lift(_ buf: RustBuffer) throws -> RelayDiagnosticInfo {
+    return try FfiConverterTypeRelayDiagnosticInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRelayDiagnosticInfo_lower(_ value: RelayDiagnosticInfo) -> RustBuffer {
+    return FfiConverterTypeRelayDiagnosticInfo.lower(value)
+}
+
+
+/**
  * A report/document (kind:30023 - Article)
  */
 public struct Report {
@@ -7036,6 +7111,11 @@ public func FfiConverterTypeSendMessageResult_lower(_ value: SendMessageResult) 
 public struct Skill {
     public var id: String
     public var pubkey: String
+    /**
+     * Replaceable identifier (NIP-33 `d` tag).
+     * Used to group multiple versions of the same logical skill.
+     */
+    public var dTag: String
     public var title: String
     public var description: String
     public var image: String?
@@ -7049,12 +7129,17 @@ public struct Skill {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, pubkey: String, title: String, description: String, image: String?, content: String, hashtags: [String], createdAt: UInt64, 
+    public init(id: String, pubkey: String, 
+        /**
+         * Replaceable identifier (NIP-33 `d` tag).
+         * Used to group multiple versions of the same logical skill.
+         */dTag: String, title: String, description: String, image: String?, content: String, hashtags: [String], createdAt: UInt64, 
         /**
          * File attachment event IDs (e-tags referencing NIP-94 kind:1063 events)
          */fileIds: [String]) {
         self.id = id
         self.pubkey = pubkey
+        self.dTag = dTag
         self.title = title
         self.description = description
         self.image = image
@@ -7076,6 +7161,9 @@ extension Skill: Equatable, Hashable {
             return false
         }
         if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
             return false
         }
         if lhs.title != rhs.title {
@@ -7105,6 +7193,7 @@ extension Skill: Equatable, Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
         hasher.combine(pubkey)
+        hasher.combine(dTag)
         hasher.combine(title)
         hasher.combine(description)
         hasher.combine(image)
@@ -7126,6 +7215,7 @@ public struct FfiConverterTypeSkill: FfiConverterRustBuffer {
             try Skill(
                 id: FfiConverterString.read(from: &buf), 
                 pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
                 image: FfiConverterOptionString.read(from: &buf), 
@@ -7139,6 +7229,7 @@ public struct FfiConverterTypeSkill: FfiConverterRustBuffer {
     public static func write(_ value: Skill, into buf: inout [UInt8]) {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
         FfiConverterOptionString.write(value.image, into: &buf)
@@ -7620,6 +7711,10 @@ public struct SystemDiagnostics {
      * Number of connected relays
      */
     public var connectedRelays: UInt32
+    /**
+     * Individual relay info
+     */
+    public var relays: [RelayDiagnosticInfo]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -7641,13 +7736,17 @@ public struct SystemDiagnostics {
          */relayConnected: Bool, 
         /**
          * Number of connected relays
-         */connectedRelays: UInt32) {
+         */connectedRelays: UInt32, 
+        /**
+         * Individual relay info
+         */relays: [RelayDiagnosticInfo]) {
         self.logPath = logPath
         self.version = version
         self.isInitialized = isInitialized
         self.isLoggedIn = isLoggedIn
         self.relayConnected = relayConnected
         self.connectedRelays = connectedRelays
+        self.relays = relays
     }
 }
 
@@ -7676,6 +7775,9 @@ extension SystemDiagnostics: Equatable, Hashable {
         if lhs.connectedRelays != rhs.connectedRelays {
             return false
         }
+        if lhs.relays != rhs.relays {
+            return false
+        }
         return true
     }
 
@@ -7686,6 +7788,7 @@ extension SystemDiagnostics: Equatable, Hashable {
         hasher.combine(isLoggedIn)
         hasher.combine(relayConnected)
         hasher.combine(connectedRelays)
+        hasher.combine(relays)
     }
 }
 
@@ -7703,7 +7806,8 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
                 isInitialized: FfiConverterBool.read(from: &buf), 
                 isLoggedIn: FfiConverterBool.read(from: &buf), 
                 relayConnected: FfiConverterBool.read(from: &buf), 
-                connectedRelays: FfiConverterUInt32.read(from: &buf)
+                connectedRelays: FfiConverterUInt32.read(from: &buf), 
+                relays: FfiConverterSequenceTypeRelayDiagnosticInfo.read(from: &buf)
         )
     }
 
@@ -7714,6 +7818,7 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
         FfiConverterBool.write(value.isLoggedIn, into: &buf)
         FfiConverterBool.write(value.relayConnected, into: &buf)
         FfiConverterUInt32.write(value.connectedRelays, into: &buf)
+        FfiConverterSequenceTypeRelayDiagnosticInfo.write(value.relays, into: &buf)
     }
 }
 
@@ -10246,6 +10351,31 @@ fileprivate struct FfiConverterSequenceTypeProjectFilterInfo: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeRelayDiagnosticInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [RelayDiagnosticInfo]
+
+    public static func write(_ value: [RelayDiagnosticInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeRelayDiagnosticInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [RelayDiagnosticInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [RelayDiagnosticInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeRelayDiagnosticInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeReport: FfiConverterRustBuffer {
     typealias SwiftType = [Report]
 
@@ -10734,7 +10864,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_reports() != 65463) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_skills() != 19512) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_skills() != 17635) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_stats_snapshot() != 13204) {
@@ -10770,7 +10900,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_login() != 8995) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_logout() != 20996) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_logout() != 29025) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_npub_to_hex() != 23677) {
