@@ -14,6 +14,7 @@ struct ConversationAdaptiveDetailView: View {
     let conversation: ConversationFullInfo
     let onOpenConversationId: ((String) -> Void)?
     let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
+    let showsMetadataInspector: Bool
     @Environment(TenexCoreManager.self) private var coreManager
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -22,17 +23,20 @@ struct ConversationAdaptiveDetailView: View {
     init(
         conversation: ConversationFullInfo,
         onOpenConversationId: ((String) -> Void)? = nil,
-        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil
+        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
+        showsMetadataInspector: Bool = true
     ) {
         self.conversation = conversation
         self.onOpenConversationId = onOpenConversationId
         self.onReferenceConversationRequested = onReferenceConversationRequested
+        self.showsMetadataInspector = showsMetadataInspector
     }
 
     var body: some View {
         #if os(macOS)
         ConversationWorkspaceView(
             source: .existing(conversation: conversation),
+            showsMetadataInspector: showsMetadataInspector,
             onReferenceConversationRequested: onReferenceConversationRequested,
             onOpenConversationId: onOpenConversationId
         )
@@ -41,6 +45,7 @@ struct ConversationAdaptiveDetailView: View {
         if horizontalSizeClass == .regular {
             ConversationWorkspaceView(
                 source: .existing(conversation: conversation),
+                showsMetadataInspector: showsMetadataInspector,
                 onReferenceConversationRequested: onReferenceConversationRequested,
                 onOpenConversationId: onOpenConversationId
             )
@@ -58,6 +63,7 @@ struct ConversationAdaptiveDetailView: View {
 struct ConversationByIdAdaptiveDetailView: View {
     let conversationId: String
     let onOpenConversationId: ((String) -> Void)?
+    let showsMetadataInspector: Bool
     @Environment(TenexCoreManager.self) private var coreManager
 
     @State private var conversation: ConversationFullInfo?
@@ -65,10 +71,12 @@ struct ConversationByIdAdaptiveDetailView: View {
 
     init(
         conversationId: String,
-        onOpenConversationId: ((String) -> Void)? = nil
+        onOpenConversationId: ((String) -> Void)? = nil,
+        showsMetadataInspector: Bool = true
     ) {
         self.conversationId = conversationId
         self.onOpenConversationId = onOpenConversationId
+        self.showsMetadataInspector = showsMetadataInspector
     }
 
     var body: some View {
@@ -76,7 +84,8 @@ struct ConversationByIdAdaptiveDetailView: View {
             if let conversation {
                 ConversationAdaptiveDetailView(
                     conversation: conversation,
-                    onOpenConversationId: onOpenConversationId
+                    onOpenConversationId: onOpenConversationId,
+                    showsMetadataInspector: showsMetadataInspector
                 )
                     .environment(coreManager)
             } else if isLoading {
@@ -96,19 +105,53 @@ struct ConversationByIdAdaptiveDetailView: View {
         .onChange(of: coreManager.conversations) { _, _ in
             if let updated = coreManager.conversationById[conversationId] {
                 conversation = updated
+                isLoading = false
             }
         }
     }
 
     private func resolveConversation() async {
+        isLoading = true
+
         if let cached = coreManager.conversationById[conversationId] {
             conversation = cached
             isLoading = false
             return
         }
 
-        let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
-        conversation = fetched.first
+        // A newly published thread can take a moment to flow from NostrDB stream
+        // processing into the in-memory conversation index.
+        let maxAttempts = 12
+        let retryDelayNs: UInt64 = 150_000_000
+        var forcedRefresh = false
+
+        for attempt in 0..<maxAttempts {
+            if Task.isCancelled { return }
+
+            if let cached = coreManager.conversationById[conversationId] {
+                conversation = cached
+                isLoading = false
+                return
+            }
+
+            let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
+            if let resolved = fetched.first {
+                conversation = resolved
+                isLoading = false
+                return
+            }
+
+            if !forcedRefresh {
+                _ = await coreManager.safeCore.refresh()
+                forcedRefresh = true
+            }
+
+            if attempt < maxAttempts - 1 {
+                try? await Task.sleep(nanoseconds: retryDelayNs)
+            }
+        }
+
+        conversation = nil
         isLoading = false
     }
 }
@@ -132,6 +175,7 @@ struct NewThreadComposerSeed: Equatable {
     let initialContent: String
     let textAttachments: [TextAttachment]
     let referenceConversationId: String?
+    let referenceReportATag: String?
 
     init(
         launchId: UUID = UUID(),
@@ -139,7 +183,8 @@ struct NewThreadComposerSeed: Equatable {
         agentPubkey: String? = nil,
         initialContent: String,
         textAttachments: [TextAttachment],
-        referenceConversationId: String?
+        referenceConversationId: String?,
+        referenceReportATag: String? = nil
     ) {
         self.launchId = launchId
         self.projectId = projectId
@@ -147,6 +192,7 @@ struct NewThreadComposerSeed: Equatable {
         self.initialContent = initialContent
         self.textAttachments = textAttachments
         self.referenceConversationId = referenceConversationId
+        self.referenceReportATag = referenceReportATag
     }
 
     var identity: String {
@@ -215,6 +261,7 @@ enum ConversationWorkspaceSource {
 /// - Right: metadata inspector (status/todos/delegations/reports)
 struct ConversationWorkspaceView: View {
     let source: ConversationWorkspaceSource
+    let showsMetadataInspector: Bool
     let onThreadCreated: ((String) -> Void)?
     let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
     let onOpenConversationId: ((String) -> Void)?
@@ -222,19 +269,13 @@ struct ConversationWorkspaceView: View {
     @Environment(TenexCoreManager.self) private var coreManager
 
     private let seedConversation: ConversationFullInfo
-    @StateObject private var viewModel: ConversationDetailViewModel
+    @State private var viewModel: ConversationDetailViewModel
     @State private var inspectorUserPreference = true
     /// Tracks the workspace width so the inspector auto-hides when space is tight.
     @State private var workspaceWidth: CGFloat = .infinity
     @State private var selectedDelegationConversation: ConversationFullInfo?
     @State private var selectedReportDestination: SelectedReportDestination?
-    @State private var currentUserPubkey: String?
     @State private var visibleMessageWindow: Int = 30
-    /// Defers ForEach rendering until after the @Published initialization storm settles.
-    /// Without this, 15-20 body re-evaluations each process 30+ rows during loadData().
-    @State private var isTranscriptReady = false
-    @State private var cachedLastAgentPubkey: String?
-    @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var navigationErrorMessage: String?
     @State private var rawEventDestination: RawEventDestination?
     private let profiler = PerformanceProfiler.shared
@@ -243,24 +284,28 @@ struct ConversationWorkspaceView: View {
 
     init(
         source: ConversationWorkspaceSource,
+        showsMetadataInspector: Bool = true,
         onThreadCreated: ((String) -> Void)? = nil,
         onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
         onOpenConversationId: ((String) -> Void)? = nil
     ) {
         self.source = source
+        self.showsMetadataInspector = showsMetadataInspector
         self.onThreadCreated = onThreadCreated
         self.onReferenceConversationRequested = onReferenceConversationRequested
         self.onOpenConversationId = onOpenConversationId
         self.seedConversation = source.seedConversation
-        _viewModel = StateObject(wrappedValue: ConversationDetailViewModel(conversation: source.seedConversation))
+        _viewModel = State(initialValue: ConversationDetailViewModel(conversation: source.seedConversation))
     }
 
     init(
         conversation: ConversationFullInfo,
+        showsMetadataInspector: Bool = true,
         onOpenConversationId: ((String) -> Void)? = nil
     ) {
         self.init(
             source: .existing(conversation: conversation),
+            showsMetadataInspector: showsMetadataInspector,
             onOpenConversationId: onOpenConversationId
         )
     }
@@ -271,7 +316,7 @@ struct ConversationWorkspaceView: View {
 
     /// Inspector shows only when the user wants it AND there's enough horizontal space.
     private var inspectorVisible: Bool {
-        inspectorUserPreference && workspaceWidth >= Self.inspectorWidthThreshold
+        showsMetadataInspector && inspectorUserPreference && workspaceWidth >= Self.inspectorWidthThreshold
     }
 
     private var isNewThreadMode: Bool {
@@ -336,19 +381,6 @@ struct ConversationWorkspaceView: View {
     /// Keep row iteration lightweight by avoiding tuple arrays with full Message copies.
     private var messageIndices: Range<Int> {
         transcriptMessages.indices
-    }
-
-    private var streamingBuffer: StreamingBuffer? {
-        guard !isNewThreadMode else { return nil }
-        return coreManager.streamingBuffers[currentConversation.thread.id]
-    }
-
-    private var streamingTextCount: Int? {
-        streamingBuffer?.text.count
-    }
-
-    private var lastAgentPubkey: String? {
-        cachedLastAgentPubkey
     }
 
     private var statusText: String {
@@ -417,12 +449,17 @@ struct ConversationWorkspaceView: View {
         .toolbarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            ToolbarItem(placement: .automatic) {
-                inspectorToggleButton
+            if showsMetadataInspector {
+                ToolbarItem(placement: .automatic) {
+                    inspectorToggleButton
+                }
             }
         }
         .navigationDestination(item: $selectedDelegationConversation) { delegatedConversation in
-            ConversationAdaptiveDetailView(conversation: delegatedConversation)
+            ConversationAdaptiveDetailView(
+                conversation: delegatedConversation,
+                showsMetadataInspector: showsMetadataInspector
+            )
                 .environment(coreManager)
         }
         .navigationDestination(item: $selectedReportDestination) { destination in
@@ -439,19 +476,12 @@ struct ConversationWorkspaceView: View {
             )
             await initializeWorkspace()
         }
-        .onChange(of: coreManager.conversations) { _, _ in
-            refreshLastAgentContext()
-            viewModel.handleConversationsChanged(coreManager.conversations)
-        }
-        .onChange(of: coreManager.messagesByConversation) { _, _ in
-            viewModel.handleMessagesChanged(coreManager.messagesByConversation)
-        }
-        .onChange(of: coreManager.reports) { _, _ in
-            viewModel.handleReportsChanged()
-        }
-        .onChange(of: viewModel.messages.count) { _, _ in
-            recomputeLastAgentPubkey()
-        }
+        // Observation isolation: onChange handlers for coreManager live in a
+        // separate lightweight view so this body doesn't observe
+        // coreManager.conversations/messagesByConversation/reports/streamingBuffers.
+        // Without this, ANY change to those dictionaries triggers a full body
+        // re-evaluation including the ForEach over 30+ message rows.
+        .background(CoreManagerObserver(viewModel: viewModel))
         .sheet(item: $rawEventDestination) { destination in
             RawEventInspectorSheet(
                 eventId: destination.eventId,
@@ -527,56 +557,55 @@ struct ConversationWorkspaceView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if isTranscriptReady {
-                        if hasOlderMessages {
-                            Button {
-                                visibleMessageWindow += 30
-                            } label: {
-                                Text("Load earlier messages")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                            }
-                            .buttonStyle(.borderless)
-                            .onAppear {
-                                visibleMessageWindow += 30
-                            }
+                    if hasOlderMessages {
+                        Button {
+                            visibleMessageWindow += 30
+                        } label: {
+                            Text("Load earlier messages")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
                         }
+                        .buttonStyle(.borderless)
+                        .onAppear {
+                            visibleMessageWindow += 30
+                        }
+                    }
 
-                        ForEach(messageIndices, id: \.self) { index in
-                            let message = transcriptMessages[index]
-                            SlackMessageRow(
-                                message: message,
-                                isConsecutive: index > transcriptMessages.startIndex && transcriptMessages[index - 1].pubkey == message.pubkey,
-                                conversationId: currentConversation.thread.id,
-                                projectId: currentConversation.extractedProjectId,
-                                authorDisplayName: coreManager.displayName(for: message.pubkey),
-                                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
-                                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
-                                    .map { "@\($0)" }
-                                    .joined(separator: ", "),
-                                onDelegationTap: { delegationId in
-                                    openDelegation(byId: delegationId)
-                                },
-                                onViewRawEvent: { messageId in
-                                    viewRawEvent(for: messageId)
-                                }
-                            )
-                            .equatable()
-                            .environment(coreManager)
-                            .id(message.id)
-                        }
+                    ForEach(messageIndices, id: \.self) { index in
+                        let message = transcriptMessages[index]
+                        SlackMessageRow(
+                            message: message,
+                            isConsecutive: index > transcriptMessages.startIndex && transcriptMessages[index - 1].pubkey == message.pubkey,
+                            conversationId: currentConversation.thread.id,
+                            projectId: currentConversation.extractedProjectId,
+                            authorDisplayName: coreManager.displayName(for: message.pubkey),
+                            directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                                .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                                .map { "@\($0)" }
+                                .joined(separator: ", "),
+                            onDelegationTap: { delegationId in
+                                openDelegation(byId: delegationId)
+                            },
+                            onViewRawEvent: { messageId in
+                                viewRawEvent(for: messageId)
+                            }
+                        )
+                        .equatable()
+                        .environment(coreManager)
+                        .id(message.id)
+                    }
 
-                        if let buffer = streamingBuffer {
-                            StreamingMessageRow(
-                                buffer: buffer,
-                                isConsecutive: allMessages.last?.pubkey == buffer.agentPubkey,
-                                agentName: coreManager.displayName(for: buffer.agentPubkey)
-                            )
-                            .environment(coreManager)
-                            .id("streaming-row")
-                        }
+                    // Streaming buffer lives in a separate view struct so that
+                    // coreManager.streamingBuffers observation is isolated here.
+                    // The parent transcript body does NOT observe streaming changes.
+                    if !isNewThreadMode {
+                        TranscriptStreamingSection(
+                            conversationId: currentConversation.thread.id,
+                            lastMessagePubkey: allMessages.last?.pubkey,
+                            scrollProxy: proxy
+                        )
                     }
 
                     Color.clear
@@ -590,25 +619,12 @@ struct ConversationWorkspaceView: View {
                 #endif
             }
             .background(workspaceBackdropColor)
-            .onChange(of: isTranscriptReady) { _, ready in
-                if ready, let lastMessage = transcriptMessages.last {
-                    DispatchQueue.main.async {
-                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                    }
-                }
-            }
             .onChange(of: transcriptMessages.last?.id) { _, _ in
-                guard isTranscriptReady, let lastMessage = transcriptMessages.last else { return }
+                guard let lastMessage = transcriptMessages.last else { return }
                 DispatchQueue.main.async {
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
-                }
-            }
-            .onChange(of: streamingTextCount) { _, _ in
-                guard isTranscriptReady else { return }
-                DispatchQueue.main.async {
-                    maybeScrollToStreamingRow(with: proxy)
                 }
             }
         }
@@ -623,10 +639,11 @@ struct ConversationWorkspaceView: View {
                 project: project,
                 conversationId: isNewThreadMode ? nil : currentConversation.thread.id,
                 conversationTitle: isNewThreadMode ? nil : currentConversation.thread.title,
-                initialAgentPubkey: isNewThreadMode ? newThreadAgentPubkey : lastAgentPubkey,
+                initialAgentPubkey: isNewThreadMode ? newThreadAgentPubkey : viewModel.lastAgentPubkey,
                 initialContent: isNewThreadMode ? newThreadComposerSeed?.initialContent : nil,
                 initialTextAttachments: isNewThreadMode ? (newThreadComposerSeed?.textAttachments ?? []) : [],
                 referenceConversationId: isNewThreadMode ? newThreadComposerSeed?.referenceConversationId : nil,
+                referenceReportATag: isNewThreadMode ? newThreadComposerSeed?.referenceReportATag : nil,
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace,
                 onSend: isNewThreadMode ? { result in
@@ -814,56 +831,25 @@ struct ConversationWorkspaceView: View {
     private func initializeWorkspace() async {
         let startedAt = CFAbsoluteTimeGetCurrent()
         visibleMessageWindow = 30
-        isTranscriptReady = false
         if !isNewThreadMode {
             viewModel.setCoreManager(coreManager)
             await viewModel.loadData()
         }
-        currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
-        refreshLastAgentContext()
-        // Warm caches for message avatars and display names before rendering the transcript.
+        let currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
+        viewModel.setCurrentUserPubkey(currentUserPubkey)
+        // Warm display-name and profile-picture caches so the first transcript
+        // render doesn't hit cold FFI lookups for every unique author.
         let uniquePubkeys = Array(Set(viewModel.messages.map(\.pubkey).filter { !$0.isEmpty }))
         coreManager.prefetchProfilePictures(uniquePubkeys)
         for pubkey in uniquePubkeys {
             _ = coreManager.displayName(for: pubkey)
         }
-        // Flip AFTER all @Published properties have settled.
-        // This ensures the ForEach is empty during the initialization storm
-        // (15-20 body re-evaluations), then renders once with final data.
-        isTranscriptReady = true
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
         profiler.logEvent(
             "workspace initialized source=\(source.identity) messages=\(viewModel.messages.count) children=\(viewModel.childConversations.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
             category: .general,
             level: elapsedMs >= 250 ? .error : .info
         )
-    }
-
-    private func refreshLastAgentContext() {
-        recomputeLastAgentPubkey()
-    }
-
-    private func recomputeLastAgentPubkey() {
-        guard !isNewThreadMode else {
-            cachedLastAgentPubkey = nil
-            return
-        }
-        cachedLastAgentPubkey = LastAgentFinder.findLastAgentPubkey(
-            messages: viewModel.messages,
-            currentUserPubkey: currentUserPubkey
-        )
-    }
-
-    private func maybeScrollToStreamingRow(with proxy: ScrollViewProxy) {
-        let now = CFAbsoluteTimeGetCurrent()
-        guard now - lastStreamingAutoScrollAt >= 0.10 else { return }
-        lastStreamingAutoScrollAt = now
-
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            proxy.scrollTo("streaming-row", anchor: .bottom)
-        }
     }
 
     private func viewRawEvent(for messageId: String) {
@@ -993,6 +979,73 @@ struct ConversationWorkspaceView: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - Observation Isolation
+
+/// Lightweight observer that bridges coreManager changes to the viewModel.
+/// Lives as a background view so that ConversationWorkspaceView's body does NOT
+/// observe coreManager.conversations / messagesByConversation / reports directly.
+/// This eliminates the root cause of the 100% CPU observation cascade:
+/// previously, any change to messagesByConversation (including messages for OTHER
+/// conversations) triggered a full body re-evaluation of the workspace including
+/// the ForEach over 30+ SlackMessageRows.
+private struct CoreManagerObserver: View {
+    let viewModel: ConversationDetailViewModel
+    @Environment(TenexCoreManager.self) private var coreManager
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: coreManager.conversations) { _, _ in
+                viewModel.handleConversationsChanged(coreManager.conversations)
+            }
+            .onChange(of: coreManager.messagesByConversation) { _, _ in
+                viewModel.handleMessagesChanged(coreManager.messagesByConversation)
+            }
+            .onChange(of: coreManager.reports) { _, _ in
+                viewModel.handleReportsChanged()
+            }
+    }
+}
+
+/// Extracted streaming buffer rendering so that coreManager.streamingBuffers
+/// observation is scoped to this view only. During active streaming, this
+/// dictionary changes 10+ times/sec — without isolation, each change would
+/// trigger the parent transcript ForEach to re-evaluate all 30+ message rows.
+private struct TranscriptStreamingSection: View {
+    let conversationId: String
+    let lastMessagePubkey: String?
+    let scrollProxy: ScrollViewProxy
+    @Environment(TenexCoreManager.self) private var coreManager
+    @State private var lastScrollAt: CFAbsoluteTime = 0
+
+    var body: some View {
+        if let buffer = coreManager.streamingBuffers[conversationId] {
+            StreamingMessageRow(
+                buffer: buffer,
+                isConsecutive: lastMessagePubkey == buffer.agentPubkey,
+                agentName: coreManager.displayName(for: buffer.agentPubkey)
+            )
+            .environment(coreManager)
+            .id("streaming-row")
+            .onChange(of: buffer.text.count) { _, _ in
+                maybeScrollToStreamingRow()
+            }
+        }
+    }
+
+    private func maybeScrollToStreamingRow() {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastScrollAt >= 0.10 else { return }
+        lastScrollAt = now
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            scrollProxy.scrollTo("streaming-row", anchor: .bottom)
+        }
     }
 }
 

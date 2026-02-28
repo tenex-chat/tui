@@ -8,22 +8,17 @@ struct ConversationDetailView: View {
     let conversation: ConversationFullInfo
     @Environment(TenexCoreManager.self) var coreManager
 
-    @StateObject private var viewModel: ConversationDetailViewModel
+    @State private var viewModel: ConversationDetailViewModel
     @State private var selectedDelegation: DelegationItem?
     @State private var selectedDelegationConv: ConversationFullInfo?
     @State private var showFullConversation = false
     @State private var showComposer = false
     @State private var isLatestReplyExpanded = false
     @State private var latestReplyContentHeight: CGFloat = 0
-    @State private var currentUserPubkey: String?
 
-    /// Initialize the view with a conversation and core manager
-    /// Note: coreManager is passed explicitly to support @StateObject initialization
     init(conversation: ConversationFullInfo, coreManager: TenexCoreManager? = nil) {
         self.conversation = conversation
-        // Create the view model with a placeholder coreManager initially
-        // The actual coreManager will be set via setCoreManager when the .task fires
-        self._viewModel = StateObject(wrappedValue: ConversationDetailViewModel(conversation: conversation))
+        _viewModel = State(initialValue: ConversationDetailViewModel(conversation: conversation))
     }
 
     var body: some View {
@@ -51,15 +46,7 @@ struct ConversationDetailView: View {
             .task {
                 await initializeAndLoad()
             }
-            .onChange(of: coreManager.conversations) { _, _ in
-                viewModel.handleConversationsChanged(coreManager.conversations)
-            }
-            .onChange(of: coreManager.messagesByConversation) { _, _ in
-                viewModel.handleMessagesChanged(coreManager.messagesByConversation)
-            }
-            .onChange(of: coreManager.reports) { _, _ in
-                viewModel.handleReportsChanged()
-            }
+            .background(DetailViewCoreManagerObserver(viewModel: viewModel))
             #if os(iOS)
             .sheet(item: $selectedDelegation) { delegation in
                 if let childConv = viewModel.childConversation(for: delegation.conversationId) {
@@ -109,10 +96,9 @@ struct ConversationDetailView: View {
                     latestReplySection(reply)
                 }
 
-                // Streaming Section - shows live agent output from local socket
-                if let buffer = coreManager.streamingBuffers[conversation.thread.id] {
-                    streamingSection(buffer)
-                }
+                // Streaming Section - isolated view to avoid observing
+                // coreManager.streamingBuffers in this view's body
+                DetailStreamingSection(conversationId: conversation.thread.id)
 
                 // Delegations Section - renders when delegations are available
                 if !viewModel.delegations.isEmpty {
@@ -131,7 +117,8 @@ struct ConversationDetailView: View {
 
     /// Initializes the view model with the core manager and loads data
     private func initializeAndLoad() async {
-        currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
+        let currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
+        viewModel.setCurrentUserPubkey(currentUserPubkey)
         viewModel.setCoreManager(coreManager)
         await viewModel.loadData()
     }
@@ -206,10 +193,7 @@ struct ConversationDetailView: View {
 
     /// Find the last non-user author that spoke in the conversation (hex pubkey format)
     private var lastAgentPubkey: String? {
-        return LastAgentFinder.findLastAgentPubkey(
-            messages: viewModel.messages,
-            currentUserPubkey: currentUserPubkey
-        )
+        viewModel.lastAgentPubkey
     }
 
     private func latestReplySection(_ reply: Message) -> some View {
@@ -363,35 +347,6 @@ struct ConversationDetailView: View {
         #endif
     }
 
-    // MARK: - Streaming Section
-
-    private func streamingSection(_ buffer: StreamingBuffer) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                ProgressView()
-                    .scaleEffect(0.7)
-                Text("Agent is typing...")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .italic()
-                Spacer()
-            }
-            if !buffer.text.isEmpty {
-                HStack(alignment: .lastTextBaseline, spacing: 0) {
-                    MarkdownView(content: buffer.text)
-                        .font(.body)
-                    Text("\u{258C}")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .opacity(0.6)
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .overlay(alignment: .top) { Divider() }
-    }
-
     // MARK: - Todo List Section
 
     private var todoListSection: some View {
@@ -468,5 +423,65 @@ struct ConversationDetailView: View {
         .buttonStyle(.borderless)
         .padding(.horizontal, 20)
         .padding(.top, 20)
+    }
+}
+
+// MARK: - Observation Isolation (Detail View)
+
+/// Bridges coreManager changes to the viewModel without polluting
+/// ConversationDetailView's body with broad observation dependencies.
+private struct DetailViewCoreManagerObserver: View {
+    let viewModel: ConversationDetailViewModel
+    @Environment(TenexCoreManager.self) private var coreManager
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: coreManager.conversations) { _, _ in
+                viewModel.handleConversationsChanged(coreManager.conversations)
+            }
+            .onChange(of: coreManager.messagesByConversation) { _, _ in
+                viewModel.handleMessagesChanged(coreManager.messagesByConversation)
+            }
+            .onChange(of: coreManager.reports) { _, _ in
+                viewModel.handleReportsChanged()
+            }
+    }
+}
+
+/// Isolated streaming buffer section for ConversationDetailView.
+/// Prevents coreManager.streamingBuffers observation from triggering
+/// re-evaluation of the parent view's body.
+private struct DetailStreamingSection: View {
+    let conversationId: String
+    @Environment(TenexCoreManager.self) private var coreManager
+
+    var body: some View {
+        if let buffer = coreManager.streamingBuffers[conversationId] {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                    Text("Agent is typing...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .italic()
+                    Spacer()
+                }
+                if !buffer.text.isEmpty {
+                    HStack(alignment: .lastTextBaseline, spacing: 0) {
+                        MarkdownView(content: buffer.text)
+                            .font(.body)
+                        Text("\u{258C}")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .opacity(0.6)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+            .overlay(alignment: .top) { Divider() }
+        }
     }
 }

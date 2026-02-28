@@ -32,96 +32,98 @@ private struct ReportATagCoordinate {
 
 /// ViewModel for ConversationDetailView that handles data loading, caching derived state,
 /// and managing live runtime updates efficiently.
-@MainActor
-final class ConversationDetailViewModel: ObservableObject {
-    // MARK: - Published State
+///
+/// Uses @Observable for per-property observation tracking. This means:
+/// - The transcript view only re-evaluates when `messages` changes
+/// - The inspector only re-evaluates when its specific properties change
+/// - Unrelated property changes (e.g. formattedRuntime) don't trigger transcript re-renders
+@Observable @MainActor
+final class ConversationDetailViewModel {
+    // MARK: - View State
 
     /// Raw messages for the conversation
-    @Published private(set) var messages: [Message] = []
+    private(set) var messages: [Message] = []
 
     /// Child conversations (delegations)
-    @Published private(set) var childConversations: [ConversationFullInfo] = []
-
-    /// All descendant conversations (for participant extraction)
-    private var allDescendants: [ConversationFullInfo] = []
+    private(set) var childConversations: [ConversationFullInfo] = []
 
     /// Loading state
-    @Published private(set) var isLoading = false
+    private(set) var isLoading = false
 
     /// Error state
-    @Published private(set) var error: Error?
+    private(set) var error: Error?
 
     // MARK: - Cached Derived State
 
     /// Cached delegations extracted from messages
-    @Published private(set) var delegations: [DelegationItem] = []
+    private(set) var delegations: [DelegationItem] = []
 
     /// Cached activity status for each direct delegation conversation
-    @Published private(set) var delegationActivityByConversationId: [String: Bool] = [:]
+    private(set) var delegationActivityByConversationId: [String: Bool] = [:]
 
     /// Cached latest reply (most recent non-tool-call message)
-    @Published private(set) var latestReply: Message?
+    private(set) var latestReply: Message?
 
     /// Reports referenced in this conversation via message a-tags (deduped by a-tag)
-    @Published private(set) var referencedReports: [ReferencedReportItem] = []
+    private(set) var referencedReports: [ReferencedReportItem] = []
 
     /// Cached participating agent infos with pubkeys for avatar lookups
-    @Published private(set) var participatingAgentInfos: [AgentAvatarInfo] = []
+    private(set) var participatingAgentInfos: [AgentAvatarInfo] = []
 
     /// Author info (for avatar group)
-    @Published private(set) var authorInfo: AgentAvatarInfo!
+    private(set) var authorInfo: AgentAvatarInfo!
 
     /// P-tagged recipient info (first p-tag from conversation, shown overlapping with author)
-    @Published private(set) var pTaggedRecipientInfo: AgentAvatarInfo?
+    private(set) var pTaggedRecipientInfo: AgentAvatarInfo?
 
     /// Other participants excluding author (for avatar group overlapping display)
-    @Published private(set) var otherParticipantsInfo: [AgentAvatarInfo] = []
+    private(set) var otherParticipantsInfo: [AgentAvatarInfo] = []
 
     /// Todo list state
-    @Published private(set) var todoState: TodoState = TodoState(items: [])
+    private(set) var todoState: TodoState = TodoState(items: [])
 
     /// Aggregated todo stats (includes current + all descendants)
-    @Published private(set) var aggregatedTodoStats: AggregateTodoStats = .empty
-
-    /// Messages for descendant conversations (for todo parsing)
-    private var descendantMessages: [String: [Message]] = [:]
-
-    /// Cached parsed todo states per descendant conversation.
-    private var parsedTodoStates: [String: TodoState] = [:]
-    /// Descendants whose message snapshots changed and need todo re-parse.
-    private var dirtyDescendantTodoConversationIds: Set<String> = []
-    /// Profile-name cache to avoid repeated FFI lookups during recompute.
-    private var profileNameCache: [String: String] = [:]
-
-    /// Children lookup map for efficient subtree traversal
-    private var childrenByParentId: [String: [String]] = [:]
+    private(set) var aggregatedTodoStats: AggregateTodoStats = .empty
 
     // MARK: - Refreshable Metadata
 
     /// Current status (refreshed periodically)
-    @Published private(set) var currentStatus: String
+    private(set) var currentStatus: String
 
     /// Current isActive state (refreshed periodically)
-    @Published private(set) var currentIsActive: Bool
+    private(set) var currentIsActive: Bool
 
     /// Current activity description (refreshed periodically)
-    @Published private(set) var currentActivity: String?
+    private(set) var currentActivity: String?
 
     /// Current effectiveLastActivity (refreshed periodically)
-    @Published private(set) var currentEffectiveLastActivity: UInt64
+    private(set) var currentEffectiveLastActivity: UInt64
 
     /// Formatted runtime string (computed async and cached)
-    @Published private(set) var formattedRuntime: String = ""
+    private(set) var formattedRuntime: String = ""
+
+    /// Last agent pubkey for reply targeting (updated when messages change)
+    private(set) var lastAgentPubkey: String?
+
+    // MARK: - Internal State (not observed by views)
+
+    @ObservationIgnored private var allDescendants: [ConversationFullInfo] = []
+    @ObservationIgnored private var descendantMessages: [String: [Message]] = [:]
+    @ObservationIgnored private var parsedTodoStates: [String: TodoState] = [:]
+    @ObservationIgnored private var dirtyDescendantTodoConversationIds: Set<String> = []
+    @ObservationIgnored private var profileNameCache: [String: String] = [:]
+    @ObservationIgnored private var childrenByParentId: [String: [String]] = [:]
+    @ObservationIgnored private var currentUserPubkey: String?
 
     // MARK: - Dependencies
 
-    private let conversation: ConversationFullInfo
-    private weak var coreManager: TenexCoreManager?
+    @ObservationIgnored private let conversation: ConversationFullInfo
+    @ObservationIgnored private weak var coreManager: TenexCoreManager?
 
-    private let profiler = PerformanceProfiler.shared
-    private var recomputeTask: Task<Void, Never>?
-    private var recomputePending = false
-    private var didCompleteInitialLoad = false
+    @ObservationIgnored private let profiler = PerformanceProfiler.shared
+    @ObservationIgnored private var recomputeTask: Task<Void, Never>?
+    @ObservationIgnored private var recomputePending = false
+    @ObservationIgnored private var didCompleteInitialLoad = false
 
     // MARK: - Initialization
 
@@ -144,6 +146,12 @@ final class ConversationDetailViewModel: ObservableObject {
 
     deinit {
         recomputeTask?.cancel()
+    }
+
+    /// Sets the current user pubkey for reply targeting logic.
+    func setCurrentUserPubkey(_ pubkey: String?) {
+        self.currentUserPubkey = pubkey
+        recomputeLastAgentPubkey()
     }
 
     /// Sets the core manager after initialization (called from view's onAppear/task).
@@ -348,9 +356,17 @@ final class ConversationDetailViewModel: ObservableObject {
         messages = fetchedMessages
         latestReply = fetchedMessages.last { $0.toolName == nil && !$0.content.isEmpty }
         todoState = TodoParser.parse(messages: fetchedMessages)
+        recomputeLastAgentPubkey()
         if scheduleRecompute {
             scheduleDerivedStateRecompute()
         }
+    }
+
+    private func recomputeLastAgentPubkey() {
+        lastAgentPubkey = LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            currentUserPubkey: currentUserPubkey
+        )
     }
 
     private func applyConversationUpdates(_ conversations: [ConversationFullInfo]) {
