@@ -137,6 +137,31 @@ final class ComposerViewModel {
             )
         }
 
+        if referenceConversationId != nil || referenceReportATag != nil {
+            var modifiedDraft = loadedDraft
+            modifiedDraft.setReferenceConversation(referenceConversationId)
+            modifiedDraft.setReferenceReportATag(referenceReportATag)
+
+            await dependencies.drafts.updateReferenceConversation(
+                referenceConversationId,
+                conversationId: conversationId,
+                projectId: projectId
+            )
+            await dependencies.drafts.updateReferenceReportATag(
+                referenceReportATag,
+                conversationId: conversationId,
+                projectId: projectId
+            )
+
+            return ComposerDraftLoadResult(
+                draft: modifiedDraft,
+                localText: modifiedDraft.content,
+                imageAttachments: modifiedDraft.imageAttachments,
+                textAttachments: modifiedDraft.textAttachments,
+                shouldShowLoadFailedAlert: false
+            )
+        }
+
         return ComposerDraftLoadResult(
             draft: loadedDraft,
             localText: loadedDraft.content,

@@ -312,12 +312,16 @@ struct MessageComposerView: View {
     // MARK: - Body
 
     var body: some View {
+        #if os(macOS)
         // TODO(#modal-composer-deprecation): remove modal flow after all call sites migrate to inline.
         if displayStyle == .modal {
             deprecatedModalComposerView
         } else {
             composerViewWithLifecycle
         }
+        #else
+        composerViewWithLifecycle
+        #endif
     }
 
     var deprecatedModalComposerView: some View {

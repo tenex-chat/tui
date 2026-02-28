@@ -63,6 +63,43 @@ final class ReportChatPaneViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testPreferredEntryModeIsListWhenReportThreadsExist() async {
+        let viewModel = ReportChatPaneViewModel()
+
+        await viewModel.load(reportATag: "30023:pubkey:weekly") { _ in
+            [self.makeThread(id: "thread-1", title: "Thread", lastActivity: 100)]
+        }
+
+        XCTAssertEqual(viewModel.preferredEntryMode(), .list)
+    }
+
+    func testPreferredEntryModeIsNewConversationWhenReportThreadsAreEmpty() async {
+        let viewModel = ReportChatPaneViewModel()
+
+        await viewModel.load(reportATag: "30023:pubkey:weekly") { _ in [] }
+
+        XCTAssertEqual(viewModel.preferredEntryMode(), .newConversation)
+        XCTAssertTrue(viewModel.orderedConversationIds.isEmpty)
+    }
+
+    func testNewThreadComposerSeedCarriesReportReferenceAndNoAttachments() {
+        let seed = NewThreadComposerSeed(
+            projectId: "project-1",
+            agentPubkey: "author-pubkey",
+            initialContent: "",
+            textAttachments: [],
+            referenceConversationId: nil,
+            referenceReportATag: "30023:author-pubkey:weekly-report"
+        )
+
+        XCTAssertEqual(seed.projectId, "project-1")
+        XCTAssertEqual(seed.agentPubkey, "author-pubkey")
+        XCTAssertEqual(seed.initialContent, "")
+        XCTAssertEqual(seed.textAttachments, [])
+        XCTAssertNil(seed.referenceConversationId)
+        XCTAssertEqual(seed.referenceReportATag, "30023:author-pubkey:weekly-report")
+    }
+
     private func makeThread(id: String, title: String, lastActivity: UInt64) -> TenexMVP.Thread {
         TenexMVP.Thread(
             id: id,

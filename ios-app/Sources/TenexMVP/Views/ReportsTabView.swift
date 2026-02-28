@@ -349,7 +349,9 @@ struct ReportsTabDetailView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     #if os(macOS)
     @State private var showsChatPane = false
-    @State private var chatPaneMode: ReportChatPaneMode = .listAndComposer
+    @State private var chatPaneMode: ReportChatPaneMode = .loadingList
+    @State private var reportScopedConversations: [ConversationFullInfo] = []
+    @State private var reportConversationRefreshTask: Task<Void, Never>?
     @StateObject private var chatPaneViewModel = ReportChatPaneViewModel()
     #else
     @State private var showChatWithAuthor = false
@@ -393,12 +395,7 @@ struct ReportsTabDetailView: View {
             ToolbarItem(placement: .automatic) {
                 Button {
                     #if os(macOS)
-                    if showsChatPane {
-                        showsChatPane = false
-                    } else {
-                        chatPaneMode = .listAndComposer
-                        showsChatPane = true
-                    }
+                    showsChatPane.toggle()
                     #else
                     showChatWithAuthor = true
                     #endif
@@ -411,18 +408,30 @@ struct ReportsTabDetailView: View {
         #if os(macOS)
         .task(id: reportATag) {
             guard showsChatPane else { return }
-            await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+            chatPaneMode = .loadingList
+            await refreshReportChatList(
+                transitionFromLoadingState: true,
+                transitionToNewConversationWhenEmpty: true
+            )
         }
         .onChange(of: showsChatPane) { _, isShown in
-            guard isShown else { return }
-            chatPaneMode = .listAndComposer
+            if !isShown {
+                reportConversationRefreshTask?.cancel()
+                reportConversationRefreshTask = nil
+                return
+            }
+
+            chatPaneMode = .loadingList
             Task {
-                await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+                await refreshReportChatList(
+                    transitionFromLoadingState: true,
+                    transitionToNewConversationWhenEmpty: true
+                )
             }
         }
         .onChange(of: coreManager.conversations) { _, _ in
             guard showsChatPane else { return }
-            chatPaneViewModel.refreshDebounced(reportATag: reportATag, using: reportThreadLoader)
+            scheduleReportChatRefresh()
         }
         #endif
         #if os(iOS)
@@ -448,6 +457,145 @@ struct ReportsTabDetailView: View {
         }
     }
 
+    #if os(macOS)
+    private var reportConversationSeed: NewThreadComposerSeed? {
+        guard let project else { return nil }
+        return NewThreadComposerSeed(
+            projectId: project.id,
+            agentPubkey: report.author,
+            initialContent: "",
+            textAttachments: [],
+            referenceConversationId: nil,
+            referenceReportATag: reportATag
+        )
+    }
+
+    private func refreshReportChatList(
+        transitionFromLoadingState: Bool,
+        transitionToNewConversationWhenEmpty: Bool
+    ) async {
+        await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+        await reloadReportScopedConversations()
+
+        if chatPaneViewModel.errorMessage != nil {
+            if transitionFromLoadingState {
+                chatPaneMode = .list
+            }
+            return
+        }
+
+        if transitionFromLoadingState {
+            chatPaneMode = chatPaneViewModel.preferredEntryMode() == .newConversation ? .newConversation : .list
+            return
+        }
+
+        if transitionToNewConversationWhenEmpty && chatPaneViewModel.threads.isEmpty {
+            chatPaneMode = .newConversation
+        }
+    }
+
+    private func scheduleReportChatRefresh() {
+        reportConversationRefreshTask?.cancel()
+        reportConversationRefreshTask = Task { [reportATag, reportThreadLoader] in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+            await reloadReportScopedConversations()
+        }
+    }
+
+    private func reloadReportScopedConversations() async {
+        let orderedIds = chatPaneViewModel.orderedConversationIds
+        guard !orderedIds.isEmpty else {
+            reportScopedConversations = []
+            return
+        }
+
+        reportScopedConversations = await resolveReportScopedConversations(orderedIds: orderedIds)
+        await coreManager.hierarchyCache.preloadForConversations(reportScopedConversations)
+    }
+
+    private func resolveReportScopedConversations(
+        orderedIds: [String],
+        maxAttempts: Int = 8,
+        retryDelayNs: UInt64 = 150_000_000
+    ) async -> [ConversationFullInfo] {
+        guard !orderedIds.isEmpty else { return [] }
+
+        var byId: [String: ConversationFullInfo] = [:]
+        var forcedRefresh = false
+
+        for attempt in 0..<maxAttempts {
+            if Task.isCancelled { break }
+
+            for conversationId in orderedIds where byId[conversationId] == nil {
+                if let cached = coreManager.conversationById[conversationId] {
+                    byId[conversationId] = cached
+                }
+            }
+
+            let missing = orderedIds.filter { byId[$0] == nil }
+            if missing.isEmpty {
+                break
+            }
+
+            let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: missing)
+            for conversation in fetched {
+                byId[conversation.thread.id] = conversation
+            }
+
+            if !forcedRefresh {
+                _ = await coreManager.safeCore.refresh()
+                forcedRefresh = true
+            }
+
+            if attempt < maxAttempts - 1 {
+                try? await Task.sleep(nanoseconds: retryDelayNs)
+            }
+        }
+
+        return orderedIds.compactMap { byId[$0] }
+    }
+
+    private func projectTitle(for conversation: ConversationFullInfo) -> String? {
+        let projectId = TenexCoreManager.projectId(fromATag: conversation.projectATag)
+        if let resolved = coreManager.projects.first(where: { $0.id == projectId }) {
+            return resolved.title
+        }
+        if let project, project.id == projectId {
+            return project.title
+        }
+        return nil
+    }
+
+    private func openConversation(_ conversationId: String) {
+        guard !conversationId.isEmpty else { return }
+        chatPaneMode = .conversation(conversationId)
+    }
+
+    private func returnToConversationList() {
+        chatPaneMode = .list
+    }
+
+    private func handleReportThreadCreated(_ conversationId: String) {
+        Task {
+            let resolved = await resolveReportScopedConversations(
+                orderedIds: [conversationId],
+                maxAttempts: 10
+            )
+            if resolved.contains(where: { $0.thread.id == conversationId }) {
+                openConversation(conversationId)
+            } else {
+                returnToConversationList()
+            }
+            await refreshReportChatList(
+                transitionFromLoadingState: false,
+                transitionToNewConversationWhenEmpty: false
+            )
+        }
+    }
+    #endif
+
     private var reportContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -464,10 +612,33 @@ struct ReportsTabDetailView: View {
     @ViewBuilder
     private var macReportChatPane: some View {
         switch chatPaneMode {
-        case .listAndComposer:
+        case .loadingList:
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Loading conversations...")
+                        .font(.headline)
+                    Spacer()
+                    ProgressView()
+                        .scaleEffect(0.8)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+                Divider()
+
+                VStack(spacing: 10) {
+                    ProgressView()
+                    Text("Fetching conversations that a-tag this report")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            }
+        case .list:
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    Text("Conversations (\(chatPaneViewModel.threads.count))")
+                    Text("Conversations (\(reportScopedConversations.count))")
                         .font(.headline)
                     Spacer()
                     if chatPaneViewModel.isLoading {
@@ -475,8 +646,19 @@ struct ReportsTabDetailView: View {
                             .scaleEffect(0.8)
                     }
                     Button {
+                        chatPaneMode = .newConversation
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("New conversation")
+
+                    Button {
                         Task {
-                            await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
+                            await refreshReportChatList(
+                                transitionFromLoadingState: false,
+                                transitionToNewConversationWhenEmpty: true
+                            )
                         }
                     } label: {
                         Image(systemName: "arrow.clockwise")
@@ -489,71 +671,111 @@ struct ReportsTabDetailView: View {
 
                 Divider()
 
-                Group {
-                    if let errorMessage = chatPaneViewModel.errorMessage {
-                        VStack(spacing: 10) {
-                            Text(errorMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                            Button("Retry") {
-                                Task {
-                                    await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding()
-                    } else if chatPaneViewModel.threads.isEmpty && !chatPaneViewModel.isLoading {
-                        Text("No conversations yet for this report.")
+                if let errorMessage = chatPaneViewModel.errorMessage {
+                    VStack(spacing: 10) {
+                        Text(errorMessage)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding()
-                    } else {
-                        List(chatPaneViewModel.threads, id: \.id) { thread in
-                            Button {
-                                chatPaneMode = .conversation(thread.id)
-                            } label: {
-                                ReportThreadRow(thread: thread)
+                            .multilineTextAlignment(.center)
+                        Button("Retry") {
+                            Task {
+                                chatPaneMode = .loadingList
+                                await refreshReportChatList(
+                                    transitionFromLoadingState: true,
+                                    transitionToNewConversationWhenEmpty: true
+                                )
                             }
-                            .buttonStyle(.plain)
                         }
-                        .listStyle(.inset)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else if reportScopedConversations.isEmpty {
+                    VStack(spacing: 12) {
+                        Text("No conversations currently a-tag this report.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button {
+                            chatPaneMode = .newConversation
+                        } label: {
+                            Label("Start Conversation", systemImage: "plus")
+                        }
+                        .adaptiveGlassButtonStyle()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else {
+                    List(reportScopedConversations, id: \.thread.id) { conversation in
+                        let hierarchy = coreManager.hierarchyCache.getHierarchy(for: conversation.thread.id)
+                        ConversationRowFull(
+                            conversation: conversation,
+                            projectTitle: projectTitle(for: conversation),
+                            isHierarchicallyActive: conversation.isActive,
+                            pTaggedRecipientInfo: hierarchy?.pTaggedRecipientInfo,
+                            delegationAgentInfos: hierarchy?.delegationAgentInfos ?? [],
+                            isPlayingAudio: false,
+                            isAudioPlaying: false,
+                            showsChevron: false,
+                            onSelect: { selected in
+                                openConversation(selected.thread.id)
+                            },
+                            onToggleArchive: nil
+                        )
+                        .equatable()
+                        .tag(conversation)
+                    }
+                    .modifier(ShellConversationListStyle(isShellColumn: true))
+                    .tenexListSurfaceBackground()
                 }
+            }
+        case .newConversation:
+            VStack(spacing: 0) {
+                HStack {
+                    if !reportScopedConversations.isEmpty {
+                        Button {
+                            returnToConversationList()
+                        } label: {
+                            Label("Back", systemImage: "chevron.left")
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Spacer()
+
+                    Text("New Conversation")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
 
                 Divider()
 
                 if let project {
-                    MessageComposerView(
-                        project: project,
-                        initialAgentPubkey: report.author,
-                        referenceReportATag: reportATag,
-                        displayStyle: .inline,
-                        inlineLayoutStyle: .standard,
-                        onSend: { result in
-                            chatPaneMode = .conversation(result.eventId)
-                            Task {
-                                await chatPaneViewModel.load(reportATag: reportATag, using: reportThreadLoader)
-                            }
-                        }
+                    ConversationWorkspaceView(
+                        source: .newThread(
+                            project: project,
+                            agentPubkey: report.author,
+                            composerSeed: reportConversationSeed
+                        ),
+                        showsMetadataInspector: false,
+                        onThreadCreated: handleReportThreadCreated
                     )
                     .environment(coreManager)
-                    .padding(12)
+                    .id("report-new-thread-\(project.id)-\(report.slug)")
                 } else {
                     Text("Unable to compose because the project is unavailable.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         case .conversation(let conversationId):
             VStack(spacing: 0) {
                 HStack {
                     Button {
-                        chatPaneMode = .listAndComposer
+                        returnToConversationList()
                     } label: {
                         Label("Back", systemImage: "chevron.left")
                     }
@@ -570,7 +792,10 @@ struct ReportsTabDetailView: View {
 
                 Divider()
 
-                ConversationByIdAdaptiveDetailView(conversationId: conversationId)
+                ConversationByIdAdaptiveDetailView(
+                    conversationId: conversationId,
+                    showsMetadataInspector: false
+                )
                     .environment(coreManager)
             }
         }
@@ -646,42 +871,10 @@ struct ReportsTabDetailView: View {
 
 #if os(macOS)
 private enum ReportChatPaneMode: Equatable {
-    case listAndComposer
+    case loadingList
+    case list
+    case newConversation
     case conversation(String)
-}
-
-private struct ReportThreadRow: View {
-    let thread: Thread
-
-    @Environment(TenexCoreManager.self) private var coreManager
-
-    var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(thread.title)
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-
-                Text(coreManager.displayName(for: thread.pubkey))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            RelativeTimeText(timestamp: thread.lastActivity, style: .localizedAbbreviated)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Image(systemName: "chevron.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
 }
 #endif
 
