@@ -21,3 +21,4 @@ futures.workspace = true
 serde_json.workspace = true
 arboard.workspace = true
 png.workspace = true
+rusqlite = { version = "0.31", features = ["bundled"] }

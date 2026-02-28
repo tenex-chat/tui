@@ -4,9 +4,12 @@ use crate::util::{format_day_label, format_runtime};
 use tenex_core::nostr::NostrCommand;
 use tenex_core::runtime::CoreRuntime;
 
+#[derive(Clone, Copy, PartialEq)]
 pub(crate) enum PanelMode {
     Tools,
-    Model,
+    AgentSelect,
+    FlagSelect,
+    ModelSelect,
 }
 
 pub(crate) struct ConfigPanel {
@@ -17,10 +20,17 @@ pub(crate) struct ConfigPanel {
     pub(crate) project_a_tag: String,
     pub(crate) is_global: bool,
     pub(crate) items: Vec<String>,
-    pub(crate) selected: HashSet<String>,
     pub(crate) cursor: usize,
     pub(crate) scroll_offset: usize,
     pub(crate) origin_command: String,
+
+    // Accumulated state across sub-modes
+    pub(crate) tools_items: Vec<String>,
+    pub(crate) tools_selected: HashSet<String>,
+    pub(crate) pending_model: Option<String>,
+    pub(crate) is_set_pm: bool,
+    pub(crate) filter: String,
+    pub(crate) quick_save: bool,
 }
 
 impl ConfigPanel {
@@ -33,11 +43,106 @@ impl ConfigPanel {
             project_a_tag: String::new(),
             is_global: false,
             items: Vec::new(),
-            selected: HashSet::new(),
             cursor: 0,
             scroll_offset: 0,
             origin_command: String::new(),
+            tools_items: Vec::new(),
+            tools_selected: HashSet::new(),
+            pending_model: None,
+            is_set_pm: false,
+            filter: String::new(),
+            quick_save: false,
         }
+    }
+
+    pub(crate) fn switch_to_tools(&mut self) {
+        self.mode = PanelMode::Tools;
+        self.items = self.tools_items.clone();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+        self.filter.clear();
+    }
+
+    pub(crate) fn switch_to_agent_select(&mut self, runtime: &CoreRuntime) {
+        self.mode = PanelMode::AgentSelect;
+        self.filter.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        let mut agent_items = Vec::new();
+        if let Some(status) = store_ref.get_project_status(&self.project_a_tag) {
+            for agent in &status.agents {
+                let model = agent.model.as_deref().unwrap_or("unknown");
+                let pm = if agent.is_pm { " [PM]" } else { "" };
+                agent_items.push(format!("{}{pm} ({model})", agent.name));
+            }
+        }
+        self.items = agent_items;
+    }
+
+    pub(crate) fn switch_to_flag_select(&mut self) {
+        self.mode = PanelMode::FlagSelect;
+        self.cursor = 0;
+        self.scroll_offset = 0;
+        self.filter.clear();
+        self.rebuild_flag_items();
+    }
+
+    pub(crate) fn rebuild_flag_items(&mut self) {
+        let global_marker = if self.is_global { "[x]" } else { "[ ]" };
+        let pm_marker = if self.is_set_pm { "[x]" } else { "[ ]" };
+        self.items = vec![
+            format!("→  --model"),
+            format!("{pm_marker} --set-pm"),
+            format!("{global_marker} --global"),
+        ];
+    }
+
+    pub(crate) fn switch_to_model_select(&mut self, runtime: &CoreRuntime) {
+        self.mode = PanelMode::ModelSelect;
+        self.filter.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        self.items = store_ref
+            .get_project_status(&self.project_a_tag)
+            .map(|s| s.models().iter().map(|m| m.to_string()).collect())
+            .unwrap_or_default();
+    }
+
+    /// Returns filtered items as (original_index, &item) pairs.
+    pub(crate) fn filtered_items(&self) -> Vec<(usize, &String)> {
+        if self.filter.is_empty() || matches!(self.mode, PanelMode::Tools | PanelMode::FlagSelect) {
+            return self.items.iter().enumerate().collect();
+        }
+        let lower = self.filter.to_lowercase();
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.to_lowercase().contains(&lower))
+            .collect()
+    }
+
+    pub(crate) fn rebuild_origin_command(&mut self) {
+        let mut parts = vec!["/config".to_string()];
+        if !self.agent_name.is_empty() {
+            // Check if agent differs from default — always include for clarity
+            parts.push(format!("@{}", self.agent_name));
+        }
+        if self.is_global {
+            parts.push("--global".to_string());
+        }
+        if self.is_set_pm {
+            parts.push("--set-pm".to_string());
+        }
+        if let Some(ref model) = self.pending_model {
+            parts.push(format!("--model {model}"));
+        }
+        self.origin_command = parts.join(" ");
     }
 
     pub(crate) fn move_up(&mut self) {
@@ -50,7 +155,8 @@ impl ConfigPanel {
     }
 
     pub(crate) fn move_down(&mut self) {
-        if !self.items.is_empty() && self.cursor < self.items.len() - 1 {
+        let count = self.filtered_items().len();
+        if count > 0 && self.cursor < count - 1 {
             self.cursor += 1;
             if self.cursor >= self.scroll_offset + 15 {
                 self.scroll_offset = self.cursor.saturating_sub(14);
@@ -59,27 +165,28 @@ impl ConfigPanel {
     }
 
     pub(crate) fn toggle_current(&mut self) {
-        if let Some(item) = self.items.get(self.cursor) {
-            let item = item.clone();
-            if self.selected.contains(&item) {
-                self.selected.remove(&item);
-            } else {
-                self.selected.insert(item);
+        let filtered = self.filtered_items();
+        if let Some(&(orig_idx, _)) = filtered.get(self.cursor) {
+            if let Some(item) = self.tools_items.get(orig_idx) {
+                let item = item.clone();
+                if self.tools_selected.contains(&item) {
+                    self.tools_selected.remove(&item);
+                } else {
+                    self.tools_selected.insert(item);
+                }
             }
-        }
-    }
-
-    pub(crate) fn select_current(&mut self) {
-        if let Some(item) = self.items.get(self.cursor) {
-            self.selected.clear();
-            self.selected.insert(item.clone());
         }
     }
 
     pub(crate) fn deactivate(&mut self) {
         self.active = false;
         self.items.clear();
-        self.selected.clear();
+        self.tools_items.clear();
+        self.tools_selected.clear();
+        self.pending_model = None;
+        self.is_set_pm = false;
+        self.filter.clear();
+        self.quick_save = false;
         self.cursor = 0;
         self.scroll_offset = 0;
     }
@@ -98,29 +205,22 @@ impl ConfigPanel {
             }
         };
 
-        let (model, tools, tags) = match self.mode {
-            PanelMode::Tools => {
-                let model = agent.model.clone();
-                let tools: Vec<String> = self.selected.iter().cloned().collect();
-                let tags: Vec<String> = if agent.is_pm {
-                    vec!["pm".to_string()]
-                } else {
-                    vec![]
-                };
-                (model, tools, tags)
-            }
-            PanelMode::Model => {
-                let model = self.selected.iter().next().cloned();
-                let tools = agent.tools.clone();
-                let tags: Vec<String> = if agent.is_pm {
-                    vec!["pm".to_string()]
-                } else {
-                    vec![]
-                };
-                (model, tools, tags)
-            }
+        // Model: use pending_model if set, otherwise keep agent's current
+        let model = self.pending_model.clone().or_else(|| agent.model.clone());
+
+        // Tools: from accumulated tools_selected
+        let tools: Vec<String> = self.tools_selected.iter().cloned().collect();
+
+        // Tags: include "pm" if is_set_pm flag is on, or agent was already PM
+        let tags: Vec<String> = if self.is_set_pm || agent.is_pm {
+            vec!["pm".to_string()]
+        } else {
+            vec![]
         };
+
         drop(store_ref);
+
+        let save_type = if self.is_global { "global" } else { "project" };
 
         if self.is_global {
             let _ = runtime.handle().send(NostrCommand::UpdateGlobalAgentConfig {
@@ -139,16 +239,111 @@ impl ConfigPanel {
             });
         }
 
-        match self.mode {
-            PanelMode::Tools => format!(
-                "Updated tools for {} ({})",
-                self.agent_name,
-                if self.is_global { "global" } else { "project" }
-            ),
-            PanelMode::Model => {
-                let model_name = self.selected.iter().next().map(|s| s.as_str()).unwrap_or("none");
-                format!("Set model for {} → {}", self.agent_name, model_name)
+        // Build descriptive message
+        let mut changes = Vec::new();
+        if self.pending_model.is_some() {
+            changes.push(format!("model → {}", self.pending_model.as_deref().unwrap_or("?")));
+        }
+        if self.is_set_pm {
+            changes.push("set as PM".to_string());
+        }
+        changes.push(format!("{} tools", self.tools_selected.len()));
+
+        format!(
+            "Updated {} ({}) [{}]",
+            self.agent_name,
+            save_type,
+            changes.join(", ")
+        )
+    }
+
+    /// Save just the model (for quick_save / /model command).
+    pub(crate) fn save_model_only(&self, runtime: &CoreRuntime) -> String {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+
+        let agent = match store_ref
+            .get_project_status(&self.project_a_tag)
+            .and_then(|s| s.agents.iter().find(|a| a.pubkey == self.agent_pubkey))
+        {
+            Some(a) => a,
+            None => {
+                return format!("Agent {} no longer found in project status", self.agent_name);
             }
+        };
+
+        let model = self.pending_model.clone();
+        let tools = agent.tools.clone();
+        let tags: Vec<String> = if agent.is_pm {
+            vec!["pm".to_string()]
+        } else {
+            vec![]
+        };
+
+        drop(store_ref);
+
+        if self.is_global {
+            let _ = runtime.handle().send(NostrCommand::UpdateGlobalAgentConfig {
+                agent_pubkey: self.agent_pubkey.clone(),
+                model: model.clone(),
+                tools,
+                tags,
+            });
+        } else {
+            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
+                project_a_tag: self.project_a_tag.clone(),
+                agent_pubkey: self.agent_pubkey.clone(),
+                model: model.clone(),
+                tools,
+                tags,
+            });
+        }
+
+        let model_name = model.as_deref().unwrap_or("none");
+        format!("Set model for {} → {}", self.agent_name, model_name)
+    }
+
+    /// Resolve the selected agent from AgentSelect mode and reload tools for that agent.
+    pub(crate) fn resolve_selected_agent(&mut self, runtime: &CoreRuntime) -> bool {
+        let filtered = self.filtered_items();
+        let Some(&(orig_idx, _)) = filtered.get(self.cursor) else {
+            return false;
+        };
+
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        let Some(status) = store_ref.get_project_status(&self.project_a_tag) else {
+            return false;
+        };
+        let Some(agent) = status.agents.get(orig_idx) else {
+            return false;
+        };
+
+        self.agent_pubkey = agent.pubkey.clone();
+        self.agent_name = agent.name.clone();
+
+        // Reload tools for this agent
+        self.tools_items = status.all_tools().iter().map(|t| t.to_string()).collect();
+        self.tools_selected = agent.tools.iter().cloned().collect();
+
+        // Reset pending model — new agent, fresh state
+        self.pending_model = None;
+        self.is_set_pm = agent.is_pm;
+
+        true
+    }
+
+    /// Select current model from ModelSelect filtered list.
+    pub(crate) fn select_current_model(&mut self) -> bool {
+        let filtered = self.filtered_items();
+        let Some(&(orig_idx, _)) = filtered.get(self.cursor) else {
+            return false;
+        };
+        if let Some(model) = self.items.get(orig_idx) {
+            self.pending_model = Some(model.clone());
+            true
+        } else {
+            false
         }
     }
 }
@@ -424,6 +619,178 @@ impl DelegationBar {
 
     pub(crate) fn selected_entry(&self) -> Option<&DelegationEntry> {
         self.visible_delegations.get(self.selected)
+    }
+}
+
+// ─── Nudge/Skill Selector Panel ─────────────────────────────────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum NudgeSkillMode {
+    Nudges,
+    Skills,
+}
+
+/// Item in the nudge/skill selector: (id, title, description)
+pub(crate) struct NudgeSkillItem {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) description: String,
+}
+
+pub(crate) struct NudgeSkillPanel {
+    pub(crate) active: bool,
+    pub(crate) mode: NudgeSkillMode,
+    pub(crate) items: Vec<NudgeSkillItem>,
+    pub(crate) cursor: usize,
+    pub(crate) scroll_offset: usize,
+    pub(crate) filter: String,
+    pub(crate) selected_ids: HashSet<String>,
+}
+
+impl NudgeSkillPanel {
+    pub(crate) fn new() -> Self {
+        Self {
+            active: false,
+            mode: NudgeSkillMode::Nudges,
+            items: Vec::new(),
+            cursor: 0,
+            scroll_offset: 0,
+            filter: String::new(),
+            selected_ids: HashSet::new(),
+        }
+    }
+
+    pub(crate) fn activate(&mut self, runtime: &CoreRuntime, mode: NudgeSkillMode, state_nudge_ids: &[String], state_skill_ids: &[String]) {
+        self.active = true;
+        self.mode = mode;
+        self.filter.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+
+        // Pre-populate selected_ids from state
+        self.selected_ids.clear();
+        for id in state_nudge_ids {
+            self.selected_ids.insert(id.clone());
+        }
+        for id in state_skill_ids {
+            self.selected_ids.insert(id.clone());
+        }
+
+        self.load_items(runtime);
+    }
+
+    fn load_items(&mut self, runtime: &CoreRuntime) {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        self.items = match self.mode {
+            NudgeSkillMode::Nudges => {
+                store_ref.content.get_nudges().into_iter().map(|n| NudgeSkillItem {
+                    id: n.id.clone(),
+                    title: n.title.clone(),
+                    description: n.description.clone(),
+                }).collect()
+            }
+            NudgeSkillMode::Skills => {
+                store_ref.content.get_skills().into_iter().map(|s| NudgeSkillItem {
+                    id: s.id.clone(),
+                    title: s.title.clone(),
+                    description: s.description.clone(),
+                }).collect()
+            }
+        };
+    }
+
+    pub(crate) fn deactivate(&mut self) {
+        self.active = false;
+        self.items.clear();
+        self.filter.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+    }
+
+    pub(crate) fn filtered_items(&self) -> Vec<(usize, &NudgeSkillItem)> {
+        if self.filter.is_empty() {
+            return self.items.iter().enumerate().collect();
+        }
+        let lower = self.filter.to_lowercase();
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| {
+                item.title.to_lowercase().contains(&lower)
+                    || item.description.to_lowercase().contains(&lower)
+            })
+            .collect()
+    }
+
+    pub(crate) fn move_up(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            if self.cursor < self.scroll_offset {
+                self.scroll_offset = self.cursor;
+            }
+        }
+    }
+
+    pub(crate) fn move_down(&mut self) {
+        let count = self.filtered_items().len();
+        if count > 0 && self.cursor < count - 1 {
+            self.cursor += 1;
+            if self.cursor >= self.scroll_offset + 15 {
+                self.scroll_offset = self.cursor.saturating_sub(14);
+            }
+        }
+    }
+
+    pub(crate) fn toggle_current(&mut self) {
+        let id = {
+            let filtered = self.filtered_items();
+            filtered.get(self.cursor).map(|(_, item)| item.id.clone())
+        };
+        if let Some(id) = id {
+            if self.selected_ids.contains(&id) {
+                self.selected_ids.remove(&id);
+            } else {
+                self.selected_ids.insert(id);
+            }
+        }
+    }
+
+    pub(crate) fn switch_mode(&mut self, mode: NudgeSkillMode, runtime: &CoreRuntime) {
+        self.mode = mode;
+        self.cursor = 0;
+        self.scroll_offset = 0;
+        self.filter.clear();
+        self.load_items(runtime);
+    }
+
+    /// Commit selections back to state vectors, split by current items.
+    /// Returns (nudge_ids, skill_ids).
+    pub(crate) fn commit_selections(&self, runtime: &CoreRuntime) -> (Vec<String>, Vec<String>) {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+
+        let nudge_ids: HashSet<String> = store_ref.content.get_nudges()
+            .iter()
+            .map(|n| n.id.clone())
+            .collect();
+        let skill_ids: HashSet<String> = store_ref.content.get_skills()
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+
+        let mut selected_nudges = Vec::new();
+        let mut selected_skills = Vec::new();
+
+        for id in &self.selected_ids {
+            if nudge_ids.contains(id) {
+                selected_nudges.push(id.clone());
+            } else if skill_ids.contains(id) {
+                selected_skills.push(id.clone());
+            }
+        }
+
+        (selected_nudges, selected_skills)
     }
 }
 

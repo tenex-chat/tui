@@ -1,10 +1,10 @@
 use crate::RESET;
 
-const BOLD_COLOR: &str = "\x1b[1;38;5;222m";
+const BOLD_COLOR: &str = "\x1b[1;38;2;255;193;7m";
 const CODE_INLINE: &str = "\x1b[36;48;5;237m";
 pub(crate) const CODE_BLOCK: &str = "\x1b[38;5;248m";
 const CODE_BLOCK_BAR: &str = "\x1b[38;5;240m";
-const HEADING_COLOR: &str = "\x1b[1;38;5;222m";
+const HEADING_COLOR: &str = "\x1b[1;38;2;255;193;7m";
 const LIST_MARKER: &str = "\x1b[36m";
 
 pub(crate) fn colorize_markdown(content: &str) -> String {

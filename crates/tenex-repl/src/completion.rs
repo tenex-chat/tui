@@ -14,6 +14,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("/config", "configure agent tools/model"),
     ("/model", "change agent model"),
     ("/boot", "boot an offline project"),
+    ("/bunker", "NIP-46 remote signer"),
     ("/active", "active work across all projects"),
     ("/stats", "usage statistics"),
     ("/status", "show current context"),
@@ -554,7 +555,21 @@ impl CompletionMenu {
                         let first = parts[0];
                         let rest = parts.get(1).map(|s| s.trim()).unwrap_or("");
 
-                        if first.starts_with("--") || first.is_empty() {
+                        if first.is_empty() {
+                            // `/config ` with no args — don't show completion, just let Enter execute
+                            self.items.clear();
+                        } else if first.starts_with('@') {
+                            // @agent_filter — show agent picker
+                            let agent_filter = first[1..].to_lowercase();
+                            if let Some(ref a_tag) = state.current_project {
+                                let store = runtime.data_store();
+                                let store_ref = store.borrow();
+                                let proj_name = store_ref.get_projects().iter().find(|p| p.a_tag() == *a_tag).map(|p| p.title.as_str()).unwrap_or("unknown");
+                                self.items = agent_completion_items(&store_ref, a_tag, &agent_filter, "/config @", None, proj_name);
+                            } else {
+                                self.items.clear();
+                            }
+                        } else if first.starts_with("--") {
                             let flag_filter = if first.starts_with("--") && rest.is_empty() && !first.contains(' ') {
                                 first
                             } else {
@@ -567,7 +582,7 @@ impl CompletionMenu {
                             if !first.starts_with("--") || (first.starts_with("--") && rest.is_empty()) {
                                 let flags = [
                                     ("--model", "change model"),
-                                    ("--make-pm", "set as project manager"),
+                                    ("--set-pm", "set as project manager"),
                                     ("--global", "apply globally"),
                                 ];
                                 for (flag, desc) in &flags {
@@ -605,7 +620,10 @@ impl CompletionMenu {
                         }
                     }
                     "/model" | "/m" => {
-                        if let Some(ref a_tag) = state.current_project {
+                        if filter.is_empty() {
+                            // `/model ` with no args — don't show completion, Enter opens model picker
+                            self.items.clear();
+                        } else if let Some(ref a_tag) = state.current_project {
                             let store = runtime.data_store();
                             let store_ref = store.borrow();
                             let proj_name = store_ref.get_projects().iter().find(|p| p.a_tag() == *a_tag).map(|p| p.title.as_str()).unwrap_or("unknown");
@@ -613,6 +631,21 @@ impl CompletionMenu {
                         } else {
                             self.items.clear();
                         }
+                    }
+                    "/bunker" => {
+                        let subcmds = [
+                            ("audit", "show recent audit log"),
+                            ("rules", "list auto-approve rules"),
+                            ("rules remove", "remove a rule by index"),
+                        ];
+                        self.items = subcmds.iter()
+                            .filter(|(cmd, _)| filter.is_empty() || cmd.contains(&filter.as_str()))
+                            .map(|(cmd, desc)| CompletionItem {
+                                label: cmd.to_string(),
+                                description: desc.to_string(),
+                                fill: format!("/bunker {cmd}"),
+                            })
+                            .collect();
                     }
                     _ => {
                         self.items.clear();
