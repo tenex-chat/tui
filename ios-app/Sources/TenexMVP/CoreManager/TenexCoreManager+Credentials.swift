@@ -96,6 +96,22 @@ extension TenexCoreManager {
         messagesByConversation = [:]
         projectOnlineStatus = [:]
         onlineAgents = [:]
+        bookmarkedIds = []
+        streamingBuffers = [:]
+        pendingBunkerRequests = []
+        hasActiveAgents = false
+        runtimeText = "0m"
+        setLastDeletedProjectId(nil)
+        hierarchyCache.clearCache()
+        invalidateProfileNameCache()
+        projectStatusUpdateTask?.cancel()
+        conversationRefreshTask?.cancel()
+        streamingFlushTask?.cancel()
+        streamingFlushTask = nil
+        pendingStreamingDeltas.removeAll(keepingCapacity: true)
+        inflightConversationMessageRefreshes.removeAll()
+        lastConversationMessageRefreshAt.removeAll()
+        refreshUnansweredAskCount(reason: "clearCredentials")
 
         // Clear profile picture cache on logout to prevent stale data
         profilePictureCache.clear()
