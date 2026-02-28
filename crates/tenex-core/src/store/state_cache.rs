@@ -29,7 +29,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// Setting this to a new value causes all existing caches to be silently discarded
 /// and rebuilt from nostrdb on the next startup.
-pub const CACHE_SCHEMA_VERSION: u32 = 2;
+pub const CACHE_SCHEMA_VERSION: u32 = 3;
 
 /// Maximum cache age in seconds (7 days).
 /// Caches older than this are discarded and rebuilt from nostrdb.
@@ -77,6 +77,10 @@ pub struct CachedState {
     pub reports: HashMap<String, Report>,
     pub reports_all_versions: HashMap<String, Vec<Report>>,
     pub document_threads: HashMap<String, Vec<Thread>>,
+
+    // Trust state
+    pub approved_backends: HashSet<String>,
+    pub blocked_backends: HashSet<String>,
 }
 
 /// Returns the path to the cache file inside `data_dir`.
