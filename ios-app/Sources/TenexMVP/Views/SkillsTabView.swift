@@ -136,6 +136,8 @@ struct SkillsTabView: View {
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                SkillsHeroHeader()
+
                 if items.isEmpty {
                     emptyState
                 } else {
