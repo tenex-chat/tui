@@ -1,7 +1,8 @@
 # TENEX TUI Client - Agent Guidelines
 
-Multi-platform TENEX client with four apps sharing a common Rust core:
+Multi-platform TENEX client with five apps sharing a common Rust core:
 
+- **tenex-repl** — Interactive REPL client in `crates/tenex-repl/`
 - **tenex-tui** — Terminal UI (Ratatui) in `crates/tenex-tui/`
 - **tenex-cli** — CLI + daemon/HTTP server in `crates/tenex-cli/`
 - **iOS app** — SwiftUI app for iPhone/iPad in `ios-app/` (destinations: `.iPhone`, `.iPad`)
@@ -15,6 +16,9 @@ The iOS and Mac apps share one codebase (`ios-app/`) with platform conditionals 
 # Build & Test (Rust workspace)
 cargo build --workspace
 cargo test --workspace
+
+# Run REPL
+cargo run -p tenex-repl
 
 # Run TUI
 cargo run -p tenex-tui

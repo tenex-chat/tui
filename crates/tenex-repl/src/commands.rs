@@ -14,6 +14,31 @@ use tenex_core::models::{Project, ProjectAgent, Thread};
 use tenex_core::events::CoreEvent;
 use nostr_sdk::prelude::*;
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Find the longest project title that matches as a prefix of `input` (case-insensitive).
+/// Returns `(matched_portion, remainder)` where remainder is trimmed.
+pub(crate) fn find_project_split<'a>(input: &'a str, projects: &[&Project]) -> Option<(&'a str, &'a str)> {
+    let mut best_len = 0;
+    for project in projects {
+        let title = &project.title;
+        let title_len = title.len();
+        if title_len > best_len
+            && title_len <= input.len()
+            && input[..title_len].eq_ignore_ascii_case(title)
+            && (title_len == input.len() || input.as_bytes()[title_len] == b' ')
+        {
+            best_len = title_len;
+        }
+    }
+
+    if best_len > 0 {
+        Some((&input[..best_len], input[best_len..].trim_start()))
+    } else {
+        None
+    }
+}
+
 // ─── Command Result ─────────────────────────────────────────────────────────
 
 pub(crate) enum CommandResult {
@@ -64,7 +89,8 @@ pub(crate) fn handle_project_command(arg: Option<&str>, state: &mut ReplState, r
                 let lower = name.to_lowercase();
                 projects
                     .iter()
-                    .find(|p| p.title.to_lowercase().contains(&lower))
+                    .find(|p| p.title.to_lowercase() == lower)
+                    .or_else(|| projects.iter().find(|p| p.title.to_lowercase().contains(&lower)))
                     .copied()
             };
 
@@ -194,19 +220,28 @@ pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, run
     let agent_arg = if let Some(raw) = arg {
         if let Some(at_pos) = raw.find('@') {
             let after_at = raw[at_pos + 1..].trim();
-            let (project_name, remainder) = match after_at.find(' ') {
-                Some(sp) => (after_at[..sp].trim(), Some(after_at[sp + 1..].trim())),
-                None => (after_at, None),
-            };
 
             let store = runtime.data_store();
             let store_ref = store.borrow();
-            let lower = project_name.to_lowercase();
-            let matched = store_ref
+            let projects: Vec<&Project> = store_ref
                 .get_projects()
                 .iter()
                 .filter(|p| !p.is_deleted)
-                .find(|p| p.title.to_lowercase().contains(&lower))
+                .collect();
+
+            let (project_name, remainder) = match find_project_split(after_at, &projects) {
+                Some((proj, rest)) => (proj, if rest.is_empty() { None } else { Some(rest) }),
+                None => match after_at.find(' ') {
+                    Some(sp) => (&after_at[..sp], Some(after_at[sp + 1..].trim())),
+                    None => (after_at, None),
+                },
+            };
+
+            let lower = project_name.to_lowercase();
+            let matched = projects
+                .iter()
+                .find(|p| p.title.to_lowercase() == lower)
+                .or_else(|| projects.iter().find(|p| p.title.to_lowercase().contains(&lower)))
                 .map(|p| p.a_tag());
             drop(store_ref);
 
@@ -325,17 +360,23 @@ pub(crate) fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runt
         return CommandResult::Lines(vec![print_error_raw("Select a project first with /project")]);
     };
 
-    let Ok(idx) = idx_str.parse::<usize>() else {
-        return CommandResult::Lines(vec![print_error_raw("Usage: /conversations <N> (number)")]);
-    };
-
     let store = runtime.data_store();
     let store_ref = store.borrow();
     let mut threads: Vec<&Thread> = store_ref.get_threads(a_tag).iter().collect();
     threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
 
-    let Some(thread) = threads.get(idx.saturating_sub(1)) else {
-        return CommandResult::Lines(vec![print_error_raw(&format!("No conversation at index {idx}"))]);
+    let matched = if let Ok(idx) = idx_str.parse::<usize>() {
+        threads.get(idx.saturating_sub(1)).copied()
+    } else {
+        let lower = idx_str.to_lowercase();
+        threads.iter().find(|t|
+            t.title.to_lowercase().contains(&lower)
+            || t.summary.as_ref().map(|s| s.to_lowercase().contains(&lower)).unwrap_or(false)
+        ).copied()
+    };
+
+    let Some(thread) = matched else {
+        return CommandResult::Lines(vec![print_error_raw(&format!("No conversation matching '{idx_str}'"))]);
     };
 
     let id = thread.id.clone();
@@ -353,9 +394,7 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
         return CommandResult::ShowCompletion("/active ".to_string());
     }
 
-    let Ok(idx) = arg.trim().parse::<usize>() else {
-        return CommandResult::Lines(vec![print_error_raw("Usage: /active <N> (number)")]);
-    };
+    let search = arg.trim();
 
     let store = runtime.data_store();
     let store_ref = store.borrow();
@@ -395,8 +434,20 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
         ordered_threads.push((thread.id.clone(), Some(a_tag)));
     }
 
-    let Some((thread_id, project_a_tag)) = ordered_threads.get(idx.saturating_sub(1)) else {
-        return CommandResult::Lines(vec![print_error_raw(&format!("No conversation at index {idx}"))]);
+    let matched_entry = if let Ok(idx) = search.parse::<usize>() {
+        ordered_threads.get(idx.saturating_sub(1))
+    } else {
+        let lower = search.to_lowercase();
+        ordered_threads.iter().find(|(tid, _)| {
+            store_ref.get_thread_by_id(tid).map(|t|
+                t.title.to_lowercase().contains(&lower)
+                || t.summary.as_ref().map(|s| s.to_lowercase().contains(&lower)).unwrap_or(false)
+            ).unwrap_or(false)
+        })
+    };
+
+    let Some((thread_id, project_a_tag)) = matched_entry else {
+        return CommandResult::Lines(vec![print_error_raw(&format!("No conversation matching '{search}'"))]);
     };
 
     let thread_id = thread_id.clone();
@@ -436,31 +487,47 @@ pub(crate) fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &Cor
         let agent_part = arg[..at_pos].trim();
         let after_at = arg[at_pos + 1..].trim();
 
-        let (project_part, agent_override) = match after_at.find(' ') {
-            Some(sp) => (&after_at[..sp], Some(after_at[sp + 1..].trim())),
-            None => (after_at, None),
+        // When agent is already specified before @, full after_at is the project name
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        let projects: Vec<&Project> = store_ref
+            .get_projects()
+            .iter()
+            .filter(|p| !p.is_deleted)
+            .collect();
+
+        let (project_part, agent_override) = if !agent_part.is_empty() {
+            (after_at, None)
+        } else {
+            match find_project_split(after_at, &projects) {
+                Some((proj, rest)) => (proj, if rest.is_empty() { None } else { Some(rest) }),
+                None => match after_at.find(' ') {
+                    Some(sp) => (&after_at[..sp], Some(after_at[sp + 1..].trim())),
+                    None => (after_at, None),
+                },
+            }
         };
+
         let agent_name = if !agent_part.is_empty() {
             agent_part
         } else {
             agent_override.unwrap_or("")
         };
 
-        if !project_part.is_empty() {
-            let store = runtime.data_store();
-            let store_ref = store.borrow();
-            let projects: Vec<&Project> = store_ref
-                .get_projects()
-                .iter()
-                .filter(|p| !p.is_deleted)
-                .collect();
+        let project_a_tag = if !project_part.is_empty() {
             let lower = project_part.to_lowercase();
-            if let Some(project) = projects.iter().find(|p| p.title.to_lowercase().contains(&lower)) {
-                let a_tag = project.a_tag();
-                drop(store_ref);
+            projects
+                .iter()
+                .find(|p| p.title.to_lowercase() == lower)
+                .or_else(|| projects.iter().find(|p| p.title.to_lowercase().contains(&lower)))
+                .map(|p| p.a_tag())
+        } else {
+            None
+        };
+        drop(store_ref);
 
-                switch_to_project(state, runtime, &a_tag);
-            }
+        if let Some(a_tag) = project_a_tag {
+            switch_to_project(state, runtime, &a_tag);
         }
 
         if !agent_name.is_empty() {
