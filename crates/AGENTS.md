@@ -1,7 +1,8 @@
 # Rust Crates
 
-Cargo workspace with three crates:
+Cargo workspace with four crates:
 - **tenex-core** - Shared library (Nostr, SQLite, UniFFI for iOS FFI)
+- **tenex-repl** - Interactive REPL client
 - **tenex-tui** - Terminal UI (Ratatui)
 - **tenex-cli** - Command-line tool
 
@@ -15,6 +16,7 @@ cargo build -p tenex-core        # Build specific crate
 cargo test -p tenex-core         # Test specific crate
 cargo fmt --all                  # Format
 cargo clippy --workspace -- -D warnings  # Lint
+cargo run -p tenex-repl                  # Run REPL
 RUST_LOG=debug cargo run -p tenex-tui    # Run TUI with logging
 ```
 
