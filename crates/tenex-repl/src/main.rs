@@ -55,13 +55,13 @@ use completion::{CompletionMenu, ItemAction};
 use panels::{ConfigPanel, PanelMode, StatusBarNav, StatsPanel, StatusBarAction};
 use state::ReplState;
 use format::{print_separator_raw, print_agent_message_raw, print_error_raw, print_system_raw, print_help_raw};
-use render::{redraw_input, clear_input_area, print_above_input, update_delegation_bar};
+use render::{redraw_input, clear_input_area, print_above_input, update_delegation_bar, apply_clear_screen};
 use commands::{
     CommandResult, handle_project_command, handle_agent_command, handle_open_command,
     handle_active_command, handle_new_command, handle_send_message, handle_boot_command,
     handle_status_command, handle_config_command, handle_model_command, handle_core_event,
-    navigate_to_delegation, pop_conversation_stack, auto_select_project, auto_select_agent,
-    subscribe_to_project, open_conversation, UploadResult, try_upload_image_file,
+    navigate_to_delegation, pop_conversation_stack, auto_select_project,
+    handle_status_bar_open, UploadResult, try_upload_image_file,
     handle_clipboard_paste,
 };
 use markdown::colorize_markdown;
@@ -269,45 +269,9 @@ async fn run_repl(
                                     continue;
                                 }
                                 StatusBarAction::OpenConversation { thread_id, project_a_tag } => {
-                                    let needs_project_switch = project_a_tag
-                                        .as_ref()
-                                        .map(|a| state.current_project.as_ref() != Some(a))
-                                        .unwrap_or(false);
-
-                                    if needs_project_switch {
-                                        if let Some(a_tag) = &project_a_tag {
-                                            subscribe_to_project(runtime, a_tag);
-                                            state.switch_project(a_tag.clone(), runtime);
-                                            auto_select_agent(state, runtime);
-                                        }
+                                    if let CommandResult::ClearScreen(lines) = handle_status_bar_open(state, runtime, &thread_id, project_a_tag) {
+                                        apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
                                     }
-
-                                    let title = {
-                                        let store = runtime.data_store();
-                                        let store_ref = store.borrow();
-                                        store_ref.get_thread_by_id(&thread_id)
-                                            .map(|t| t.title.clone())
-                                            .unwrap_or_default()
-                                    };
-                                    let mut output = vec![print_system_raw(&format!("Opened: {title}"))];
-                                    output.extend(open_conversation(state, runtime, &thread_id, true, util::MESSAGES_TO_LOAD));
-
-                                    if needs_project_switch {
-                                        execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
-                                        completion.input_area_drawn = false;
-                                        let (_, rows) = terminal::size().unwrap_or((80, 24));
-                                        let content_rows = output.len() as u16;
-                                        let start_row = rows.saturating_sub(5 + content_rows);
-                                        execute!(stdout, cursor::MoveTo(0, start_row)).ok();
-                                    } else {
-                                        clear_input_area(&mut stdout, &mut completion);
-                                        completion.input_area_drawn = false;
-                                    }
-                                    for l in &output {
-                                        raw_println!("{}", l);
-                                    }
-                                    update_delegation_bar(state, runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
                                     continue;
                                 }
                                 StatusBarAction::OpenStats => {
@@ -351,17 +315,7 @@ async fn run_repl(
                             if let Some(thread_id) = target {
                                 let result = navigate_to_delegation(state, runtime, &thread_id);
                                 if let CommandResult::ClearScreen(lines) = result {
-                                    execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
-                                    completion.input_area_drawn = false;
-                                    let (_, rows) = terminal::size().unwrap_or((80, 24));
-                                    let content_rows = lines.len() as u16;
-                                    let start = rows.saturating_sub(5 + content_rows);
-                                    execute!(stdout, cursor::MoveTo(0, start)).ok();
-                                    for l in &lines {
-                                        raw_println!("{}", l);
-                                    }
-                                    update_delegation_bar(state, runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
+                                    apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
                                 }
                             }
                             continue;
@@ -445,16 +399,7 @@ async fn run_repl(
                                     redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
                                 }
                                 CommandResult::ClearScreen(lines) => {
-                                    execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
-                                    completion.input_area_drawn = false;
-                                    let (_, rows) = terminal::size().unwrap_or((80, 24));
-                                    let content_rows = lines.len() as u16;
-                                    let start = rows.saturating_sub(5 + content_rows);
-                                    execute!(stdout, cursor::MoveTo(0, start)).ok();
-                                    for l in &lines {
-                                        raw_println!("{}", l);
-                                    }
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
+                                    apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
                                 }
                             }
                         }
@@ -532,17 +477,7 @@ async fn run_repl(
                             redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
                         } else if !state.conversation_stack.is_empty() {
                             if let Some(CommandResult::ClearScreen(lines)) = pop_conversation_stack(state, runtime) {
-                                execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
-                                completion.input_area_drawn = false;
-                                let (_, rows) = terminal::size().unwrap_or((80, 24));
-                                let content_rows = lines.len() as u16;
-                                let start = rows.saturating_sub(5 + content_rows);
-                                execute!(stdout, cursor::MoveTo(0, start)).ok();
-                                for l in &lines {
-                                    raw_println!("{}", l);
-                                }
-                                update_delegation_bar(state, runtime);
-                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
+                                apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel);
                             }
                         }
                     }

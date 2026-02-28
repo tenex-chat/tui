@@ -74,12 +74,10 @@ pub(crate) fn handle_project_command(arg: Option<&str>, state: &mut ReplState, r
                     let title = project.title.clone();
                     drop(store_ref);
 
-                    subscribe_to_project(runtime, &a_tag);
-                    state.switch_project(a_tag, runtime);
+                    switch_to_project(state, runtime, &a_tag);
                     state.current_conversation = None;
                     state.last_displayed_pubkey = None;
                     state.last_todo_items.clear();
-                    auto_select_agent(state, runtime);
                     output.push(print_system_raw(&format!("Switched to project: {title}")));
                 }
                 None => output.push(print_error_raw(&format!("No project matching '{name}'"))),
@@ -141,6 +139,13 @@ pub(crate) fn subscribe_to_project(runtime: &CoreRuntime, a_tag: &str) {
     });
 }
 
+/// Unified project switching: subscribe + switch state + auto-select agent.
+pub(crate) fn switch_to_project(state: &mut ReplState, runtime: &CoreRuntime, a_tag: &str) {
+    subscribe_to_project(runtime, a_tag);
+    state.switch_project(a_tag.to_string(), runtime);
+    auto_select_agent(state, runtime);
+}
+
 /// Auto-select the first online project. Returns true if a project was selected.
 pub(crate) fn auto_select_project(state: &mut ReplState, runtime: &CoreRuntime) -> bool {
     if state.current_project.is_some() {
@@ -157,9 +162,7 @@ pub(crate) fn auto_select_project(state: &mut ReplState, runtime: &CoreRuntime) 
     drop(store_ref);
 
     if let Some((a_tag, title)) = online_project {
-        subscribe_to_project(runtime, &a_tag);
-        state.switch_project(a_tag, runtime);
-        auto_select_agent(state, runtime);
+        switch_to_project(state, runtime, &a_tag);
         raw_println!("{}", print_system_raw(&format!("Auto-selected project: {title}")));
         true
     } else {
@@ -209,9 +212,7 @@ pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, run
 
             match matched {
                 Some(a_tag) => {
-                    subscribe_to_project(runtime, &a_tag);
-                    state.switch_project(a_tag, runtime);
-                    auto_select_agent(state, runtime);
+                    switch_to_project(state, runtime, &a_tag);
                 }
                 None => {
                     output.push(print_error_raw(&format!("No project matching '{project_name}'")));
@@ -314,9 +315,7 @@ pub(crate) fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runt
 
         match matched {
             Some(a_tag) => {
-                subscribe_to_project(runtime, &a_tag);
-                state.switch_project(a_tag, runtime);
-                auto_select_agent(state, runtime);
+                switch_to_project(state, runtime, &a_tag);
             }
             None => return CommandResult::Lines(vec![print_error_raw(&format!("No project matching '{project_name}'"))]),
         }
@@ -416,9 +415,7 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
 
     if needs_project_switch {
         if let Some(a_tag) = &switch_a_tag {
-            subscribe_to_project(runtime, a_tag);
-            state.switch_project(a_tag.clone(), runtime);
-            auto_select_agent(state, runtime);
+            switch_to_project(state, runtime, a_tag);
         }
     }
 
@@ -462,9 +459,7 @@ pub(crate) fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &Cor
                 let a_tag = project.a_tag();
                 drop(store_ref);
 
-                subscribe_to_project(runtime, &a_tag);
-                state.switch_project(a_tag, runtime);
-                auto_select_agent(state, runtime);
+                switch_to_project(state, runtime, &a_tag);
             }
         }
 
@@ -527,13 +522,37 @@ pub(crate) fn navigate_to_delegation(state: &mut ReplState, runtime: &CoreRuntim
     CommandResult::ClearScreen(output)
 }
 
+/// Handle opening a conversation from the status bar navigation.
+pub(crate) fn handle_status_bar_open(
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+    thread_id: &str,
+    project_a_tag: Option<String>,
+) -> CommandResult {
+    if let Some(a_tag) = &project_a_tag {
+        if state.current_project.as_ref() != Some(a_tag) {
+            switch_to_project(state, runtime, a_tag);
+        }
+    }
+    let title = {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        store_ref.get_thread_by_id(thread_id)
+            .map(|t| t.title.clone())
+            .unwrap_or_default()
+    };
+    let mut output = vec![print_system_raw(&format!("Opened: {title}"))];
+    output.extend(open_conversation(state, runtime, thread_id, true, MESSAGES_TO_LOAD));
+    CommandResult::ClearScreen(output)
+}
+
 /// Pop the conversation stack and return to the previous conversation.
 pub(crate) fn pop_conversation_stack(state: &mut ReplState, runtime: &CoreRuntime) -> Option<CommandResult> {
     let entry = state.conversation_stack.pop()?;
 
     if let Some(ref a_tag) = entry.project_a_tag {
         if state.current_project.as_ref() != Some(a_tag) {
-            state.switch_project(a_tag.clone(), runtime);
+            switch_to_project(state, runtime, a_tag);
         }
     }
 
