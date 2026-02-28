@@ -1408,32 +1408,7 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
     } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
         app.open_agent_config_modal();
     } else if c == '.' && app.view == View::Chat {
-        if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
-            let (is_busy, project_a_tag) = {
-                let store = app.data_store.borrow();
-                let is_busy = store.operations.is_event_busy(&stop_thread_id);
-                let project_a_tag = store.find_project_for_thread(&stop_thread_id);
-                (is_busy, project_a_tag)
-            };
-            if is_busy {
-                if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
-                    let working_agents = app
-                        .data_store
-                        .borrow()
-                        .operations
-                        .get_working_agents(&stop_thread_id);
-                    if let Err(e) = core_handle.send(NostrCommand::StopOperations {
-                        project_a_tag: a_tag,
-                        event_ids: vec![stop_thread_id.clone()],
-                        agent_pubkeys: working_agents,
-                    }) {
-                        app.set_warning_status(&format!("Failed to stop: {}", e));
-                    } else {
-                        app.set_warning_status("Stop command sent");
-                    }
-                }
-            }
-        }
+        app.stop_current_conversation();
     } else if c == 't' && app.view == View::Chat {
         app.todo_sidebar_visible = !app.todo_sidebar_visible;
     } else if c == 'o' && app.view == View::Chat {

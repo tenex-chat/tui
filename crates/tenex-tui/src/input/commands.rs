@@ -913,32 +913,7 @@ fn open_conversation_trace(app: &mut App) {
 }
 
 fn stop_agents(app: &mut App) {
-    if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
-        let (is_busy, project_a_tag) = {
-            let store = app.data_store.borrow();
-            let is_busy = store.operations.is_event_busy(&stop_thread_id);
-            let project_a_tag = store.find_project_for_thread(&stop_thread_id);
-            (is_busy, project_a_tag)
-        };
-        if is_busy {
-            if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
-                let working_agents = app
-                    .data_store
-                    .borrow()
-                    .operations
-                    .get_working_agents(&stop_thread_id);
-                if let Err(e) = core_handle.send(NostrCommand::StopOperations {
-                    project_a_tag: a_tag,
-                    event_ids: vec![stop_thread_id.clone()],
-                    agent_pubkeys: working_agents,
-                }) {
-                    app.set_warning_status(&format!("Failed to stop: {}", e));
-                } else {
-                    app.set_warning_status("Stop command sent");
-                }
-            }
-        }
-    }
+    app.stop_current_conversation();
 }
 
 fn go_to_parent(app: &mut App) {
