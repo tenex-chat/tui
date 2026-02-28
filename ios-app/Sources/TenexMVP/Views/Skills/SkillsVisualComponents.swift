@@ -2,6 +2,39 @@ import Foundation
 import SwiftUI
 import Kingfisher
 
+struct SkillsHeroHeader: View {
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.38),
+                            Color.black.opacity(0.22)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Skills")
+                    .font(.system(size: 56, weight: .regular, design: .rounded))
+                    .foregroundStyle(.primary)
+
+                Text("Give Codex superpowers.")
+                    .font(.system(size: 48, weight: .regular, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .padding(.horizontal, 26)
+            .padding(.vertical, 24)
+        }
+        .frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
+    }
+}
+
 struct SkillCatalogCard: View {
     let item: SkillListItem
     let isBookmarked: Bool
