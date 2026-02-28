@@ -247,7 +247,7 @@ impl TenexCore {
     }
 
     /// Logout the current user.
-    /// Disconnects from relays and clears all session state including in-memory data.
+    /// Disconnects from relays, wipes local Nostr cache files, and resets session state.
     /// This prevents stale data from previous accounts from leaking to new logins.
     ///
     /// This method is deterministic - it waits for the disconnect to complete before
@@ -342,23 +342,141 @@ impl TenexCore {
             })
         };
 
-        // Only clear state if disconnect was successful
-        if disconnect_result.is_ok() {
-            // Clear keys
-            if let Ok(mut keys_guard) = self.keys.write() {
-                *keys_guard = None;
-            }
+        // If disconnect failed, bail out without clearing state.
+        disconnect_result?;
 
-            // Clear all in-memory data in the store to prevent data leaks
-            // The next login will rebuild_from_ndb() with the new user's context
-            if let Ok(mut store_guard) = self.store.write() {
-                if let Some(store) = store_guard.as_mut() {
-                    store.clear();
-                }
-            }
-            eprintln!("[TENEX] logout: Session state cleared");
+        // Clear keys immediately.
+        if let Ok(mut keys_guard) = self.keys.write() {
+            *keys_guard = None;
         }
 
-        disconnect_result
+        // Rebuild runtime with a fresh on-disk cache so the next login starts clean.
+        self.reset_runtime_after_logout()?;
+
+        eprintln!("[TENEX] logout: Session state cleared and local cache wiped");
+        Ok(())
+    }
+}
+
+impl TenexCore {
+    fn remove_file_if_exists(path: &std::path::Path) -> Result<(), TenexError> {
+        match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(TenexError::LogoutFailed {
+                message: format!("Failed to remove {}: {}", path.display(), e),
+            }),
+        }
+    }
+
+    fn wipe_local_cache_files(&self) -> Result<(), TenexError> {
+        let data_dir = get_data_dir();
+        let state_cache_path = crate::store::state_cache::cache_path(&data_dir);
+        let state_cache_tmp_path = state_cache_path.with_extension("bin.tmp");
+
+        Self::remove_file_if_exists(&data_dir.join("data.mdb"))?;
+        Self::remove_file_if_exists(&data_dir.join("lock.mdb"))?;
+        Self::remove_file_if_exists(&state_cache_path)?;
+        Self::remove_file_if_exists(&state_cache_tmp_path)?;
+        Ok(())
+    }
+
+    fn reset_runtime_after_logout(&self) -> Result<(), TenexError> {
+        let _txn_guard =
+            self.ndb_transaction_lock
+                .lock()
+                .map_err(|_| TenexError::LogoutFailed {
+                    message: "Failed to acquire transaction lock during logout".to_string(),
+                })?;
+
+        // Ensure worker drops all Ndb handles before wiping files.
+        if let Ok(handle_guard) = self.core_handle.read() {
+            if let Some(handle) = handle_guard.as_ref() {
+                let _ = handle.send(NostrCommand::Shutdown);
+            }
+        }
+
+        {
+            let mut worker_guard =
+                self.worker_handle
+                    .write()
+                    .map_err(|_| TenexError::LogoutFailed {
+                        message: "Failed to acquire worker handle lock during logout".to_string(),
+                    })?;
+            if let Some(worker_handle) = worker_guard.take() {
+                worker_handle.join().map_err(|_| TenexError::LogoutFailed {
+                    message: "Failed to join worker thread during logout".to_string(),
+                })?;
+            }
+        }
+
+        {
+            let mut handle_guard =
+                self.core_handle
+                    .write()
+                    .map_err(|_| TenexError::LogoutFailed {
+                        message: "Failed to clear core handle during logout".to_string(),
+                    })?;
+            *handle_guard = None;
+        }
+        {
+            let mut data_rx_guard = self.data_rx.lock().map_err(|_| TenexError::LogoutFailed {
+                message: "Failed to clear data receiver during logout".to_string(),
+            })?;
+            *data_rx_guard = None;
+        }
+        {
+            let mut stream_guard =
+                self.ndb_stream
+                    .write()
+                    .map_err(|_| TenexError::LogoutFailed {
+                        message: "Failed to clear NostrDB stream during logout".to_string(),
+                    })?;
+            *stream_guard = None;
+        }
+        {
+            let mut store_guard = self.store.write().map_err(|_| TenexError::LogoutFailed {
+                message: "Failed to clear app store during logout".to_string(),
+            })?;
+            *store_guard = None;
+        }
+        {
+            let mut ndb_guard = self.ndb.write().map_err(|_| TenexError::LogoutFailed {
+                message: "Failed to clear NostrDB handle during logout".to_string(),
+            })?;
+            *ndb_guard = None;
+        }
+        {
+            let mut stats_guard =
+                self.subscription_stats
+                    .write()
+                    .map_err(|_| TenexError::LogoutFailed {
+                        message: "Failed to clear subscription stats during logout".to_string(),
+                    })?;
+            *stats_guard = None;
+        }
+        {
+            let mut stats_guard =
+                self.negentropy_stats
+                    .write()
+                    .map_err(|_| TenexError::LogoutFailed {
+                        message: "Failed to clear negentropy stats during logout".to_string(),
+                    })?;
+            *stats_guard = None;
+        }
+
+        self.cached_today_runtime_ms.store(0, Ordering::Release);
+        self.last_refresh_ms.store(0, Ordering::Relaxed);
+
+        self.wipe_local_cache_files()?;
+
+        self.initialized.store(false, Ordering::SeqCst);
+        if !self.init() {
+            return Err(TenexError::LogoutFailed {
+                message: "Failed to reinitialize core after logout".to_string(),
+            });
+        }
+
+        Ok(())
     }
 }
