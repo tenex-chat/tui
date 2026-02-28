@@ -504,6 +504,8 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/agent", "list or switch agent"),
     ("/new", "new context [agent@project]"),
     ("/conversations", "browse/open conversations"),
+    ("/config", "configure agent tools/model"),
+    ("/model", "change agent model"),
     ("/boot", "boot an offline project"),
     ("/active", "active work across all projects"),
     ("/status", "show current context"),
@@ -1097,6 +1099,71 @@ impl CompletionMenu {
                             })
                             .collect();
                     }
+                    "/config" => {
+                        // Parse: possible flags then agent filter
+                        // e.g. "" | "cl" | "--model" | "--model cl" | "--global cl"
+                        let parts: Vec<&str> = arg.splitn(2, ' ').collect();
+                        let first = parts[0];
+                        let rest = parts.get(1).map(|s| s.trim()).unwrap_or("");
+
+                        if first.starts_with("--") || first.is_empty() {
+                            // Show flags + agents
+                            let flag_filter = if first.starts_with("--") && rest.is_empty() && !first.contains(' ') {
+                                first
+                            } else {
+                                ""
+                            };
+                            let agent_filter = if first.starts_with("--") { rest } else { first };
+
+                            let mut items = Vec::new();
+
+                            // Add flag options if no flag selected yet or still filtering flags
+                            if !first.starts_with("--") || (first.starts_with("--") && rest.is_empty()) {
+                                let flags = [
+                                    ("--model", "change model"),
+                                    ("--make-pm", "set as project manager"),
+                                    ("--global", "apply globally"),
+                                ];
+                                for (flag, desc) in &flags {
+                                    if flag_filter.is_empty() || flag.starts_with(flag_filter) {
+                                        items.push(CompletionItem {
+                                            label: flag.to_string(),
+                                            description: desc.to_string(),
+                                            action: ItemAction::ReplaceFull(format!("/config {flag} ")),
+                                        });
+                                    }
+                                }
+                            }
+
+                            // Add agent list
+                            if let Some(ref a_tag) = state.current_project {
+                                let store = runtime.data_store();
+                                let store_ref = store.borrow();
+                                let agent_filter_lower = agent_filter.to_lowercase();
+                                items.extend(agent_completion_items(&store_ref, a_tag, &agent_filter_lower, None));
+                            }
+
+                            self.items = items;
+                        } else {
+                            // Bare agent filter (no flag prefix)
+                            if let Some(ref a_tag) = state.current_project {
+                                let store = runtime.data_store();
+                                let store_ref = store.borrow();
+                                self.items = agent_completion_items(&store_ref, a_tag, &filter, None);
+                            } else {
+                                self.items.clear();
+                            }
+                        }
+                    }
+                    "/model" | "/m" => {
+                        if let Some(ref a_tag) = state.current_project {
+                            let store = runtime.data_store();
+                            let store_ref = store.borrow();
+                            self.items = agent_completion_items(&store_ref, a_tag, &filter, None);
+                        } else {
+                            self.items.clear();
+                        }
+                    }
                     _ => {
                         self.items.clear();
                     }
@@ -1139,6 +1206,158 @@ impl CompletionMenu {
         let action = self.items[self.selected].action.clone();
         self.hide();
         Some(action)
+    }
+}
+
+// ─── Config Panel ───────────────────────────────────────────────────────────
+
+enum PanelMode {
+    Tools,
+    Model,
+}
+
+struct ConfigPanel {
+    active: bool,
+    mode: PanelMode,
+    agent_pubkey: String,
+    agent_name: String,
+    project_a_tag: String,
+    is_global: bool,
+    items: Vec<String>,
+    selected: HashSet<String>,
+    cursor: usize,
+    scroll_offset: usize,
+    origin_command: String,
+}
+
+impl ConfigPanel {
+    fn new() -> Self {
+        Self {
+            active: false,
+            mode: PanelMode::Tools,
+            agent_pubkey: String::new(),
+            agent_name: String::new(),
+            project_a_tag: String::new(),
+            is_global: false,
+            items: Vec::new(),
+            selected: HashSet::new(),
+            cursor: 0,
+            scroll_offset: 0,
+            origin_command: String::new(),
+        }
+    }
+
+    fn move_up(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            if self.cursor < self.scroll_offset {
+                self.scroll_offset = self.cursor;
+            }
+        }
+    }
+
+    fn move_down(&mut self) {
+        if !self.items.is_empty() && self.cursor < self.items.len() - 1 {
+            self.cursor += 1;
+            if self.cursor >= self.scroll_offset + 15 {
+                self.scroll_offset = self.cursor.saturating_sub(14);
+            }
+        }
+    }
+
+    fn toggle_current(&mut self) {
+        if let Some(item) = self.items.get(self.cursor) {
+            let item = item.clone();
+            if self.selected.contains(&item) {
+                self.selected.remove(&item);
+            } else {
+                self.selected.insert(item);
+            }
+        }
+    }
+
+    fn select_current(&mut self) {
+        if let Some(item) = self.items.get(self.cursor) {
+            self.selected.clear();
+            self.selected.insert(item.clone());
+        }
+    }
+
+    fn deactivate(&mut self) {
+        self.active = false;
+        self.items.clear();
+        self.selected.clear();
+        self.cursor = 0;
+        self.scroll_offset = 0;
+    }
+
+    fn save(&self, runtime: &CoreRuntime) -> String {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+
+        // Find the agent to read current values we're not changing
+        let agent = match store_ref
+            .get_project_status(&self.project_a_tag)
+            .and_then(|s| s.agents.iter().find(|a| a.pubkey == self.agent_pubkey))
+        {
+            Some(a) => a,
+            None => {
+                return format!("Agent {} no longer found in project status", self.agent_name);
+            }
+        };
+
+        let (model, tools, tags) = match self.mode {
+            PanelMode::Tools => {
+                let model = agent.model.clone();
+                let tools: Vec<String> = self.selected.iter().cloned().collect();
+                let tags: Vec<String> = if agent.is_pm {
+                    vec!["pm".to_string()]
+                } else {
+                    vec![]
+                };
+                (model, tools, tags)
+            }
+            PanelMode::Model => {
+                let model = self.selected.iter().next().cloned();
+                let tools = agent.tools.clone();
+                let tags: Vec<String> = if agent.is_pm {
+                    vec!["pm".to_string()]
+                } else {
+                    vec![]
+                };
+                (model, tools, tags)
+            }
+        };
+        drop(store_ref);
+
+        if self.is_global {
+            let _ = runtime.handle().send(NostrCommand::UpdateGlobalAgentConfig {
+                agent_pubkey: self.agent_pubkey.clone(),
+                model,
+                tools,
+                tags,
+            });
+        } else {
+            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
+                project_a_tag: self.project_a_tag.clone(),
+                agent_pubkey: self.agent_pubkey.clone(),
+                model,
+                tools,
+                tags,
+            });
+        }
+
+        match self.mode {
+            PanelMode::Tools => format!(
+                "Updated tools for {} ({})",
+                self.agent_name,
+                if self.is_global { "global" } else { "project" }
+            ),
+            PanelMode::Model => {
+                let model_name = self.selected.iter().next().map(|s| s.as_str()).unwrap_or("none");
+                format!("Set model for {} → {}", self.agent_name, model_name)
+            }
+        }
     }
 }
 
@@ -1375,6 +1594,7 @@ fn redraw_input(
     runtime: &CoreRuntime,
     editor: &LineEditor,
     completion: &mut CompletionMenu,
+    panel: &ConfigPanel,
 ) {
     let width = term_width() as usize;
 
@@ -1438,12 +1658,13 @@ fn redraw_input(
     }
 
     // ── Input line (dark background, full width) ──
-    let input_visible_len = PROMPT_PREFIX_WIDTH as usize + editor.buffer.chars().count();
+    let display_buffer = if panel.active { &panel.origin_command } else { &editor.buffer };
+    let input_visible_len = PROMPT_PREFIX_WIDTH as usize + display_buffer.chars().count();
     let input_total_rows = if width > 0 { input_visible_len.saturating_sub(1) / width + 1 } else { 1 };
     let last_row_chars = if width > 0 { ((input_visible_len.saturating_sub(1)) % width) + 1 } else { input_visible_len };
     let pad = width.saturating_sub(last_row_chars);
     write!(stdout, "\r\n{BG_INPUT}{WHITE_BOLD}  › {RESET}{BG_INPUT}{}{}{RESET}",
-        editor.buffer,
+        display_buffer,
         " ".repeat(pad),
     ).ok();
     completion.input_wrap_lines = (input_total_rows as u16).saturating_sub(1);
@@ -1475,8 +1696,67 @@ fn redraw_input(
         completion.attachment_indicator_lines = 0;
     }
 
-    // ── Completion menu (if visible, between input and bottom edge) ──
-    if completion.visible && !completion.items.is_empty() {
+    // ── Config panel or completion menu ──
+    if panel.active {
+        // Header
+        let header = match panel.mode {
+            PanelMode::Tools => format!("  Tools for {}", panel.agent_name),
+            PanelMode::Model => format!("  Model for {}", panel.agent_name),
+        };
+        let header_len = header.chars().count();
+        let header_pad = width.saturating_sub(header_len);
+        write!(stdout, "\r\n").ok();
+        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
+        write!(stdout, "{BG_INPUT}{WHITE_BOLD}{header}{}{RESET}", " ".repeat(header_pad)).ok();
+
+        // Items (scrollable, max 15 visible)
+        let max_visible = 15;
+        let visible_end = (panel.scroll_offset + max_visible).min(panel.items.len());
+        let visible_count = visible_end - panel.scroll_offset;
+        for i in panel.scroll_offset..visible_end {
+            let item = &panel.items[i];
+            let (marker, marker_len) = match panel.mode {
+                PanelMode::Tools => {
+                    if panel.selected.contains(item) {
+                        ("[x] ", 4)
+                    } else {
+                        ("[ ] ", 4)
+                    }
+                }
+                PanelMode::Model => {
+                    if panel.selected.contains(item) {
+                        ("(*) ", 4)
+                    } else {
+                        ("( ) ", 4)
+                    }
+                }
+            };
+            let text = format!("  {marker}{item}");
+            let text_len = 2 + marker_len + item.chars().count();
+            let item_pad = width.saturating_sub(text_len);
+            write!(stdout, "\r\n").ok();
+            queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
+            if i == panel.cursor {
+                write!(stdout, "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+            } else {
+                write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+            }
+        }
+
+        // Footer with keybinds
+        let footer = match panel.mode {
+            PanelMode::Tools => "  Space: toggle  Enter: save  Esc: cancel",
+            PanelMode::Model => "  Space/Enter: select  Esc: cancel",
+        };
+        let footer_len = footer.chars().count();
+        let footer_pad = width.saturating_sub(footer_len);
+        write!(stdout, "\r\n").ok();
+        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
+        write!(stdout, "{BG_INPUT}{DIM}{footer}{}{RESET}", " ".repeat(footer_pad)).ok();
+
+        // 1 header + items + 1 footer
+        completion.rendered_lines = (1 + visible_count + 1) as u16;
+    } else if completion.visible && !completion.items.is_empty() {
         let count = completion.items.len().min(12) as u16; // cap at 12 visible items
         for (i, item) in completion.items.iter().take(12).enumerate() {
             let label = &item.label;
@@ -1660,6 +1940,7 @@ fn print_above_input(
     runtime: &CoreRuntime,
     editor: &LineEditor,
     completion: &mut CompletionMenu,
+    panel: &ConfigPanel,
 ) {
     // Clear the entire input area
     clear_input_area(stdout, completion);
@@ -1672,7 +1953,7 @@ fn print_above_input(
     stdout.flush().ok();
 
     // Redraw input area
-    redraw_input(stdout, state, runtime, editor, completion);
+    redraw_input(stdout, state, runtime, editor, completion, panel);
 }
 
 // ─── Markdown Colorizer ─────────────────────────────────────────────────────
@@ -1958,15 +2239,18 @@ fn print_system_raw(msg: &str) -> String {
 fn print_help_raw() -> String {
     format!(
         "{WHITE_BOLD}Commands:{RESET}\n\
-         \x20 /project [name]      List projects or switch to one\n\
-         \x20 /agent [@project] [n]  List/switch agents (@ for other project)\n\
+         \x20 /project [name]       List projects or switch to one\n\
+         \x20 /agent [@project] [n] List/switch agents (@ for other project)\n\
          \x20 /new [agent@project]  Clear screen, new context\n\
          \x20 /conversations [@proj] Browse and open conversations\n\
+         \x20 /config [--model|--make-pm|--global] [agent]\n\
+         \x20                       Configure agent tools or model\n\
+         \x20 /model [agent]        Change agent model (shortcut)\n\
          \x20 /boot [name]          Boot an offline project\n\
-         \x20 /active              Active work across all projects\n\
-         \x20 /status              Show current context\n\
-         \x20 /help                Show this help\n\
-         \x20 /quit                Exit"
+         \x20 /active               Active work across all projects\n\
+         \x20 /status               Show current context\n\
+         \x20 /help                 Show this help\n\
+         \x20 /quit                 Exit"
     )
 }
 
@@ -2802,6 +3086,158 @@ enum CommandResult {
     ClearScreen(Vec<String>),
 }
 
+// ─── Config / Model Command Handlers ────────────────────────────────────────
+
+fn resolve_agent_for_config<'a>(
+    filter: &str,
+    state: &ReplState,
+    runtime: &'a CoreRuntime,
+    a_tag: &str,
+) -> Result<(String, String), String> {
+    // Returns (pubkey, name)
+    if filter.is_empty() {
+        // Use current agent
+        match (&state.current_agent, &state.current_agent_name) {
+            (Some(pk), Some(name)) => Ok((pk.clone(), name.clone())),
+            _ => Err("No current agent. Specify an agent or switch with /agent".to_string()),
+        }
+    } else {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        let agents: Vec<&ProjectAgent> = store_ref
+            .get_online_agents(a_tag)
+            .map(|a| a.iter().collect())
+            .unwrap_or_default();
+
+        let matched = if let Ok(idx) = filter.parse::<usize>() {
+            if idx == 0 { None } else { agents.get(idx - 1).copied() }
+        } else {
+            let lower = filter.to_lowercase();
+            agents.iter().find(|a| a.name.to_lowercase().contains(&lower)).copied()
+        };
+
+        match matched {
+            Some(agent) => Ok((agent.pubkey.clone(), agent.name.clone())),
+            None => Err(format!("No agent matching '{filter}'")),
+        }
+    }
+}
+
+fn handle_config_command(
+    arg: Option<&str>,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+    panel: &mut ConfigPanel,
+) -> CommandResult {
+    let raw = arg.unwrap_or("");
+
+    let Some(ref a_tag) = state.current_project else {
+        return CommandResult::Lines(vec![print_error_raw("Select a project first with /project")]);
+    };
+    let a_tag = a_tag.clone();
+
+    // Parse flags and agent filter from the argument
+    let mut is_model = false;
+    let mut is_make_pm = false;
+    let mut is_global = false;
+    let mut agent_filter = String::new();
+
+    for part in raw.split_whitespace() {
+        match part {
+            "--model" => is_model = true,
+            "--make-pm" => is_make_pm = true,
+            "--global" => is_global = true,
+            _ => agent_filter = part.to_string(),
+        }
+    }
+
+    // Resolve agent
+    let (agent_pubkey, agent_name) = match resolve_agent_for_config(&agent_filter, state, runtime, &a_tag) {
+        Ok(pair) => pair,
+        Err(msg) => return CommandResult::Lines(vec![print_error_raw(&msg)]),
+    };
+
+    // --make-pm: immediate action, no panel
+    if is_make_pm {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        let agent = store_ref
+            .get_project_status(&a_tag)
+            .and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
+        let model = agent.and_then(|a| a.model.clone());
+        let tools = agent.map(|a| a.tools.clone()).unwrap_or_default();
+        drop(store_ref);
+
+        if is_global {
+            let _ = runtime.handle().send(NostrCommand::UpdateGlobalAgentConfig {
+                agent_pubkey,
+                model,
+                tools,
+                tags: vec!["pm".to_string()],
+            });
+        } else {
+            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
+                project_a_tag: a_tag,
+                agent_pubkey,
+                model,
+                tools,
+                tags: vec!["pm".to_string()],
+            });
+        }
+        return CommandResult::Lines(vec![print_system_raw(&format!("Set {} as project manager", agent_name))]);
+    }
+
+    // Populate panel
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    let status = store_ref.get_project_status(&a_tag);
+
+    let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
+
+    if is_model {
+        panel.mode = PanelMode::Model;
+        panel.items = status.map(|s| s.models().iter().map(|m| m.to_string()).collect()).unwrap_or_default();
+        panel.selected.clear();
+        if let Some(model) = agent.and_then(|a| a.model.as_ref()) {
+            panel.selected.insert(model.clone());
+        }
+    } else {
+        panel.mode = PanelMode::Tools;
+        panel.items = status.map(|s| s.all_tools().iter().map(|t| t.to_string()).collect()).unwrap_or_default();
+        panel.selected = agent.map(|a| a.tools.iter().cloned().collect()).unwrap_or_default();
+    }
+
+    if panel.items.is_empty() {
+        drop(store_ref);
+        let what = if is_model { "models" } else { "tools" };
+        return CommandResult::Lines(vec![print_error_raw(&format!("No {what} available for this project"))]);
+    }
+
+    panel.active = true;
+    panel.agent_pubkey = agent_pubkey;
+    panel.agent_name = agent_name;
+    panel.project_a_tag = a_tag;
+    panel.is_global = is_global;
+    panel.cursor = 0;
+    panel.scroll_offset = 0;
+    panel.origin_command = format!("/config{}", if raw.is_empty() { String::new() } else { format!(" {raw}") });
+
+    CommandResult::Lines(vec![])
+}
+
+fn handle_model_command(
+    arg: Option<&str>,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+    panel: &mut ConfigPanel,
+) -> CommandResult {
+    let combined = match arg {
+        Some(a) if !a.is_empty() => format!("--model {a}"),
+        _ => "--model".to_string(),
+    };
+    handle_config_command(Some(&combined), state, runtime, panel)
+}
+
 // ─── Event Handlers ─────────────────────────────────────────────────────────
 
 fn handle_core_event(event: &CoreEvent, state: &mut ReplState, runtime: &CoreRuntime) -> Option<String> {
@@ -2971,6 +3407,7 @@ fn handle_clipboard_paste(
     state: &ReplState,
     runtime: &CoreRuntime,
     completion: &mut CompletionMenu,
+    panel: &ConfigPanel,
 ) {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
@@ -2982,13 +3419,13 @@ fn handle_clipboard_paste(
             Ok(data) => data,
             Err(e) => {
                 let msg = print_error_raw(&format!("Failed to convert image: {}", e));
-                print_above_input(stdout, &msg, state, runtime, editor, completion);
+                print_above_input(stdout, &msg, state, runtime, editor, completion, panel);
                 return;
             }
         };
 
         let msg = print_system_raw("Uploading image...");
-        print_above_input(stdout, &msg, state, runtime, editor, completion);
+        print_above_input(stdout, &msg, state, runtime, editor, completion, panel);
 
         let keys = keys.clone();
         let tx = upload_tx;
@@ -3003,10 +3440,10 @@ fn handle_clipboard_paste(
     } else if let Ok(text) = clipboard.get_text() {
         if !try_upload_image_file(&text, keys, upload_tx) {
             editor.handle_paste(&text);
-            redraw_input(stdout, state, runtime, editor, completion);
+            redraw_input(stdout, state, runtime, editor, completion, panel);
         } else {
             let msg = print_system_raw("Uploading image...");
-            print_above_input(stdout, &msg, state, runtime, editor, completion);
+            print_above_input(stdout, &msg, state, runtime, editor, completion, panel);
         }
     }
 }
@@ -3034,6 +3471,7 @@ async fn run_repl(
     let mut stdout = io::stdout();
     let mut editor = LineEditor::new();
     let mut completion = CompletionMenu::new();
+    let mut panel = ConfigPanel::new();
     let mut events = EventStream::new();
     let (upload_tx, mut upload_rx) = tokio::sync::mpsc::channel::<UploadResult>(8);
 
@@ -3048,7 +3486,7 @@ async fn run_repl(
     // Auto-select the first online project (if any)
     auto_select_project(state, runtime);
 
-    redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
 
     let mut tick = tokio::time::interval(tokio::time::Duration::from_millis(50));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -3065,14 +3503,14 @@ async fn run_repl(
                         // Check if it's an image file path (terminal drag-drop)
                         if try_upload_image_file(&text, keys, upload_tx.clone()) {
                             let msg = print_system_raw("Uploading image...");
-                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel);
                         } else {
                             editor.handle_paste(&text);
                             if editor.has_attachments() {
                                 let msg = format!("{DIM}(pasted as text attachment){RESET}");
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel);
                             } else {
-                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                             }
                         }
                         continue;
@@ -3097,7 +3535,7 @@ async fn run_repl(
                                 store_ref.add_approved_backend(&backend_pk);
                                 drop(store_ref);
                                 let msg = print_system_raw(&format!("Approved backend: {}", name));
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel);
                                 continue;
                             }
                             KeyCode::Char('b') | KeyCode::Char('n') => {
@@ -3106,7 +3544,7 @@ async fn run_repl(
                                 store_ref.add_blocked_backend(&backend_pk);
                                 drop(store_ref);
                                 let msg = print_system_raw(&format!("Blocked backend: {}", name));
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel);
                                 continue;
                             }
                             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
@@ -3119,6 +3557,43 @@ async fn run_repl(
                             }
                         }
                     }
+                }
+
+                // ── Config panel keyboard intercept ──
+                if panel.active {
+                    match code {
+                        KeyCode::Up => panel.move_up(),
+                        KeyCode::Down => panel.move_down(),
+                        KeyCode::Char(' ') => {
+                            match panel.mode {
+                                PanelMode::Tools => panel.toggle_current(),
+                                PanelMode::Model => {
+                                    panel.select_current();
+                                    let msg = panel.save(runtime);
+                                    panel.deactivate();
+                                    print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel);
+                                    continue;
+                                }
+                            }
+                        }
+                        KeyCode::Enter => {
+                            let msg = panel.save(runtime);
+                            panel.deactivate();
+                            print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel);
+                            continue;
+                        }
+                        KeyCode::Esc => {
+                            panel.deactivate();
+                        }
+                        KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                            raw_println!();
+                            raw_println!("{}", print_system_raw("Goodbye."));
+                            return Ok(());
+                        }
+                        _ => {} // swallow other keys
+                    }
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
+                    continue;
                 }
 
                 match (code, modifiers) {
@@ -3137,7 +3612,7 @@ async fn run_repl(
                                     ItemAction::ReplaceFull(text) => {
                                         editor.set_buffer(&text);
                                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                                         continue;
                                     }
                                     ItemAction::Submit(value) => {
@@ -3164,7 +3639,7 @@ async fn run_repl(
                             raw_println!();
 
                             if line.trim().is_empty() {
-                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                                 continue;
                             }
 
@@ -3178,6 +3653,8 @@ async fn run_repl(
                                     "/agent" | "/a" => CommandResult::Lines(handle_agent_command(arg, state, runtime)),
                                     "/new" | "/n" => handle_new_command(arg.unwrap_or(""), state, runtime),
                                     "/conversations" | "/c" | "/open" | "/o" => handle_open_command(arg, state, runtime),
+                                    "/config" => handle_config_command(arg, state, runtime, &mut panel),
+                                    "/model" | "/m" => handle_model_command(arg, state, runtime, &mut panel),
                                     "/active" => handle_active_command(arg, state, runtime),
                                     "/boot" | "/b" => CommandResult::Lines(handle_boot_command(arg, runtime)),
                                     "/status" | "/s" => CommandResult::Lines(handle_status_command(state, runtime)),
@@ -3198,13 +3675,13 @@ async fn run_repl(
                                         raw_println!("{}", l);
                                     }
                                     if !state.streaming_in_progress {
-                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                                     }
                                 }
                                 CommandResult::ShowCompletion(buf) => {
                                     editor.set_buffer(&buf);
                                     completion.update_from_buffer(&editor.buffer, state, runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                                 }
                                 CommandResult::ClearScreen(lines) => {
                                     execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
@@ -3217,7 +3694,7 @@ async fn run_repl(
                                     for l in &lines {
                                         raw_println!("{}", l);
                                     }
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                                 }
                             }
                         }
@@ -3241,7 +3718,7 @@ async fn run_repl(
                                 }
                             }
                             completion.select_next();
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         } else if editor.buffer.starts_with('/') || editor.buffer.starts_with('@') {
                             completion.update_from_buffer(&editor.buffer, state, runtime);
                             // Apply first match immediately
@@ -3261,7 +3738,7 @@ async fn run_repl(
                                 }
                                 completion.select_next();
                             }
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         }
                     }
 
@@ -3280,7 +3757,7 @@ async fn run_repl(
                                     editor.set_buffer(&format!("{cmd} {value}"));
                                 }
                             }
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         }
                     }
 
@@ -3288,10 +3765,10 @@ async fn run_repl(
                     (KeyCode::Esc, _) => {
                         if editor.selected_attachment.is_some() {
                             editor.selected_attachment = None;
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         } else if completion.visible {
                             completion.hide();
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         }
                     }
 
@@ -3304,7 +3781,7 @@ async fn run_repl(
                         } else {
                             editor.history_up();
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Down arrow
@@ -3313,13 +3790,13 @@ async fn run_repl(
                             && editor.cursor == editor.buffer.len() && editor.has_attachments()
                         {
                             editor.selected_attachment = Some(0);
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         } else if completion.visible {
                             completion.select_next();
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         } else {
                             editor.history_down();
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                         }
                     }
 
@@ -3333,7 +3810,7 @@ async fn run_repl(
                             editor.delete_back();
                         }
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Delete
@@ -3344,7 +3821,7 @@ async fn run_repl(
                             editor.delete_forward();
                         }
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Left
@@ -3354,7 +3831,7 @@ async fn run_repl(
                         } else {
                             editor.move_left();
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Right
@@ -3365,48 +3842,48 @@ async fn run_repl(
                         } else {
                             editor.move_right();
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Home / Ctrl+A
                     (KeyCode::Home, _) => {
                         editor.move_home();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
                     (KeyCode::Char('a'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_home();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // End / Ctrl+E
                     (KeyCode::End, _) => {
                         editor.move_end();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
                     (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_end();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+W → delete word back
                     (KeyCode::Char('w'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.delete_word_back();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+U → clear line
                     (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.set_buffer("");
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+K → kill to end of line
                     (KeyCode::Char('k'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.kill_to_end();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+D → delete forward (or quit on empty)
@@ -3418,19 +3895,19 @@ async fn run_repl(
                         }
                         editor.delete_forward();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+B → move left
                     (KeyCode::Char('b'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_left();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+F → move right
                     (KeyCode::Char('f'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_right();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+L → clear screen
@@ -3439,41 +3916,41 @@ async fn run_repl(
                         completion.input_area_drawn = false;
                         let (_, rows) = terminal::size().unwrap_or((80, 24));
                         execute!(stdout, cursor::MoveTo(0, rows.saturating_sub(5))).ok();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Alt+B / Alt+Left → word left
                     (KeyCode::Char('b'), m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_left();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
                     (KeyCode::Left, m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_left();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Alt+F / Alt+Right → word right
                     (KeyCode::Char('f'), m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_right();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
                     (KeyCode::Right, m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_right();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Alt+D → delete word forward
                     (KeyCode::Char('d'), m) if m.contains(KeyModifiers::ALT) => {
                         editor.delete_word_forward();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Alt+Backspace → delete word back
                     (KeyCode::Backspace, m) if m.contains(KeyModifiers::ALT) => {
                         editor.delete_word_back();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Regular character
@@ -3481,12 +3958,12 @@ async fn run_repl(
                         editor.selected_attachment = None;
                         editor.insert_char(c);
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                     }
 
                     // Ctrl+V → clipboard paste (image or text)
                     (KeyCode::Char('v'), m) if m.contains(KeyModifiers::CONTROL) => {
-                        handle_clipboard_paste(&mut editor, keys, upload_tx.clone(), &mut stdout, state, runtime, &mut completion);
+                        handle_clipboard_paste(&mut editor, keys, upload_tx.clone(), &mut stdout, state, runtime, &mut completion, &panel);
                     }
 
                     _ => {}
@@ -3502,11 +3979,11 @@ async fn run_repl(
                     UploadResult::Success(url) => {
                         let id = editor.add_image_attachment(url);
                         let msg = print_system_raw(&format!("Image uploaded → [Image #{}]", id));
-                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel);
                     }
                     UploadResult::Error(err) => {
                         let msg = print_error_raw(&format!("Image upload failed: {}", err));
-                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel);
                     }
                 }
             }
@@ -3521,25 +3998,25 @@ async fn run_repl(
                                         // During streaming, just print raw
                                         raw_println!("{}", text);
                                     } else {
-                                        print_above_input(&mut stdout, &text, state, runtime, &editor, &mut completion);
+                                        print_above_input(&mut stdout, &text, state, runtime, &editor, &mut completion, &panel);
                                     }
                                 }
                             }
                         }
                         Err(e) => {
                             let msg = print_error_raw(&format!("Event processing error: {e}"));
-                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel);
                         }
                     }
                 }
             }
 
             _ = tick.tick() => {
-                drain_data_changes(data_rx, state, runtime, &mut stdout, &editor, &mut completion);
+                drain_data_changes(data_rx, state, runtime, &mut stdout, &editor, &mut completion, &mut panel);
                 state.wave_frame = state.wave_frame.wrapping_add(1);
                 let agents_active = state.has_active_agents(runtime);
                 if (state.is_animating() || agents_active) && !state.streaming_in_progress {
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel);
                 }
             }
         }
@@ -3555,6 +4032,7 @@ fn drain_data_changes(
     stdout: &mut Stdout,
     editor: &LineEditor,
     completion: &mut CompletionMenu,
+    panel: &mut ConfigPanel,
 ) {
     loop {
         match data_rx.try_recv() {
@@ -3572,6 +4050,11 @@ fn drain_data_changes(
                     if !state.streaming_in_progress {
                         state.streaming_in_progress = true;
                         state.stream_buffer.clear();
+
+                        // Auto-close config panel when streaming starts
+                        if panel.active {
+                            panel.deactivate();
+                        }
 
                         // Clear input area
                         clear_input_area(stdout, completion);
@@ -3637,7 +4120,7 @@ fn drain_data_changes(
                     state.streaming_in_progress = false;
                     state.stream_buffer.clear();
 
-                    redraw_input(stdout, state, runtime, editor, completion);
+                    redraw_input(stdout, state, runtime, editor, completion, panel);
                 }
             }
             Ok(DataChange::ProjectStatus { json }) => {
@@ -3666,7 +4149,7 @@ fn drain_data_changes(
                 }
 
                 if needs_redraw && !state.streaming_in_progress {
-                    redraw_input(stdout, state, runtime, editor, completion);
+                    redraw_input(stdout, state, runtime, editor, completion, panel);
                 }
             }
             Ok(_) => {}
