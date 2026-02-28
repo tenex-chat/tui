@@ -289,7 +289,6 @@ struct FullConversationSheet: View {
     @State private var selectedDelegation: String?
     @State private var showComposer = false
     @State private var currentUserPubkey: String?
-    @State private var lastStreamingAutoScrollAt: CFAbsoluteTime = 0
     @State private var visibleMessageLimit = 240
 
     private let bottomAnchorId = "full-conversation-bottom"
@@ -443,15 +442,11 @@ struct FullConversationSheet: View {
                             .id(message.id)
                         }
 
-                        if let buffer = coreManager.streamingBuffers[conversation.thread.id] {
-                            StreamingMessageRow(
-                                buffer: buffer,
-                                isConsecutive: messages.last?.pubkey == buffer.agentPubkey,
-                                agentName: coreManager.displayName(for: buffer.agentPubkey)
-                            )
-                            .environment(coreManager)
-                            .id("streaming-row")
-                        }
+                        FullConversationStreamingSection(
+                            conversationId: conversation.thread.id,
+                            lastMessagePubkey: messages.last?.pubkey,
+                            scrollProxy: proxy
+                        )
                     }
                     .padding()
                     .padding(.bottom, isEmbedded ? 12 : 80)
@@ -489,11 +484,6 @@ struct FullConversationSheet: View {
                         }
                     }
                 }
-                .onChange(of: coreManager.streamingBuffers[conversation.thread.id]?.text.count) { _, _ in
-                    DispatchQueue.main.async {
-                        maybeScrollToStreamingRow(with: proxy)
-                    }
-                }
             }
             .background(transcriptBackdropColor)
 
@@ -526,18 +516,6 @@ struct FullConversationSheet: View {
             }
         }
         #endif
-    }
-
-    private func maybeScrollToStreamingRow(with proxy: ScrollViewProxy) {
-        let now = CFAbsoluteTimeGetCurrent()
-        guard now - lastStreamingAutoScrollAt >= 0.10 else { return }
-        lastStreamingAutoScrollAt = now
-
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            proxy.scrollTo("streaming-row", anchor: .bottom)
-        }
     }
 
     private func loadOlderMessages() {
@@ -665,6 +643,44 @@ extension ConversationFullInfo {
         let parts = projectATag.split(separator: ":", omittingEmptySubsequences: false)
         guard parts.count >= 3 else { return "" }
         return parts.dropFirst(2).joined(separator: ":")
+    }
+}
+
+/// Isolated streaming buffer rendering for FullConversationSheet.
+/// Prevents coreManager.streamingBuffers observation from triggering
+/// re-evaluation of the parent view's ForEach over all message rows.
+private struct FullConversationStreamingSection: View {
+    let conversationId: String
+    let lastMessagePubkey: String?
+    let scrollProxy: ScrollViewProxy
+    @Environment(TenexCoreManager.self) private var coreManager
+    @State private var lastScrollAt: CFAbsoluteTime = 0
+
+    var body: some View {
+        if let buffer = coreManager.streamingBuffers[conversationId] {
+            StreamingMessageRow(
+                buffer: buffer,
+                isConsecutive: lastMessagePubkey == buffer.agentPubkey,
+                agentName: coreManager.displayName(for: buffer.agentPubkey)
+            )
+            .environment(coreManager)
+            .id("streaming-row")
+            .onChange(of: buffer.text.count) { _, _ in
+                maybeScrollToStreamingRow()
+            }
+        }
+    }
+
+    private func maybeScrollToStreamingRow() {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastScrollAt >= 0.10 else { return }
+        lastScrollAt = now
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            scrollProxy.scrollTo("streaming-row", anchor: .bottom)
+        }
     }
 }
 
