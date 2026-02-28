@@ -2,10 +2,10 @@ use std::collections::HashSet;
 use std::io::{Stdout, Write};
 use crossterm::{cursor, execute, queue};
 use crossterm::terminal::{self, ClearType};
-use crate::{DIM, YELLOW, WHITE_BOLD, RED, RESET, BG_INPUT, BG_HIGHLIGHT};
+use crate::{DIM, ACCENT, WHITE_BOLD, RED, RESET, BG_INPUT, BG_HIGHLIGHT};
 use crate::editor::{LineEditor, AttachmentKind};
 use crate::completion::CompletionMenu;
-use crate::panels::{ConfigPanel, PanelMode, StatusBarNav, StatsTab, StatsPanel, DelegationEntry, Q_TAG_DELEGATION_DENYLIST};
+use crate::panels::{ConfigPanel, PanelMode, StatusBarNav, StatsTab, StatsPanel, DelegationEntry, Q_TAG_DELEGATION_DENYLIST, NudgeSkillPanel, NudgeSkillMode};
 use crate::state::ReplState;
 use crate::util::{term_width, thread_display_name, format_runtime, PROMPT_PREFIX_WIDTH, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER};
 use tenex_core::runtime::CoreRuntime;
@@ -358,6 +358,7 @@ pub(crate) fn redraw_input(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
+    nudge_skill_panel: &NudgeSkillPanel,
 ) {
     let width = term_width() as usize;
 
@@ -385,7 +386,7 @@ pub(crate) fn redraw_input(
         });
         drop(store_ref);
         if let Some((name, short_pk)) = pending_info {
-            let prompt = format!("  New backend: {YELLOW}{name}{RESET}{BG_INPUT}{DIM} ({short_pk}…){RESET}{BG_INPUT}  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[b]{RESET}{BG_INPUT}lock");
+            let prompt = format!("  New backend: {ACCENT}{name}{RESET}{BG_INPUT}{DIM} ({short_pk}…){RESET}{BG_INPUT}  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[b]{RESET}{BG_INPUT}lock");
             let visible_len = 2 + "New backend: ".len() + name.len() + 2 + short_pk.len() + 2 + 2 + "[a]pprove  [b]lock".len();
             let prompt_pad = width.saturating_sub(visible_len);
             write!(stdout, "\r\n{BG_INPUT}{prompt}{}{RESET}", " ".repeat(prompt_pad)).ok();
@@ -420,20 +421,88 @@ pub(crate) fn redraw_input(
         }
     }
 
+    // ── Bunker approval prompt (replaces normal input when pending) ──
+    if let Some(req) = state.pending_bunker_requests.front() {
+        let short_pk = if req.requester_pubkey.len() >= 12 {
+            req.requester_pubkey[..12].to_string()
+        } else {
+            req.requester_pubkey.clone()
+        };
+        let kind_str = req.event_kind.map(|k| format!("kind:{k}")).unwrap_or_else(|| "unknown".to_string());
+        let content_preview = req.event_content.as_deref().unwrap_or("").chars().take(40).collect::<String>();
+
+        let line1 = format!("  {ACCENT}Bunker sign request{RESET}{BG_INPUT} from {DIM}{short_pk}…{RESET}{BG_INPUT}  {kind_str}");
+        let line1_plain = 2 + "Bunker sign request".len() + " from ".len() + short_pk.len() + 1 + 2 + kind_str.len();
+        let line1_pad = width.saturating_sub(line1_plain);
+        write!(stdout, "\r\n{BG_INPUT}{line1}{}{RESET}", " ".repeat(line1_pad)).ok();
+
+        if !content_preview.is_empty() {
+            let line2 = format!("  {DIM}\"{content_preview}\"{RESET}{BG_INPUT}");
+            let line2_plain = 2 + 1 + content_preview.chars().count() + 1;
+            let line2_pad = width.saturating_sub(line2_plain);
+            write!(stdout, "\r\n{BG_INPUT}{line2}{}{RESET}", " ".repeat(line2_pad)).ok();
+        }
+
+        let prompt = format!("  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[A]{RESET}{BG_INPUT}lways  {WHITE_BOLD}[r]{RESET}{BG_INPUT}eject");
+        let prompt_plain = 2 + "[a]pprove  [A]lways  [r]eject".len();
+        let prompt_pad = width.saturating_sub(prompt_plain);
+        write!(stdout, "\r\n{BG_INPUT}{prompt}{}{RESET}", " ".repeat(prompt_pad)).ok();
+
+        completion.input_wrap_lines = 0;
+        completion.attachment_indicator_lines = 0;
+        completion.rendered_lines = 0;
+
+        write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
+        let (status_text, status_plain_width) = state.status_bar_text(runtime);
+        let (rt_ms, rt_active, rt_count) = {
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            store_ref.get_statusbar_runtime_ms()
+        };
+        let (rt_ansi, rt_plain_width) =
+            build_runtime_indicator(rt_ms, rt_active, rt_count, state.wave_frame);
+        let left_used = 3 + status_plain_width;
+        let gap = width.saturating_sub(left_used + rt_plain_width);
+        write!(
+            stdout,
+            "\r\n{DIM}   {status_text}{RESET}{}{rt_ansi}",
+            " ".repeat(gap)
+        )
+        .ok();
+
+        let lines_for_content = if content_preview.is_empty() { 2 } else { 3 };
+        queue!(stdout, cursor::MoveUp(lines_for_content + 1)).ok();
+        queue!(stdout, cursor::MoveToColumn(prompt_plain as u16)).ok();
+        stdout.flush().ok();
+        completion.cursor_row = 0;
+        completion.input_area_drawn = true;
+        return;
+    }
+
     // ── Input line (dark background, full width) ──
     let display_buffer = if panel.active { &panel.origin_command } else { &editor.buffer };
-    let input_visible_len = PROMPT_PREFIX_WIDTH as usize + display_buffer.chars().count();
+    let (prompt_str, prompt_width) = if state.search_mode {
+        if state.search_all_projects {
+            (format!("{WHITE_BOLD}  \u{27f2} all:{RESET}{BG_INPUT} "), 9)
+        } else {
+            (format!("{WHITE_BOLD}  \u{27f2} {RESET}{BG_INPUT}"), 4)
+        }
+    } else {
+        (format!("{WHITE_BOLD}  \u{203a} {RESET}{BG_INPUT}"), PROMPT_PREFIX_WIDTH as usize)
+    };
+    let input_visible_len = prompt_width + display_buffer.chars().count();
     let input_total_rows = if width > 0 { input_visible_len.saturating_sub(1) / width + 1 } else { 1 };
     let last_row_chars = if width > 0 { ((input_visible_len.saturating_sub(1)) % width) + 1 } else { input_visible_len };
     let pad = width.saturating_sub(last_row_chars);
-    write!(stdout, "\r\n{BG_INPUT}{WHITE_BOLD}  › {RESET}{BG_INPUT}{}{}{RESET}",
+    write!(stdout, "\r\n{BG_INPUT}{prompt_str}{}{}{RESET}",
         display_buffer,
         " ".repeat(pad),
     ).ok();
     completion.input_wrap_lines = (input_total_rows as u16).saturating_sub(1);
 
-    // ── Attachment strip (below input, if attachments exist) ──
-    if editor.has_attachments() {
+    // ── Attachment strip (below input, if attachments or selected nudges/skills exist) ──
+    let has_nudge_skill_chips = !state.selected_nudge_ids.is_empty() || !state.selected_skill_ids.is_empty();
+    if editor.has_attachments() || has_nudge_skill_chips {
         write!(stdout, "\r\n{BG_INPUT}  📎 ").ok();
         let mut strip_chars: usize = 5;
         for (i, att) in editor.attachments.iter().enumerate() {
@@ -452,6 +521,29 @@ pub(crate) fn redraw_input(
             }
             strip_chars += 2 + label.len() + 1;
         }
+        // Nudge/skill chips
+        {
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            for nid in &state.selected_nudge_ids {
+                let title = store_ref.content.get_nudges().iter()
+                    .find(|n| n.id == *nid)
+                    .map(|n| n.title.as_str())
+                    .unwrap_or("nudge");
+                let chip = format!("[${}]", title);
+                write!(stdout, " {ACCENT}{chip}{RESET}{BG_INPUT}").ok();
+                strip_chars += 1 + chip.chars().count();
+            }
+            for sid in &state.selected_skill_ids {
+                let title = store_ref.content.get_skills().iter()
+                    .find(|s| s.id == *sid)
+                    .map(|s| s.title.as_str())
+                    .unwrap_or("skill");
+                let chip = format!("[${}]", title);
+                write!(stdout, " {ACCENT}{chip}{RESET}{BG_INPUT}").ok();
+                strip_chars += 1 + chip.chars().count();
+            }
+        }
         let strip_pad = width.saturating_sub(strip_chars);
         write!(stdout, "{}{RESET}", " ".repeat(strip_pad)).ok();
         completion.attachment_indicator_lines = 1;
@@ -461,9 +553,24 @@ pub(crate) fn redraw_input(
 
     // ── Config panel or completion menu ──
     if panel.active {
+        // Header per mode
         let header = match panel.mode {
             PanelMode::Tools => format!("  Tools for {}", panel.agent_name),
-            PanelMode::Model => format!("  Model for {}", panel.agent_name),
+            PanelMode::AgentSelect => {
+                if panel.filter.is_empty() {
+                    "  Select agent".to_string()
+                } else {
+                    format!("  Select agent ({})", panel.filter)
+                }
+            }
+            PanelMode::FlagSelect => "  Options".to_string(),
+            PanelMode::ModelSelect => {
+                if panel.filter.is_empty() {
+                    format!("  Model for {}", panel.agent_name)
+                } else {
+                    format!("  Model for {} ({})", panel.agent_name, panel.filter)
+                }
+            }
         };
         let header_len = header.chars().count();
         let header_pad = width.saturating_sub(header_len);
@@ -471,43 +578,117 @@ pub(crate) fn redraw_input(
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
         write!(stdout, "{BG_INPUT}{WHITE_BOLD}{header}{}{RESET}", " ".repeat(header_pad)).ok();
 
+        // Items list — use filtered_items() for the visible subset
+        let filtered = panel.filtered_items();
         let max_visible = 15;
-        let visible_end = (panel.scroll_offset + max_visible).min(panel.items.len());
-        let visible_count = visible_end - panel.scroll_offset;
-        for i in panel.scroll_offset..visible_end {
-            let item = &panel.items[i];
+        let visible_end = (panel.scroll_offset + max_visible).min(filtered.len());
+        let visible_count = visible_end.saturating_sub(panel.scroll_offset);
+
+        for fi in panel.scroll_offset..visible_end {
+            let (_orig_idx, item) = filtered[fi];
+
+            // Per-mode markers
             let (marker, marker_len) = match panel.mode {
                 PanelMode::Tools => {
-                    if panel.selected.contains(item) {
+                    if panel.tools_selected.contains(item.as_str()) {
                         ("[x] ", 4)
                     } else {
                         ("[ ] ", 4)
                     }
                 }
-                PanelMode::Model => {
-                    if panel.selected.contains(item) {
-                        ("(*) ", 4)
+                PanelMode::AgentSelect => ("", 0),
+                PanelMode::FlagSelect => ("", 0), // markers are baked into item text
+                PanelMode::ModelSelect => {
+                    let is_selected = panel.pending_model.as_deref() == Some(item.as_str());
+                    if is_selected {
+                        (concat!("(*) "), 4)
                     } else {
                         ("( ) ", 4)
                     }
                 }
             };
+
             let text = format!("  {marker}{item}");
             let text_len = 2 + marker_len + item.chars().count();
             let item_pad = width.saturating_sub(text_len);
             write!(stdout, "\r\n").ok();
             queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-            if i == panel.cursor {
+            if fi == panel.cursor {
                 write!(stdout, "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
             } else {
                 write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
             }
         }
 
+        // Footer per mode
         let footer = match panel.mode {
-            PanelMode::Tools => "  Space: toggle  Enter: save  Esc: cancel",
-            PanelMode::Model => "  Space/Enter: select  Esc: cancel",
+            PanelMode::Tools => "  Space: toggle  @: agent  -: options  Enter: save  Esc: cancel",
+            PanelMode::AgentSelect => "  Enter: select  Type to filter  Esc: back",
+            PanelMode::FlagSelect => "  Enter: select  Esc: back",
+            PanelMode::ModelSelect => "  Enter: select  Type to filter  Esc: back",
         };
+        let footer_len = footer.chars().count();
+        let footer_pad = width.saturating_sub(footer_len);
+        write!(stdout, "\r\n").ok();
+        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
+        write!(stdout, "{BG_INPUT}{DIM}{footer}{}{RESET}", " ".repeat(footer_pad)).ok();
+
+        completion.rendered_lines = (1 + visible_count + 1) as u16;
+    } else if nudge_skill_panel.active {
+        // Header with mode label + filter
+        let mode_label = match nudge_skill_panel.mode {
+            NudgeSkillMode::Nudges => "Nudges",
+            NudgeSkillMode::Skills => "Skills",
+        };
+        let other_label = match nudge_skill_panel.mode {
+            NudgeSkillMode::Nudges => "Skills",
+            NudgeSkillMode::Skills => "Nudges",
+        };
+        let header = if nudge_skill_panel.filter.is_empty() {
+            format!("  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}")
+        } else {
+            format!("  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}  filter: {}", nudge_skill_panel.filter)
+        };
+        let header_plain = 2 + mode_label.len() + 2 + 2 + other_label.len() + 1
+            + if nudge_skill_panel.filter.is_empty() { 0 } else { 10 + nudge_skill_panel.filter.len() };
+        let header_pad = width.saturating_sub(header_plain);
+        write!(stdout, "\r\n").ok();
+        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
+        write!(stdout, "{BG_INPUT}{header}{}{RESET}", " ".repeat(header_pad)).ok();
+
+        // Items list
+        let filtered = nudge_skill_panel.filtered_items();
+        let max_visible = 15;
+        let visible_end = (nudge_skill_panel.scroll_offset + max_visible).min(filtered.len());
+        let visible_count = visible_end.saturating_sub(nudge_skill_panel.scroll_offset);
+
+        for fi in nudge_skill_panel.scroll_offset..visible_end {
+            let (_, item) = &filtered[fi];
+            let marker = if nudge_skill_panel.selected_ids.contains(&item.id) {
+                "[x] "
+            } else {
+                "[ ] "
+            };
+            let desc_preview = if item.description.is_empty() {
+                String::new()
+            } else {
+                let short: String = item.description.chars().take(30).collect();
+                format!(" {DIM}— {short}{RESET}")
+            };
+            let text = format!("  {marker}{}{desc_preview}", item.title);
+            let text_plain = 2 + 4 + item.title.chars().count()
+                + if item.description.is_empty() { 0 } else { 3 + item.description.chars().take(30).count() };
+            let item_pad = width.saturating_sub(text_plain);
+            write!(stdout, "\r\n").ok();
+            queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
+            if fi == nudge_skill_panel.cursor {
+                write!(stdout, "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+            } else {
+                write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+            }
+        }
+
+        let footer = "  Space: toggle  Tab: switch  Enter: confirm  Esc: cancel";
         let footer_len = footer.chars().count();
         let footer_pad = width.saturating_sub(footer_len);
         write!(stdout, "\r\n").ok();
@@ -630,7 +811,12 @@ pub(crate) fn redraw_input(
 
     // ── Position cursor back on input line ──
     let lines_below = completion.attachment_indicator_lines + completion.rendered_lines + 2;
-    let cursor_char_pos = PROMPT_PREFIX_WIDTH as usize + editor.buffer[..editor.cursor].chars().count();
+    let cursor_char_pos = if state.search_mode {
+        let pw = if state.search_all_projects { 9 } else { 4 };
+        pw + editor.buffer[..editor.cursor].chars().count()
+    } else {
+        PROMPT_PREFIX_WIDTH as usize + editor.buffer[..editor.cursor].chars().count()
+    };
     let cursor_row = if width > 0 && cursor_char_pos > 0 { (cursor_char_pos - 1) / width } else { 0 };
     let wrap_lines_after_cursor = (completion.input_wrap_lines as usize).saturating_sub(cursor_row);
     queue!(stdout, cursor::MoveUp(lines_below + wrap_lines_after_cursor as u16)).ok();
@@ -679,7 +865,10 @@ pub(crate) fn apply_clear_screen(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
+    nudge_skill_panel: &NudgeSkillPanel,
 ) {
+    state.search_mode = false;
+    state.search_all_projects = false;
     execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
     completion.input_area_drawn = false;
     let (_, rows) = terminal::size().unwrap_or((80, 24));
@@ -693,7 +882,7 @@ pub(crate) fn apply_clear_screen(
     }
     stdout.flush().ok();
     update_delegation_bar(state, runtime);
-    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel);
+    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
 }
 
 /// Print text above the input area, then redraw the input area.
@@ -707,6 +896,7 @@ pub(crate) fn print_above_input(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
+    nudge_skill_panel: &NudgeSkillPanel,
 ) {
     clear_input_area(stdout, completion);
     completion.input_area_drawn = false;
@@ -716,5 +906,5 @@ pub(crate) fn print_above_input(
     }
     stdout.flush().ok();
 
-    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel);
+    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
 }

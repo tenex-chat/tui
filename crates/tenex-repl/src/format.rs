@@ -1,7 +1,7 @@
 use chrono::Local;
-use crate::{DIM, GREEN, YELLOW, WHITE_BOLD, BRIGHT_GREEN, RED, CYAN, RESET};
+use crate::{DIM, GREEN, ACCENT, WHITE_BOLD, BRIGHT_GREEN, RED, CYAN, RESET, BG_INPUT};
 use crate::markdown::{colorize_markdown, CODE_BLOCK};
-use crate::util::term_width;
+use crate::util::{term_width, strip_ansi};
 use tenex_core::models::Message;
 use tenex_core::store::app_data_store::AppDataStore;
 
@@ -122,9 +122,36 @@ pub(crate) fn print_separator_raw() -> String {
     format!("{DIM}{line} {time}{RESET}")
 }
 
+/// Wrap each line of rendered content with BG_INPUT background, padded to terminal width.
+/// Preserves background through inline ANSI resets in the content.
+fn wrap_with_user_bg(rendered: &str, prefix: &str, prefix_visible_len: usize) -> String {
+    let width = term_width() as usize;
+    let bg_safe = rendered.replace(RESET, &format!("{RESET}{BG_INPUT}"));
+
+    let mut out = String::new();
+    for (i, line) in bg_safe.lines().enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let line_visible = strip_ansi(line).chars().count();
+        if i == 0 {
+            let total = prefix_visible_len + line_visible;
+            let pad = width.saturating_sub(total);
+            out.push_str(&format!("{BG_INPUT}{prefix}{line}{}{RESET}", " ".repeat(pad)));
+        } else {
+            let indent = " ".repeat(prefix_visible_len);
+            let total = prefix_visible_len + line_visible;
+            let pad = width.saturating_sub(total);
+            out.push_str(&format!("{BG_INPUT}{indent}{line}{}{RESET}", " ".repeat(pad)));
+        }
+    }
+    out
+}
+
 pub(crate) fn print_user_message_raw(content: &str) -> String {
     let rendered = render_content_with_attachments(content);
-    format!("{WHITE_BOLD}you ›{RESET} {rendered}")
+    let prefix = format!("{WHITE_BOLD}you ›{RESET}{BG_INPUT} ");
+    wrap_with_user_bg(&rendered, &prefix, 6)
 }
 
 pub(crate) fn print_agent_message_raw(agent_name: &str, content: &str) -> String {
@@ -146,7 +173,7 @@ pub(crate) fn print_error_raw(msg: &str) -> String {
 }
 
 pub(crate) fn print_system_raw(msg: &str) -> String {
-    format!("{YELLOW}{msg}{RESET}")
+    format!("{ACCENT}{msg}{RESET}")
 }
 
 pub(crate) fn print_help_raw() -> String {
@@ -156,8 +183,8 @@ pub(crate) fn print_help_raw() -> String {
          \x20 /agent [@project] [n] List/switch agents (@ for other project)\n\
          \x20 /new [agent@project]  Clear screen, new context\n\
          \x20 /conversations [@proj] Browse and open conversations\n\
-         \x20 /config [--model|--make-pm|--global] [agent]\n\
-         \x20                       Configure agent tools or model\n\
+         \x20 /config [@agent] [--set-pm|--global|--model]\n\
+         \x20                       Configure agent tools/model/flags\n\
          \x20 /model [agent]        Change agent model (shortcut)\n\
          \x20 /boot [name]          Boot an offline project\n\
          \x20 /active               Active work across all projects\n\
@@ -271,11 +298,10 @@ fn print_tool_use_raw(msg: &Message) -> String {
     format!("{TOOL_DIM}  {summary}{RESET}")
 }
 
-/// Render a todo_write call inline with smart diffing.
+/// Render a todo_write call inline, always showing all items.
 /// Returns (formatted_output, new_todo_state).
 fn format_todo_inline(
     args: &serde_json::Value,
-    prev_items: &[(String, String)],
 ) -> (String, Vec<(String, String)>) {
     let items = args
         .get("todos")
@@ -319,7 +345,7 @@ fn format_todo_inline(
     let status_icon = |s: &str| -> (&str, &str) {
         match s {
             "completed" => ("✓", GREEN),
-            "in_progress" => ("◒", YELLOW),
+            "in_progress" => ("◒", ACCENT),
             "cancelled" | "skipped" => ("✗", DIM),
             _ => ("◯", DIM),
         }
@@ -334,28 +360,10 @@ fn format_todo_inline(
     };
     lines.push(header);
 
-    let prev_map: std::collections::HashMap<&str, &str> = prev_items
-        .iter()
-        .map(|(t, s)| (t.as_str(), s.as_str()))
-        .collect();
-
-    let is_first = prev_items.is_empty();
-
     for (title, status) in &current {
         let (icon, color) = status_icon(status);
         let display_title = truncate_title(title);
-
-        if is_first {
-            lines.push(format!("{color}    {icon} {display_title}{RESET}"));
-        } else {
-            let prev_status = prev_map.get(title.as_str()).copied();
-            let changed = prev_status != Some(status.as_str());
-            let is_active = status == "in_progress";
-
-            if changed || is_active {
-                lines.push(format!("{color}    {icon} {display_title}{RESET}"));
-            }
-        }
+        lines.push(format!("{color}    {icon} {display_title}{RESET}"));
     }
 
     (lines.join("\n"), current)
@@ -381,13 +389,13 @@ pub(crate) fn format_message(
     let is_tool = is_tool_use(msg);
 
     if is_tool {
-        *last_pubkey = Some(msg.pubkey.clone());
-
+        // Don't update last_pubkey for tool use messages so the next
+        // text message from this agent will always show its header.
         let tool_name = msg.tool_name.as_deref().unwrap_or("").to_lowercase();
         if matches!(tool_name.as_str(), "todo_write" | "todowrite" | "mcp__tenex__todo_write") {
             if let Some(args_str) = &msg.tool_args {
                 if let Ok(args) = serde_json::from_str::<serde_json::Value>(args_str) {
-                    let (formatted, new_items) = format_todo_inline(&args, todo_items);
+                    let (formatted, new_items) = format_todo_inline(&args);
                     *todo_items = new_items;
                     return Some(formatted);
                 }
@@ -407,7 +415,7 @@ pub(crate) fn format_message(
     if is_user {
         if is_consecutive {
             let rendered = render_content_with_attachments(&msg.content);
-            return Some(format!("      {}", rendered));
+            return Some(wrap_with_user_bg(&rendered, "      ", 6));
         }
         return Some(format!("{gap}{}", print_user_message_raw(&msg.content)));
     }

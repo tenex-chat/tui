@@ -3,7 +3,7 @@ use std::io::{Stdout, Write};
 use crate::{DIM, GREEN, WHITE_BOLD, CYAN, RED, RESET};
 use crate::editor::LineEditor;
 use crate::completion::CompletionMenu;
-use crate::panels::{ConfigPanel, PanelMode, ConversationStackEntry, StatusBarNav, StatsPanel};
+use crate::panels::{ConfigPanel, ConversationStackEntry, StatusBarNav, StatsPanel, NudgeSkillPanel};
 use crate::state::ReplState;
 use crate::format::{format_message, print_separator_raw, print_user_message_raw, print_error_raw, print_system_raw, is_tool_use};
 use crate::render::{print_above_input, redraw_input};
@@ -641,8 +641,8 @@ pub(crate) fn handle_send_message(content: &str, state: &mut ReplState, runtime:
             title: String::new(),
             content: content.to_string(),
             agent_pubkey: state.current_agent.clone(),
-            nudge_ids: vec![],
-            skill_ids: vec![],
+            nudge_ids: state.selected_nudge_ids.clone(),
+            skill_ids: state.selected_skill_ids.clone(),
             reference_conversation_id: None,
             reference_report_a_tag: None,
             fork_message_id: None,
@@ -654,6 +654,8 @@ pub(crate) fn handle_send_message(content: &str, state: &mut ReplState, runtime:
             state.last_todo_items.clear();
         }
 
+        state.selected_nudge_ids.clear();
+        state.selected_skill_ids.clear();
         state.last_displayed_pubkey = Some(state.user_pubkey.clone());
         return vec![print_user_message_raw(content)];
     }
@@ -666,12 +668,14 @@ pub(crate) fn handle_send_message(content: &str, state: &mut ReplState, runtime:
         content: content.to_string(),
         agent_pubkey: state.current_agent.clone(),
         reply_to: None,
-        nudge_ids: vec![],
-        skill_ids: vec![],
+        nudge_ids: state.selected_nudge_ids.clone(),
+        skill_ids: state.selected_skill_ids.clone(),
         ask_author_pubkey: None,
         response_tx: None,
     });
 
+    state.selected_nudge_ids.clear();
+    state.selected_skill_ids.clear();
     state.last_displayed_pubkey = Some(state.user_pubkey.clone());
     vec![print_user_message_raw(content)]
 }
@@ -801,78 +805,65 @@ pub(crate) fn handle_config_command(
     };
     let a_tag = a_tag.clone();
 
-    let mut is_model = false;
-    let mut is_make_pm = false;
+    let mut open_model = false;
+    let mut is_set_pm = false;
     let mut is_global = false;
     let mut agent_filter = String::new();
+    let mut open_agent_select = false;
 
     for part in raw.split_whitespace() {
         match part {
-            "--model" => is_model = true,
-            "--make-pm" => is_make_pm = true,
+            "--model" => open_model = true,
+            "--set-pm" => is_set_pm = true,
             "--global" => is_global = true,
+            _ if part.starts_with('@') => {
+                let name = &part[1..];
+                if name.is_empty() {
+                    open_agent_select = true;
+                } else {
+                    agent_filter = name.to_string();
+                }
+            }
             _ => agent_filter = part.to_string(),
         }
     }
 
-    let (agent_pubkey, agent_name) = match resolve_agent_for_config(&agent_filter, state, runtime, &a_tag) {
-        Ok(pair) => pair,
-        Err(msg) => return CommandResult::Lines(vec![print_error_raw(&msg)]),
+    // If @ alone was specified, we need to open agent select first
+    // but we still need a project_a_tag on the panel
+    let (agent_pubkey, agent_name) = if open_agent_select {
+        // Agent not yet resolved — will be picked in AgentSelect mode
+        // Use current agent as placeholder so we have something to fall back to
+        match (&state.current_agent, &state.current_agent_name) {
+            (Some(pk), Some(name)) => (pk.clone(), name.clone()),
+            _ => (String::new(), String::new()),
+        }
+    } else {
+        match resolve_agent_for_config(&agent_filter, state, runtime, &a_tag) {
+            Ok(pair) => pair,
+            Err(msg) => return CommandResult::Lines(vec![print_error_raw(&msg)]),
+        }
     };
 
-    if is_make_pm {
-        let store = runtime.data_store();
-        let store_ref = store.borrow();
-        let agent = store_ref
-            .get_project_status(&a_tag)
-            .and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
-        let model = agent.and_then(|a| a.model.clone());
-        let tools = agent.map(|a| a.tools.clone()).unwrap_or_default();
-        drop(store_ref);
-
-        if is_global {
-            let _ = runtime.handle().send(NostrCommand::UpdateGlobalAgentConfig {
-                agent_pubkey,
-                model,
-                tools,
-                tags: vec!["pm".to_string()],
-            });
-        } else {
-            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
-                project_a_tag: a_tag,
-                agent_pubkey,
-                model,
-                tools,
-                tags: vec!["pm".to_string()],
-            });
-        }
-        return CommandResult::Lines(vec![print_system_raw(&format!("Set {} as project manager", agent_name))]);
-    }
-
+    // Load tools for the resolved agent
     let store = runtime.data_store();
     let store_ref = store.borrow();
     let status = store_ref.get_project_status(&a_tag);
-
     let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
-    if is_model {
-        panel.mode = PanelMode::Model;
-        panel.items = status.map(|s| s.models().iter().map(|m| m.to_string()).collect()).unwrap_or_default();
-        panel.selected.clear();
-        if let Some(model) = agent.and_then(|a| a.model.as_ref()) {
-            panel.selected.insert(model.clone());
-        }
-    } else {
-        panel.mode = PanelMode::Tools;
-        panel.items = status.map(|s| s.all_tools().iter().map(|t| t.to_string()).collect()).unwrap_or_default();
-        panel.selected = agent.map(|a| a.tools.iter().cloned().collect()).unwrap_or_default();
+    panel.tools_items = status.map(|s| s.all_tools().iter().map(|t| t.to_string()).collect()).unwrap_or_default();
+    panel.tools_selected = agent.map(|a| a.tools.iter().cloned().collect()).unwrap_or_default();
+    panel.pending_model = None;
+    panel.is_set_pm = is_set_pm || agent.map(|a| a.is_pm).unwrap_or(false);
+    panel.filter.clear();
+    panel.quick_save = false;
+
+    // If no tools available and not opening agent/model select, bail
+    if panel.tools_items.is_empty() && !open_agent_select && !open_model {
+        drop(store_ref);
+        return CommandResult::Lines(vec![print_error_raw("No tools available for this project")]);
     }
 
-    if panel.items.is_empty() {
-        drop(store_ref);
-        let what = if is_model { "models" } else { "tools" };
-        return CommandResult::Lines(vec![print_error_raw(&format!("No {what} available for this project"))]);
-    }
+    drop(store_ref);
 
     panel.active = true;
     panel.agent_pubkey = agent_pubkey;
@@ -883,6 +874,15 @@ pub(crate) fn handle_config_command(
     panel.scroll_offset = 0;
     panel.origin_command = format!("/config{}", if raw.is_empty() { String::new() } else { format!(" {raw}") });
 
+    // Decide initial mode
+    if open_agent_select {
+        panel.switch_to_agent_select(runtime);
+    } else if open_model {
+        panel.switch_to_model_select(runtime);
+    } else {
+        panel.switch_to_tools();
+    }
+
     CommandResult::Lines(vec![])
 }
 
@@ -892,19 +892,69 @@ pub(crate) fn handle_model_command(
     runtime: &CoreRuntime,
     panel: &mut ConfigPanel,
 ) -> CommandResult {
-    let combined = match arg {
-        Some(a) if !a.is_empty() => format!("--model {a}"),
-        _ => "--model".to_string(),
+    let agent_filter = arg.unwrap_or("").trim();
+
+    let Some(ref a_tag) = state.current_project else {
+        return CommandResult::Lines(vec![print_error_raw("Select a project first with /project")]);
     };
-    handle_config_command(Some(&combined), state, runtime, panel)
+    let a_tag = a_tag.clone();
+
+    let (agent_pubkey, agent_name) = match resolve_agent_for_config(agent_filter, state, runtime, &a_tag) {
+        Ok(pair) => pair,
+        Err(msg) => return CommandResult::Lines(vec![print_error_raw(&msg)]),
+    };
+
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    let status = store_ref.get_project_status(&a_tag);
+    let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
+
+    panel.tools_items = status.map(|s| s.all_tools().iter().map(|t| t.to_string()).collect()).unwrap_or_default();
+    panel.tools_selected = agent.map(|a| a.tools.iter().cloned().collect()).unwrap_or_default();
+    panel.pending_model = None;
+    panel.is_set_pm = agent.map(|a| a.is_pm).unwrap_or(false);
+    panel.filter.clear();
+    panel.quick_save = true;
+
+    drop(store_ref);
+
+    panel.active = true;
+    panel.agent_pubkey = agent_pubkey;
+    panel.agent_name = agent_name;
+    panel.project_a_tag = a_tag;
+    panel.is_global = false;
+    panel.cursor = 0;
+    panel.scroll_offset = 0;
+    panel.origin_command = format!("/model{}", if agent_filter.is_empty() { String::new() } else { format!(" {agent_filter}") });
+
+    panel.switch_to_model_select(runtime);
+
+    if panel.items.is_empty() {
+        panel.deactivate();
+        return CommandResult::Lines(vec![print_error_raw("No models available for this project")]);
+    }
+
+    CommandResult::Lines(vec![])
 }
 
 // ─── Event Handlers ─────────────────────────────────────────────────────────
 
-pub(crate) fn handle_core_event(event: &CoreEvent, state: &mut ReplState, runtime: &CoreRuntime) -> Option<String> {
+pub(crate) fn handle_core_event(event: &CoreEvent, state: &mut ReplState, runtime: &CoreRuntime, history_store: &crate::history::HistoryStore) -> Option<String> {
     match event {
         CoreEvent::Message(msg) => {
             if msg.pubkey == state.user_pubkey {
+                let project_atag = {
+                    let store = runtime.data_store();
+                    let store_ref = store.borrow();
+                    store_ref.get_project_a_tag_for_thread(&msg.thread_id)
+                };
+                history_store.import_kind1(
+                    &msg.content,
+                    project_atag.as_deref(),
+                    &msg.id,
+                    msg.created_at as i64,
+                ).ok();
+
                 if state.current_conversation.is_none() {
                     let store = runtime.data_store();
                     let store_ref = store.borrow();
@@ -1068,6 +1118,7 @@ pub(crate) fn handle_clipboard_paste(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
+    nudge_skill_panel: &NudgeSkillPanel,
 ) {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
@@ -1079,13 +1130,13 @@ pub(crate) fn handle_clipboard_paste(
             Ok(data) => data,
             Err(e) => {
                 let msg = print_error_raw(&format!("Failed to convert image: {}", e));
-                print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel);
+                print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
                 return;
             }
         };
 
         let msg = print_system_raw("Uploading image...");
-        print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel);
+        print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
 
         let keys = keys.clone();
         let tx = upload_tx;
@@ -1100,10 +1151,129 @@ pub(crate) fn handle_clipboard_paste(
     } else if let Ok(text) = clipboard.get_text() {
         if !try_upload_image_file(&text, keys, upload_tx) {
             editor.handle_paste(&text);
-            redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel);
+            redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
         } else {
             let msg = print_system_raw("Uploading image...");
-            print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel);
+            print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
         }
+    }
+}
+
+// ─── Bunker Command Handler ─────────────────────────────────────────────────
+
+pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreRuntime) -> Vec<String> {
+    let arg = arg.unwrap_or("").trim();
+
+    match arg {
+        "" => {
+            // Toggle bunker on/off
+            if state.bunker_active {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let _ = runtime.handle().send(NostrCommand::StopBunker { response_tx: tx });
+                match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                    Ok(Ok(())) => {
+                        state.bunker_active = false;
+                        vec![print_system_raw("Bunker stopped")]
+                    }
+                    Ok(Err(e)) => vec![print_error_raw(&format!("Failed to stop bunker: {e}"))],
+                    Err(_) => vec![print_error_raw("Bunker stop timed out")],
+                }
+            } else {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let _ = runtime.handle().send(NostrCommand::StartBunker { response_tx: tx });
+                match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+                    Ok(Ok(uri)) => {
+                        state.bunker_active = true;
+                        vec![
+                            print_system_raw("Bunker started"),
+                            format!("{DIM}{uri}{RESET}"),
+                        ]
+                    }
+                    Ok(Err(e)) => vec![print_error_raw(&format!("Failed to start bunker: {e}"))],
+                    Err(_) => vec![print_error_raw("Bunker start timed out")],
+                }
+            }
+        }
+        "audit" => {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = runtime.handle().send(NostrCommand::GetBunkerAuditLog { response_tx: tx });
+            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(entries) => {
+                    if entries.is_empty() {
+                        return vec![print_system_raw("No audit log entries")];
+                    }
+                    let mut output = vec![format!("{WHITE_BOLD}Bunker Audit Log:{RESET}")];
+                    for entry in entries.iter().rev().take(20) {
+                        let ts_secs = entry.timestamp_ms / 1000;
+                        let dt = chrono::DateTime::from_timestamp(ts_secs as i64, 0)
+                            .map(|d| d.format("%m-%d %H:%M:%S").to_string())
+                            .unwrap_or_else(|| "?".to_string());
+                        let short_pk = if entry.requester_pubkey.len() >= 8 {
+                            &entry.requester_pubkey[..8]
+                        } else {
+                            &entry.requester_pubkey
+                        };
+                        let kind_str = entry.event_kind.map(|k| format!("k:{k}")).unwrap_or_default();
+                        output.push(format!(
+                            "  {DIM}{dt}{RESET}  {short_pk}…  {kind_str}  {GREEN}{}{RESET}  {DIM}{}ms{RESET}",
+                            entry.decision, entry.response_time_ms
+                        ));
+                    }
+                    output
+                }
+                Err(_) => vec![print_error_raw("Failed to fetch audit log")],
+            }
+        }
+        _ if arg.starts_with("rules remove") => {
+            let idx_str = arg.strip_prefix("rules remove").unwrap().trim();
+            let idx: usize = match idx_str.parse() {
+                Ok(n) if n > 0 => n,
+                _ => return vec![print_error_raw("Usage: /bunker rules remove <N>")],
+            };
+
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = runtime.handle().send(NostrCommand::GetBunkerAutoApproveRules { response_tx: tx });
+            let rules = match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(r) => r,
+                Err(_) => return vec![print_error_raw("Failed to fetch rules")],
+            };
+
+            let Some(rule) = rules.get(idx - 1) else {
+                return vec![print_error_raw(&format!("No rule at index {idx}"))];
+            };
+
+            let _ = runtime.handle().send(NostrCommand::RemoveBunkerAutoApproveRule {
+                requester_pubkey: rule.requester_pubkey.clone(),
+                event_kind: rule.event_kind,
+            });
+
+            vec![print_system_raw(&format!("Removed rule #{idx}"))]
+        }
+        "rules" => {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = runtime.handle().send(NostrCommand::GetBunkerAutoApproveRules { response_tx: tx });
+            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                Ok(rules) => {
+                    if rules.is_empty() {
+                        return vec![print_system_raw("No auto-approve rules")];
+                    }
+                    let mut output = vec![format!("{WHITE_BOLD}Auto-approve Rules:{RESET}")];
+                    for (i, rule) in rules.iter().enumerate() {
+                        let short_pk = if rule.requester_pubkey.len() >= 12 {
+                            &rule.requester_pubkey[..12]
+                        } else {
+                            &rule.requester_pubkey
+                        };
+                        let kind_str = rule.event_kind
+                            .map(|k| format!("kind:{k}"))
+                            .unwrap_or_else(|| "any kind".to_string());
+                        output.push(format!("  {}: {short_pk}…  {kind_str}", i + 1));
+                    }
+                    output
+                }
+                Err(_) => vec![print_error_raw("Failed to fetch rules")],
+            }
+        }
+        _ => vec![print_error_raw("Usage: /bunker [audit|rules|rules remove <N>]")],
     }
 }

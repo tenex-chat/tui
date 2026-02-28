@@ -1,7 +1,9 @@
+use std::collections::VecDeque;
 use std::time::Instant;
-use crate::{CYAN, GREEN, DIM, YELLOW, RESET};
+use crate::{CYAN, GREEN, DIM, ACCENT, RESET};
 use crate::panels::{DelegationBar, ConversationStackEntry, StatusBarAction};
 use crate::util::{strip_ansi, thread_display_name, wave_colorize, ANIMATION_DURATION_MS, ANIMATION_DURATION_F64};
+use tenex_core::nostr::bunker::BunkerSignRequest;
 use tenex_core::runtime::CoreRuntime;
 
 pub(crate) struct ReplState {
@@ -19,6 +21,16 @@ pub(crate) struct ReplState {
     pub(crate) conversation_stack: Vec<ConversationStackEntry>,
     pub(crate) delegation_bar: DelegationBar,
     pub(crate) last_todo_items: Vec<(String, String)>,
+    pub(crate) selected_nudge_ids: Vec<String>,
+    pub(crate) selected_skill_ids: Vec<String>,
+    pub(crate) bunker_active: bool,
+    pub(crate) pending_bunker_requests: VecDeque<BunkerSignRequest>,
+    pub(crate) active_draft_id: Option<i64>,
+    pub(crate) draft_last_saved: Instant,
+    pub(crate) draft_last_content: String,
+    pub(crate) search_mode: bool,
+    pub(crate) search_all_projects: bool,
+    pub(crate) pre_search_buffer: String,
 }
 
 impl ReplState {
@@ -38,6 +50,16 @@ impl ReplState {
             conversation_stack: Vec::new(),
             delegation_bar: DelegationBar::new(),
             last_todo_items: Vec::new(),
+            selected_nudge_ids: Vec::new(),
+            selected_skill_ids: Vec::new(),
+            bunker_active: false,
+            pending_bunker_requests: VecDeque::new(),
+            active_draft_id: None,
+            draft_last_saved: Instant::now(),
+            draft_last_content: String::new(),
+            search_mode: false,
+            search_all_projects: false,
+            pre_search_buffer: String::new(),
         }
     }
 
@@ -124,7 +146,7 @@ impl ReplState {
                     .collect();
                 let names_str = names.join(", ");
                 text.push_str(&format!(
-                    "  {YELLOW}⟡ {names_str} working{RESET}"
+                    "  {ACCENT}⟡ {names_str} working{RESET}"
                 ));
                 plain_width += 2 + 2 + names_str.len() + " working".len();
             }
