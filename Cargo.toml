@@ -4,6 +4,7 @@ members = [
   "crates/tenex-core",
   "crates/tenex-tui",
   "crates/tenex-cli",
+  "crates/tenex-repl",
 ]
 
 [workspace.package]
