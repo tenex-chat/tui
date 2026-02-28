@@ -2,10 +2,12 @@ use anyhow::Result;
 use nostr_sdk::prelude::*;
 use nostrdb::{IngestMetadata, Ndb, Transaction};
 use serde_json::json;
+use std::time::Duration;
 
 /// Ingest events into nostrdb from nostr-sdk Events
 /// - relay_url: the source relay URL (None for locally created events)
 pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Result<usize> {
+    const MAX_ATTEMPTS: usize = 24;
     let mut ingested = 0;
 
     for event in events {
@@ -18,22 +20,103 @@ pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Re
         // nostrdb expects relay format: ["EVENT", "subid", {...}]
         let relay_json = format!(r#"["EVENT","tenex",{}]"#, json);
 
-        let result = if let Some(url) = relay_url {
-            let meta = IngestMetadata::new().client(false).relay(url);
-            ndb.process_event_with(&relay_json, meta)
-        } else {
-            // For local/test events, use process_event which doesn't require relay metadata
-            ndb.process_event(&relay_json)
-        };
+        // nostrdb can transiently fail writes under contention. Retry with backoff and
+        // surface hard failures instead of silently dropping events.
+        let mut handled = false;
+        let mut last_error: Option<String> = None;
 
-        if let Err(_e) = result {
-            // Event ingestion failed (e.g., duplicate)
-        } else {
-            ingested += 1;
+        for attempt in 0..MAX_ATTEMPTS {
+            if note_exists(ndb, event) {
+                handled = true;
+                break;
+            }
+
+            let result = if let Some(url) = relay_url {
+                let meta = IngestMetadata::new().client(false).relay(url);
+                ndb.process_event_with(&relay_json, meta)
+            } else {
+                // For local/test events, use process_event which doesn't require relay metadata
+                ndb.process_event(&relay_json)
+            };
+
+            match result {
+                Ok(()) => {
+                    ingested += 1;
+                    handled = true;
+                    break;
+                }
+                Err(err) => {
+                    last_error = Some(err.to_string());
+
+                    // Duplicate/already-present events are a success path.
+                    if note_exists(ndb, event) {
+                        handled = true;
+                        break;
+                    }
+
+                    // Some relayed events fail with relay metadata but succeed without it.
+                    // Fallback once to avoid dropping valid events.
+                    if relay_url.is_some() {
+                        match ndb.process_event(&relay_json) {
+                            Ok(()) => {
+                                ingested += 1;
+                                handled = true;
+                                break;
+                            }
+                            Err(fallback_err) => {
+                                last_error = Some(format!(
+                                    "primary={} fallback={}",
+                                    err, fallback_err
+                                ));
+                                if note_exists(ndb, event) {
+                                    handled = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Backoff for retryable contention and transient failures.
+            // Cap delay to keep publish latency bounded.
+            if attempt + 1 < MAX_ATTEMPTS {
+                let delay_ms = match attempt {
+                    0..=3 => 5,
+                    4..=9 => 15,
+                    _ => 30,
+                };
+                std::thread::sleep(Duration::from_millis(delay_ms));
+            }
+        }
+
+        if !handled && !note_exists(ndb, event) {
+            let err_text = last_error.unwrap_or_else(|| "unknown ingest failure".to_string());
+            crate::tlog!(
+                "ERROR",
+                "ingest_events exhausted retries id={} kind={} err={}",
+                event.id.to_hex(),
+                event.kind.as_u16(),
+                err_text
+            );
+            return Err(anyhow::anyhow!(
+                "failed to ingest id={} kind={} after {} attempts: {}",
+                event.id.to_hex(),
+                event.kind.as_u16(),
+                MAX_ATTEMPTS,
+                err_text
+            ));
         }
     }
 
     Ok(ingested)
+}
+
+fn note_exists(ndb: &Ndb, event: &Event) -> bool {
+    let Ok(txn) = Transaction::new(ndb) else {
+        return false;
+    };
+    ndb.get_notekey_by_id(&txn, event.id.as_bytes()).is_ok()
 }
 
 /// Trace context info extracted from event tags

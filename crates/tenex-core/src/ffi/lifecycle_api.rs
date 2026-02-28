@@ -56,9 +56,10 @@ impl TenexCore {
             return false;
         }
 
-        // Initialize nostrdb with appropriate mapsize for iOS
-        // Use 2GB to avoid MDB_MAP_FULL errors with larger datasets
-        let config = nostrdb::Config::new().set_mapsize(2 * 1024 * 1024 * 1024);
+        // Initialize nostrdb with an expanded map size.
+        // 2GB has proven too small for active accounts and leads to persistent
+        // TransactionFailed / map pressure behavior.
+        let config = nostrdb::Config::new().set_mapsize(8 * 1024 * 1024 * 1024);
         let ndb_open_started_at = Instant::now();
         let ndb = match open_ndb_with_lock_recovery(&data_dir, &config) {
             Ok(ndb) => ndb,
