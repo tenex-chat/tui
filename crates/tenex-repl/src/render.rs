@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::io::{Stdout, Write};
-use crossterm::{cursor, queue};
+use crossterm::{cursor, execute, queue};
 use crossterm::terminal::{self, ClearType};
 use crate::{DIM, YELLOW, WHITE_BOLD, RED, RESET, BG_INPUT, BG_HIGHLIGHT};
 use crate::editor::{LineEditor, AttachmentKind};
@@ -664,6 +664,36 @@ pub(crate) fn clear_input_area(stdout: &mut Stdout, completion: &mut CompletionM
     completion.attachment_indicator_lines = 0;
     completion.delegation_bar_lines = 0;
     completion.input_wrap_lines = 0;
+}
+
+/// Clear the entire terminal, print lines near the bottom, update delegation bar, redraw input.
+/// This is the single implementation of the ClearScreen pattern used when opening conversations,
+/// navigating delegations, switching projects, etc.
+pub(crate) fn apply_clear_screen(
+    stdout: &mut Stdout,
+    lines: &[String],
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+    editor: &LineEditor,
+    completion: &mut CompletionMenu,
+    panel: &ConfigPanel,
+    status_nav: &StatusBarNav,
+    stats_panel: &StatsPanel,
+) {
+    execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
+    completion.input_area_drawn = false;
+    let (_, rows) = terminal::size().unwrap_or((80, 24));
+    let content_rows = lines.len() as u16;
+    let start = rows.saturating_sub(5 + content_rows);
+    execute!(stdout, cursor::MoveTo(0, start)).ok();
+    for l in lines {
+        for part in l.split('\n') {
+            write!(stdout, "{}\r\n", part).ok();
+        }
+    }
+    stdout.flush().ok();
+    update_delegation_bar(state, runtime);
+    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel);
 }
 
 /// Print text above the input area, then redraw the input area.
