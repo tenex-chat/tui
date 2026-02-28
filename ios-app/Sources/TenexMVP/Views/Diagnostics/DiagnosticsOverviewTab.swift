@@ -14,6 +14,9 @@ struct DiagnosticsOverviewTab: View {
             // System Status Section
             systemStatusSection
 
+            // Connected Relays Section
+            connectedRelaysSection
+
             // Quick Stats Section
             quickStatsSection
         }
@@ -139,6 +142,59 @@ struct DiagnosticsOverviewTab: View {
             } else {
                 SectionUnavailablePlaceholder(message: "System information unavailable")
             }
+        }
+    }
+
+    // MARK: - Connected Relays Section
+
+    private var connectedRelaysSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Relays")
+
+            if let system = snapshot.system {
+                if system.relays.isEmpty {
+                    SectionUnavailablePlaceholder(message: "No relays configured")
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(system.relays.enumerated()), id: \.offset) { index, relay in
+                            if index > 0 {
+                                Divider()
+                            }
+                            HStack {
+                                Circle()
+                                    .fill(relayStatusColor(relay.status))
+                                    .frame(width: 8, height: 8)
+
+                                Text(relay.url)
+                                    .font(.subheadline)
+                                    .foregroundColor(.primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Spacer()
+
+                                Text(relay.status)
+                                    .font(.caption)
+                                    .foregroundColor(relayStatusColor(relay.status))
+                                    .fontWeight(.medium)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                        }
+                    }
+                    .diagnosticCardStyle()
+                }
+            } else {
+                SectionUnavailablePlaceholder(message: "Relay information unavailable")
+            }
+        }
+    }
+
+    private func relayStatusColor(_ status: String) -> Color {
+        switch status {
+        case "Connected": return .green
+        case "Connecting", "Pending": return .yellow
+        default: return .red
         }
     }
 
@@ -362,7 +418,12 @@ struct StatusRow<ValueContent: View>: View {
                     isInitialized: true,
                     isLoggedIn: true,
                     relayConnected: true,
-                    connectedRelays: 3
+                    connectedRelays: 3,
+                    relays: [
+                        RelayDiagnosticInfo(url: "wss://relay.damus.io", status: "Connected"),
+                        RelayDiagnosticInfo(url: "wss://relay.nostr.band", status: "Connected"),
+                        RelayDiagnosticInfo(url: "wss://nos.lol", status: "Disconnected"),
+                    ]
                 ),
                 sync: NegentropySyncDiagnostics(
                     enabled: true,
@@ -401,7 +462,8 @@ struct StatusRow<ValueContent: View>: View {
                     isInitialized: true,
                     isLoggedIn: true,
                     relayConnected: false,
-                    connectedRelays: 0
+                    connectedRelays: 0,
+                    relays: []
                 ),
                 sync: nil,  // Sync failed to load
                 subscriptions: [],
