@@ -43,6 +43,55 @@ pub struct CoreRuntime {
     negentropy_stats: SharedNegentropySyncStats,
 }
 
+fn open_ndb_with_health_check(
+    data_dir: &std::path::Path,
+    config: &nostrdb::Config,
+) -> Result<Arc<Ndb>> {
+    let ndb = Ndb::new(data_dir.to_str().unwrap_or("tenex_data"), config)?;
+    let txn = Transaction::new(&ndb)?;
+    let probe_filter = FilterBuilder::new().kinds([31933]).build();
+    let _ = ndb.query(&txn, &[probe_filter], 1)?;
+    Ok(Arc::new(ndb))
+}
+
+fn is_likely_stale_lock_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("transaction failed")
+        || lower.contains("lock")
+        || lower.contains("resource temporarily unavailable")
+        || lower.contains("busy")
+        || lower.contains("mdb_bad_rslot")
+        || lower.contains("mdb_readers_full")
+}
+
+fn open_ndb_with_lock_recovery(
+    data_dir: &std::path::Path,
+    config: &nostrdb::Config,
+) -> Result<Arc<Ndb>> {
+    match open_ndb_with_health_check(data_dir, config) {
+        Ok(ndb) => Ok(ndb),
+        Err(first_err) => {
+            let first = first_err.to_string();
+            if !is_likely_stale_lock_error(&first) {
+                return Err(first_err);
+            }
+
+            let lock_path = data_dir.join("lock.mdb");
+            if lock_path.exists() {
+                let _ = std::fs::remove_file(&lock_path);
+            }
+
+            open_ndb_with_health_check(data_dir, config).map_err(|retry_err| {
+                anyhow::anyhow!(
+                    "{} (retry after lock recovery failed: {})",
+                    first,
+                    retry_err
+                )
+            })
+        }
+    }
+}
+
 /// Process note keys and update the given data store.
 /// This standalone function allows external callers (like the daemon) to process
 /// note keys with a custom data store instead of the CoreRuntime's internal one.
@@ -108,10 +157,8 @@ pub fn process_note_keys(
 impl CoreRuntime {
     pub fn new(config: CoreConfig) -> Result<Self> {
         std::fs::create_dir_all(&config.data_dir)?;
-        let ndb = Arc::new(Ndb::new(
-            config.data_dir.to_str().unwrap_or("tenex_data"),
-            &nostrdb::Config::new(),
-        )?);
+        let ndb_config = nostrdb::Config::new().set_mapsize(8 * 1024 * 1024 * 1024);
+        let ndb = open_ndb_with_lock_recovery(&config.data_dir, &ndb_config)?;
 
         let data_store = Rc::new(RefCell::new(AppDataStore::new_with_cache(
             ndb.clone(),
