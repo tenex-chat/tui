@@ -120,9 +120,14 @@ impl Thread {
         // Parse ask event data if present
         let ask_event = Message::parse_ask_event(note);
 
+        let resolved_title = title
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| DEFAULT_THREAD_TITLE.to_string());
+
         Some(Thread {
             id,
-            title: title.unwrap_or_else(|| DEFAULT_THREAD_TITLE.to_string()),
+            title: resolved_title,
             content,
             pubkey,
             last_activity: created_at,
@@ -253,6 +258,72 @@ mod tests {
 
         let thread = Thread::from_note(&note);
         assert!(thread.is_none(), "Should reject kind:1 without a-tag");
+    }
+
+    #[test]
+    fn test_thread_uses_default_title_when_title_tag_is_empty() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = EventBuilder::new(Kind::from(1), "Thread content")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec!["31933:pubkey:proj1".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["".to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
+
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(!results.is_empty(), "Event should be indexed");
+
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+        let thread = Thread::from_note(&note).expect("Should parse as thread");
+
+        assert_eq!(thread.title, DEFAULT_THREAD_TITLE);
+    }
+
+    #[test]
+    fn test_thread_parses_real_world_report_tagged_event_with_empty_title() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+
+        let raw_event = r#"{"kind":1,"id":"0ee767fed295070e2f2a773ec6b66faa4996daccd02db8f48baf1607d5eb266c","pubkey":"09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7","created_at":1772179535,"tags":[["a","31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:TENEX-ff3ssq"],["title",""],["client","tenex-tui"],["a","30023:14925f2b4795ca6037fa7d33899c5145d3c1f264865d94ea028ba6168f394ebf:nostr-skill-events-kind-4202"],["p","14925f2b4795ca6037fa7d33899c5145d3c1f264865d94ea028ba6168f394ebf"]],"content":"test","sig":"52a6654f296f36cf4d4d52fe8e5f2163a64cf12ad8ac330d195e15d2b70b1de767eb304bda154269e49b358e3d59fa1e5eb773e419d30830fb44209aff136895"}"#;
+        let event = Event::from_json(raw_event).expect("valid event json");
+
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
+
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter, 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let note = db
+            .ndb
+            .get_note_by_id(&txn, event.id.as_bytes())
+            .expect("event should be retrievable by id");
+
+        let thread = Thread::from_note(&note).expect("event should parse as thread root");
+        assert_eq!(thread.id, event.id.to_hex());
+        assert_eq!(thread.title, DEFAULT_THREAD_TITLE);
+
+        assert!(
+            Message::from_note(&note).is_none(),
+            "thread root must not parse as message"
+        );
+        assert!(
+            Message::from_thread_note(&note).is_some(),
+            "thread root should parse as root message"
+        );
     }
 
     #[test]

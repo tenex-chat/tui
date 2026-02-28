@@ -119,12 +119,12 @@ impl TenexCore {
     ) -> Vec<ConversationFullInfo> {
         let started_at = Instant::now();
         let requested = conversation_ids.len();
-        let store_guard = match self.store.read() {
+        let mut store_guard = match self.store.write() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
         };
 
-        let store = match store_guard.as_ref() {
+        let store = match store_guard.as_mut() {
             Some(s) => s,
             None => return Vec::new(),
         };
@@ -138,9 +138,37 @@ impl TenexCore {
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
+        let ndb = self
+            .ndb
+            .read()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned());
+        let txn = ndb
+            .as_ref()
+            .and_then(|db| Transaction::new(db.as_ref()).ok());
+
         let mut conversations = Vec::new();
 
         for conversation_id in conversation_ids {
+            if store.get_thread_by_id(&conversation_id).is_none() {
+                // Fallback path: if the runtime cache missed this thread, attempt to
+                // hydrate it directly from nostrdb. This prevents transient "not found"
+                // when a publish succeeds but callback processing is still catching up.
+                if let (Some(db), Some(txn)) = (ndb.as_ref(), txn.as_ref()) {
+                    if let Ok(id_bytes) = hex::decode(&conversation_id) {
+                        if id_bytes.len() == 32 {
+                            let mut id = [0u8; 32];
+                            id.copy_from_slice(&id_bytes);
+                            if let Ok(note_key) = db.get_notekey_by_id(txn, &id) {
+                                if let Ok(note) = db.get_note_by_key(txn, note_key) {
+                                    store.handle_event(note.kind(), &note);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if let Some(thread) = store.get_thread_by_id(&conversation_id) {
                 conversations.push(thread_to_full_info(store, thread, &archived_ids));
             }
@@ -241,22 +269,63 @@ impl TenexCore {
 
     /// Get root threads that reference a report a-tag (`30023:pubkey:slug`).
     pub fn get_document_threads(&self, report_a_tag: String) -> Vec<Thread> {
-        let store_guard = match self.store.read() {
+        let mut store_guard = match self.store.write() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
         };
 
-        let store = match store_guard.as_ref() {
+        let store = match store_guard.as_mut() {
             Some(s) => s,
             None => return Vec::new(),
         };
 
-        store
+        let cached: Vec<Thread> = store
             .reports
             .get_document_threads(&report_a_tag)
             .iter()
             .cloned()
-            .collect()
+            .collect();
+        if !cached.is_empty() {
+            return cached;
+        }
+
+        let ndb = match self.ndb.read() {
+            Ok(g) => g.as_ref().cloned(),
+            Err(_) => None,
+        };
+        let Some(ndb) = ndb else {
+            return Vec::new();
+        };
+
+        let txn = match Transaction::new(ndb.as_ref()) {
+            Ok(txn) => txn,
+            Err(_) => return Vec::new(),
+        };
+
+        let filter = nostrdb::Filter::new()
+            .kinds([1])
+            .tags([report_a_tag.as_str()], 'a')
+            .build();
+        let results = match ndb.query(&txn, &[filter], 100_000) {
+            Ok(results) => results,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut fetched: Vec<Thread> = results
+            .iter()
+            .filter_map(|r| ndb.get_note_by_key(&txn, r.note_key).ok())
+            .filter_map(|note| Thread::from_note(&note))
+            .collect();
+
+        fetched.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+
+        for thread in &fetched {
+            store
+                .reports
+                .add_document_thread(&report_a_tag, thread.clone());
+        }
+
+        fetched
     }
 
     /// Get inbox items for the current user.
