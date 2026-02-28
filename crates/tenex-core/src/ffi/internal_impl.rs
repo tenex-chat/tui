@@ -65,24 +65,30 @@ impl TenexCore {
         let is_initialized = self.initialized.load(Ordering::SeqCst);
         let is_logged_in = self.is_logged_in();
         let log_path = data_dir.join("tenex.log").to_string_lossy().to_string();
-        let (relay_connected, connected_relays) = self.get_relay_status();
+        let relays = self.get_relay_status();
+        let connected_relays = relays
+            .iter()
+            .filter(|r| r.status == "Connected")
+            .count()
+            .min(u32::MAX as usize) as u32;
 
         Ok(SystemDiagnostics {
             log_path,
             version: env!("CARGO_PKG_VERSION").to_string(),
             is_initialized,
             is_logged_in,
-            relay_connected,
+            relay_connected: connected_relays > 0,
             connected_relays,
+            relays,
         })
     }
 
-    pub(super) fn get_relay_status(&self) -> (bool, u32) {
+    pub(super) fn get_relay_status(&self) -> Vec<RelayDiagnosticInfo> {
         use std::time::Duration;
 
         let handle = match get_core_handle(&self.core_handle) {
             Ok(handle) => handle,
-            Err(_) => return (false, 0),
+            Err(_) => return Vec::new(),
         };
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -90,12 +96,15 @@ impl TenexCore {
             .send(NostrCommand::GetRelayStatus { response_tx: tx })
             .is_err()
         {
-            return (false, 0);
+            return Vec::new();
         }
 
         match rx.recv_timeout(Duration::from_millis(200)) {
-            Ok(count) => (count > 0, count.min(u32::MAX as usize) as u32),
-            Err(_) => (false, 0),
+            Ok(relays) => relays
+                .into_iter()
+                .map(|(url, status)| RelayDiagnosticInfo { url, status })
+                .collect(),
+            Err(_) => Vec::new(),
         }
     }
 

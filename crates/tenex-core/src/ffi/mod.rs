@@ -91,6 +91,17 @@ fn get_tokio_runtime() -> &'static tokio::runtime::Runtime {
 }
 
 /// Get the data directory for nostrdb
+#[cfg(test)]
+fn get_data_dir() -> PathBuf {
+    if let Ok(base_dir) = std::env::var("TENEX_BASE_DIR") {
+        return PathBuf::from(base_dir).join("nostrdb");
+    }
+    std::env::temp_dir()
+        .join(format!("tenex-core-tests-{}", std::process::id()))
+        .join("nostrdb")
+}
+
+#[cfg(not(test))]
 fn get_data_dir() -> PathBuf {
     if let Ok(base_dir) = std::env::var("TENEX_BASE_DIR") {
         return PathBuf::from(base_dir).join("nostrdb");
@@ -1253,6 +1264,13 @@ pub struct NegentropySyncDiagnostics {
     pub recent_results: Vec<SyncResultDiagnostic>,
 }
 
+/// Individual relay diagnostic info
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RelayDiagnosticInfo {
+    pub url: String,
+    pub status: String,
+}
+
 /// System diagnostics information
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct SystemDiagnostics {
@@ -1268,6 +1286,8 @@ pub struct SystemDiagnostics {
     pub relay_connected: bool,
     /// Number of connected relays
     pub connected_relays: u32,
+    /// Individual relay info
+    pub relays: Vec<RelayDiagnosticInfo>,
 }
 
 /// Full diagnostics snapshot containing all diagnostic information

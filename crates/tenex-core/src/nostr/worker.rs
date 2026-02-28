@@ -525,7 +525,7 @@ pub enum NostrCommand {
     },
     /// Get current relay connection status
     GetRelayStatus {
-        response_tx: Sender<usize>,
+        response_tx: Sender<Vec<(String, String)>>,
     },
     /// Force reconnection to relays and restart subscriptions
     /// Used by pull-to-refresh to ensure fresh data is fetched
@@ -1154,18 +1154,18 @@ impl NostrWorker {
                         }
                     }
                     NostrCommand::GetRelayStatus { response_tx } => {
-                        let connected_count = rt.block_on(async {
+                        let relay_info = rt.block_on(async {
                             if let Some(client) = self.client.as_ref() {
                                 let relays = client.relays().await;
                                 relays
-                                    .values()
-                                    .filter(|r| r.status() == nostr_sdk::RelayStatus::Connected)
-                                    .count()
+                                    .iter()
+                                    .map(|(url, r)| (url.to_string(), r.status().to_string()))
+                                    .collect()
                             } else {
-                                0
+                                Vec::new()
                             }
                         });
-                        let _ = response_tx.send(connected_count);
+                        let _ = response_tx.send(relay_info);
                     }
                     NostrCommand::ForceReconnect { response_tx } => {
                         debug_log("Worker: Force reconnecting");
