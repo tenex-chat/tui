@@ -1,5 +1,10 @@
 import SwiftUI
 
+enum ReportChatPaneEntryMode: Equatable {
+    case list
+    case newConversation
+}
+
 /// View model for macOS report chat pane.
 /// Loads root threads that a-tag a report and exposes loading/error state for UI.
 @MainActor
@@ -34,6 +39,14 @@ final class ReportChatPaneViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             isLoading = false
         }
+    }
+
+    var orderedConversationIds: [String] {
+        threads.map(\.id)
+    }
+
+    func preferredEntryMode() -> ReportChatPaneEntryMode {
+        threads.isEmpty ? .newConversation : .list
     }
 
     func refreshDebounced(

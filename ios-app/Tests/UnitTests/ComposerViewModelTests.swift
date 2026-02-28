@@ -90,6 +90,28 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertEqual(draftStore.updatedReferenceReportATags.last ?? nil, "30023:pubkey:slug")
     }
 
+    func testLoadDraftWithoutInitialContentStillPersistsReferenceReportATag() async {
+        let draftStore = MockDraftStore()
+        let existing = Draft(projectId: "project-a", content: "existing")
+        draftStore.seedDraft(existing, conversationId: nil, projectId: "project-a")
+        let viewModel = makeViewModel(core: MockCoreGateway(), drafts: draftStore)
+
+        let result = await viewModel.loadDraft(
+            projectId: "project-a",
+            conversationId: nil,
+            initialContent: nil,
+            initialTextAttachments: [],
+            referenceConversationId: nil,
+            referenceReportATag: "30023:author:report-slug",
+            isDirty: false
+        )
+
+        XCTAssertFalse(result.shouldShowLoadFailedAlert)
+        XCTAssertEqual(result.localText, "existing")
+        XCTAssertEqual(result.draft?.referenceReportATag, "30023:author:report-slug")
+        XCTAssertEqual(draftStore.updatedReferenceReportATags.last ?? nil, "30023:author:report-slug")
+    }
+
     func testLoadAgentContextUsesInitialAgentAndResolvesName() async {
         let core = MockCoreGateway()
         core.onlineAgents = ["project-a": []]
