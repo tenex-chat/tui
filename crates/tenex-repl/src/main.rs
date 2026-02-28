@@ -11,6 +11,7 @@ use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 use std::io::{self, Stdout, Write};
 use std::sync::mpsc::Receiver;
+use std::time::Instant;
 use tenex_core::config::CoreConfig;
 use tenex_core::events::CoreEvent;
 use tenex_core::models::{Message, Project, ProjectAgent, Thread};
@@ -28,7 +29,8 @@ const WHITE_BOLD: &str = "\x1b[1;37m";
 const DIM: &str = "\x1b[2m";
 const RESET: &str = "\x1b[0m";
 // Background color for input box
-const BG_INPUT: &str = "\x1b[48;5;236m";
+const BG_INPUT: &str = "\x1b[48;5;234m";
+const BG_HIGHLIGHT: &str = "\x1b[48;5;239m";
 
 macro_rules! raw_println {
     () => {{
@@ -56,14 +58,14 @@ struct Args {
 
 // ─── Attachment Types ───────────────────────────────────────────────────────
 
-struct PasteAttachment {
-    id: usize,
-    content: String,
+enum AttachmentKind {
+    Text { content: String },
+    Image { url: String },
 }
 
-struct ImageAttachment {
+struct Attachment {
     id: usize,
-    url: String,
+    kind: AttachmentKind,
 }
 
 // ─── Line Editor ────────────────────────────────────────────────────────────
@@ -74,10 +76,9 @@ struct LineEditor {
     history: Vec<String>,
     history_index: Option<usize>,
     saved_buffer: String,
-    attachments: Vec<PasteAttachment>,
-    next_attachment_id: usize,
-    image_attachments: Vec<ImageAttachment>,
-    next_image_id: usize,
+    attachments: Vec<Attachment>,
+    next_id: usize,
+    selected_attachment: Option<usize>,
 }
 
 impl LineEditor {
@@ -89,9 +90,8 @@ impl LineEditor {
             history_index: None,
             saved_buffer: String::new(),
             attachments: Vec::new(),
-            next_attachment_id: 1,
-            image_attachments: Vec::new(),
-            next_image_id: 1,
+            next_id: 1,
+            selected_attachment: None,
         }
     }
 
@@ -219,12 +219,12 @@ impl LineEditor {
 
     fn handle_paste(&mut self, text: &str) {
         if Self::should_be_attachment(text) {
-            let id = self.next_attachment_id;
-            self.attachments.push(PasteAttachment {
+            let id = self.next_id;
+            self.attachments.push(Attachment {
                 id,
-                content: text.to_string(),
+                kind: AttachmentKind::Text { content: text.to_string() },
             });
-            self.next_attachment_id += 1;
+            self.next_id += 1;
             let marker = format!("[Text Attachment {}]", id);
             self.insert_text(&marker);
         } else {
@@ -316,9 +316,12 @@ impl LineEditor {
     }
 
     fn add_image_attachment(&mut self, url: String) -> usize {
-        let id = self.next_image_id;
-        self.image_attachments.push(ImageAttachment { id, url });
-        self.next_image_id += 1;
+        let id = self.next_id;
+        self.attachments.push(Attachment {
+            id,
+            kind: AttachmentKind::Image { url },
+        });
+        self.next_id += 1;
         let marker = format!("[Image #{}]", id);
         self.insert_text(&marker);
         id
@@ -328,22 +331,29 @@ impl LineEditor {
         let mut content = self.buffer.clone();
 
         // Replace [Image #N] markers with actual URLs
-        for img in &self.image_attachments {
-            let marker = format!("[Image #{}]", img.id);
-            content = content.replace(&marker, &img.url);
+        for att in &self.attachments {
+            if let AttachmentKind::Image { ref url } = att.kind {
+                let marker = format!("[Image #{}]", att.id);
+                content = content.replace(&marker, url);
+            }
         }
 
         // Append text attachments at end with ---- separator
-        if !self.attachments.is_empty() {
+        let text_attachments: Vec<&Attachment> = self.attachments.iter()
+            .filter(|a| matches!(a.kind, AttachmentKind::Text { .. }))
+            .collect();
+        if !text_attachments.is_empty() {
             if !content.is_empty() && !content.ends_with('\n') {
                 content.push('\n');
             }
             content.push_str("\n----\n");
-            for attachment in &self.attachments {
-                content.push_str(&format!("-- Text Attachment {} --\n", attachment.id));
-                content.push_str(&attachment.content);
-                if !attachment.content.ends_with('\n') {
-                    content.push('\n');
+            for att in &text_attachments {
+                if let AttachmentKind::Text { content: ref text } = att.kind {
+                    content.push_str(&format!("-- Text Attachment {} --\n", att.id));
+                    content.push_str(text);
+                    if !text.ends_with('\n') {
+                        content.push('\n');
+                    }
                 }
             }
         }
@@ -352,7 +362,7 @@ impl LineEditor {
     }
 
     fn has_attachments(&self) -> bool {
-        !self.attachments.is_empty() || !self.image_attachments.is_empty()
+        !self.attachments.is_empty()
     }
 
     fn submit(&mut self) -> String {
@@ -369,9 +379,8 @@ impl LineEditor {
         self.cursor = 0;
         self.history_index = None;
         self.attachments.clear();
-        self.next_attachment_id = 1;
-        self.image_attachments.clear();
-        self.next_image_id = 1;
+        self.next_id = 1;
+        self.selected_attachment = None;
         content
     }
 
@@ -433,6 +442,59 @@ impl LineEditor {
         pos
     }
 
+    fn marker_for_attachment(att: &Attachment) -> String {
+        match &att.kind {
+            AttachmentKind::Text { .. } => format!("[Text Attachment {}]", att.id),
+            AttachmentKind::Image { .. } => format!("[Image #{}]", att.id),
+        }
+    }
+
+    /// Find attachment marker immediately before cursor. Returns attachment index if found.
+    fn marker_before_cursor(&self) -> Option<usize> {
+        if self.cursor == 0 {
+            return None;
+        }
+        // Check if char before cursor is ']'
+        let bytes = self.buffer.as_bytes();
+        if bytes[self.cursor - 1] != b']' {
+            return None;
+        }
+        // Find matching '['
+        let before = &self.buffer[..self.cursor];
+        let bracket_start = before.rfind('[')?;
+        let marker_text = &self.buffer[bracket_start..self.cursor];
+        // Match against known markers
+        for (i, att) in self.attachments.iter().enumerate() {
+            if Self::marker_for_attachment(att) == marker_text {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Remove attachment at index: delete from Vec, remove marker from buffer, adjust cursor.
+    fn remove_attachment(&mut self, idx: usize) {
+        if idx >= self.attachments.len() {
+            return;
+        }
+        let marker = Self::marker_for_attachment(&self.attachments[idx]);
+        self.attachments.remove(idx);
+        // Remove marker from buffer
+        if let Some(pos) = self.buffer.find(&marker) {
+            self.buffer.drain(pos..pos + marker.len());
+            if self.cursor > pos {
+                self.cursor = self.cursor.saturating_sub(marker.len()).max(pos);
+            }
+        }
+        // Clamp or clear selected_attachment
+        if self.attachments.is_empty() {
+            self.selected_attachment = None;
+        } else if let Some(sel) = self.selected_attachment {
+            if sel >= self.attachments.len() {
+                self.selected_attachment = Some(self.attachments.len() - 1);
+            }
+        }
+    }
 }
 
 // ─── Completion Menu ────────────────────────────────────────────────────────
@@ -442,6 +504,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("/agent", "list or switch agent"),
     ("/new", "new context [agent@project]"),
     ("/conversations", "browse/open conversations"),
+    ("/boot", "boot an offline project"),
     ("/active", "active work across all projects"),
     ("/status", "show current context"),
     ("/help", "show commands"),
@@ -469,6 +532,8 @@ struct CompletionMenu {
     selected: usize,
     rendered_lines: u16,
     attachment_indicator_lines: u16,
+    input_wrap_lines: u16,
+    cursor_row: u16,
     input_area_drawn: bool,
 }
 
@@ -723,22 +788,37 @@ impl CompletionMenu {
             selected: 0,
             rendered_lines: 0,
             attachment_indicator_lines: 0,
+            input_wrap_lines: 0,
+            cursor_row: 0,
             input_area_drawn: false,
         }
     }
 
     /// Update completions based on the current buffer content.
     fn update_from_buffer(&mut self, buffer: &str, state: &ReplState, runtime: &CoreRuntime) {
-        // Handle "@" at start of input — agent picker (like /agent)
+        // Handle "@" at start of input — agent picker: current project first, then others
         if buffer.starts_with('@') {
             let filter = buffer[1..].to_lowercase();
-            if let Some(ref a_tag) = state.current_project {
-                let store = runtime.data_store();
-                let store_ref = store.borrow();
-                self.items = agent_completion_items(&store_ref, a_tag, &filter, None);
-            } else {
-                self.items.clear();
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            let mut items = Vec::new();
+
+            // Current project agents first
+            if let Some(ref current_a_tag) = state.current_project {
+                items.extend(agent_completion_items(&store_ref, current_a_tag, &filter, None));
             }
+
+            // Agents from other projects
+            for project in store_ref.get_projects().iter().filter(|p| !p.is_deleted) {
+                let a_tag = project.a_tag();
+                if state.current_project.as_deref() == Some(&a_tag) {
+                    continue;
+                }
+                let other_items = agent_completion_items(&store_ref, &a_tag, &filter, Some(&project.title));
+                items.extend(other_items);
+            }
+
+            self.items = items;
             self.selected = 0;
             self.visible = !self.items.is_empty();
             return;
@@ -995,6 +1075,28 @@ impl CompletionMenu {
                             }
                         }
                     }
+                    "/boot" | "/b" => {
+                        let store = runtime.data_store();
+                        let store_ref = store.borrow();
+                        let projects: Vec<&Project> = store_ref
+                            .get_projects()
+                            .iter()
+                            .filter(|p| !p.is_deleted)
+                            .collect();
+                        self.items = projects
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, p)| {
+                                let online = store_ref.is_project_online(&p.a_tag());
+                                !online && (filter.is_empty() || p.title.to_lowercase().contains(&filter))
+                            })
+                            .map(|(i, p)| CompletionItem {
+                                label: p.title.clone(),
+                                description: "offline".to_string(),
+                                action: ItemAction::Submit((i + 1).to_string()),
+                            })
+                            .collect();
+                    }
                     _ => {
                         self.items.clear();
                     }
@@ -1052,6 +1154,11 @@ struct ReplState {
     stream_buffer: String,
     /// Track last displayed message pubkey for consecutive message dedup
     last_displayed_pubkey: Option<String>,
+    /// Wave animation on project name when switching projects
+    project_anim_start: Option<Instant>,
+    project_anim_name: String,
+    /// Frame counter for runtime wave animation (incremented every tick)
+    wave_frame: u64,
 }
 
 impl ReplState {
@@ -1065,7 +1172,27 @@ impl ReplState {
             streaming_in_progress: false,
             stream_buffer: String::new(),
             last_displayed_pubkey: None,
+            project_anim_start: None,
+            project_anim_name: String::new(),
+            wave_frame: 0,
         }
+    }
+
+    fn start_project_animation(&mut self, name: &str) {
+        self.project_anim_start = Some(Instant::now());
+        self.project_anim_name = name.to_string();
+    }
+
+    fn is_animating(&self) -> bool {
+        self.project_anim_start
+            .map(|t| t.elapsed().as_millis() < 5000)
+            .unwrap_or(false)
+    }
+
+    fn has_active_agents(&self, runtime: &CoreRuntime) -> bool {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        store_ref.operations.has_active_agents()
     }
 
     fn project_display(&self, runtime: &CoreRuntime) -> String {
@@ -1090,10 +1217,35 @@ impl ReplState {
             .unwrap_or_else(|| "no-agent".to_string())
     }
 
+    fn switch_project(&mut self, a_tag: String, runtime: &CoreRuntime) {
+        let name = {
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            store_ref.get_projects().iter()
+                .find(|p| p.a_tag() == a_tag)
+                .map(|p| p.title.clone())
+                .unwrap_or_else(|| "project".to_string())
+        };
+        self.current_project = Some(a_tag);
+        self.start_project_animation(&name);
+    }
+
     fn status_bar_text(&self, runtime: &CoreRuntime) -> String {
         let project = self.project_display(runtime);
         let agent = self.agent_display();
-        let mut text = format!("{CYAN}{project}{RESET}{DIM}/{RESET}{GREEN}{agent}{RESET}");
+
+        let project_rendered = if let Some(start) = self.project_anim_start {
+            let elapsed_ms = start.elapsed().as_millis() as f64;
+            if elapsed_ms < 5000.0 {
+                wave_colorize(&project, elapsed_ms, &[44, 37, 73, 109, 117, 159])
+            } else {
+                format!("{CYAN}{project}{RESET}")
+            }
+        } else {
+            format!("{CYAN}{project}{RESET}")
+        };
+
+        let mut text = format!("{project_rendered}{DIM}/{RESET}{GREEN}{agent}{RESET}");
 
         let store = runtime.data_store();
         let store_ref = store.borrow();
@@ -1230,31 +1382,94 @@ fn redraw_input(
     clear_input_area(stdout, completion);
 
     // ── Top edge: lower half-blocks in input bg color ──
-    let fg_input_bg = "\x1b[38;5;236m"; // fg = same color as BG_INPUT
+    let fg_input_bg = "\x1b[38;5;234m"; // fg = same color as BG_INPUT
     write!(stdout, "{fg_input_bg}{}{RESET}", HALF_BLOCK_LOWER.to_string().repeat(width)).ok();
+
+    // ── Backend approval prompt (replaces normal input when pending) ──
+    {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        let pending_info = store_ref.trust.pending_backend_approvals.first().map(|a| {
+            let name = store_ref.get_profile_name(&a.backend_pubkey);
+            let short_pk = if a.backend_pubkey.len() >= 12 {
+                a.backend_pubkey[..12].to_string()
+            } else {
+                a.backend_pubkey.clone()
+            };
+            (name, short_pk)
+        });
+        drop(store_ref);
+        if let Some((name, short_pk)) = pending_info {
+            let prompt = format!("  New backend: {YELLOW}{name}{RESET}{BG_INPUT}{DIM} ({short_pk}…){RESET}{BG_INPUT}  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[b]{RESET}{BG_INPUT}lock");
+            let visible_len = 2 + "New backend: ".len() + name.len() + 2 + short_pk.len() + 2 + 2 + "[a]pprove  [b]lock".len();
+            let prompt_pad = width.saturating_sub(visible_len);
+            write!(stdout, "\r\n{BG_INPUT}{prompt}{}{RESET}", " ".repeat(prompt_pad)).ok();
+            completion.input_wrap_lines = 0;
+            completion.attachment_indicator_lines = 0;
+            completion.rendered_lines = 0;
+
+            // Bottom edge + status bar
+            write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
+            let status_text = state.status_bar_text(runtime);
+            let status_plain_width = state.status_bar_plain_width(runtime);
+            let (rt_ms, rt_active, rt_count) = {
+                let store = runtime.data_store();
+                let store_ref = store.borrow();
+                store_ref.get_statusbar_runtime_ms()
+            };
+            let (rt_ansi, rt_plain_width) =
+                build_runtime_indicator(rt_ms, rt_active, rt_count, state.wave_frame);
+            let left_used = 3 + status_plain_width;
+            let gap = width.saturating_sub(left_used + rt_plain_width);
+            write!(
+                stdout,
+                "\r\n{DIM}   {status_text}{RESET}{}{rt_ansi}",
+                " ".repeat(gap)
+            )
+            .ok();
+
+            queue!(stdout, cursor::MoveUp(2)).ok();
+            queue!(stdout, cursor::MoveToColumn(visible_len as u16)).ok();
+            stdout.flush().ok();
+            completion.cursor_row = 0;
+            completion.input_area_drawn = true;
+            return;
+        }
+    }
 
     // ── Input line (dark background, full width) ──
     let input_visible_len = PROMPT_PREFIX_WIDTH as usize + editor.buffer.chars().count();
-    let pad = if width > input_visible_len { width - input_visible_len } else { 0 };
+    let input_total_rows = if width > 0 { input_visible_len.saturating_sub(1) / width + 1 } else { 1 };
+    let last_row_chars = if width > 0 { ((input_visible_len.saturating_sub(1)) % width) + 1 } else { input_visible_len };
+    let pad = width.saturating_sub(last_row_chars);
     write!(stdout, "\r\n{BG_INPUT}{WHITE_BOLD}  › {RESET}{BG_INPUT}{}{}{RESET}",
         editor.buffer,
         " ".repeat(pad),
     ).ok();
+    completion.input_wrap_lines = (input_total_rows as u16).saturating_sub(1);
 
-    // ── Attachment indicator (below input, if attachments exist) ──
+    // ── Attachment strip (below input, if attachments exist) ──
     if editor.has_attachments() {
-        let mut parts = Vec::new();
-        let text_count = editor.attachments.len();
-        let image_count = editor.image_attachments.len();
-        if text_count > 0 {
-            parts.push(format!("{} text attachment{}", text_count, if text_count == 1 { "" } else { "s" }));
+        write!(stdout, "\r\n{BG_INPUT}  📎 ").ok();
+        let mut strip_chars: usize = 5; // "  📎 " = 5 visible chars (📎 counts as 2)
+        for (i, att) in editor.attachments.iter().enumerate() {
+            let label = match &att.kind {
+                AttachmentKind::Text { content } => {
+                    let lines = content.lines().count();
+                    format!("Text Att. {} ({} line{})", att.id, lines, if lines == 1 { "" } else { "s" })
+                }
+                AttachmentKind::Image { .. } => format!("Image #{}", att.id),
+            };
+            let is_selected = editor.selected_attachment == Some(i);
+            if is_selected {
+                write!(stdout, " {WHITE_BOLD}{BG_HIGHLIGHT} {label} {RESET}{BG_INPUT}").ok();
+            } else {
+                write!(stdout, " {DIM} {label} {RESET}{BG_INPUT}").ok();
+            }
+            strip_chars += 2 + label.len() + 1; // " " + " label " spacing
         }
-        if image_count > 0 {
-            parts.push(format!("{} image{}", image_count, if image_count == 1 { "" } else { "s" }));
-        }
-        let indicator = format!("  📎 {}", parts.join(" · "));
-        let indicator_pad = width.saturating_sub(indicator.chars().count() + 2);
-        write!(stdout, "\r\n{BG_INPUT}{DIM}{indicator}{}{RESET}", " ".repeat(indicator_pad)).ok();
+        let strip_pad = width.saturating_sub(strip_chars);
+        write!(stdout, "{}{RESET}", " ".repeat(strip_pad)).ok();
         completion.attachment_indicator_lines = 1;
     } else {
         completion.attachment_indicator_lines = 0;
@@ -1285,20 +1500,38 @@ fn redraw_input(
     // ── Bottom edge: upper half-blocks in input bg color ──
     write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
 
-    // ── Status bar (project/agent) ──
+    // ── Status bar (project/agent on left, runtime on right) ──
     let status_text = state.status_bar_text(runtime);
     let status_plain_width = state.status_bar_plain_width(runtime);
-    let status_pad = if width > status_plain_width + 3 { width - status_plain_width - 3 } else { 0 };
-    write!(stdout, "\r\n{DIM}   {status_text}{}{RESET}", " ".repeat(status_pad)).ok();
+    let (runtime_ms, has_active, active_count) = {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        store_ref.get_statusbar_runtime_ms()
+    };
+    let (runtime_ansi, runtime_plain_width) =
+        build_runtime_indicator(runtime_ms, has_active, active_count, state.wave_frame);
+    let left_used = 3 + status_plain_width; // "   " prefix + status text
+    let gap = width.saturating_sub(left_used + runtime_plain_width);
+    write!(
+        stdout,
+        "\r\n{DIM}   {status_text}{RESET}{}{runtime_ansi}",
+        " ".repeat(gap)
+    )
+    .ok();
 
-    // ── Position cursor back on input line (Line 1) ──
-    // Lines below input: attachment_indicator + completion + bottom_edge + status_bar
+    // ── Position cursor back on input line ──
+    // Lines below the last input row: attachment_indicator + completion + bottom_edge + status_bar
     let lines_below = completion.attachment_indicator_lines + completion.rendered_lines + 2;
-    queue!(stdout, cursor::MoveUp(lines_below)).ok();
-    let col = PROMPT_PREFIX_WIDTH + editor.buffer[..editor.cursor].chars().count() as u16;
-    queue!(stdout, cursor::MoveToColumn(col)).ok();
+    // Figure out which terminal row the cursor is on within the (possibly wrapped) input
+    let cursor_char_pos = PROMPT_PREFIX_WIDTH as usize + editor.buffer[..editor.cursor].chars().count();
+    let cursor_row = if width > 0 && cursor_char_pos > 0 { (cursor_char_pos - 1) / width } else { 0 };
+    let wrap_lines_after_cursor = (completion.input_wrap_lines as usize).saturating_sub(cursor_row);
+    queue!(stdout, cursor::MoveUp(lines_below + wrap_lines_after_cursor as u16)).ok();
+    let col = if width > 0 && cursor_char_pos > 0 { ((cursor_char_pos - 1) % width) + 1 } else { 0 };
+    queue!(stdout, cursor::MoveToColumn(col as u16)).ok();
     stdout.flush().ok();
 
+    completion.cursor_row = cursor_row as u16;
     completion.input_area_drawn = true;
 }
 
@@ -1310,12 +1543,13 @@ fn clear_input_area(stdout: &mut Stdout, completion: &mut CompletionMenu) {
         return;
     }
 
-    // We're on the input line (Line 1). Move up to top edge (Line 0).
-    queue!(stdout, cursor::MoveUp(1), cursor::MoveToColumn(0)).ok();
+    // Cursor is on `cursor_row` within the input. Move up to top edge (1 row above input row 0).
+    let up_to_top = completion.cursor_row + 1;
+    queue!(stdout, cursor::MoveUp(up_to_top), cursor::MoveToColumn(0)).ok();
     queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
 
-    // Clear: input line + attachment_indicator + completion lines + bottom edge + status bar
-    let lines_below = 1 + completion.attachment_indicator_lines + completion.rendered_lines + 2;
+    // Clear: input rows (1 + wrap_lines) + attachment_indicator + completion lines + bottom edge + status bar
+    let lines_below = 1 + completion.input_wrap_lines + completion.attachment_indicator_lines + completion.rendered_lines + 2;
     for _ in 0..lines_below {
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
@@ -1325,6 +1559,97 @@ fn clear_input_area(stdout: &mut Stdout, completion: &mut CompletionMenu) {
     stdout.flush().ok();
     completion.rendered_lines = 0;
     completion.attachment_indicator_lines = 0;
+    completion.input_wrap_lines = 0;
+}
+
+/// Render text with a wave of brightness sweeping left-to-right.
+/// `palette` is a set of 256-color codes from dim to bright.
+/// The wave peak moves across the characters over 5000ms.
+fn wave_colorize(text: &str, elapsed_ms: f64, palette: &[u8]) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len().max(1) as f64;
+    // Wave peak position (0..1) sweeps across, then a second pass dims down
+    let progress = (elapsed_ms / 5000.0).clamp(0.0, 1.0);
+    let peak = progress * 1.4 - 0.2; // overshoot slightly for smooth entry/exit
+
+    let mut out = String::new();
+    let pal_max = palette.len() - 1;
+
+    for (i, ch) in chars.iter().enumerate() {
+        let char_pos = i as f64 / len;
+        // Distance from wave peak, normalized
+        let dist = (char_pos - peak).abs();
+        // Brightness: 1.0 at peak, fading with distance; gaussian-ish
+        let brightness = (-dist * dist * 20.0).exp();
+        // Blend between dim (index 0) and bright (last index)
+        let idx = (brightness * pal_max as f64).round() as usize;
+        let color = palette[idx.min(pal_max)];
+        out.push_str(&format!("\x1b[38;5;{color}m{ch}"));
+    }
+    out.push_str(RESET);
+    out
+}
+
+/// Format runtime in milliseconds to a human-readable string (HH:MM:SS or MM:SS)
+fn format_runtime(total_ms: u64) -> String {
+    let total_seconds = total_ms / 1000;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let seconds = total_seconds % 60;
+    if hours > 0 {
+        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    } else {
+        format!("{:02}:{:02}", minutes, seconds)
+    }
+}
+
+/// Build the runtime indicator string with wave animation when agents are active.
+/// Returns (ansi_colored_string, plain_char_count).
+fn build_runtime_indicator(
+    cumulative_runtime_ms: u64,
+    has_active_agents: bool,
+    active_agent_count: usize,
+    wave_frame: u64,
+) -> (String, usize) {
+    let label = format!("Today: {} ", format_runtime(cumulative_runtime_ms));
+    let plain_width = label.len();
+
+    if !has_active_agents {
+        // Red when no agents are working
+        return (format!("{RED}{label}{RESET}"), plain_width);
+    }
+
+    // Green wave animation when agents are active
+    // Wave parameters matching the TUI
+    let base_r: f32 = 106.0;
+    let base_g: f32 = 153.0;
+    let base_b: f32 = 85.0;
+    let wave_phase_speed: f32 = 0.3;
+    let wave_wavelength: f32 = 0.8;
+    let wave_period: f32 = 12.0;
+
+    let agent_count_clamped = active_agent_count.max(1).min(10) as f32;
+    let speed_multiplier = 0.3 * agent_count_clamped;
+    let brightness_amplitude = 0.3 + (0.3 * (agent_count_clamped - 1.0) / 9.0);
+    let offset = (wave_frame / 2) as f32; // slow down: every 2 frames
+
+    let mut out = String::new();
+    for (i, ch) in label.chars().enumerate() {
+        let phase = ((offset * wave_phase_speed * speed_multiplier)
+            + (i as f32 * wave_wavelength))
+            * std::f32::consts::PI
+            * 2.0
+            / wave_period;
+        let wave_value = phase.sin();
+        let brightness = 1.0 + (wave_value * brightness_amplitude);
+        let r = (base_r * brightness).clamp(0.0, 255.0) as u8;
+        let g = (base_g * brightness).clamp(0.0, 255.0) as u8;
+        let b = (base_b * brightness).clamp(0.0, 255.0) as u8;
+        out.push_str(&format!("\x1b[38;2;{r};{g};{b}m{ch}"));
+    }
+    out.push_str(RESET);
+
+    (out, plain_width)
 }
 
 /// Print text above the input area, then redraw the input area.
@@ -1352,11 +1677,11 @@ fn print_above_input(
 
 // ─── Markdown Colorizer ─────────────────────────────────────────────────────
 
-const BOLD_COLOR: &str = "\x1b[1;33m"; // bold yellow
+const BOLD_COLOR: &str = "\x1b[1;38;5;222m"; // #FFD787
 const CODE_INLINE: &str = "\x1b[36;48;5;237m"; // cyan on dark bg
 const CODE_BLOCK: &str = "\x1b[38;5;248m"; // light gray
 const CODE_BLOCK_BAR: &str = "\x1b[38;5;240m"; // dim bar
-const HEADING_COLOR: &str = "\x1b[1;33m"; // bold yellow
+const HEADING_COLOR: &str = "\x1b[1;38;5;222m"; // #FFD787
 const LIST_MARKER: &str = "\x1b[36m"; // cyan
 
 /// Colorize markdown content for terminal display.
@@ -1637,6 +1962,7 @@ fn print_help_raw() -> String {
          \x20 /agent [@project] [n]  List/switch agents (@ for other project)\n\
          \x20 /new [agent@project]  Clear screen, new context\n\
          \x20 /conversations [@proj] Browse and open conversations\n\
+         \x20 /boot [name]          Boot an offline project\n\
          \x20 /active              Active work across all projects\n\
          \x20 /status              Show current context\n\
          \x20 /help                Show this help\n\
@@ -1777,6 +2103,9 @@ fn format_message(
     let is_consecutive = !has_p_tags
         && last_pubkey.as_deref() == Some(&msg.pubkey);
 
+    // Add blank line between message groups (when sender changes)
+    let gap = if !is_consecutive && last_pubkey.is_some() { "\n" } else { "" };
+
     *last_pubkey = Some(msg.pubkey.clone());
 
     if is_user {
@@ -1784,13 +2113,13 @@ fn format_message(
             let rendered = render_content_with_attachments(&msg.content);
             return Some(format!("      {}", rendered));
         }
-        return Some(print_user_message_raw(&msg.content));
+        return Some(format!("{gap}{}", print_user_message_raw(&msg.content)));
     }
 
     // Agent message
     let name = store.get_profile_name(&msg.pubkey);
 
-    let mut out = String::new();
+    let mut out = String::from(gap);
 
     if has_p_tags {
         // Colored envelope: [from → @to1, @to2]
@@ -1886,7 +2215,7 @@ fn handle_project_command(arg: Option<&str>, state: &mut ReplState, runtime: &Co
                         project_a_tag: a_tag.clone(),
                     });
 
-                    state.current_project = Some(a_tag);
+                    state.switch_project(a_tag, runtime);
                     state.current_conversation = None;
                     state.last_displayed_pubkey = None;
                     auto_select_agent(state, runtime);
@@ -1921,7 +2250,7 @@ fn auto_select_project(state: &mut ReplState, runtime: &CoreRuntime) -> bool {
         let _ = runtime.handle().send(NostrCommand::SubscribeToProjectMetadata {
             project_a_tag: a_tag.clone(),
         });
-        state.current_project = Some(a_tag);
+        state.switch_project(a_tag, runtime);
         auto_select_agent(state, runtime);
         raw_println!("{}", print_system_raw(&format!("Auto-selected project: {title}")));
         true
@@ -1983,7 +2312,7 @@ fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, runtime: &Core
                     let _ = runtime.handle().send(NostrCommand::SubscribeToProjectMetadata {
                         project_a_tag: a_tag.clone(),
                     });
-                    state.current_project = Some(a_tag);
+                    state.switch_project(a_tag, runtime);
                     auto_select_agent(state, runtime);
                 }
                 None => {
@@ -2095,7 +2424,7 @@ fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreR
                 let _ = runtime.handle().send(NostrCommand::SubscribeToProjectMetadata {
                     project_a_tag: a_tag.clone(),
                 });
-                state.current_project = Some(a_tag);
+                state.switch_project(a_tag, runtime);
                 auto_select_agent(state, runtime);
             }
             None => return CommandResult::Lines(vec![print_error_raw(&format!("No project matching '{project_name}'"))]),
@@ -2107,7 +2436,7 @@ fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreR
     };
 
     let Ok(idx) = idx_str.parse::<usize>() else {
-        return CommandResult::Lines(vec![print_error_raw("Usage: /open <N> (number)")]);
+        return CommandResult::Lines(vec![print_error_raw("Usage: /conversations <N> (number)")]);
     };
 
     let store = runtime.data_store();
@@ -2131,15 +2460,10 @@ fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreR
     let store = runtime.data_store();
     let store_ref = store.borrow();
     let messages = store_ref.get_messages(&id);
-    let show_count = messages.len().min(10);
-    let start = messages.len().saturating_sub(show_count);
 
-    if show_count > 0 {
-        if start > 0 {
-            output.push(print_system_raw(&format!("  ... {} earlier messages", start)));
-        }
+    if !messages.is_empty() {
         let mut last_pk: Option<String> = None;
-        for msg in &messages[start..] {
+        for msg in messages {
             if let Some(formatted) = format_message(msg, &store_ref, &state.user_pubkey, &mut last_pk) {
                 output.push(formatted);
             }
@@ -2148,11 +2472,7 @@ fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreR
         output.push(print_separator_raw());
     }
 
-    if project_switch.is_some() {
-        CommandResult::ClearScreen(output)
-    } else {
-        CommandResult::Lines(output)
-    }
+    CommandResult::ClearScreen(output)
 }
 
 fn handle_active_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreRuntime) -> CommandResult {
@@ -2234,7 +2554,7 @@ fn handle_active_command(arg: Option<&str>, state: &mut ReplState, runtime: &Cor
             let _ = runtime.handle().send(NostrCommand::SubscribeToProjectMetadata {
                 project_a_tag: a_tag.clone(),
             });
-            state.current_project = Some(a_tag.clone());
+            state.switch_project(a_tag.clone(), runtime);
             auto_select_agent(state, runtime);
         }
     }
@@ -2309,7 +2629,7 @@ fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &CoreRuntime) -
                 let _ = runtime.handle().send(NostrCommand::SubscribeToProjectMetadata {
                     project_a_tag: a_tag.clone(),
                 });
-                state.current_project = Some(a_tag);
+                state.switch_project(a_tag, runtime);
                 auto_select_agent(state, runtime);
             }
         }
@@ -2394,6 +2714,49 @@ fn handle_send_message(content: &str, state: &mut ReplState, runtime: &CoreRunti
 
     state.last_displayed_pubkey = Some(state.user_pubkey.clone());
     vec![print_user_message_raw(content)]
+}
+
+fn handle_boot_command(arg: Option<&str>, runtime: &CoreRuntime) -> Vec<String> {
+    let arg = arg.unwrap_or("").trim();
+    if arg.is_empty() {
+        return vec![print_error_raw("Usage: /boot <project>")];
+    }
+
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    let projects: Vec<&Project> = store_ref
+        .get_projects()
+        .iter()
+        .filter(|p| !p.is_deleted)
+        .collect();
+
+    // Try numeric index first, then name match
+    let matched = if let Ok(idx) = arg.parse::<usize>() {
+        projects.get(idx.saturating_sub(1)).copied()
+    } else {
+        let lower = arg.to_lowercase();
+        projects.iter().find(|p| p.title.to_lowercase().contains(&lower)).copied()
+    };
+
+    let Some(project) = matched else {
+        return vec![print_error_raw(&format!("No project matching '{arg}'"))];
+    };
+
+    if store_ref.is_project_online(&project.a_tag()) {
+        return vec![print_system_raw(&format!("{} is already online", project.title))];
+    }
+
+    let a_tag = project.a_tag();
+    let pubkey = project.pubkey.clone();
+    let title = project.title.clone();
+    drop(store_ref);
+
+    let _ = runtime.handle().send(NostrCommand::BootProject {
+        project_a_tag: a_tag,
+        project_pubkey: Some(pubkey),
+    });
+
+    vec![print_system_raw(&format!("Booting {}...", title))]
 }
 
 fn handle_status_command(state: &ReplState, runtime: &CoreRuntime) -> Vec<String> {
@@ -2721,6 +3084,43 @@ async fn run_repl(
                     continue;
                 }
 
+                // ── Backend approval prompt handling ──
+                {
+                    let store = runtime.data_store();
+                    let first_pending = store.borrow().trust.pending_backend_approvals.first()
+                        .map(|a| a.backend_pubkey.clone());
+                    if let Some(backend_pk) = first_pending {
+                        match code {
+                            KeyCode::Char('a') | KeyCode::Char('y') | KeyCode::Enter => {
+                                let mut store_ref = store.borrow_mut();
+                                let name = store_ref.get_profile_name(&backend_pk);
+                                store_ref.add_approved_backend(&backend_pk);
+                                drop(store_ref);
+                                let msg = print_system_raw(&format!("Approved backend: {}", name));
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                                continue;
+                            }
+                            KeyCode::Char('b') | KeyCode::Char('n') => {
+                                let mut store_ref = store.borrow_mut();
+                                let name = store_ref.get_profile_name(&backend_pk);
+                                store_ref.add_blocked_backend(&backend_pk);
+                                drop(store_ref);
+                                let msg = print_system_raw(&format!("Blocked backend: {}", name));
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion);
+                                continue;
+                            }
+                            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                                raw_println!();
+                                raw_println!("{}", print_system_raw("Goodbye."));
+                                return Ok(());
+                            }
+                            _ => {
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 match (code, modifiers) {
                     // Ctrl+C → quit
                     (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => {
@@ -2779,6 +3179,7 @@ async fn run_repl(
                                     "/new" | "/n" => handle_new_command(arg.unwrap_or(""), state, runtime),
                                     "/conversations" | "/c" | "/open" | "/o" => handle_open_command(arg, state, runtime),
                                     "/active" => handle_active_command(arg, state, runtime),
+                                    "/boot" | "/b" => CommandResult::Lines(handle_boot_command(arg, runtime)),
                                     "/status" | "/s" => CommandResult::Lines(handle_status_command(state, runtime)),
                                     "/help" | "/h" => CommandResult::Lines(vec![print_help_raw()]),
                                     "/quit" | "/q" => {
@@ -2822,28 +3223,73 @@ async fn run_repl(
                         }
                     }
 
-                    // Tab → next completion or trigger menu
+                    // Tab → apply selected completion to buffer, or trigger menu
                     (KeyCode::Tab, m) if !m.contains(KeyModifiers::SHIFT) => {
-                        if completion.visible {
+                        if completion.visible && !completion.items.is_empty() {
+                            // Apply currently selected item to buffer
+                            let item = &completion.items[completion.selected];
+                            match &item.action {
+                                ItemAction::ReplaceFull(text) => {
+                                    editor.set_buffer(text);
+                                }
+                                ItemAction::Submit(value) => {
+                                    let cmd_part = match editor.buffer.find(' ') {
+                                        Some(pos) => editor.buffer[..pos].to_string(),
+                                        None => editor.buffer.clone(),
+                                    };
+                                    editor.set_buffer(&format!("{cmd_part} {value}"));
+                                }
+                            }
                             completion.select_next();
                             redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                         } else if editor.buffer.starts_with('/') || editor.buffer.starts_with('@') {
                             completion.update_from_buffer(&editor.buffer, state, runtime);
+                            // Apply first match immediately
+                            if !completion.items.is_empty() {
+                                let item = &completion.items[completion.selected];
+                                match &item.action {
+                                    ItemAction::ReplaceFull(text) => {
+                                        editor.set_buffer(text);
+                                    }
+                                    ItemAction::Submit(value) => {
+                                        let cmd_part = match editor.buffer.find(' ') {
+                                            Some(pos) => editor.buffer[..pos].to_string(),
+                                            None => editor.buffer.clone(),
+                                        };
+                                        editor.set_buffer(&format!("{cmd_part} {value}"));
+                                    }
+                                }
+                                completion.select_next();
+                            }
                             redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                         }
                     }
 
                     // Shift+Tab → prev completion
                     (KeyCode::BackTab, _) => {
-                        if completion.visible {
+                        if completion.visible && !completion.items.is_empty() {
                             completion.select_prev();
+                            let item = &completion.items[completion.selected];
+                            match &item.action {
+                                ItemAction::ReplaceFull(text) => editor.set_buffer(text),
+                                ItemAction::Submit(value) => {
+                                    let cmd = match editor.buffer.find(' ') {
+                                        Some(p) => editor.buffer[..p].to_string(),
+                                        None => editor.buffer.clone(),
+                                    };
+                                    editor.set_buffer(&format!("{cmd} {value}"));
+                                }
+                            }
                             redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                         }
                     }
 
-                    // Escape → hide menu
+                    // Escape → hide menu / deselect attachment
                     (KeyCode::Esc, _) => {
-                        if completion.visible {
+                        if editor.selected_attachment.is_some() {
+                            editor.selected_attachment = None;
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        } else if completion.visible {
                             completion.hide();
                             redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                         }
@@ -2851,7 +3297,9 @@ async fn run_repl(
 
                     // Up arrow
                     (KeyCode::Up, _) => {
-                        if completion.visible {
+                        if editor.selected_attachment.is_some() {
+                            editor.selected_attachment = None;
+                        } else if completion.visible {
                             completion.select_prev();
                         } else {
                             editor.history_up();
@@ -2861,37 +3309,62 @@ async fn run_repl(
 
                     // Down arrow
                     (KeyCode::Down, _) => {
-                        if completion.visible {
+                        if !completion.visible && editor.selected_attachment.is_none()
+                            && editor.cursor == editor.buffer.len() && editor.has_attachments()
+                        {
+                            editor.selected_attachment = Some(0);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                        } else if completion.visible {
                             completion.select_next();
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                         } else {
                             editor.history_down();
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                     }
 
                     // Backspace
                     (KeyCode::Backspace, m) if !m.contains(KeyModifiers::ALT) => {
-                        editor.delete_back();
+                        if let Some(idx) = editor.selected_attachment {
+                            editor.remove_attachment(idx);
+                        } else if let Some(att_idx) = editor.marker_before_cursor() {
+                            editor.selected_attachment = Some(att_idx);
+                        } else {
+                            editor.delete_back();
+                        }
                         completion.update_from_buffer(&editor.buffer, state, runtime);
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                     }
 
                     // Delete
                     (KeyCode::Delete, _) => {
-                        editor.delete_forward();
+                        if let Some(idx) = editor.selected_attachment {
+                            editor.remove_attachment(idx);
+                        } else {
+                            editor.delete_forward();
+                        }
                         completion.update_from_buffer(&editor.buffer, state, runtime);
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                     }
 
                     // Left
                     (KeyCode::Left, m) if !m.contains(KeyModifiers::ALT) => {
-                        editor.move_left();
+                        if let Some(idx) = editor.selected_attachment {
+                            editor.selected_attachment = Some(idx.saturating_sub(1));
+                        } else {
+                            editor.move_left();
+                        }
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                     }
 
                     // Right
                     (KeyCode::Right, m) if !m.contains(KeyModifiers::ALT) => {
-                        editor.move_right();
+                        if let Some(idx) = editor.selected_attachment {
+                            let max = editor.attachments.len().saturating_sub(1);
+                            editor.selected_attachment = Some((idx + 1).min(max));
+                        } else {
+                            editor.move_right();
+                        }
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
                     }
 
@@ -3005,6 +3478,7 @@ async fn run_repl(
 
                     // Regular character
                     (KeyCode::Char(c), m) if !m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) => {
+                        editor.selected_attachment = None;
                         editor.insert_char(c);
                         completion.update_from_buffer(&editor.buffer, state, runtime);
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
@@ -3062,6 +3536,11 @@ async fn run_repl(
 
             _ = tick.tick() => {
                 drain_data_changes(data_rx, state, runtime, &mut stdout, &editor, &mut completion);
+                state.wave_frame = state.wave_frame.wrapping_add(1);
+                let agents_active = state.has_active_agents(runtime);
+                if (state.is_animating() || agents_active) && !state.streaming_in_progress {
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion);
+                }
             }
         }
     }
@@ -3171,14 +3650,11 @@ fn drain_data_changes(
                 let mut store_ref = store.borrow_mut();
                 store_ref.handle_status_event_json(&json);
 
-                // Auto-approve any pending backends (REPL has no approval UI)
-                if store_ref.trust.has_pending_approvals() {
-                    let pending = store_ref.drain_pending_backend_approvals();
-                    store_ref.approve_pending_backends(pending);
-                }
+                // Redraw if there are pending backend approvals to show
+                let has_pending = store_ref.trust.has_pending_approvals();
 
                 // kind:24133 — agent activity updates the status bar on redraw
-                let mut needs_redraw = kind == Some(24133);
+                let mut needs_redraw = kind == Some(24133) || has_pending;
 
                 drop(store_ref);
 
