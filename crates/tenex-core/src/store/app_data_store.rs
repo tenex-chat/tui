@@ -439,6 +439,26 @@ impl AppDataStore {
             threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
         }
 
+        // Rebuild report discussion thread index from loaded thread roots.
+        // This ensures `get_document_threads(report_a_tag)` works after cold start/rebuild,
+        // even before incremental callback updates arrive.
+        self.reports.document_threads.clear();
+        let mut report_thread_links: Vec<(String, Thread)> = Vec::new();
+        for threads in self.threads_by_project.values() {
+            for thread in threads {
+                if let Some(messages) = self.messages_by_thread.get(&thread.id) {
+                    if let Some(root_message) = messages.first() {
+                        for report_a_tag in &root_message.a_tags {
+                            report_thread_links.push((report_a_tag.clone(), thread.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        for (report_a_tag, thread) in report_thread_links {
+            self.reports.add_document_thread(&report_a_tag, thread);
+        }
+
         // Load content definitions (kind:34199, 4199, 4200, 4201, 4202)
         let load_content_started_at = Instant::now();
         self.content.load_team_packs(&self.ndb);
@@ -558,6 +578,9 @@ impl AppDataStore {
         self.reports.reports = state.reports;
         self.reports.reports_all_versions = state.reports_all_versions;
         self.reports.document_threads = state.document_threads;
+
+        self.trust.approved_backends = state.approved_backends;
+        self.trust.blocked_backends = state.blocked_backends;
 
         // Rebuild derived data from the restored snapshot.  These operate only on
         // already-loaded data and do not touch nostrdb, so they are fast.
@@ -697,6 +720,8 @@ impl AppDataStore {
             reports: self.reports.reports.clone(),
             reports_all_versions: self.reports.reports_all_versions.clone(),
             document_threads: self.reports.document_threads.clone(),
+            approved_backends: self.trust.approved_backends.clone(),
+            blocked_backends: self.trust.blocked_backends.clone(),
         };
 
         match state_cache::save_cache(cache_dir, cached_state, max_created_at) {
@@ -2717,7 +2742,7 @@ impl AppDataStore {
         limit: usize,
     ) -> Vec<(String, String, u64, Option<String>)> {
         use crate::search::text_contains_term;
-        use std::collections::HashMap;
+        use std::collections::{HashMap, HashSet};
 
         // Precompute thread_id -> project_a_tag mapping once
         let thread_to_project: HashMap<&str, &str> = self
@@ -2729,12 +2754,12 @@ impl AppDataStore {
             .collect();
 
         let mut results: Vec<(String, String, u64, Option<String>)> = Vec::new();
+        let mut seen_ids: HashSet<String> = HashSet::new();
 
+        // Phase 1: In-memory scan of loaded messages
         for (thread_id, messages) in &self.messages_by_thread {
-            // Fast project lookup using precomputed map
             let thread_project_a_tag = thread_to_project.get(thread_id.as_str()).copied();
 
-            // Filter by project if specified
             if let Some(filter_a_tag) = project_a_tag {
                 if thread_project_a_tag != Some(filter_a_tag) {
                     continue;
@@ -2742,13 +2767,10 @@ impl AppDataStore {
             }
 
             for message in messages {
-                // Only include messages from this user
                 if message.pubkey != user_pubkey {
                     continue;
                 }
 
-                // If there are search terms, ALL must match (AND semantics)
-                // Uses ASCII case-insensitive matching like conversation search
                 if !terms.is_empty() {
                     let all_match = terms
                         .iter()
@@ -2758,12 +2780,71 @@ impl AppDataStore {
                     }
                 }
 
+                seen_ids.insert(message.id.clone());
                 results.push((
                     message.id.clone(),
                     message.content.clone(),
                     message.created_at,
                     thread_project_a_tag.map(String::from),
                 ));
+            }
+        }
+
+        // Phase 2: Query nostrdb for cross-client kind:1 messages not in memory
+        // This catches messages sent from other clients (web, iOS) that were
+        // seeded via the user messages history subscription.
+        if let Ok(pubkey_bytes) = hex::decode(user_pubkey)
+            .ok()
+            .and_then(|d| <[u8; 32]>::try_from(d).ok())
+            .ok_or(())
+        {
+            if let Ok(txn) = nostrdb::Transaction::new(&self.ndb) {
+                let db_limit = (limit * 5).min(500) as i32;
+                let filter = nostrdb::Filter::new()
+                    .kinds([1])
+                    .authors([&pubkey_bytes])
+                    .limit(db_limit as u64)
+                    .build();
+                if let Ok(query_results) = self.ndb.query(&txn, &[filter], db_limit) {
+                    for result in query_results {
+                        if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                            let event_id = hex::encode(note.id());
+                            if seen_ids.contains(&event_id) {
+                                continue;
+                            }
+
+                            let content = note.content().to_string();
+
+                            if !terms.is_empty() {
+                                let all_match = terms
+                                    .iter()
+                                    .all(|term| text_contains_term(&content, term));
+                                if !all_match {
+                                    continue;
+                                }
+                            }
+
+                            let thread_id = Self::extract_thread_id_from_note(&note);
+                            let thread_project = thread_id
+                                .as_ref()
+                                .and_then(|tid| thread_to_project.get(tid.as_str()).copied());
+
+                            if let Some(filter_a_tag) = project_a_tag {
+                                if thread_project != Some(filter_a_tag) {
+                                    continue;
+                                }
+                            }
+
+                            seen_ids.insert(event_id.clone());
+                            results.push((
+                                event_id,
+                                content,
+                                note.created_at(),
+                                thread_project.map(String::from),
+                            ));
+                        }
+                    }
+                }
             }
         }
 
@@ -5372,6 +5453,149 @@ mod tests {
         assert_eq!(threads[0].id, "t1");
 
         assert!(store.reports.get_document_threads("missing").is_empty());
+    }
+
+    #[test]
+    fn test_kind1_root_with_project_and_report_a_tags_indexes_in_both_views() {
+        use crate::store::events::{ingest_events, wait_for_event_processing};
+        use nostr_sdk::prelude::*;
+        use nostrdb::Transaction;
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        let keys = Keys::generate();
+
+        let project_a_tag = format!("31933:{}:TENEX-ff3ssq", keys.public_key().to_hex());
+        let report_author =
+            "14925f2b4795ca6037fa7d33899c5145d3c1f264865d94ea028ba6168f394ebf".to_string();
+        let report_a_tag = format!("30023:{}:nostr-skill-events-kind-4202", report_author);
+
+        let event = EventBuilder::new(Kind::from(1), "test")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec![project_a_tag.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec![report_a_tag.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+                vec![report_author],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
+
+        let filter = nostrdb::Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let notes: Vec<_> = db
+            .ndb
+            .query(&txn, &[filter], 10)
+            .unwrap()
+            .into_iter()
+            .filter_map(|r| db.ndb.get_note_by_key(&txn, r.note_key).ok())
+            .collect();
+        assert_eq!(notes.len(), 1, "expected one kind:1 root note");
+
+        store.handle_event(1, &notes[0]);
+
+        let thread_id = event.id.to_hex();
+
+        assert!(
+            store.get_thread_by_id(&thread_id).is_some(),
+            "thread should be indexed in global conversation store"
+        );
+        assert_eq!(
+            store.get_threads(&project_a_tag).len(),
+            1,
+            "thread should be indexed under project threads"
+        );
+        assert_eq!(
+            store.get_thread_root_count(&project_a_tag),
+            1,
+            "thread root index should include the new thread"
+        );
+        assert!(
+            store
+                .reports
+                .get_document_threads(&report_a_tag)
+                .iter()
+                .any(|t| t.id == thread_id),
+            "thread should be indexed under report document threads"
+        );
+    }
+
+    #[test]
+    fn test_rebuild_indexes_existing_report_document_threads() {
+        use crate::store::events::{ingest_events, wait_for_event_processing};
+        use nostr_sdk::prelude::*;
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let d_tag = "TENEX-ff3ssq".to_string();
+        let project_a_tag = format!("31933:{}:{}", keys.public_key().to_hex(), d_tag);
+        let report_author =
+            "14925f2b4795ca6037fa7d33899c5145d3c1f264865d94ea028ba6168f394ebf".to_string();
+        let report_a_tag = format!("30023:{}:nostr-skill-events-kind-4202", report_author);
+
+        let project_event = EventBuilder::new(Kind::Custom(31933), "Project description")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec![d_tag],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("name")),
+                vec!["TENEX".to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let thread_event = EventBuilder::new(Kind::from(1), "test")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec![project_a_tag],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec![report_a_tag.clone()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+        let thread_id = thread_event.id.to_hex();
+
+        ingest_events(&db.ndb, &[project_event, thread_event], None).unwrap();
+
+        let filter = nostrdb::Filter::new().kinds([31933, 1]).build();
+        wait_for_event_processing(&db.ndb, filter, 5000);
+
+        let store = AppDataStore::new(db.ndb.clone());
+        assert!(
+            store
+                .reports
+                .get_document_threads(&report_a_tag)
+                .iter()
+                .any(|t| t.id == thread_id),
+            "rebuild_from_ndb should recover report-tagged thread roots"
+        );
     }
 
     #[test]

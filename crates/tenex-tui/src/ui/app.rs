@@ -390,6 +390,10 @@ pub struct App {
     pub browse_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::BrowseResult>>,
     /// Last time the user sent a message per thread (unix timestamp seconds)
     pub last_user_activity_by_thread: HashMap<String, u64>,
+    /// Last time Esc was pressed (for double-Esc stop detection)
+    pub last_esc_time: Option<std::time::Instant>,
+    /// Last time an autosave was performed (for periodic crash protection)
+    pub last_autosave: std::time::Instant,
 }
 
 impl App {
@@ -480,6 +484,8 @@ impl App {
             audio_player: AudioPlayer::new(),
             browse_tx: None,
             last_user_activity_by_thread: HashMap::new(),
+            last_esc_time: None,
+            last_autosave: std::time::Instant::now(),
         }
     }
 
@@ -3869,6 +3875,57 @@ impl App {
 
         // Default: return current thread ID
         Some(thread.id.clone())
+    }
+
+    /// Send a stop command (kind:24134) for the current conversation's active agents.
+    /// Used by double-Esc to quickly stop agent activity.
+    pub fn stop_current_conversation(&mut self) {
+        if let Some(stop_thread_id) = self.get_stop_target_thread_id() {
+            let (is_busy, project_a_tag) = {
+                let store = self.data_store.borrow();
+                (
+                    store.operations.is_event_busy(&stop_thread_id),
+                    store.find_project_for_thread(&stop_thread_id),
+                )
+            };
+            if is_busy {
+                if let (Some(core_handle), Some(a_tag)) =
+                    (self.core_handle.clone(), project_a_tag)
+                {
+                    let working_agents = self
+                        .data_store
+                        .borrow()
+                        .operations
+                        .get_working_agents(&stop_thread_id);
+                    if let Err(e) = core_handle.send(NostrCommand::StopOperations {
+                        project_a_tag: a_tag,
+                        event_ids: vec![stop_thread_id.clone()],
+                        agent_pubkeys: working_agents,
+                    }) {
+                        self.set_warning_status(&format!("Failed to stop: {}", e));
+                    } else {
+                        self.set_warning_status("Stop command sent");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Periodically autosave the current draft to protect against crashes.
+    /// Only saves if 5+ seconds have elapsed, we're in Chat+Editing mode,
+    /// and the editor has content.
+    pub fn maybe_autosave_draft(&mut self) {
+        if self.last_autosave.elapsed() < std::time::Duration::from_secs(5) {
+            return;
+        }
+        if self.view != View::Chat || self.input_mode != InputMode::Editing {
+            return;
+        }
+        if self.chat_editor().text.is_empty() {
+            return;
+        }
+        self.save_chat_draft();
+        self.last_autosave = std::time::Instant::now();
     }
 
     /// Remove a nudge from selected nudges (per-tab isolated)
