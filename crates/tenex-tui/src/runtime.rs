@@ -217,6 +217,17 @@ pub(crate) async fn run_app(
                             } else {
                                 // Any other key clears pending quit state
                                 app.pending_quit = false;
+
+                                // Double-Esc within 2 seconds sends stop command for current conversation
+                                if key.code == KeyCode::Esc {
+                                    if app.last_esc_time.map_or(false, |t| t.elapsed() < Duration::from_secs(2)) {
+                                        app.stop_current_conversation();
+                                        app.last_esc_time = None;
+                                    } else {
+                                        app.last_esc_time = Some(Instant::now());
+                                    }
+                                }
+
                                 handle_key(app, key, login_step, pending_nsec)?;
                             }
                         }
@@ -287,6 +298,9 @@ pub(crate) async fn run_app(
                 check_pending_backend_approvals(app);
                 // Check for pending bunker signing approvals
                 check_pending_bunker_approvals(app);
+
+                // Periodic autosave of draft content (crash protection)
+                app.maybe_autosave_draft();
             }
 
             // Handle upload results from background tasks

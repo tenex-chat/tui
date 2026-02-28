@@ -1541,6 +1541,29 @@ impl NostrWorker {
             KIND_BOOKMARK_LIST
         );
 
+        // 2d. User's own kind:1 messages - seeds nostrdb with messages sent from other clients
+        // so Ctrl+R history search can find cross-client messages
+        let user_messages_filter = Filter::new()
+            .kind(Kind::from(KIND_TEXT_NOTE))
+            .author(pubkey);
+        let user_messages_json = serde_json::to_string(&user_messages_filter).ok();
+        let output = client
+            .subscribe(user_messages_filter.clone(), None)
+            .await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new(
+                "User messages history".to_string(),
+                vec![KIND_TEXT_NOTE],
+                None,
+            )
+            .with_raw_filter(user_messages_json.unwrap_or_default()),
+        );
+        tlog!(
+            "CONN",
+            "Subscribed to user's own kind:1 messages for history search"
+        );
+
         // 3. Global definitions/social (kind:34199, 4199, 4200, 4201, 4202, 1111, 7)
         let global_filter = Filter::new().kinds(vec![
             Kind::Custom(KIND_TEAM_PACK),
@@ -1932,6 +1955,12 @@ impl NostrWorker {
 
         // Ingest locally into nostrdb so it appears immediately
         ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+        if !Self::wait_for_note_persisted(&self.ndb, signed_event.id.as_bytes(), 600) {
+            return Err(anyhow::anyhow!(
+                "thread {} was not persisted to local store after publish",
+                event_id
+            ));
+        }
         // UI gets notified via nostrdb SubscriptionStream when data is ready
 
         // Send to relay with timeout (don't block forever on degraded connections)
@@ -1950,6 +1979,25 @@ impl NostrWorker {
         }
 
         Ok(event_id)
+    }
+
+    fn wait_for_note_persisted(ndb: &Ndb, event_id: &[u8; 32], timeout_ms: u64) -> bool {
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_millis(timeout_ms);
+
+        loop {
+            if let Ok(txn) = Transaction::new(ndb) {
+                if ndb.get_notekey_by_id(&txn, event_id).is_ok() {
+                    return true;
+                }
+            }
+
+            if start.elapsed() >= timeout {
+                return false;
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     fn parse_report_coordinate(report_a_tag: &str) -> Result<Coordinate> {
