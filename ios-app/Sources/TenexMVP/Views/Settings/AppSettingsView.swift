@@ -223,7 +223,7 @@ private struct RelaysSettingsSectionView: View {
                     Text("Status")
                     Spacer()
                     Text((system?.relayConnected ?? false) ? "Connected" : "Disconnected")
-                        .foregroundStyle((system?.relayConnected ?? false) ? .green : .secondary)
+                        .foregroundStyle((system?.relayConnected ?? false) ? .orange : .secondary)
                 }
                 HStack {
                     Text("Connected Relays")
@@ -436,13 +436,13 @@ private struct PushSettingsSectionView: View {
                     Text("Status")
                     Spacer()
                     Text(viewModel.pushAuthorizationStatusDescription)
-                        .foregroundStyle(viewModel.pushAuthorizationAllowed ? .green : .secondary)
+                        .foregroundStyle(viewModel.pushAuthorizationAllowed ? .orange : .secondary)
                 }
                 HStack {
                     Text("Delivery Allowed")
                     Spacer()
                     Text(viewModel.pushAuthorizationAllowed ? "Yes" : "No")
-                        .foregroundStyle(viewModel.pushAuthorizationAllowed ? .green : .secondary)
+                        .foregroundStyle(viewModel.pushAuthorizationAllowed ? .orange : .secondary)
                 }
             }
 
@@ -620,7 +620,7 @@ private struct BunkerSettingsSectionView: View {
                                 }
                                 Spacer()
                                 Image(systemName: "checkmark.shield.fill")
-                                    .foregroundStyle(.green)
+                                    .foregroundStyle(.orange)
                             }
                         }
                         .onDelete { offsets in
@@ -733,10 +733,10 @@ private struct BunkerSettingsSectionView: View {
 
     private func auditOutcomeColor(_ decision: String) -> Color {
         switch decision {
-        case "auto-approved": return .green
-        case "approved": return .green
+        case "auto-approved": return .accentColor
+        case "approved": return .accentColor
         case "rejected": return .red
-        case "timed-out": return .orange
+        case "timed-out": return .accentColor
         default: return .secondary
         }
     }
@@ -775,7 +775,7 @@ private struct AISettingsSectionView: View {
                                         .font(.body.weight(.medium))
                                     if hasKey {
                                         Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.green)
+                                            .foregroundStyle(.orange)
                                             .font(.body)
                                     }
                                 }

@@ -217,10 +217,10 @@ struct SharedConversationRow: View {
     let onSelect: (ConversationFullInfo) -> Void
 
     private var statusColor: Color {
-        if conversation.isActive { return .green }
+        if conversation.isActive { return .accentColor }
         switch conversation.thread.statusLabel?.lowercased() ?? "" {
-        case "active", "in progress": return .green
-        case "waiting", "blocked": return .orange
+        case "active", "in progress": return .accentColor
+        case "waiting", "blocked": return .accentColor
         case "completed", "done": return .gray
         default: return .blue
         }

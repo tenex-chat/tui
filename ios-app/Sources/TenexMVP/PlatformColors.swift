@@ -157,42 +157,42 @@ extension Color {
     #endif
 
     // MARK: - Conversation Status
-    static let statusActive: Color = .green
-    static let statusActiveBackground: Color = .green.opacity(0.15)
-    static let statusWaiting: Color = .orange
-    static let statusWaitingBackground: Color = .orange.opacity(0.15)
+    static let statusActive: Color = .accentColor
+    static let statusActiveBackground: Color = Color.accentColor.opacity(0.15)
+    static let statusWaiting: Color = .accentColor
+    static let statusWaitingBackground: Color = Color.accentColor.opacity(0.15)
     static let statusCompleted: Color = .gray
     static let statusCompletedBackground: Color = .gray.opacity(0.15)
     static let statusDefault: Color = .blue
     static let statusDefaultBackground: Color = .blue.opacity(0.15)
 
     // MARK: - Feature Brands
-    static let skillBrand: Color = .orange
-    static let skillBrandBackground: Color = .orange.opacity(0.15)
+    static let skillBrand: Color = .accentColor
+    static let skillBrandBackground: Color = Color.accentColor.opacity(0.15)
     static let agentBrand: Color = .blue
     static let projectBrand: Color = .purple
     static let projectBrandBackground: Color = .purple.opacity(0.15)
 
     // MARK: - Presence
-    static let presenceOnline: Color = .green
-    static let presenceOnlineBackground: Color = .green.opacity(0.15)
+    static let presenceOnline: Color = .accentColor
+    static let presenceOnlineBackground: Color = Color.accentColor.opacity(0.15)
     static let presenceOffline: Color = .gray
     static let presenceOfflineBackground: Color = .gray.opacity(0.15)
 
     // MARK: - Ask / Question Events
-    static let askBrand: Color = .orange
-    static let askBrandSubtleBackground: Color = .orange.opacity(0.05)
-    static let askBrandBackground: Color = .orange.opacity(0.15)
-    static let askBrandBorder: Color = .orange.opacity(0.3)
+    static let askBrand: Color = .accentColor
+    static let askBrandSubtleBackground: Color = Color.accentColor.opacity(0.05)
+    static let askBrandBackground: Color = Color.accentColor.opacity(0.15)
+    static let askBrandBorder: Color = Color.accentColor.opacity(0.3)
 
     // MARK: - Message Bubbles
     static let messageBubbleUserBackground: Color = .blue.opacity(0.15)
     static let messageBubbleAgent: Color = .systemGray6
-    static let messageUserAvatarColor: Color = .green
+    static let messageUserAvatarColor: Color = .accentColor
 
     // MARK: - Todo Items
-    static let todoDone: Color = .green
-    static let todoDoneBackground: Color = .green.opacity(0.15)
+    static let todoDone: Color = .accentColor
+    static let todoDoneBackground: Color = Color.accentColor.opacity(0.15)
     static let todoInProgress: Color = .blue
     static let todoSkipped: Color = .gray
 
@@ -232,8 +232,8 @@ extension Color {
     static let recordingActiveBackground: Color = .red.opacity(0.3)
 
     // MARK: - Diagnostics / Health
-    static let healthGood: Color = .green
-    static let healthWarning: Color = .orange
+    static let healthGood: Color = .accentColor
+    static let healthWarning: Color = .accentColor
     static let healthError: Color = .red
 
     // MARK: - Inbox
@@ -242,10 +242,10 @@ extension Color {
     // MARK: - Composer
     static let composerAction: Color = .blue
     static let composerDestructive: Color = .red
-    static let composerWarning: Color = .orange
+    static let composerWarning: Color = .accentColor
 
     // MARK: - Stats
-    static let statCost: Color = .green
+    static let statCost: Color = .accentColor
     static let statRuntime: Color = .blue
     static let statAverage: Color = .purple
     static let statUserMessages: Color = .blue

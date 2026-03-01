@@ -22,7 +22,7 @@ struct TodoRowView: View {
     private var statusColor: Color {
         switch todo.status {
         case .done, .completed:
-            return .green
+            return .orange
         case .inProgress:
             return .blue
         case .skipped:

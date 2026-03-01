@@ -627,9 +627,9 @@ final class MemoryMonitor: ObservableObject {
 
     var statusColor: Color {
         if currentMemoryMB > 500 { return .red }
-        if currentMemoryMB > 300 { return .orange }
+        if currentMemoryMB > 300 { return .accentColor }
         if currentMemoryMB > 150 { return .yellow }
-        return .green
+        return .accentColor
     }
 }
 
@@ -902,8 +902,8 @@ struct PerformanceOverlayView: View {
 
     private var fpsColor: Color {
         if frameMonitor.currentFPS < 30 { return .red }
-        if frameMonitor.currentFPS < 50 { return .orange }
-        return .green
+        if frameMonitor.currentFPS < 50 { return .accentColor }
+        return .accentColor
     }
 }
 
