@@ -3524,7 +3524,6 @@ dependencies = [
  "futures",
  "hex",
  "keyring",
- "libc",
  "nostr",
  "nostr-ndb",
  "nostr-sdk",
