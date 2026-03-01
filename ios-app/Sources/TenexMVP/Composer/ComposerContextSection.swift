@@ -192,22 +192,6 @@ extension MessageComposerView {
                     }
                 }
 
-                Button(action: { openNudgeSkillSelector(mode: .nudges) }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.caption)
-                        Text("Add Nudge")
-                            .font(.caption)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
-                    )
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
             }
             .padding(.horizontal, 16)
         }
@@ -225,23 +209,6 @@ extension MessageComposerView {
                         persistSelectedSkillIds()
                     }
                 }
-
-                Button(action: { openNudgeSkillSelector(mode: .skills) }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.caption)
-                        Text("Add Skill")
-                            .font(.caption)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
-                    )
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
             }
             .padding(.horizontal, 16)
         }

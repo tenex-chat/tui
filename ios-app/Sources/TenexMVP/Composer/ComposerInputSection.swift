@@ -334,6 +334,23 @@ extension MessageComposerView {
                     .help("Browse saved drafts")
                 }
 
+                if selectedProject != nil {
+                    Button {
+                        openNudgeSkillSelector(mode: .all)
+                    } label: {
+                        Text("/")
+                            .font(.body.weight(.bold).monospaced())
+                            .foregroundStyle(Color.composerAction)
+                            .frame(width: 24, height: 24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(Color.composerAction.opacity(0.5), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Nudges & Skills")
+                }
+
                 Spacer()
 
                 if !localImageAttachments.isEmpty {
