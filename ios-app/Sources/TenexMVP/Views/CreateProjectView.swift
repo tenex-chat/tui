@@ -179,7 +179,7 @@ struct CreateProjectView: View {
             HStack(spacing: 10) {
                 Group {
                     if isCompleted {
-                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.orange)
                     } else if isActive {
                         Image(systemName: candidate.symbol).foregroundStyle(Color.projectBrand)
                     } else {
@@ -289,12 +289,12 @@ struct CreateProjectView: View {
                             .font(isCompleted ? .caption2.weight(.bold) : .caption.weight(.semibold))
                         Text(candidate.title).font(.caption.weight(.semibold))
                     }
-                    .foregroundStyle(isActive ? Color.projectBrand : isCompleted ? Color.green : isReachable ? Color.secondary : Color.gray.opacity(0.3))
+                    .foregroundStyle(isActive ? Color.projectBrand : isCompleted ? Color.orange : isReachable ? Color.secondary : Color.gray.opacity(0.3))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .frame(maxWidth: .infinity)
                     .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(isActive ? Color.projectBrand.opacity(0.15) : isCompleted ? Color.green.opacity(0.08) : Color.systemGray6.opacity(0.6)))
+                        .fill(isActive ? Color.projectBrand.opacity(0.15) : isCompleted ? Color.orange.opacity(0.08) : Color.systemGray6.opacity(0.6)))
                 }
                 .buttonStyle(.plain)
                 .disabled(isCreating)

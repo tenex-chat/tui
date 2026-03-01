@@ -324,14 +324,14 @@ extension NegentropySyncDiagnostics {
     }
 
     /// Color based on success rate thresholds
-    /// - >= 90%: green
-    /// - >= 70%: orange
+    /// - >= 90%: accentColor
+    /// - >= 70%: accentColor (muted)
     /// - < 70%: red
     var successRateColor: SwiftUI.Color {
         if successRate >= 90 {
-            return .green
+            return .accentColor
         } else if successRate >= 70 {
-            return .orange
+            return .accentColor
         } else {
             return .red
         }

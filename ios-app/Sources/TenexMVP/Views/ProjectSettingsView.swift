@@ -168,7 +168,7 @@ struct ProjectSettingsView: View {
                 HStack(spacing: 8) {
                     Label(isProjectOnline ? "Online" : "Offline", systemImage: isProjectOnline ? "checkmark.circle.fill" : "xmark.circle")
                         .font(.subheadline)
-                        .foregroundStyle(isProjectOnline ? Color.green : .secondary)
+                        .foregroundStyle(isProjectOnline ? Color.orange : .secondary)
                     if isProjectOnline {
                         Text("• \(onlineAgentCount) agent\(onlineAgentCount == 1 ? "" : "s") active")
                             .font(.subheadline)
