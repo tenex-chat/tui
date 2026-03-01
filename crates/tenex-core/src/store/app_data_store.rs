@@ -2509,6 +2509,32 @@ impl AppDataStore {
         None
     }
 
+    /// Check if a specific ask event has been answered by the current user.
+    /// Searches all messages across all threads for a reply to the given message ID.
+    pub fn is_ask_answered_by_user(&self, message_id: &str) -> bool {
+        self.get_user_response_to_ask(message_id).is_some()
+    }
+
+    /// Get the user's response content to an ask event (if any).
+    /// Searches all messages across all threads for a reply to the given message ID.
+    pub fn get_user_response_to_ask(&self, message_id: &str) -> Option<String> {
+        let user_pubkey = self.user_pubkey.as_ref()?;
+
+        for messages in self.messages_by_thread.values() {
+            for msg in messages {
+                if msg.pubkey == *user_pubkey {
+                    if let Some(ref reply_to) = msg.reply_to {
+                        if reply_to == message_id {
+                            return Some(msg.content.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     // ===== Text Search Methods =====
 
     /// Search content using nostrdb's fulltext search.

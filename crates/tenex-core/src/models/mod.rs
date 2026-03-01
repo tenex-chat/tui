@@ -1,4 +1,5 @@
 pub mod agent_definition;
+pub mod ask_input;
 pub mod bookmark;
 pub mod conversation_metadata;
 pub mod draft;
@@ -19,6 +20,7 @@ pub mod thread;
 pub mod time_filter;
 
 pub use agent_definition::AgentDefinition;
+pub use ask_input::{AskInputState, InputMode, QuestionAnswer, Answer};
 pub use bookmark::BookmarkList;
 pub use conversation_metadata::ConversationMetadata;
 pub use draft::{
