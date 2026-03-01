@@ -4,13 +4,13 @@ use crate::{DIM, GREEN, WHITE_BOLD, CYAN, RED, RESET};
 use crate::editor::LineEditor;
 use crate::completion::CompletionMenu;
 use crate::panels::{ConfigPanel, ConversationStackEntry, StatusBarNav, StatsPanel, NudgeSkillPanel};
-use crate::state::ReplState;
+use crate::state::{AskModalState, ReplState};
 use crate::format::{format_message, print_separator_raw, print_user_message_raw, print_error_raw, print_system_raw, is_tool_use};
 use crate::render::{print_above_input, redraw_input};
 use crate::util::{thread_display_name, MESSAGES_TO_LOAD};
 use tenex_core::runtime::CoreRuntime;
 use tenex_core::nostr::NostrCommand;
-use tenex_core::models::{Project, ProjectAgent, Thread};
+use tenex_core::models::{AskInputState, Project, ProjectAgent, Thread};
 use tenex_core::events::CoreEvent;
 use nostr_sdk::prelude::*;
 
@@ -154,6 +154,29 @@ pub(crate) fn open_conversation(
     }
 
     output
+}
+
+/// Check for unanswered ask events in the current thread and open the ask modal if found.
+pub(crate) fn maybe_open_ask_modal(state: &mut ReplState, runtime: &CoreRuntime) {
+    if state.ask_modal.is_some() {
+        return;
+    }
+    let thread_id = match &state.current_conversation {
+        Some(id) => id.clone(),
+        None => return,
+    };
+
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    if let Some((ask_event_id, ask_event, author_pubkey)) =
+        store_ref.get_unanswered_ask_for_thread(&thread_id)
+    {
+        state.ask_modal = Some(AskModalState {
+            message_id: ask_event_id,
+            input_state: AskInputState::new(ask_event.questions),
+            ask_author_pubkey: author_pubkey,
+        });
+    }
 }
 
 pub(crate) fn subscribe_to_project(runtime: &CoreRuntime, a_tag: &str) {
@@ -368,7 +391,7 @@ pub(crate) fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runt
     let matched = if let Ok(idx) = idx_str.parse::<usize>() {
         threads.get(idx.saturating_sub(1)).copied()
     } else {
-        let lower = idx_str.to_lowercase();
+        let lower = idx_str.strip_suffix("...").unwrap_or(idx_str).to_lowercase();
         threads.iter().find(|t|
             t.title.to_lowercase().contains(&lower)
             || t.summary.as_ref().map(|s| s.to_lowercase().contains(&lower)).unwrap_or(false)
