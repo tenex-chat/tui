@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::time::Instant;
-use crate::{CYAN, GREEN, DIM, ACCENT, RESET};
+use crate::{CYAN, GREEN, RED, DIM, ACCENT, RESET};
 use crate::panels::{DelegationBar, ConversationStackEntry, StatusBarAction};
 use crate::util::{strip_ansi, thread_display_name, wave_colorize, ANIMATION_DURATION_MS, ANIMATION_DURATION_F64};
 use tenex_core::models::AskInputState;
@@ -44,6 +44,7 @@ pub(crate) struct ReplState {
     pub(crate) search_all_projects: bool,
     pub(crate) pre_search_buffer: String,
     pub(crate) ask_modal: Option<AskModalState>,
+    pub(crate) connected: bool,
 }
 
 impl ReplState {
@@ -75,6 +76,7 @@ impl ReplState {
             search_all_projects: false,
             pre_search_buffer: String::new(),
             ask_modal: None,
+            connected: false,
         }
     }
 
@@ -149,6 +151,11 @@ impl ReplState {
         let mut text = format!("{project_rendered}{DIM}/{RESET}{GREEN}{agent}{RESET}");
         let mut plain_width = project.len() + 1 + agent.len();
 
+        if !self.connected {
+            text.push_str(&format!("  {RED}⚡ disconnected{RESET}"));
+            plain_width += 2 + "⚡ disconnected".len();
+        }
+
         let store = runtime.data_store();
         let store_ref = store.borrow();
 
@@ -209,6 +216,11 @@ impl ReplState {
         let mut segments: Vec<(String, usize)> = Vec::new();
         segments.push((project_rendered, project.len()));
         segments.push((format!("{GREEN}{agent}{RESET}"), agent.len()));
+
+        if !self.connected {
+            let label = "⚡ disconnected";
+            segments.push((format!("{RED}{label}{RESET}"), label.len()));
+        }
 
         let store = runtime.data_store();
         let store_ref = store.borrow();

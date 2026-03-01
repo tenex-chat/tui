@@ -9,8 +9,8 @@ use nostr_sdk::prelude::*;
 use std::io::{self, Stdout, Write};
 use std::sync::mpsc::Receiver;
 use tenex_core::config::CoreConfig;
-use tenex_core::models::InputMode as AskInputMode;
-use tenex_core::nostr::{get_current_pubkey, DataChange, NostrCommand};
+use tenex_core::models::{InputMode as AskInputMode, PreferencesStorage};
+use tenex_core::nostr::{get_current_pubkey, load_unencrypted_keys, DataChange, NostrCommand};
 use tenex_core::runtime::CoreRuntime;
 
 // ANSI color codes
@@ -74,18 +74,46 @@ struct Args {
     /// nsec key for authentication (prefer TENEX_NSEC env var)
     #[arg(long)]
     nsec: Option<String>,
+
+    /// Relay URL to connect to (defaults to wss://tenex.chat)
+    #[arg(long)]
+    relay: Option<String>,
 }
 
-fn resolve_nsec(args: &Args) -> Result<String> {
+fn resolve_keys(args: &Args, prefs: &mut PreferencesStorage) -> Result<Keys> {
+    // 1. CLI --nsec flag
     if let Some(ref nsec) = args.nsec {
-        return Ok(nsec.clone());
+        let secret_key = SecretKey::parse(nsec)?;
+        let keys = Keys::new(secret_key);
+        prefs.store_credentials(nsec);
+        return Ok(keys);
     }
+
+    // 2. TENEX_NSEC env var
     if let Ok(nsec) = std::env::var("TENEX_NSEC") {
         if !nsec.is_empty() {
-            return Ok(nsec);
+            let secret_key = SecretKey::parse(&nsec)?;
+            let keys = Keys::new(secret_key);
+            prefs.store_credentials(&nsec);
+            return Ok(keys);
         }
     }
-    anyhow::bail!("No nsec provided. Use --nsec or set TENEX_NSEC env var.")
+
+    // 3. Stored credentials (shared with TUI)
+    if prefs.has_stored_credentials() {
+        if prefs.credentials_need_password() {
+            anyhow::bail!(
+                "Stored credentials are encrypted. Use --nsec or set TENEX_NSEC env var.\n\
+                 (Encrypted credentials from the TUI require a password prompt not yet supported in the REPL.)"
+            );
+        }
+        return load_unencrypted_keys(prefs);
+    }
+
+    anyhow::bail!(
+        "No credentials found.\n\
+         Use --nsec, set TENEX_NSEC env var, or log in via the TUI first."
+    )
 }
 
 fn history_entry_label(entry: &history::HistoryEntry) -> String {
@@ -1328,12 +1356,11 @@ fn drain_data_changes(
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let nsec = resolve_nsec(&args)?;
-    let secret_key = SecretKey::parse(&nsec)?;
-    let keys = Keys::new(secret_key);
+    let config = CoreConfig::default();
+    let mut prefs = PreferencesStorage::new(config.data_dir.to_str().unwrap_or("~/.tenex/cli"));
+    let keys = resolve_keys(&args, &mut prefs)?;
     let user_pubkey = get_current_pubkey(&keys);
 
-    let config = CoreConfig::default();
     let mut runtime = CoreRuntime::new(config)?;
     let handle = runtime.handle();
 
@@ -1351,30 +1378,37 @@ async fn main() -> Result<()> {
     // Connect to relays
     println!("{DIM}Connecting...{RESET}");
     let (response_tx, response_rx) = std::sync::mpsc::channel();
+    let relay_urls = args.relay.map(|r| vec![r]).unwrap_or_default();
     handle.send(NostrCommand::Connect {
         keys,
         user_pubkey: user_pubkey.clone(),
-        relay_urls: vec![],
+        relay_urls,
         response_tx: Some(response_tx),
     })?;
 
-    match response_rx.recv_timeout(std::time::Duration::from_secs(15)) {
+    let connected = match response_rx.recv_timeout(std::time::Duration::from_secs(15)) {
         Ok(Ok(())) => {
             println!("{GREEN}Connected.{RESET}");
+            true
         }
         Ok(Err(e)) => {
-            anyhow::bail!("Connection failed: {e}");
+            println!("{RED}Connection failed: {e}{RESET}");
+            println!("{DIM}Continuing in offline mode with cached data...{RESET}");
+            false
         }
         Err(_) => {
-            anyhow::bail!("Connection timed out after 15s");
+            println!("{RED}Connection timed out after 15s{RESET}");
+            println!("{DIM}Continuing in offline mode with cached data...{RESET}");
+            false
         }
-    }
+    };
 
     println!();
     println!("{WHITE_BOLD}tenex-repl{RESET} {DIM}— type /help for commands{RESET}");
     println!();
 
     let mut state = ReplState::new(user_pubkey);
+    state.connected = connected;
 
     // Install panic hook to restore terminal
     let default_panic = std::panic::take_hook();
