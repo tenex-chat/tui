@@ -2939,29 +2939,15 @@ impl App {
 
     /// Check if a specific message's ask event has been answered by the current user
     pub fn is_ask_answered_by_user(&self, message_id: &str) -> bool {
-        self.get_user_response_to_ask(message_id).is_some()
+        let store = self.data_store.borrow();
+        store.is_ask_answered_by_user(message_id)
     }
 
     /// Get the user's response to an ask event (if any)
     /// Searches ALL messages for a reply to the ask event, not just the current thread
     pub fn get_user_response_to_ask(&self, message_id: &str) -> Option<String> {
         let store = self.data_store.borrow();
-        let user_pubkey = store.user_pubkey.as_ref()?;
-
-        // Search all messages across all threads for a reply to this ask event
-        for messages in store.messages_by_thread.values() {
-            for msg in messages {
-                if msg.pubkey == *user_pubkey {
-                    if let Some(ref reply_to) = msg.reply_to {
-                        if reply_to == message_id {
-                            return Some(msg.content.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        None
+        store.get_user_response_to_ask(message_id)
     }
 
     // ===== Local Streaming Methods =====
