@@ -114,6 +114,40 @@ pub(crate) fn handle_project_command(arg: Option<&str>, state: &mut ReplState, r
 }
 
 /// Open a conversation: set it as current, load recent messages, return display lines.
+/// Re-render the current conversation's messages without mutating navigation state.
+/// Used on terminal resize to rebuild the display at the new width.
+pub(crate) fn rebuild_conversation_view(state: &mut ReplState, runtime: &CoreRuntime) -> Vec<String> {
+    let thread_id = match &state.current_conversation {
+        Some(id) => id.clone(),
+        None => return Vec::new(),
+    };
+
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+
+    let messages = store_ref.get_messages(&thread_id);
+    let show_count = messages.len().min(MESSAGES_TO_LOAD);
+    let start = messages.len().saturating_sub(show_count);
+
+    let mut output = Vec::new();
+    if show_count > 0 {
+        if start > 0 {
+            output.push(print_system_raw(&format!("  ... {} earlier messages", start)));
+        }
+        let mut last_pk: Option<String> = None;
+        let mut todo_items: Vec<(String, String)> = Vec::new();
+        for msg in &messages[start..] {
+            if let Some(formatted) = format_message(msg, &store_ref, &state.user_pubkey, &mut last_pk, &mut todo_items) {
+                output.push(formatted);
+            }
+        }
+        state.last_displayed_pubkey = last_pk;
+        state.last_todo_items = todo_items;
+        output.push(print_separator_raw());
+    }
+    output
+}
+
 pub(crate) fn open_conversation(
     state: &mut ReplState,
     runtime: &CoreRuntime,

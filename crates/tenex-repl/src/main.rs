@@ -65,6 +65,7 @@ use commands::{
     navigate_to_delegation, pop_conversation_stack, auto_select_project,
     handle_status_bar_open, UploadResult, try_upload_image_file,
     handle_clipboard_paste, handle_bunker_command, maybe_open_ask_modal,
+    rebuild_conversation_view,
 };
 
 #[derive(Parser, Debug)]
@@ -151,6 +152,7 @@ fn history_search_items(entries: &[history::HistoryEntry], runtime: &CoreRuntime
             label: history_entry_label(e),
             description: history_entry_description(e, runtime),
             fill: e.content.clone(),
+            completed: false,
         }
     }).collect()
 }
@@ -1162,7 +1164,8 @@ async fn run_repl(
                 }
                 } // end Event::Key
                     Event::Resize(_, _) => {
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        let lines = rebuild_conversation_view(state, runtime);
+                        apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                     }
                     _ => {}
                 } // end match event
