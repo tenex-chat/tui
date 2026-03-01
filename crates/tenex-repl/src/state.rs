@@ -3,8 +3,17 @@ use std::time::Instant;
 use crate::{CYAN, GREEN, DIM, ACCENT, RESET};
 use crate::panels::{DelegationBar, ConversationStackEntry, StatusBarAction};
 use crate::util::{strip_ansi, thread_display_name, wave_colorize, ANIMATION_DURATION_MS, ANIMATION_DURATION_F64};
+use tenex_core::models::AskInputState;
 use tenex_core::nostr::bunker::BunkerSignRequest;
 use tenex_core::runtime::CoreRuntime;
+
+/// State for the interactive ask modal in the REPL input area.
+#[derive(Debug, Clone)]
+pub(crate) struct AskModalState {
+    pub(crate) message_id: String,
+    pub(crate) input_state: AskInputState,
+    pub(crate) ask_author_pubkey: String,
+}
 
 pub(crate) struct ReplState {
     pub(crate) current_project: Option<String>,
@@ -34,6 +43,7 @@ pub(crate) struct ReplState {
     pub(crate) search_mode: bool,
     pub(crate) search_all_projects: bool,
     pub(crate) pre_search_buffer: String,
+    pub(crate) ask_modal: Option<AskModalState>,
 }
 
 impl ReplState {
@@ -64,6 +74,7 @@ impl ReplState {
             search_mode: false,
             search_all_projects: false,
             pre_search_buffer: String::new(),
+            ask_modal: None,
         }
     }
 

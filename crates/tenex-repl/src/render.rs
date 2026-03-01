@@ -2,14 +2,14 @@ use std::collections::HashSet;
 use std::io::{Stdout, Write};
 use crossterm::{cursor, execute, queue};
 use crossterm::terminal::{self, ClearType};
-use crate::{DIM, ACCENT, WHITE_BOLD, RED, RESET, BG_INPUT, BG_HIGHLIGHT};
+use crate::{DIM, GREEN, ACCENT, WHITE_BOLD, RED, RESET, BG_INPUT, BG_HIGHLIGHT};
 use crate::editor::{LineEditor, AttachmentKind};
 use crate::completion::CompletionMenu;
 use crate::panels::{ConfigPanel, PanelMode, StatusBarNav, StatsTab, StatsPanel, DelegationEntry, Q_TAG_DELEGATION_DENYLIST, NudgeSkillPanel, NudgeSkillMode};
 use crate::state::ReplState;
 use crate::util::{term_width, thread_display_name, format_runtime, PROMPT_PREFIX_WIDTH, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER};
+use tenex_core::models::{AskQuestion, InputMode as AskInputMode, Message};
 use tenex_core::runtime::CoreRuntime;
-use tenex_core::models::Message;
 
 // ─── Delegation Bar Data Collection ─────────────────────────────────────────
 
@@ -473,6 +473,137 @@ pub(crate) fn redraw_input(
         let lines_for_content = if content_preview.is_empty() { 2 } else { 3 };
         queue!(stdout, cursor::MoveUp(lines_for_content + 1)).ok();
         queue!(stdout, cursor::MoveToColumn(prompt_plain as u16)).ok();
+        stdout.flush().ok();
+        completion.cursor_row = 0;
+        completion.input_area_drawn = true;
+        return;
+    }
+
+    // ── Ask modal (replaces normal input when an ask question is pending) ──
+    if let Some(ref ask_modal) = state.ask_modal {
+        let input_state = &ask_modal.input_state;
+        let mut content_lines: Vec<String> = Vec::new();
+
+        // Tab bar (if multiple questions)
+        if input_state.questions.len() > 1 {
+            let mut tabs = String::new();
+            for (qi, _) in input_state.questions.iter().enumerate() {
+                let label = format!("Q{}", qi + 1);
+                let answered = input_state.answers.iter().any(|a| a.question_index == qi);
+                if qi > 0 { tabs.push_str(&format!("{DIM} │ {RESET}{BG_INPUT}")); }
+                if qi == input_state.current_question_index {
+                    tabs.push_str(&format!("{ACCENT}{WHITE_BOLD} {label} {RESET}{BG_INPUT}"));
+                } else if answered {
+                    tabs.push_str(&format!("{GREEN} {label} {RESET}{BG_INPUT}"));
+                } else {
+                    tabs.push_str(&format!("{DIM} {label} {RESET}{BG_INPUT}"));
+                }
+            }
+            content_lines.push(format!("  {tabs}"));
+        }
+
+        // Question text
+        if let Some(question) = input_state.current_question() {
+            let (q_title, q_text) = match question {
+                AskQuestion::SingleSelect { title, question, .. } => (title.as_str(), question.as_str()),
+                AskQuestion::MultiSelect { title, question, .. } => (title.as_str(), question.as_str()),
+            };
+            let multi_label = if input_state.is_multi_select() { " (multi-select)" } else { "" };
+            content_lines.push(format!("  {WHITE_BOLD}{q_title}{RESET}{BG_INPUT}{DIM}{multi_label}{RESET}{BG_INPUT}"));
+            if !q_text.is_empty() && q_text != q_title {
+                content_lines.push(format!("  {DIM}{q_text}{RESET}{BG_INPUT}"));
+            }
+
+            // Options
+            let options: &[String] = match question {
+                AskQuestion::SingleSelect { suggestions, .. } => suggestions,
+                AskQuestion::MultiSelect { options, .. } => options,
+            };
+            for (oi, opt) in options.iter().enumerate() {
+                let marker = if oi == input_state.selected_option_index {
+                    if input_state.is_multi_select() {
+                        let checked = input_state.multi_select_state.get(oi).copied().unwrap_or(false);
+                        if checked { format!("{WHITE_BOLD}▸ ☑{RESET}{BG_INPUT}") } else { format!("{WHITE_BOLD}▸ ☐{RESET}{BG_INPUT}") }
+                    } else {
+                        format!("{WHITE_BOLD}▸{RESET}{BG_INPUT}")
+                    }
+                } else if input_state.is_multi_select() {
+                    let checked = input_state.multi_select_state.get(oi).copied().unwrap_or(false);
+                    if checked { format!("{DIM}  ☑{RESET}{BG_INPUT}") } else { format!("{DIM}  ☐{RESET}{BG_INPUT}") }
+                } else {
+                    format!("{DIM} {RESET}{BG_INPUT}")
+                };
+
+                if oi == input_state.selected_option_index {
+                    content_lines.push(format!("  {marker} {WHITE_BOLD}{opt}{RESET}{BG_INPUT}"));
+                } else {
+                    content_lines.push(format!("  {marker} {opt}"));
+                }
+            }
+
+            // Custom input option
+            let custom_idx = options.len();
+            let is_custom_selected = input_state.selected_option_index == custom_idx;
+            if input_state.mode == AskInputMode::CustomInput {
+                let cursor_char = "▏";
+                let text = &input_state.custom_input;
+                content_lines.push(format!("  {WHITE_BOLD}▸{RESET}{BG_INPUT} {ACCENT}✎ {text}{cursor_char}{RESET}{BG_INPUT}"));
+            } else if is_custom_selected {
+                content_lines.push(format!("  {WHITE_BOLD}▸{RESET}{BG_INPUT} {ACCENT}✎ Type custom answer...{RESET}{BG_INPUT}"));
+            } else {
+                content_lines.push(format!("  {DIM}  ✎ Type custom answer...{RESET}{BG_INPUT}"));
+            }
+        }
+
+        // Help bar
+        let help = if input_state.mode == AskInputMode::CustomInput {
+            "  Enter: submit  Esc: cancel"
+        } else if input_state.is_multi_select() {
+            if input_state.questions.len() > 1 {
+                "  ↑↓: navigate  Space: toggle  Enter: confirm  ←→: questions  Esc: close"
+            } else {
+                "  ↑↓: navigate  Space: toggle  Enter: confirm  Esc: close"
+            }
+        } else if input_state.questions.len() > 1 {
+            "  ↑↓: navigate  Enter: select  ←→: questions  Esc: close"
+        } else {
+            "  ↑↓: navigate  Enter: select  Esc: close"
+        };
+        content_lines.push(format!("{DIM}{help}{RESET}{BG_INPUT}"));
+
+        // Render all lines with BG_INPUT background
+        for line in &content_lines {
+            let plain_len = crate::util::strip_ansi(line).chars().count();
+            let line_pad = width.saturating_sub(plain_len);
+            write!(stdout, "\r\n{BG_INPUT}{line}{}{RESET}", " ".repeat(line_pad)).ok();
+        }
+
+        completion.input_wrap_lines = 0;
+        completion.attachment_indicator_lines = 0;
+        completion.rendered_lines = 0;
+
+        // Bottom edge + status bar
+        write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
+        let (status_text, status_plain_width) = state.status_bar_text(runtime);
+        let (rt_ms, rt_active, rt_count) = {
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            store_ref.get_statusbar_runtime_ms()
+        };
+        let (rt_ansi, rt_plain_width) =
+            build_runtime_indicator(rt_ms, rt_active, rt_count, state.wave_frame);
+        let left_used = 3 + status_plain_width;
+        let gap = width.saturating_sub(left_used + rt_plain_width);
+        write!(
+            stdout,
+            "\r\n{DIM}   {status_text}{RESET}{}{rt_ansi}",
+            " ".repeat(gap)
+        )
+        .ok();
+
+        let total_content_lines = content_lines.len() as u16;
+        queue!(stdout, cursor::MoveUp(total_content_lines + 1)).ok();
+        queue!(stdout, cursor::MoveToColumn(0)).ok();
         stdout.flush().ok();
         completion.cursor_row = 0;
         completion.input_area_drawn = true;

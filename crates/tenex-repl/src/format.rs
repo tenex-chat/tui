@@ -2,7 +2,7 @@ use chrono::Local;
 use crate::{DIM, GREEN, ACCENT, WHITE_BOLD, BRIGHT_GREEN, RED, CYAN, RESET, BG_INPUT};
 use crate::markdown::{colorize_markdown, CODE_BLOCK};
 use crate::util::{term_width, strip_ansi, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER};
-use tenex_core::models::Message;
+use tenex_core::models::{AskEvent, AskQuestion, Message};
 use tenex_core::store::app_data_store::AppDataStore;
 
 // ─── Attachment Parsing & Rendering ─────────────────────────────────────────
@@ -373,6 +373,89 @@ fn format_todo_inline(
     (lines.join("\n"), current)
 }
 
+// ─── Ask Event Inline Rendering ─────────────────────────────────────────────
+
+const ASK_ACCENT: &str = "\x1b[38;5;214m"; // warm yellow/orange for ask events
+
+/// Render an ask event inline for passive display in conversation history.
+/// Shows the question, options, and answered/unanswered state.
+fn render_ask_event_inline(
+    ask_event: &AskEvent,
+    ask_event_id: &str,
+    agent_name: &str,
+    store: &AppDataStore,
+) -> String {
+    let mut lines = Vec::new();
+
+    // Header
+    let title = ask_event.title.as_deref().unwrap_or("Question");
+    lines.push(format!("  {ASK_ACCENT}│{RESET} {ASK_ACCENT}❓ {BRIGHT_GREEN}{agent_name}{RESET}  {WHITE_BOLD}{title}{RESET}"));
+
+    // Context
+    if !ask_event.context.is_empty() {
+        lines.push(format!("  {ASK_ACCENT}│{RESET}"));
+        for ctx_line in ask_event.context.lines() {
+            lines.push(format!("  {ASK_ACCENT}│{RESET}   {DIM}{ctx_line}{RESET}"));
+        }
+    }
+
+    // Check answered state
+    let response = store.get_user_response_to_ask(ask_event_id);
+
+    if let Some(ref answer_text) = response {
+        // Answered: show response
+        lines.push(format!("  {ASK_ACCENT}│{RESET}"));
+        lines.push(format!("  {ASK_ACCENT}│{RESET} {GREEN}✓ Response submitted{RESET}"));
+        lines.push(format!("  {ASK_ACCENT}│{RESET} {DIM}╭──────────────────╮{RESET}"));
+        for answer_line in answer_text.lines().take(5) {
+            let truncated = if answer_line.len() > 60 {
+                format!("{}...", &answer_line[..57])
+            } else {
+                answer_line.to_string()
+            };
+            lines.push(format!("  {ASK_ACCENT}│{RESET} {DIM}│{RESET} {truncated}"));
+        }
+        lines.push(format!("  {ASK_ACCENT}│{RESET} {DIM}╰──────────────────╯{RESET}"));
+    } else {
+        // Unanswered: show questions and options
+        lines.push(format!("  {ASK_ACCENT}│{RESET}"));
+        for (qi, question) in ask_event.questions.iter().enumerate() {
+            let (q_title, q_text, options) = match question {
+                AskQuestion::SingleSelect { title, question, suggestions } => {
+                    (title.as_str(), question.as_str(), suggestions.as_slice())
+                }
+                AskQuestion::MultiSelect { title, question, options } => {
+                    (title.as_str(), question.as_str(), options.as_slice())
+                }
+            };
+            if ask_event.questions.len() > 1 {
+                lines.push(format!("  {ASK_ACCENT}│{RESET}   {WHITE_BOLD}Q{}: {q_title}{RESET}: {q_text}", qi + 1));
+            } else {
+                lines.push(format!("  {ASK_ACCENT}│{RESET}   {WHITE_BOLD}{q_title}{RESET}: {q_text}"));
+            }
+            for (oi, opt) in options.iter().enumerate() {
+                lines.push(format!("  {ASK_ACCENT}│{RESET}   {DIM}{}. {opt}{RESET}", oi + 1));
+            }
+        }
+        lines.push(format!("  {ASK_ACCENT}│{RESET}"));
+        lines.push(format!("  {ASK_ACCENT}│{RESET} {ASK_ACCENT}⟶  Waiting for your answer{RESET}"));
+    }
+
+    lines.join("\n")
+}
+
+/// Try to render a message as an ask event. Returns Some(rendered) if q-tags
+/// resolve to an ask event, None otherwise.
+fn try_render_ask_event(msg: &Message, store: &AppDataStore) -> Option<String> {
+    for q_tag in &msg.q_tags {
+        if let Some((ask_event, author_pubkey)) = store.get_ask_event_by_id(q_tag) {
+            let agent_name = store.get_profile_name(&author_pubkey);
+            return Some(render_ask_event_inline(&ask_event, q_tag, &agent_name, store));
+        }
+    }
+    None
+}
+
 /// Format a message with all rendering rules:
 /// - Tool use: muted single-line summary
 /// - Consecutive dedup: skip header for same-author non-tool, non-ptag messages
@@ -391,6 +474,14 @@ pub(crate) fn format_message(
     let is_user = msg.pubkey == user_pubkey;
     let has_p_tags = !msg.p_tags.is_empty();
     let is_tool = is_tool_use(msg);
+
+    // Check for ask events BEFORE tool rendering — ask events referenced via
+    // q-tags should get rich inline rendering, not a collapsed tool summary.
+    if is_tool && !msg.q_tags.is_empty() {
+        if let Some(rendered) = try_render_ask_event(msg, store) {
+            return Some(rendered);
+        }
+    }
 
     if is_tool {
         // Don't update last_pubkey for tool use messages so the next

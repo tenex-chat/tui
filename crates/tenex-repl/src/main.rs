@@ -9,6 +9,7 @@ use nostr_sdk::prelude::*;
 use std::io::{self, Stdout, Write};
 use std::sync::mpsc::Receiver;
 use tenex_core::config::CoreConfig;
+use tenex_core::models::InputMode as AskInputMode;
 use tenex_core::nostr::{get_current_pubkey, DataChange, NostrCommand};
 use tenex_core::runtime::CoreRuntime;
 
@@ -63,7 +64,7 @@ use commands::{
     handle_status_command, handle_config_command, handle_model_command, handle_core_event,
     navigate_to_delegation, pop_conversation_stack, auto_select_project,
     handle_status_bar_open, UploadResult, try_upload_image_file,
-    handle_clipboard_paste, handle_bunker_command,
+    handle_clipboard_paste, handle_bunker_command, maybe_open_ask_modal,
 };
 
 #[derive(Parser, Debug)]
@@ -278,6 +279,113 @@ async fn run_repl(
                             continue; // swallow all other input while bunker prompt active
                         }
                     }
+                }
+
+                // ── Ask modal keyboard intercept ──
+                if state.ask_modal.is_some() {
+                    match code {
+                        KeyCode::Up => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                modal.input_state.prev_option();
+                            }
+                        }
+                        KeyCode::Down => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                modal.input_state.next_option();
+                            }
+                        }
+                        KeyCode::Left => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                if modal.input_state.mode == AskInputMode::CustomInput {
+                                    modal.input_state.move_cursor_left();
+                                } else {
+                                    modal.input_state.prev_question();
+                                }
+                            }
+                        }
+                        KeyCode::Right => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                if modal.input_state.mode == AskInputMode::CustomInput {
+                                    modal.input_state.move_cursor_right();
+                                } else {
+                                    modal.input_state.skip_question();
+                                }
+                            }
+                        }
+                        KeyCode::Char(' ') => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                if modal.input_state.mode == AskInputMode::Selection {
+                                    modal.input_state.toggle_multi_select();
+                                } else {
+                                    modal.input_state.insert_char(' ');
+                                }
+                            }
+                        }
+                        KeyCode::Enter => {
+                            let should_submit = if let Some(ref mut modal) = state.ask_modal {
+                                if modal.input_state.mode == AskInputMode::CustomInput {
+                                    modal.input_state.submit_custom_answer();
+                                } else {
+                                    modal.input_state.select_current_option();
+                                }
+                                modal.input_state.is_complete()
+                            } else {
+                                false
+                            };
+
+                            if should_submit {
+                                if let Some(modal) = state.ask_modal.take() {
+                                    let response_text = modal.input_state.format_response();
+                                    if let (Some(ref a_tag), Some(ref thread_id)) = (&state.current_project, &state.current_conversation) {
+                                        let _ = runtime.handle().send(NostrCommand::PublishMessage {
+                                            thread_id: thread_id.clone(),
+                                            project_a_tag: a_tag.clone(),
+                                            content: response_text,
+                                            agent_pubkey: state.current_agent.clone(),
+                                            reply_to: Some(modal.message_id),
+                                            nudge_ids: Vec::new(),
+                                            skill_ids: Vec::new(),
+                                            ask_author_pubkey: Some(modal.ask_author_pubkey),
+                                            response_tx: None,
+                                        });
+                                        let msg = print_system_raw("Response submitted");
+                                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    }
+                                }
+                            }
+                        }
+                        KeyCode::Esc => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                if modal.input_state.mode == AskInputMode::CustomInput {
+                                    modal.input_state.cancel_custom_mode();
+                                } else {
+                                    state.ask_modal = None;
+                                }
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                if modal.input_state.mode == AskInputMode::CustomInput {
+                                    modal.input_state.delete_char();
+                                }
+                            }
+                        }
+                        KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                            raw_println!();
+                            raw_println!("{}", print_system_raw("Goodbye."));
+                            return Ok(());
+                        }
+                        KeyCode::Char(c) => {
+                            if let Some(ref mut modal) = state.ask_modal {
+                                if modal.input_state.mode == AskInputMode::CustomInput {
+                                    modal.input_state.insert_char(c);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    continue;
                 }
 
                 // ── Config panel keyboard intercept (4-mode) ──
@@ -514,6 +622,8 @@ async fn run_repl(
                                 StatusBarAction::OpenConversation { thread_id, project_a_tag } => {
                                     if let CommandResult::ClearScreen(lines) = handle_status_bar_open(state, runtime, &thread_id, project_a_tag) {
                                         apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        maybe_open_ask_modal(state, runtime);
+                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                                     }
                                     continue;
                                 }
@@ -655,11 +765,16 @@ async fn run_repl(
                                 let result = navigate_to_delegation(state, runtime, &thread_id);
                                 if let CommandResult::ClearScreen(lines) = result {
                                     apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    maybe_open_ask_modal(state, runtime);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                                 }
                             }
                             continue;
                         }
-                        if completion.visible {
+                        if completion.visible && !completion.items.is_empty() {
+                            editor.set_buffer(&completion.items[completion.selected].fill);
+                            completion.hide();
+                        } else if completion.visible {
                             completion.hide();
                         }
                         {
@@ -732,6 +847,8 @@ async fn run_repl(
                                 }
                                 CommandResult::ClearScreen(lines) => {
                                     apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    maybe_open_ask_modal(state, runtime);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                                 }
                             }
                         }
@@ -785,6 +902,8 @@ async fn run_repl(
                         } else if !state.conversation_stack.is_empty() {
                             if let Some(CommandResult::ClearScreen(lines)) = pop_conversation_stack(state, runtime) {
                                 apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                maybe_open_ask_modal(state, runtime);
+                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                             }
                         }
                     }
@@ -1048,6 +1167,11 @@ async fn run_repl(
                                         print_above_input(&mut stdout, &text, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                                     }
                                 }
+                            }
+                            // Auto-open ask modal if a new ask event arrived
+                            if !events.is_empty() {
+                                maybe_open_ask_modal(state, runtime);
+                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                             }
                         }
                         Err(e) => {
