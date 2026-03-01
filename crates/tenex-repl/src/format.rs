@@ -1,7 +1,7 @@
 use chrono::Local;
 use crate::{DIM, GREEN, ACCENT, WHITE_BOLD, BRIGHT_GREEN, RED, CYAN, RESET, BG_INPUT};
 use crate::markdown::{colorize_markdown, CODE_BLOCK};
-use crate::util::{term_width, strip_ansi};
+use crate::util::{term_width, strip_ansi, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER};
 use tenex_core::models::Message;
 use tenex_core::store::app_data_store::AppDataStore;
 
@@ -122,17 +122,21 @@ pub(crate) fn print_separator_raw() -> String {
     format!("{DIM}{line} {time}{RESET}")
 }
 
-/// Wrap each line of rendered content with BG_INPUT background, padded to terminal width.
-/// Preserves background through inline ANSI resets in the content.
+/// Wrap each line of rendered content with BG_INPUT background, padded to terminal width,
+/// with half-block borders (▄ top, ▀ bottom) for smooth visual transition.
 fn wrap_with_user_bg(rendered: &str, prefix: &str, prefix_visible_len: usize) -> String {
     let width = term_width() as usize;
     let bg_safe = rendered.replace(RESET, &format!("{RESET}{BG_INPUT}"));
+    let fg_input_bg = "\x1b[38;5;234m";
 
     let mut out = String::new();
+
+    // Top half-block border
+    out.push_str(&format!("{fg_input_bg}{}{RESET}",
+        HALF_BLOCK_LOWER.to_string().repeat(width)));
+
     for (i, line) in bg_safe.lines().enumerate() {
-        if i > 0 {
-            out.push('\n');
-        }
+        out.push('\n');
         let line_visible = strip_ansi(line).chars().count();
         if i == 0 {
             let total = prefix_visible_len + line_visible;
@@ -145,25 +149,25 @@ fn wrap_with_user_bg(rendered: &str, prefix: &str, prefix_visible_len: usize) ->
             out.push_str(&format!("{BG_INPUT}{indent}{line}{}{RESET}", " ".repeat(pad)));
         }
     }
+
+    // Bottom half-block border
+    out.push_str(&format!("\n{fg_input_bg}{}{RESET}",
+        HALF_BLOCK_UPPER.to_string().repeat(width)));
+
     out
 }
 
 pub(crate) fn print_user_message_raw(content: &str) -> String {
     let rendered = render_content_with_attachments(content);
-    let prefix = format!("{WHITE_BOLD}you ›{RESET}{BG_INPUT} ");
-    wrap_with_user_bg(&rendered, &prefix, 6)
+    let combined = format!("{WHITE_BOLD}you{RESET}\n{rendered}");
+    wrap_with_user_bg(&combined, "  ", 2)
 }
 
 pub(crate) fn print_agent_message_raw(agent_name: &str, content: &str) -> String {
     let rendered = render_content_with_attachments(content);
-    let lines: Vec<&str> = rendered.lines().collect();
-    if lines.is_empty() {
-        return String::new();
-    }
-    let mut out = format!("{BRIGHT_GREEN}{agent_name} ›{RESET} {}", lines[0]);
-    let indent = " ".repeat(agent_name.len() + 3);
-    for line in &lines[1..] {
-        out.push_str(&format!("\n{indent}{line}"));
+    let mut out = format!("{BRIGHT_GREEN}{agent_name}{RESET}");
+    for line in rendered.lines() {
+        out.push_str(&format!("\n  {line}"));
     }
     out
 }
@@ -415,7 +419,7 @@ pub(crate) fn format_message(
     if is_user {
         if is_consecutive {
             let rendered = render_content_with_attachments(&msg.content);
-            return Some(wrap_with_user_bg(&rendered, "      ", 6));
+            return Some(wrap_with_user_bg(&rendered, "  ", 2));
         }
         return Some(format!("{gap}{}", print_user_message_raw(&msg.content)));
     }
@@ -444,11 +448,10 @@ pub(crate) fn format_message(
             out.pop();
         }
     } else if is_consecutive {
-        let indent = " ".repeat(name.len() + 3);
         let colored = render_content_with_attachments(&msg.content);
         for (i, line) in colored.lines().enumerate() {
             if i > 0 { out.push('\n'); }
-            out.push_str(&indent);
+            out.push_str("  ");
             out.push_str(line);
         }
     } else {

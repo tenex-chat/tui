@@ -1134,12 +1134,10 @@ fn drain_data_changes(
                             && state.current_agent.is_some();
 
                         if is_consecutive {
-                            let agent_name = state.agent_display();
-                            let indent = " ".repeat(agent_name.len() + 3);
-                            write!(stdout, "{indent}").ok();
+                            write!(stdout, "  ").ok();
                         } else {
                             let agent_name = state.agent_display();
-                            write!(stdout, "{BRIGHT_GREEN}{agent_name} ›{RESET} ").ok();
+                            write!(stdout, "{BRIGHT_GREEN}{agent_name}{RESET}\r\n  ").ok();
                         }
                     }
                     write!(stdout, "{delta}").ok();
@@ -1148,25 +1146,27 @@ fn drain_data_changes(
                 }
 
                 if is_finish && state.streaming_in_progress {
-                    let raw_lines = state.stream_buffer.lines().count().max(1);
-                    queue!(stdout, cursor::MoveUp(raw_lines as u16 - 1)).ok();
-                    write!(stdout, "\r").ok();
-                    for _ in 0..raw_lines {
-                        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-                        write!(stdout, "\r\n").ok();
-                    }
-                    queue!(stdout, cursor::MoveUp(raw_lines as u16)).ok();
-                    write!(stdout, "\r").ok();
-
                     let agent_name = state.agent_display();
                     let is_consecutive = state.last_displayed_pubkey.as_deref() == state.current_agent.as_deref()
                         && state.current_agent.is_some();
 
+                    let raw_lines = state.stream_buffer.lines().count().max(1);
+                    let header_extra = if is_consecutive { 0 } else { 1 };
+                    let total_lines = raw_lines + header_extra;
+
+                    queue!(stdout, cursor::MoveUp(total_lines as u16 - 1)).ok();
+                    write!(stdout, "\r").ok();
+                    for _ in 0..total_lines {
+                        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
+                        write!(stdout, "\r\n").ok();
+                    }
+                    queue!(stdout, cursor::MoveUp(total_lines as u16)).ok();
+                    write!(stdout, "\r").ok();
+
                     if is_consecutive {
-                        let indent = " ".repeat(agent_name.len() + 3);
                         let colored = colorize_markdown(&state.stream_buffer);
                         for line in colored.lines() {
-                            write!(stdout, "{indent}{line}\r\n").ok();
+                            write!(stdout, "  {line}\r\n").ok();
                         }
                     } else {
                         let colored = print_agent_message_raw(&agent_name, &state.stream_buffer);
