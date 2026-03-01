@@ -418,9 +418,9 @@ private struct BunkerAuditEntryRow: View {
 
     private var decisionColor: Color {
         switch entry.decision {
-        case "approved": return .green
+        case "approved": return .accentColor
         case "rejected": return .red
-        case "timed-out": return .orange
+        case "timed-out": return .accentColor
         case "auto-approved": return .gray
         case "error": return .red
         default: return .secondary

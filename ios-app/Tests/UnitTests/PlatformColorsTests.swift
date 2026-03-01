@@ -215,11 +215,11 @@ final class PlatformColorsTests: XCTestCase {
     // MARK: - Static color identity checks
 
     func testStatusActiveIsGreen() {
-        XCTAssertEqual(Color.statusActive, .green)
+        XCTAssertEqual(Color.statusActive, .accentColor)
     }
 
     func testStatusWaitingIsOrange() {
-        XCTAssertEqual(Color.statusWaiting, .orange)
+        XCTAssertEqual(Color.statusWaiting, .accentColor)
     }
 
     func testStatusCompletedIsGray() {
@@ -231,11 +231,11 @@ final class PlatformColorsTests: XCTestCase {
     }
 
     func testStatusActiveBackgroundIsGreenWithOpacity() {
-        XCTAssertEqual(Color.statusActiveBackground, .green.opacity(0.15))
+        XCTAssertEqual(Color.statusActiveBackground, Color.accentColor.opacity(0.15))
     }
 
     func testStatusWaitingBackgroundIsOrangeWithOpacity() {
-        XCTAssertEqual(Color.statusWaitingBackground, .orange.opacity(0.15))
+        XCTAssertEqual(Color.statusWaitingBackground, Color.accentColor.opacity(0.15))
     }
 
     func testStatusCompletedBackgroundIsGrayWithOpacity() {
@@ -249,11 +249,11 @@ final class PlatformColorsTests: XCTestCase {
     // MARK: - Feature brand colors
 
     func testSkillBrandIsOrange() {
-        XCTAssertEqual(Color.skillBrand, .orange)
+        XCTAssertEqual(Color.skillBrand, .accentColor)
     }
 
     func testSkillBrandBackgroundIsOrangeWithOpacity() {
-        XCTAssertEqual(Color.skillBrandBackground, .orange.opacity(0.15))
+        XCTAssertEqual(Color.skillBrandBackground, Color.accentColor.opacity(0.15))
     }
 
     func testAgentBrandIsBlue() {
@@ -271,11 +271,11 @@ final class PlatformColorsTests: XCTestCase {
     // MARK: - Presence colors
 
     func testPresenceOnlineIsGreen() {
-        XCTAssertEqual(Color.presenceOnline, .green)
+        XCTAssertEqual(Color.presenceOnline, .accentColor)
     }
 
     func testPresenceOnlineBackgroundIsGreenWithOpacity() {
-        XCTAssertEqual(Color.presenceOnlineBackground, .green.opacity(0.15))
+        XCTAssertEqual(Color.presenceOnlineBackground, Color.accentColor.opacity(0.15))
     }
 
     func testPresenceOfflineIsGray() {
@@ -289,19 +289,19 @@ final class PlatformColorsTests: XCTestCase {
     // MARK: - Ask / Question brand colors
 
     func testAskBrandIsOrange() {
-        XCTAssertEqual(Color.askBrand, .orange)
+        XCTAssertEqual(Color.askBrand, .accentColor)
     }
 
     func testAskBrandSubtleBackgroundOpacity() {
-        XCTAssertEqual(Color.askBrandSubtleBackground, .orange.opacity(0.05))
+        XCTAssertEqual(Color.askBrandSubtleBackground, Color.accentColor.opacity(0.05))
     }
 
     func testAskBrandBackgroundOpacity() {
-        XCTAssertEqual(Color.askBrandBackground, .orange.opacity(0.15))
+        XCTAssertEqual(Color.askBrandBackground, Color.accentColor.opacity(0.15))
     }
 
     func testAskBrandBorderOpacity() {
-        XCTAssertEqual(Color.askBrandBorder, .orange.opacity(0.3))
+        XCTAssertEqual(Color.askBrandBorder, Color.accentColor.opacity(0.3))
     }
 
     // MARK: - Message bubble colors
@@ -311,17 +311,17 @@ final class PlatformColorsTests: XCTestCase {
     }
 
     func testMessageUserAvatarColor() {
-        XCTAssertEqual(Color.messageUserAvatarColor, .green)
+        XCTAssertEqual(Color.messageUserAvatarColor, .accentColor)
     }
 
     // MARK: - Todo colors
 
     func testTodoDoneIsGreen() {
-        XCTAssertEqual(Color.todoDone, .green)
+        XCTAssertEqual(Color.todoDone, .accentColor)
     }
 
     func testTodoDoneBackgroundIsGreenWithOpacity() {
-        XCTAssertEqual(Color.todoDoneBackground, .green.opacity(0.15))
+        XCTAssertEqual(Color.todoDoneBackground, Color.accentColor.opacity(0.15))
     }
 
     func testTodoInProgressIsBlue() {
@@ -345,11 +345,11 @@ final class PlatformColorsTests: XCTestCase {
     // MARK: - Health / Diagnostics colors
 
     func testHealthGoodIsGreen() {
-        XCTAssertEqual(Color.healthGood, .green)
+        XCTAssertEqual(Color.healthGood, .accentColor)
     }
 
     func testHealthWarningIsOrange() {
-        XCTAssertEqual(Color.healthWarning, .orange)
+        XCTAssertEqual(Color.healthWarning, .accentColor)
     }
 
     func testHealthErrorIsRed() {
@@ -373,13 +373,13 @@ final class PlatformColorsTests: XCTestCase {
     }
 
     func testComposerWarningIsOrange() {
-        XCTAssertEqual(Color.composerWarning, .orange)
+        XCTAssertEqual(Color.composerWarning, .accentColor)
     }
 
     // MARK: - Stats colors
 
     func testStatCostIsGreen() {
-        XCTAssertEqual(Color.statCost, .green)
+        XCTAssertEqual(Color.statCost, .accentColor)
     }
 
     func testStatRuntimeIsBlue() {
