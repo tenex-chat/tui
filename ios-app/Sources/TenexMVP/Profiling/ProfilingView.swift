@@ -237,8 +237,8 @@ private struct FFICallRow: View {
 
     private var severityColor: Color {
         if summary.avgDurationMs > 50 { return .red }
-        if summary.avgDurationMs > 16 { return .orange }
-        return .green
+        if summary.avgDurationMs > 16 { return .accentColor }
+        return .accentColor
     }
 
     var body: some View {
@@ -307,7 +307,7 @@ private struct MemoryLeakRow: View {
             }
 
             HStack(spacing: 16) {
-                metricBadge(label: "Allocated", value: "\(leak.allocations)", color: .green)
+                metricBadge(label: "Allocated", value: "\(leak.allocations)", color: .accentColor)
                 metricBadge(label: "Deallocated", value: "\(leak.deallocations)", color: .blue)
                 metricBadge(label: "Leaked", value: "\(leak.leaked)", color: severityColor)
             }

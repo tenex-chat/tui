@@ -33,7 +33,7 @@ struct DiagnosticsOverviewTab: View {
                         title: "Relay Sync",
                         value: sync.enabled ? "Enabled" : "Disabled",
                         subtitle: "Interval: \(sync.currentIntervalSecs)s",
-                        color: sync.enabled ? .green : .red,
+                        color: sync.enabled ? .orange : .red,
                         icon: "arrow.triangle.2.circlepath"
                     )
                 } else {
@@ -61,7 +61,7 @@ struct DiagnosticsOverviewTab: View {
                         title: "Relays",
                         value: "\(system.connectedRelays)",
                         subtitle: system.relayConnected ? "Connected" : "Disconnected",
-                        color: system.relayConnected ? .green : .red,
+                        color: system.relayConnected ? .orange : .red,
                         icon: "antenna.radiowaves.left.and.right"
                     )
                 } else {
@@ -95,7 +95,7 @@ struct DiagnosticsOverviewTab: View {
                     StatusRow(
                         label: "Core Initialized",
                         value: system.isInitialized ? "Yes" : "No",
-                        valueColor: system.isInitialized ? .green : .red
+                        valueColor: system.isInitialized ? .orange : .red
                     )
 
                     Divider()
@@ -103,7 +103,7 @@ struct DiagnosticsOverviewTab: View {
                     StatusRow(
                         label: "Logged In",
                         value: system.isLoggedIn ? "Yes" : "No",
-                        valueColor: system.isLoggedIn ? .green : .red
+                        valueColor: system.isLoggedIn ? .orange : .red
                     )
 
                     Divider()
@@ -111,7 +111,7 @@ struct DiagnosticsOverviewTab: View {
                     StatusRow(
                         label: "Relays Connected",
                         value: "\(system.connectedRelays)",
-                        valueColor: system.relayConnected ? .green : .red
+                        valueColor: system.relayConnected ? .orange : .red
                     )
 
                     Divider()
@@ -192,7 +192,7 @@ struct DiagnosticsOverviewTab: View {
 
     private func relayStatusColor(_ status: String) -> Color {
         switch status {
-        case "Connected": return .green
+        case "Connected": return .orange
         case "Connecting", "Pending": return .yellow
         default: return .red
         }
@@ -242,7 +242,7 @@ struct DiagnosticsOverviewTab: View {
                     StatusRow(
                         label: "Successful Syncs",
                         value: "\(sync.successfulSyncs)",
-                        valueColor: .green
+                        valueColor: .orange
                     )
 
                     Divider()

@@ -34,14 +34,14 @@ struct DiagnosticsSyncTab: View {
                 Spacer()
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.title3)
-                    .foregroundColor(syncData.enabled ? .green : .red)
+                    .foregroundColor(syncData.enabled ? .orange : .red)
             }
 
             HStack(alignment: .firstTextBaseline) {
                 Text(syncData.enabled ? "Enabled" : "Disabled")
                     .font(.system(.title, design: .rounded))
                     .fontWeight(.bold)
-                    .foregroundColor(syncData.enabled ? .green : .red)
+                    .foregroundColor(syncData.enabled ? .orange : .red)
 
                 if syncData.syncInProgress {
                     ProgressView()
@@ -69,7 +69,7 @@ struct DiagnosticsSyncTab: View {
                 StatusRow(
                     label: "Status",
                     value: syncData.enabled ? "Enabled" : "Disabled",
-                    valueColor: syncData.enabled ? .green : .red
+                    valueColor: syncData.enabled ? .orange : .red
                 )
 
                 Divider()
@@ -127,7 +127,7 @@ struct DiagnosticsSyncTab: View {
                 StatusRow(
                     label: "Successful Syncs",
                     value: "\(syncData.successfulSyncs)",
-                    valueColor: .green
+                    valueColor: .orange
                 )
 
                 Divider()
@@ -243,8 +243,8 @@ struct DiagnosticsSyncTab: View {
 
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "ok": return .green
-        case "unsupported": return .orange
+        case "ok": return .accentColor
+        case "unsupported": return .accentColor
         case "failed": return .red
         default: return .secondary
         }
