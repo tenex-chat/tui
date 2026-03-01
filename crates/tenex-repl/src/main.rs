@@ -3,7 +3,7 @@ use crossterm::event::{
     Event, EventStream, KeyCode, KeyEvent, KeyModifiers,
 };
 use crossterm::terminal::{self, ClearType};
-use crossterm::{cursor, execute, queue};
+use crossterm::{cursor, execute};
 use futures::StreamExt;
 use nostr_sdk::prelude::*;
 use std::io::{self, Stdout, Write};
@@ -55,7 +55,7 @@ use editor::LineEditor;
 use completion::CompletionMenu;
 use panels::{ConfigPanel, PanelMode, StatusBarNav, StatsPanel, StatusBarAction, NudgeSkillPanel, NudgeSkillMode};
 use state::ReplState;
-use format::{print_separator_raw, print_agent_message_raw, print_error_raw, print_system_raw, print_help_raw};
+use format::{print_separator_raw, print_error_raw, print_system_raw, print_help_raw};
 use render::{redraw_input, clear_input_area, print_above_input, update_delegation_bar, apply_clear_screen};
 use commands::{
     CommandResult, handle_project_command, handle_agent_command, handle_open_command,
@@ -65,7 +65,6 @@ use commands::{
     handle_status_bar_open, UploadResult, try_upload_image_file,
     handle_clipboard_paste, handle_bunker_command,
 };
-use markdown::colorize_markdown;
 
 #[derive(Parser, Debug)]
 #[command(name = "tenex-repl")]
@@ -1122,6 +1121,7 @@ fn drain_data_changes(
                     if !state.streaming_in_progress {
                         state.streaming_in_progress = true;
                         state.stream_buffer.clear();
+                        state.stream_finished_conv = None;
 
                         if panel.active {
                             panel.deactivate();
@@ -1146,34 +1146,10 @@ fn drain_data_changes(
                 }
 
                 if is_finish && state.streaming_in_progress {
-                    let agent_name = state.agent_display();
-                    let is_consecutive = state.last_displayed_pubkey.as_deref() == state.current_agent.as_deref()
-                        && state.current_agent.is_some();
-
-                    let raw_lines = state.stream_buffer.lines().count().max(1);
-                    let header_extra = if is_consecutive { 0 } else { 1 };
-                    let total_lines = raw_lines + header_extra;
-
-                    queue!(stdout, cursor::MoveUp(total_lines as u16 - 1)).ok();
-                    write!(stdout, "\r").ok();
-                    for _ in 0..total_lines {
-                        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-                        write!(stdout, "\r\n").ok();
-                    }
-                    queue!(stdout, cursor::MoveUp(total_lines as u16)).ok();
-                    write!(stdout, "\r").ok();
-
-                    if is_consecutive {
-                        let colored = colorize_markdown(&state.stream_buffer);
-                        for line in colored.lines() {
-                            write!(stdout, "  {line}\r\n").ok();
-                        }
-                    } else {
-                        let colored = print_agent_message_raw(&agent_name, &state.stream_buffer);
-                        for line in colored.lines() {
-                            write!(stdout, "{line}\r\n").ok();
-                        }
-                    }
+                    // Finish the streaming line and print separator.
+                    // The raw streamed text stays on screen — no cursor
+                    // rewrite (terminal line wrapping makes that fragile).
+                    write!(stdout, "\r\n").ok();
                     stdout.flush().ok();
 
                     if let Some(ref pk) = state.current_agent {
@@ -1183,6 +1159,7 @@ fn drain_data_changes(
                     raw_println!("{}", print_separator_raw());
                     state.streaming_in_progress = false;
                     state.stream_buffer.clear();
+                    state.stream_finished_conv = Some(conversation_id.clone());
 
                     redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
                 }

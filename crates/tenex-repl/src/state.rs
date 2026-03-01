@@ -14,6 +14,9 @@ pub(crate) struct ReplState {
     pub(crate) user_pubkey: String,
     pub(crate) streaming_in_progress: bool,
     pub(crate) stream_buffer: String,
+    /// Conversation ID that just finished streaming — suppresses the next
+    /// published message display to avoid duplication (stream already shown).
+    pub(crate) stream_finished_conv: Option<String>,
     pub(crate) last_displayed_pubkey: Option<String>,
     pub(crate) project_anim_start: Option<Instant>,
     pub(crate) project_anim_name: String,
@@ -43,6 +46,7 @@ impl ReplState {
             user_pubkey,
             streaming_in_progress: false,
             stream_buffer: String::new(),
+            stream_finished_conv: None,
             last_displayed_pubkey: None,
             project_anim_start: None,
             project_anim_name: String::new(),

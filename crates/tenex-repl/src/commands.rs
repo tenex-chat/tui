@@ -980,8 +980,17 @@ pub(crate) fn handle_core_event(event: &CoreEvent, state: &mut ReplState, runtim
             if state.streaming_in_progress {
                 state.streaming_in_progress = false;
                 state.stream_buffer.clear();
+                state.stream_finished_conv = None;
                 state.last_displayed_pubkey = Some(msg.pubkey.clone());
                 return Some(format!("\n{}", print_separator_raw()));
+            }
+
+            // Suppress duplicate: streaming already displayed this content
+            if state.stream_finished_conv.as_deref() == Some(&msg.thread_id)
+                && !is_tool_use(msg)
+            {
+                state.stream_finished_conv = None;
+                return None;
             }
 
             let store = runtime.data_store();
