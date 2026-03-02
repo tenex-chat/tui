@@ -336,22 +336,13 @@ fn format_todo_inline(
         .collect();
 
     let total = current.len();
-    let done = current.iter().filter(|(_, s)| s == "completed").count();
+    let done = current.iter().filter(|(_, s)| s == "completed" || s == "done").count();
 
     let truncate_title = |s: &str| -> String {
         if s.len() <= 50 {
             s.to_string()
         } else {
             format!("{}...", &s[..47])
-        }
-    };
-
-    let status_icon = |s: &str| -> (&str, &str) {
-        match s {
-            "completed" => ("✓", GREEN),
-            "in_progress" => ("◒", ACCENT),
-            "cancelled" | "skipped" => ("✗", DIM),
-            _ => ("◯", DIM),
         }
     };
 
@@ -365,9 +356,22 @@ fn format_todo_inline(
     lines.push(header);
 
     for (title, status) in &current {
-        let (icon, color) = status_icon(status);
         let display_title = truncate_title(title);
-        lines.push(format!("{color}    {icon} {display_title}{RESET}"));
+        let line = match status.as_str() {
+            "completed" | "done" => {
+                format!("{GREEN}    ✓{RESET} {DIM}{display_title}{RESET}")
+            }
+            "in_progress" => {
+                format!("{ACCENT}    ◒ {display_title}{RESET}")
+            }
+            "cancelled" | "skipped" => {
+                format!("{DIM}    ✗ {display_title}{RESET}")
+            }
+            _ => {
+                format!("{DIM}    ◯ {display_title}{RESET}")
+            }
+        };
+        lines.push(line);
     }
 
     (lines.join("\n"), current)
