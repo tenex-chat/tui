@@ -27,6 +27,9 @@ pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Re
 
         for attempt in 0..MAX_ATTEMPTS {
             if note_exists(ndb, event) {
+                if attempt == 0 && event.kind.as_u16() == 1 {
+                    crate::tlog!("INGEST", "kind:1 id={} already in ndb (skip)", event.id.to_hex());
+                }
                 handled = true;
                 break;
             }

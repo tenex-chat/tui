@@ -1406,11 +1406,12 @@ impl AppDataStore {
             }
         }
 
+        let note_id = hex::encode(note.id());
         if has_e_tag {
-            // Has e-tag: it's a message
+            crate::tlog!("STORE", "handle_text id={} → message (has e-tag)", &note_id);
             self.handle_message_event(note);
         } else {
-            // No e-tag: it's a thread
+            crate::tlog!("STORE", "handle_text id={} → thread (no e-tag)", &note_id);
             self.handle_thread_event(note);
 
             // Check if this is a document discussion thread (has a-tag for a report)
@@ -1776,7 +1777,9 @@ impl AppDataStore {
                 .or_default();
 
             // Check if message already exists (avoid duplicates)
-            if !messages.iter().any(|m| m.id == message_id) {
+            let is_dup = messages.iter().any(|m| m.id == message_id);
+            crate::tlog!("STORE", "handle_message id={} thread={} dup={}", &message_id, &thread_id, is_dup);
+            if !is_dup {
                 let message_created_at = message.created_at;
                 let message_pubkey = message.pubkey.clone();
                 let message_llm_metadata = message.llm_metadata.clone();

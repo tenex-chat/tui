@@ -113,7 +113,10 @@ pub fn process_note_keys(
 
             match kind {
                 1 => {
+                    let note_id = hex::encode(note.id());
+                    crate::tlog!("NDB-SUB", "kind:1 note_key={} id={}", note_key.as_u64(), &note_id);
                     if let Some(message) = Message::from_note(&note) {
+                        crate::tlog!("NDB-SUB", "  → message thread={} id={}", message.thread_id, message.id);
                         events.push(CoreEvent::Message(message));
                     } else if let Some(message) = Message::from_thread_note(&note) {
                         // Thread root: emit as CoreEvent::Message if it p-tags the user
