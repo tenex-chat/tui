@@ -727,6 +727,7 @@ fn build_single_text_attachment_message(content: &str) -> String {
 }
 
 pub(crate) fn handle_reference_command(
+    arg: Option<&str>,
     state: &mut ReplState,
     runtime: &CoreRuntime,
 ) -> CommandResult {
@@ -740,9 +741,8 @@ pub(crate) fn handle_reference_command(
         )]);
     };
 
-    // Keep the same selected PM/agent when creating the referenced conversation.
-    let mut agent_pubkey = state.current_agent.clone();
-    if agent_pubkey.is_none() {
+    // Auto-select PM agent if none is chosen.
+    if state.current_agent.is_none() {
         let pm_agent = {
             let store = runtime.data_store();
             let store_ref = store.borrow();
@@ -752,9 +752,8 @@ pub(crate) fn handle_reference_command(
                 .map(|agent| (agent.pubkey.clone(), agent.name.clone()))
         };
         if let Some((pm_pubkey, pm_name)) = pm_agent {
-            state.current_agent = Some(pm_pubkey.clone());
+            state.current_agent = Some(pm_pubkey);
             state.current_agent_name = Some(pm_name);
-            agent_pubkey = Some(pm_pubkey);
         }
     }
 
@@ -769,19 +768,23 @@ pub(crate) fn handle_reference_command(
         total_chars / 4
     };
 
-    let short_conversation_id: String = source_thread_id.chars().take(12).collect();
+    let short_id: String = source_thread_id.chars().take(12).collect();
     let context_message = format!(
         "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
-        short_conversation_id, approx_tokens
+        short_id, approx_tokens
     );
-    let content = build_single_text_attachment_message(&context_message);
+    let mut content = build_single_text_attachment_message(&context_message);
+    if let Some(user_msg) = arg.filter(|s| !s.trim().is_empty()) {
+        content.push('\n');
+        content.push_str(user_msg.trim());
+    }
 
     let (response_tx, response_rx) = std::sync::mpsc::sync_channel(1);
     let _ = runtime.handle().send(NostrCommand::PublishThread {
         project_a_tag,
         title: String::new(),
         content: content.clone(),
-        agent_pubkey,
+        agent_pubkey: state.current_agent.clone(),
         nudge_ids: state.selected_nudge_ids.clone(),
         skill_ids: state.selected_skill_ids.clone(),
         reference_conversation_id: Some(source_thread_id.clone()),
@@ -790,7 +793,9 @@ pub(crate) fn handle_reference_command(
         response_tx: Some(response_tx),
     });
 
-    let Ok(event_id) = response_rx.recv_timeout(std::time::Duration::from_secs(5)) else {
+    // The worker sends response_tx after local ingest (before relay), so this
+    // should return almost instantly.
+    let Ok(event_id) = response_rx.recv_timeout(std::time::Duration::from_secs(10)) else {
         return CommandResult::Lines(vec![print_error_raw(
             "Timed out creating referenced conversation",
         )]);
