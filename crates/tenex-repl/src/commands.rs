@@ -1,24 +1,32 @@
+use crate::completion::CompletionMenu;
+use crate::editor::LineEditor;
+use crate::format::{
+    format_message, is_tool_use, print_error_raw, print_separator_raw, print_system_raw,
+    print_user_message_raw,
+};
+use crate::panels::{
+    ConfigPanel, ConversationStackEntry, NudgeSkillPanel, StatsPanel, StatusBarNav,
+};
+use crate::render::{print_above_input, redraw_input};
+use crate::state::{AskModalState, ReplState};
+use crate::util::thread_display_name;
+use crate::{CYAN, DIM, GREEN, RED, RESET, WHITE_BOLD};
+use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 use std::io::{Stdout, Write};
-use crate::{DIM, GREEN, WHITE_BOLD, CYAN, RED, RESET};
-use crate::editor::LineEditor;
-use crate::completion::CompletionMenu;
-use crate::panels::{ConfigPanel, ConversationStackEntry, StatusBarNav, StatsPanel, NudgeSkillPanel};
-use crate::state::{AskModalState, ReplState};
-use crate::format::{format_message, print_separator_raw, print_user_message_raw, print_error_raw, print_system_raw, is_tool_use};
-use crate::render::{print_above_input, redraw_input};
-use crate::util::{thread_display_name, MESSAGES_TO_LOAD};
-use tenex_core::runtime::CoreRuntime;
-use tenex_core::nostr::NostrCommand;
-use tenex_core::models::{AskInputState, Project, ProjectAgent, Thread};
 use tenex_core::events::CoreEvent;
-use nostr_sdk::prelude::*;
+use tenex_core::models::{AskInputState, Project, ProjectAgent, Thread};
+use tenex_core::nostr::NostrCommand;
+use tenex_core::runtime::CoreRuntime;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /// Find the longest project title that matches as a prefix of `input` (case-insensitive).
 /// Returns `(matched_portion, remainder)` where remainder is trimmed.
-pub(crate) fn find_project_split<'a>(input: &'a str, projects: &[&Project]) -> Option<(&'a str, &'a str)> {
+pub(crate) fn find_project_split<'a>(
+    input: &'a str,
+    projects: &[&Project],
+) -> Option<(&'a str, &'a str)> {
     let mut best_len = 0;
     for project in projects {
         let title = &project.title;
@@ -51,7 +59,11 @@ pub(crate) enum CommandResult {
 
 // ─── Command Handlers ───────────────────────────────────────────────────────
 
-pub(crate) fn handle_project_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreRuntime) -> Vec<String> {
+pub(crate) fn handle_project_command(
+    arg: Option<&str>,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> Vec<String> {
     let mut output = Vec::new();
     let store = runtime.data_store();
     let store_ref = store.borrow();
@@ -90,7 +102,11 @@ pub(crate) fn handle_project_command(arg: Option<&str>, state: &mut ReplState, r
                 projects
                     .iter()
                     .find(|p| p.title.to_lowercase() == lower)
-                    .or_else(|| projects.iter().find(|p| p.title.to_lowercase().contains(&lower)))
+                    .or_else(|| {
+                        projects
+                            .iter()
+                            .find(|p| p.title.to_lowercase().contains(&lower))
+                    })
                     .copied()
             };
 
@@ -113,10 +129,13 @@ pub(crate) fn handle_project_command(arg: Option<&str>, state: &mut ReplState, r
     output
 }
 
-/// Open a conversation: set it as current, load recent messages, return display lines.
+/// Open a conversation: set it as current, load messages, return display lines.
 /// Re-render the current conversation's messages without mutating navigation state.
 /// Used on terminal resize to rebuild the display at the new width.
-pub(crate) fn rebuild_conversation_view(state: &mut ReplState, runtime: &CoreRuntime) -> Vec<String> {
+pub(crate) fn rebuild_conversation_view(
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> Vec<String> {
     let thread_id = match &state.current_conversation {
         Some(id) => id.clone(),
         None => return Vec::new(),
@@ -126,18 +145,19 @@ pub(crate) fn rebuild_conversation_view(state: &mut ReplState, runtime: &CoreRun
     let store_ref = store.borrow();
 
     let messages = store_ref.get_messages(&thread_id);
-    let show_count = messages.len().min(MESSAGES_TO_LOAD);
-    let start = messages.len().saturating_sub(show_count);
 
     let mut output = Vec::new();
-    if show_count > 0 {
-        if start > 0 {
-            output.push(print_system_raw(&format!("  ... {} earlier messages", start)));
-        }
+    if !messages.is_empty() {
         let mut last_pk: Option<String> = None;
         let mut todo_items: Vec<(String, String)> = Vec::new();
-        for msg in &messages[start..] {
-            if let Some(formatted) = format_message(msg, &store_ref, &state.user_pubkey, &mut last_pk, &mut todo_items) {
+        for msg in messages {
+            if let Some(formatted) = format_message(
+                msg,
+                &store_ref,
+                &state.user_pubkey,
+                &mut last_pk,
+                &mut todo_items,
+            ) {
                 output.push(formatted);
             }
         }
@@ -153,7 +173,6 @@ pub(crate) fn open_conversation(
     runtime: &CoreRuntime,
     thread_id: &str,
     clear_stack: bool,
-    max_messages: usize,
 ) -> Vec<String> {
     state.current_conversation = Some(thread_id.to_string());
     if clear_stack {
@@ -168,17 +187,18 @@ pub(crate) fn open_conversation(
     let store_ref = store.borrow();
 
     let messages = store_ref.get_messages(thread_id);
-    let show_count = if max_messages == 0 { messages.len() } else { messages.len().min(max_messages) };
-    let start = messages.len().saturating_sub(show_count);
 
-    if show_count > 0 {
-        if start > 0 {
-            output.push(print_system_raw(&format!("  ... {} earlier messages", start)));
-        }
+    if !messages.is_empty() {
         let mut last_pk: Option<String> = None;
         let mut todo_items: Vec<(String, String)> = Vec::new();
-        for msg in &messages[start..] {
-            if let Some(formatted) = format_message(msg, &store_ref, &state.user_pubkey, &mut last_pk, &mut todo_items) {
+        for msg in messages {
+            if let Some(formatted) = format_message(
+                msg,
+                &store_ref,
+                &state.user_pubkey,
+                &mut last_pk,
+                &mut todo_items,
+            ) {
                 output.push(formatted);
             }
         }
@@ -214,12 +234,16 @@ pub(crate) fn maybe_open_ask_modal(state: &mut ReplState, runtime: &CoreRuntime)
 }
 
 pub(crate) fn subscribe_to_project(runtime: &CoreRuntime, a_tag: &str) {
-    let _ = runtime.handle().send(NostrCommand::SubscribeToProjectMessages {
-        project_a_tag: a_tag.to_string(),
-    });
-    let _ = runtime.handle().send(NostrCommand::SubscribeToProjectMetadata {
-        project_a_tag: a_tag.to_string(),
-    });
+    let _ = runtime
+        .handle()
+        .send(NostrCommand::SubscribeToProjectMessages {
+            project_a_tag: a_tag.to_string(),
+        });
+    let _ = runtime
+        .handle()
+        .send(NostrCommand::SubscribeToProjectMetadata {
+            project_a_tag: a_tag.to_string(),
+        });
 }
 
 /// Unified project switching: subscribe + switch state + auto-select agent.
@@ -246,7 +270,10 @@ pub(crate) fn auto_select_project(state: &mut ReplState, runtime: &CoreRuntime) 
 
     if let Some((a_tag, title)) = online_project {
         switch_to_project(state, runtime, &a_tag);
-        raw_println!("{}", print_system_raw(&format!("Auto-selected project: {title}")));
+        raw_println!(
+            "{}",
+            print_system_raw(&format!("Auto-selected project: {title}"))
+        );
         true
     } else {
         false
@@ -260,10 +287,7 @@ pub(crate) fn auto_select_agent(state: &mut ReplState, runtime: &CoreRuntime) {
     let store = runtime.data_store();
     let store_ref = store.borrow();
     if let Some(agents) = store_ref.get_online_agents(a_tag) {
-        let agent = agents
-            .iter()
-            .find(|a| a.is_pm)
-            .or_else(|| agents.first());
+        let agent = agents.iter().find(|a| a.is_pm).or_else(|| agents.first());
         if let Some(a) = agent {
             state.current_agent = Some(a.pubkey.clone());
             state.current_agent_name = Some(a.name.clone());
@@ -271,7 +295,11 @@ pub(crate) fn auto_select_agent(state: &mut ReplState, runtime: &CoreRuntime) {
     }
 }
 
-pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreRuntime) -> Vec<String> {
+pub(crate) fn handle_agent_command(
+    arg: Option<&str>,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> Vec<String> {
     let mut output = Vec::new();
 
     let agent_arg = if let Some(raw) = arg {
@@ -298,7 +326,11 @@ pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, run
             let matched = projects
                 .iter()
                 .find(|p| p.title.to_lowercase() == lower)
-                .or_else(|| projects.iter().find(|p| p.title.to_lowercase().contains(&lower)))
+                .or_else(|| {
+                    projects
+                        .iter()
+                        .find(|p| p.title.to_lowercase().contains(&lower))
+                })
                 .map(|p| p.a_tag());
             drop(store_ref);
 
@@ -307,7 +339,9 @@ pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, run
                     switch_to_project(state, runtime, &a_tag);
                 }
                 None => {
-                    output.push(print_error_raw(&format!("No project matching '{project_name}'")));
+                    output.push(print_error_raw(&format!(
+                        "No project matching '{project_name}'"
+                    )));
                     return output;
                 }
             }
@@ -334,7 +368,9 @@ pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, run
     match agent_arg {
         None | Some("") => {
             if agents.is_empty() {
-                output.push(print_system_raw("No online agents. Is the backend running?"));
+                output.push(print_system_raw(
+                    "No online agents. Is the backend running?",
+                ));
                 return output;
             }
             output.push(format!("{WHITE_BOLD}Online agents:{RESET}"));
@@ -368,7 +404,10 @@ pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, run
                 Some(agent) => {
                     state.current_agent = Some(agent.pubkey.clone());
                     state.current_agent_name = Some(agent.name.clone());
-                    output.push(print_system_raw(&format!("Switched to agent: {}", agent.name)));
+                    output.push(print_system_raw(&format!(
+                        "Switched to agent: {}",
+                        agent.name
+                    )));
                 }
                 None => output.push(print_error_raw(&format!("No agent matching '{name}'"))),
             }
@@ -377,7 +416,11 @@ pub(crate) fn handle_agent_command(arg: Option<&str>, state: &mut ReplState, run
     output
 }
 
-pub(crate) fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreRuntime) -> CommandResult {
+pub(crate) fn handle_open_command(
+    arg: Option<&str>,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> CommandResult {
     let arg = arg.unwrap_or("");
     if arg.is_empty() {
         return CommandResult::ShowCompletion("/conversations ".to_string());
@@ -409,12 +452,18 @@ pub(crate) fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runt
             Some(a_tag) => {
                 switch_to_project(state, runtime, &a_tag);
             }
-            None => return CommandResult::Lines(vec![print_error_raw(&format!("No project matching '{project_name}'"))]),
+            None => {
+                return CommandResult::Lines(vec![print_error_raw(&format!(
+                    "No project matching '{project_name}'"
+                ))]);
+            }
         }
     }
 
     let Some(ref a_tag) = state.current_project else {
-        return CommandResult::Lines(vec![print_error_raw("Select a project first with /project")]);
+        return CommandResult::Lines(vec![print_error_raw(
+            "Select a project first with /project",
+        )]);
     };
 
     let store = runtime.data_store();
@@ -425,15 +474,26 @@ pub(crate) fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runt
     let matched = if let Ok(idx) = idx_str.parse::<usize>() {
         threads.get(idx.saturating_sub(1)).copied()
     } else {
-        let lower = idx_str.strip_suffix("...").unwrap_or(idx_str).to_lowercase();
-        threads.iter().find(|t|
-            t.title.to_lowercase().contains(&lower)
-            || t.summary.as_ref().map(|s| s.to_lowercase().contains(&lower)).unwrap_or(false)
-        ).copied()
+        let lower = idx_str
+            .strip_suffix("...")
+            .unwrap_or(idx_str)
+            .to_lowercase();
+        threads
+            .iter()
+            .find(|t| {
+                t.title.to_lowercase().contains(&lower)
+                    || t.summary
+                        .as_ref()
+                        .map(|s| s.to_lowercase().contains(&lower))
+                        .unwrap_or(false)
+            })
+            .copied()
     };
 
     let Some(thread) = matched else {
-        return CommandResult::Lines(vec![print_error_raw(&format!("No conversation matching '{idx_str}'"))]);
+        return CommandResult::Lines(vec![print_error_raw(&format!(
+            "No conversation matching '{idx_str}'"
+        ))]);
     };
 
     let id = thread.id.clone();
@@ -441,11 +501,15 @@ pub(crate) fn handle_open_command(arg: Option<&str>, state: &mut ReplState, runt
     drop(store_ref);
 
     let mut output = vec![print_system_raw(&format!("Opened: {title}"))];
-    output.extend(open_conversation(state, runtime, &id, true, MESSAGES_TO_LOAD));
+    output.extend(open_conversation(state, runtime, &id, true));
     CommandResult::ClearScreen(output)
 }
 
-pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreRuntime) -> CommandResult {
+pub(crate) fn handle_active_command(
+    arg: Option<&str>,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> CommandResult {
     let arg = arg.unwrap_or("");
     if arg.is_empty() {
         return CommandResult::ShowCompletion("/active ".to_string());
@@ -482,7 +546,10 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
             }
         }
     }
-    recent_threads.sort_by(|a, b| b.0.effective_last_activity.cmp(&a.0.effective_last_activity));
+    recent_threads.sort_by(|a, b| {
+        b.0.effective_last_activity
+            .cmp(&a.0.effective_last_activity)
+    });
 
     for (thread, a_tag) in recent_threads.into_iter().take(15) {
         if !seen_ids.insert(thread.id.clone()) {
@@ -495,20 +562,30 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
         ordered_threads.get(idx.saturating_sub(1))
     } else {
         // Try direct thread_id match first (from completion fill), then text search
-        ordered_threads.iter().find(|(tid, _)| tid == search)
+        ordered_threads
+            .iter()
+            .find(|(tid, _)| tid == search)
             .or_else(|| {
                 let lower = search.to_lowercase();
                 ordered_threads.iter().find(|(tid, _)| {
-                    store_ref.get_thread_by_id(tid).map(|t|
-                        t.title.to_lowercase().contains(&lower)
-                        || t.summary.as_ref().map(|s| s.to_lowercase().contains(&lower)).unwrap_or(false)
-                    ).unwrap_or(false)
+                    store_ref
+                        .get_thread_by_id(tid)
+                        .map(|t| {
+                            t.title.to_lowercase().contains(&lower)
+                                || t.summary
+                                    .as_ref()
+                                    .map(|s| s.to_lowercase().contains(&lower))
+                                    .unwrap_or(false)
+                        })
+                        .unwrap_or(false)
                 })
             })
     };
 
     let Some((thread_id, project_a_tag)) = matched_entry else {
-        return CommandResult::Lines(vec![print_error_raw(&format!("No conversation matching '{search}'"))]);
+        return CommandResult::Lines(vec![print_error_raw(&format!(
+            "No conversation matching '{search}'"
+        ))]);
     };
 
     let thread_id = thread_id.clone();
@@ -532,7 +609,7 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
     }
 
     let mut output = vec![print_system_raw(&format!("Opened: {title}"))];
-    output.extend(open_conversation(state, runtime, &thread_id, true, MESSAGES_TO_LOAD));
+    output.extend(open_conversation(state, runtime, &thread_id, true));
 
     if needs_project_switch {
         CommandResult::ClearScreen(output)
@@ -541,7 +618,11 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
     }
 }
 
-pub(crate) fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &CoreRuntime) -> CommandResult {
+pub(crate) fn handle_new_command(
+    arg: &str,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> CommandResult {
     let arg = arg.trim();
 
     if let Some(at_pos) = arg.find('@') {
@@ -580,7 +661,11 @@ pub(crate) fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &Cor
             projects
                 .iter()
                 .find(|p| p.title.to_lowercase() == lower)
-                .or_else(|| projects.iter().find(|p| p.title.to_lowercase().contains(&lower)))
+                .or_else(|| {
+                    projects
+                        .iter()
+                        .find(|p| p.title.to_lowercase().contains(&lower))
+                })
                 .map(|p| p.a_tag())
         } else {
             None
@@ -597,7 +682,10 @@ pub(crate) fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &Cor
                 let store_ref = store.borrow();
                 if let Some(agents) = store_ref.get_online_agents(a_tag) {
                     let lower = agent_name.to_lowercase();
-                    if let Some(agent) = agents.iter().find(|a| a.name.to_lowercase().contains(&lower)) {
+                    if let Some(agent) = agents
+                        .iter()
+                        .find(|a| a.name.to_lowercase().contains(&lower))
+                    {
                         state.current_agent = Some(agent.pubkey.clone());
                         state.current_agent_name = Some(agent.name.clone());
                     }
@@ -610,7 +698,10 @@ pub(crate) fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &Cor
             let store_ref = store.borrow();
             if let Some(agents) = store_ref.get_online_agents(a_tag) {
                 let lower = arg.to_lowercase();
-                if let Some(agent) = agents.iter().find(|a| a.name.to_lowercase().contains(&lower)) {
+                if let Some(agent) = agents
+                    .iter()
+                    .find(|a| a.name.to_lowercase().contains(&lower))
+                {
                     state.current_agent = Some(agent.pubkey.clone());
                     state.current_agent_name = Some(agent.name.clone());
                 }
@@ -626,9 +717,109 @@ pub(crate) fn handle_new_command(arg: &str, state: &mut ReplState, runtime: &Cor
     CommandResult::ClearScreen(vec![])
 }
 
+fn build_single_text_attachment_message(content: &str) -> String {
+    let mut full = "[Text Attachment 1]\n\n----\n-- Text Attachment 1 --\n".to_string();
+    full.push_str(content);
+    if !content.ends_with('\n') {
+        full.push('\n');
+    }
+    full
+}
+
+pub(crate) fn handle_reference_command(
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> CommandResult {
+    let Some(source_thread_id) = state.current_conversation.clone() else {
+        return CommandResult::Lines(vec![print_error_raw("No conversation to reference")]);
+    };
+
+    let Some(project_a_tag) = state.current_project.clone() else {
+        return CommandResult::Lines(vec![print_error_raw(
+            "Select a project first with /project",
+        )]);
+    };
+
+    // Keep the same selected PM/agent when creating the referenced conversation.
+    let mut agent_pubkey = state.current_agent.clone();
+    if agent_pubkey.is_none() {
+        let pm_agent = {
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            store_ref
+                .get_project_status(&project_a_tag)
+                .and_then(|status| status.pm_agent())
+                .map(|agent| (agent.pubkey.clone(), agent.name.clone()))
+        };
+        if let Some((pm_pubkey, pm_name)) = pm_agent {
+            state.current_agent = Some(pm_pubkey.clone());
+            state.current_agent_name = Some(pm_name);
+            agent_pubkey = Some(pm_pubkey);
+        }
+    }
+
+    let approx_tokens = {
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        let total_chars: usize = store_ref
+            .get_messages(&source_thread_id)
+            .iter()
+            .map(|msg| msg.content.len())
+            .sum();
+        total_chars / 4
+    };
+
+    let short_conversation_id: String = source_thread_id.chars().take(12).collect();
+    let context_message = format!(
+        "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
+        short_conversation_id, approx_tokens
+    );
+    let content = build_single_text_attachment_message(&context_message);
+
+    let (response_tx, response_rx) = std::sync::mpsc::sync_channel(1);
+    let _ = runtime.handle().send(NostrCommand::PublishThread {
+        project_a_tag,
+        title: String::new(),
+        content: content.clone(),
+        agent_pubkey,
+        nudge_ids: state.selected_nudge_ids.clone(),
+        skill_ids: state.selected_skill_ids.clone(),
+        reference_conversation_id: Some(source_thread_id.clone()),
+        reference_report_a_tag: None,
+        fork_message_id: None,
+        response_tx: Some(response_tx),
+    });
+
+    let Ok(event_id) = response_rx.recv_timeout(std::time::Duration::from_secs(5)) else {
+        return CommandResult::Lines(vec![print_error_raw(
+            "Timed out creating referenced conversation",
+        )]);
+    };
+
+    state.current_conversation = Some(event_id);
+    state.last_todo_items.clear();
+    state.conversation_stack.clear();
+    state.delegation_bar.unfocus();
+    state.selected_nudge_ids.clear();
+    state.selected_skill_ids.clear();
+    state.last_displayed_pubkey = Some(state.user_pubkey.clone());
+
+    let mut output = vec![print_system_raw(&format!(
+        "New conversation referencing {} (~{} tokens)",
+        &source_thread_id[..8.min(source_thread_id.len())],
+        approx_tokens
+    ))];
+    output.push(print_user_message_raw(&content));
+    CommandResult::ClearScreen(output)
+}
+
 /// Navigate into a delegation: push current conversation onto the stack,
 /// switch to the delegation's conversation, and return lines to display.
-pub(crate) fn navigate_to_delegation(state: &mut ReplState, runtime: &CoreRuntime, target_thread_id: &str) -> CommandResult {
+pub(crate) fn navigate_to_delegation(
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+    target_thread_id: &str,
+) -> CommandResult {
     if let Some(ref conv_id) = state.current_conversation {
         state.conversation_stack.push(ConversationStackEntry {
             thread_id: conv_id.clone(),
@@ -646,7 +837,7 @@ pub(crate) fn navigate_to_delegation(state: &mut ReplState, runtime: &CoreRuntim
         }
     }
 
-    output.extend(open_conversation(state, runtime, target_thread_id, false, MESSAGES_TO_LOAD));
+    output.extend(open_conversation(state, runtime, target_thread_id, false));
     CommandResult::ClearScreen(output)
 }
 
@@ -665,17 +856,21 @@ pub(crate) fn handle_status_bar_open(
     let title = {
         let store = runtime.data_store();
         let store_ref = store.borrow();
-        store_ref.get_thread_by_id(thread_id)
+        store_ref
+            .get_thread_by_id(thread_id)
             .map(|t| t.title.clone())
             .unwrap_or_default()
     };
     let mut output = vec![print_system_raw(&format!("Opened: {title}"))];
-    output.extend(open_conversation(state, runtime, thread_id, true, MESSAGES_TO_LOAD));
+    output.extend(open_conversation(state, runtime, thread_id, true));
     CommandResult::ClearScreen(output)
 }
 
 /// Pop the conversation stack and return to the previous conversation.
-pub(crate) fn pop_conversation_stack(state: &mut ReplState, runtime: &CoreRuntime) -> Option<CommandResult> {
+pub(crate) fn pop_conversation_stack(
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> Option<CommandResult> {
     let entry = state.conversation_stack.pop()?;
 
     if let Some(ref a_tag) = entry.project_a_tag {
@@ -685,11 +880,15 @@ pub(crate) fn pop_conversation_stack(state: &mut ReplState, runtime: &CoreRuntim
     }
 
     let mut output = vec![print_system_raw("← Back to parent conversation")];
-    output.extend(open_conversation(state, runtime, &entry.thread_id, false, MESSAGES_TO_LOAD));
+    output.extend(open_conversation(state, runtime, &entry.thread_id, false));
     Some(CommandResult::ClearScreen(output))
 }
 
-pub(crate) fn handle_send_message(content: &str, state: &mut ReplState, runtime: &CoreRuntime) -> Vec<String> {
+pub(crate) fn handle_send_message(
+    content: &str,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> Vec<String> {
     let Some(ref a_tag) = state.current_project else {
         return vec![print_error_raw("Select a project first with /project")];
     };
@@ -759,7 +958,10 @@ pub(crate) fn handle_boot_command(arg: Option<&str>, runtime: &CoreRuntime) -> V
         projects.get(idx.saturating_sub(1)).copied()
     } else {
         let lower = arg.to_lowercase();
-        projects.iter().find(|p| p.title.to_lowercase().contains(&lower)).copied()
+        projects
+            .iter()
+            .find(|p| p.title.to_lowercase().contains(&lower))
+            .copied()
     };
 
     let Some(project) = matched else {
@@ -767,7 +969,10 @@ pub(crate) fn handle_boot_command(arg: Option<&str>, runtime: &CoreRuntime) -> V
     };
 
     if store_ref.is_project_online(&project.a_tag()) {
-        return vec![print_system_raw(&format!("{} is already online", project.title))];
+        return vec![print_system_raw(&format!(
+            "{} is already online",
+            project.title
+        ))];
     }
 
     let a_tag = project.a_tag();
@@ -818,6 +1023,69 @@ pub(crate) fn handle_status_command(state: &ReplState, runtime: &CoreRuntime) ->
     output
 }
 
+pub(crate) fn handle_info_command(state: &ReplState, runtime: &CoreRuntime) -> Vec<String> {
+    let Some(conversation_id) = state.current_conversation.as_deref() else {
+        return vec![print_error_raw(
+            "No active conversation. Open one with /conversations, /open, or /active",
+        )];
+    };
+
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    let thread = store_ref.get_thread_by_id(conversation_id);
+    let message_count = store_ref.get_messages(conversation_id).len();
+
+    let (title, summary, status, parent_id, project_a_tag) = match thread {
+        Some(t) => (
+            t.title.clone(),
+            t.summary.clone(),
+            t.status_label.clone(),
+            t.parent_conversation_id.clone(),
+            store_ref.get_project_a_tag_for_thread(conversation_id),
+        ),
+        None => (
+            "unknown".to_string(),
+            None,
+            None,
+            None,
+            state.current_project.clone(),
+        ),
+    };
+
+    let project_name = project_a_tag.as_ref().and_then(|a_tag| {
+        store_ref
+            .get_projects()
+            .iter()
+            .find(|p| p.a_tag() == *a_tag)
+            .map(|p| p.title.clone())
+    });
+
+    let mut output = Vec::new();
+    output.push(format!("{WHITE_BOLD}Conversation Info:{RESET}"));
+    output.push(format!("  ID:           {conversation_id}"));
+    output.push(format!("  Title:        {title}"));
+    output.push(format!("  Messages:     {message_count}"));
+    if let Some(summary) = summary.filter(|s| !s.is_empty()) {
+        output.push(format!("  Summary:      {summary}"));
+    }
+    if let Some(status) = status.filter(|s| !s.is_empty()) {
+        output.push(format!("  Status:       {status}"));
+    }
+    output.push(format!(
+        "  Parent ID:    {}",
+        parent_id.unwrap_or_else(|| "none".to_string())
+    ));
+    output.push(format!(
+        "  Project ID:   {}",
+        project_a_tag.unwrap_or_else(|| "unknown".to_string())
+    ));
+    output.push(format!(
+        "  Project:      {}",
+        project_name.unwrap_or_else(|| "unknown".to_string())
+    ));
+    output
+}
+
 // ─── Config / Model Command Handlers ────────────────────────────────────────
 
 fn resolve_agent_for_config(
@@ -840,10 +1108,17 @@ fn resolve_agent_for_config(
             .unwrap_or_default();
 
         let matched = if let Ok(idx) = filter.parse::<usize>() {
-            if idx == 0 { None } else { agents.get(idx - 1).copied() }
+            if idx == 0 {
+                None
+            } else {
+                agents.get(idx - 1).copied()
+            }
         } else {
             let lower = filter.to_lowercase();
-            agents.iter().find(|a| a.name.to_lowercase().contains(&lower)).copied()
+            agents
+                .iter()
+                .find(|a| a.name.to_lowercase().contains(&lower))
+                .copied()
         };
 
         match matched {
@@ -862,7 +1137,9 @@ pub(crate) fn handle_config_command(
     let raw = arg.unwrap_or("");
 
     let Some(ref a_tag) = state.current_project else {
-        return CommandResult::Lines(vec![print_error_raw("Select a project first with /project")]);
+        return CommandResult::Lines(vec![print_error_raw(
+            "Select a project first with /project",
+        )]);
     };
     let a_tag = a_tag.clone();
 
@@ -911,8 +1188,12 @@ pub(crate) fn handle_config_command(
     let status = store_ref.get_project_status(&a_tag);
     let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
-    panel.tools_items = status.map(|s| s.all_tools().iter().map(|t| t.to_string()).collect()).unwrap_or_default();
-    panel.tools_selected = agent.map(|a| a.tools.iter().cloned().collect()).unwrap_or_default();
+    panel.tools_items = status
+        .map(|s| s.all_tools().iter().map(|t| t.to_string()).collect())
+        .unwrap_or_default();
+    panel.tools_selected = agent
+        .map(|a| a.tools.iter().cloned().collect())
+        .unwrap_or_default();
     panel.pending_model = None;
     panel.is_set_pm = is_set_pm || agent.map(|a| a.is_pm).unwrap_or(false);
     panel.filter.clear();
@@ -933,7 +1214,14 @@ pub(crate) fn handle_config_command(
     panel.is_global = is_global;
     panel.cursor = 0;
     panel.scroll_offset = 0;
-    panel.origin_command = format!("/config{}", if raw.is_empty() { String::new() } else { format!(" {raw}") });
+    panel.origin_command = format!(
+        "/config{}",
+        if raw.is_empty() {
+            String::new()
+        } else {
+            format!(" {raw}")
+        }
+    );
 
     // Decide initial mode
     if open_agent_select {
@@ -956,22 +1244,29 @@ pub(crate) fn handle_model_command(
     let agent_filter = arg.unwrap_or("").trim();
 
     let Some(ref a_tag) = state.current_project else {
-        return CommandResult::Lines(vec![print_error_raw("Select a project first with /project")]);
+        return CommandResult::Lines(vec![print_error_raw(
+            "Select a project first with /project",
+        )]);
     };
     let a_tag = a_tag.clone();
 
-    let (agent_pubkey, agent_name) = match resolve_agent_for_config(agent_filter, state, runtime, &a_tag) {
-        Ok(pair) => pair,
-        Err(msg) => return CommandResult::Lines(vec![print_error_raw(&msg)]),
-    };
+    let (agent_pubkey, agent_name) =
+        match resolve_agent_for_config(agent_filter, state, runtime, &a_tag) {
+            Ok(pair) => pair,
+            Err(msg) => return CommandResult::Lines(vec![print_error_raw(&msg)]),
+        };
 
     let store = runtime.data_store();
     let store_ref = store.borrow();
     let status = store_ref.get_project_status(&a_tag);
     let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
-    panel.tools_items = status.map(|s| s.all_tools().iter().map(|t| t.to_string()).collect()).unwrap_or_default();
-    panel.tools_selected = agent.map(|a| a.tools.iter().cloned().collect()).unwrap_or_default();
+    panel.tools_items = status
+        .map(|s| s.all_tools().iter().map(|t| t.to_string()).collect())
+        .unwrap_or_default();
+    panel.tools_selected = agent
+        .map(|a| a.tools.iter().cloned().collect())
+        .unwrap_or_default();
     panel.pending_model = None;
     panel.is_set_pm = agent.map(|a| a.is_pm).unwrap_or(false);
     panel.filter.clear();
@@ -986,13 +1281,22 @@ pub(crate) fn handle_model_command(
     panel.is_global = false;
     panel.cursor = 0;
     panel.scroll_offset = 0;
-    panel.origin_command = format!("/model{}", if agent_filter.is_empty() { String::new() } else { format!(" {agent_filter}") });
+    panel.origin_command = format!(
+        "/model{}",
+        if agent_filter.is_empty() {
+            String::new()
+        } else {
+            format!(" {agent_filter}")
+        }
+    );
 
     panel.switch_to_model_select(runtime);
 
     if panel.items.is_empty() {
         panel.deactivate();
-        return CommandResult::Lines(vec![print_error_raw("No models available for this project")]);
+        return CommandResult::Lines(vec![print_error_raw(
+            "No models available for this project",
+        )]);
     }
 
     CommandResult::Lines(vec![])
@@ -1000,7 +1304,12 @@ pub(crate) fn handle_model_command(
 
 // ─── Event Handlers ─────────────────────────────────────────────────────────
 
-pub(crate) fn handle_core_event(event: &CoreEvent, state: &mut ReplState, runtime: &CoreRuntime, history_store: &crate::history::HistoryStore) -> Option<String> {
+pub(crate) fn handle_core_event(
+    event: &CoreEvent,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+    history_store: &crate::history::HistoryStore,
+) -> Option<String> {
     match event {
         CoreEvent::Message(msg) => {
             if msg.pubkey == state.user_pubkey {
@@ -1009,12 +1318,14 @@ pub(crate) fn handle_core_event(event: &CoreEvent, state: &mut ReplState, runtim
                     let store_ref = store.borrow();
                     store_ref.get_project_a_tag_for_thread(&msg.thread_id)
                 };
-                history_store.import_kind1(
-                    &msg.content,
-                    project_atag.as_deref(),
-                    &msg.id,
-                    msg.created_at as i64,
-                ).ok();
+                history_store
+                    .import_kind1(
+                        &msg.content,
+                        project_atag.as_deref(),
+                        &msg.id,
+                        msg.created_at as i64,
+                    )
+                    .ok();
 
                 if state.current_conversation.is_none() {
                     let store = runtime.data_store();
@@ -1047,16 +1358,20 @@ pub(crate) fn handle_core_event(event: &CoreEvent, state: &mut ReplState, runtim
             }
 
             // Suppress duplicate: streaming already displayed this content
-            if state.stream_finished_conv.as_deref() == Some(&msg.thread_id)
-                && !is_tool_use(msg)
-            {
+            if state.stream_finished_conv.as_deref() == Some(&msg.thread_id) && !is_tool_use(msg) {
                 state.stream_finished_conv = None;
                 return None;
             }
 
             let store = runtime.data_store();
             let store_ref = store.borrow();
-            let formatted = format_message(msg, &store_ref, &state.user_pubkey, &mut state.last_displayed_pubkey, &mut state.last_todo_items);
+            let formatted = format_message(
+                msg,
+                &store_ref,
+                &state.user_pubkey,
+                &mut state.last_displayed_pubkey,
+                &mut state.last_todo_items,
+            );
             drop(store_ref);
 
             formatted.map(|f| {
@@ -1200,13 +1515,35 @@ pub(crate) fn handle_clipboard_paste(
             Ok(data) => data,
             Err(e) => {
                 let msg = print_error_raw(&format!("Failed to convert image: {}", e));
-                print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+                print_above_input(
+                    stdout,
+                    &msg,
+                    state,
+                    runtime,
+                    editor,
+                    completion,
+                    panel,
+                    status_nav,
+                    stats_panel,
+                    nudge_skill_panel,
+                );
                 return;
             }
         };
 
         let msg = print_system_raw("Uploading image...");
-        print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+        print_above_input(
+            stdout,
+            &msg,
+            state,
+            runtime,
+            editor,
+            completion,
+            panel,
+            status_nav,
+            stats_panel,
+            nudge_skill_panel,
+        );
 
         let keys = keys.clone();
         let tx = upload_tx;
@@ -1221,17 +1558,42 @@ pub(crate) fn handle_clipboard_paste(
     } else if let Ok(text) = clipboard.get_text() {
         if !try_upload_image_file(&text, keys, upload_tx) {
             editor.handle_paste(&text);
-            redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+            redraw_input(
+                stdout,
+                state,
+                runtime,
+                editor,
+                completion,
+                panel,
+                status_nav,
+                stats_panel,
+                nudge_skill_panel,
+            );
         } else {
             let msg = print_system_raw("Uploading image...");
-            print_above_input(stdout, &msg, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+            print_above_input(
+                stdout,
+                &msg,
+                state,
+                runtime,
+                editor,
+                completion,
+                panel,
+                status_nav,
+                stats_panel,
+                nudge_skill_panel,
+            );
         }
     }
 }
 
 // ─── Bunker Command Handler ─────────────────────────────────────────────────
 
-pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, runtime: &CoreRuntime) -> Vec<String> {
+pub(crate) fn handle_bunker_command(
+    arg: Option<&str>,
+    state: &mut ReplState,
+    runtime: &CoreRuntime,
+) -> Vec<String> {
     let arg = arg.unwrap_or("").trim();
 
     match arg {
@@ -1239,7 +1601,9 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
             // Toggle bunker on/off
             if state.bunker_active {
                 let (tx, rx) = std::sync::mpsc::channel();
-                let _ = runtime.handle().send(NostrCommand::StopBunker { response_tx: tx });
+                let _ = runtime
+                    .handle()
+                    .send(NostrCommand::StopBunker { response_tx: tx });
                 match rx.recv_timeout(std::time::Duration::from_secs(5)) {
                     Ok(Ok(())) => {
                         state.bunker_active = false;
@@ -1250,7 +1614,9 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
                 }
             } else {
                 let (tx, rx) = std::sync::mpsc::channel();
-                let _ = runtime.handle().send(NostrCommand::StartBunker { response_tx: tx });
+                let _ = runtime
+                    .handle()
+                    .send(NostrCommand::StartBunker { response_tx: tx });
                 match rx.recv_timeout(std::time::Duration::from_secs(10)) {
                     Ok(Ok(uri)) => {
                         state.bunker_active = true;
@@ -1266,7 +1632,9 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
         }
         "audit" => {
             let (tx, rx) = std::sync::mpsc::channel();
-            let _ = runtime.handle().send(NostrCommand::GetBunkerAuditLog { response_tx: tx });
+            let _ = runtime
+                .handle()
+                .send(NostrCommand::GetBunkerAuditLog { response_tx: tx });
             match rx.recv_timeout(std::time::Duration::from_secs(5)) {
                 Ok(entries) => {
                     if entries.is_empty() {
@@ -1283,7 +1651,10 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
                         } else {
                             &entry.requester_pubkey
                         };
-                        let kind_str = entry.event_kind.map(|k| format!("k:{k}")).unwrap_or_default();
+                        let kind_str = entry
+                            .event_kind
+                            .map(|k| format!("k:{k}"))
+                            .unwrap_or_default();
                         output.push(format!(
                             "  {DIM}{dt}{RESET}  {short_pk}…  {kind_str}  {GREEN}{}{RESET}  {DIM}{}ms{RESET}",
                             entry.decision, entry.response_time_ms
@@ -1302,7 +1673,9 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
             };
 
             let (tx, rx) = std::sync::mpsc::channel();
-            let _ = runtime.handle().send(NostrCommand::GetBunkerAutoApproveRules { response_tx: tx });
+            let _ = runtime
+                .handle()
+                .send(NostrCommand::GetBunkerAutoApproveRules { response_tx: tx });
             let rules = match rx.recv_timeout(std::time::Duration::from_secs(5)) {
                 Ok(r) => r,
                 Err(_) => return vec![print_error_raw("Failed to fetch rules")],
@@ -1312,16 +1685,20 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
                 return vec![print_error_raw(&format!("No rule at index {idx}"))];
             };
 
-            let _ = runtime.handle().send(NostrCommand::RemoveBunkerAutoApproveRule {
-                requester_pubkey: rule.requester_pubkey.clone(),
-                event_kind: rule.event_kind,
-            });
+            let _ = runtime
+                .handle()
+                .send(NostrCommand::RemoveBunkerAutoApproveRule {
+                    requester_pubkey: rule.requester_pubkey.clone(),
+                    event_kind: rule.event_kind,
+                });
 
             vec![print_system_raw(&format!("Removed rule #{idx}"))]
         }
         "rules" => {
             let (tx, rx) = std::sync::mpsc::channel();
-            let _ = runtime.handle().send(NostrCommand::GetBunkerAutoApproveRules { response_tx: tx });
+            let _ = runtime
+                .handle()
+                .send(NostrCommand::GetBunkerAutoApproveRules { response_tx: tx });
             match rx.recv_timeout(std::time::Duration::from_secs(5)) {
                 Ok(rules) => {
                     if rules.is_empty() {
@@ -1334,7 +1711,8 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
                         } else {
                             &rule.requester_pubkey
                         };
-                        let kind_str = rule.event_kind
+                        let kind_str = rule
+                            .event_kind
                             .map(|k| format!("kind:{k}"))
                             .unwrap_or_else(|| "any kind".to_string());
                         output.push(format!("  {}: {short_pk}…  {kind_str}", i + 1));
@@ -1344,6 +1722,8 @@ pub(crate) fn handle_bunker_command(arg: Option<&str>, state: &mut ReplState, ru
                 Err(_) => vec![print_error_raw("Failed to fetch rules")],
             }
         }
-        _ => vec![print_error_raw("Usage: /bunker [audit|rules|rules remove <N>]")],
+        _ => vec![print_error_raw(
+            "Usage: /bunker [audit|rules|rules remove <N>]",
+        )],
     }
 }

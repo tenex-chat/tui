@@ -1,7 +1,7 @@
-use chrono::Local;
-use crate::{DIM, GREEN, ACCENT, WHITE_BOLD, BRIGHT_GREEN, RED, CYAN, RESET, BG_INPUT};
 use crate::markdown::{colorize_markdown, CODE_BLOCK};
-use crate::util::{term_width, strip_ansi, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER};
+use crate::util::{strip_ansi, term_width, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER};
+use crate::{ACCENT, BG_INPUT, BRIGHT_GREEN, CYAN, DIM, GREEN, RED, RESET, WHITE_BOLD};
+use chrono::Local;
 use tenex_core::models::{AskEvent, AskQuestion, Message};
 use tenex_core::store::app_data_store::AppDataStore;
 
@@ -25,7 +25,10 @@ fn parse_message_attachments(content: &str) -> (String, Vec<(String, String)>) {
     for line in attachment_section.lines() {
         if line.starts_with("-- Text Attachment ") && line.ends_with(" --") {
             if !current_header.is_empty() {
-                attachments.push((current_header.clone(), current_content.trim_end().to_string()));
+                attachments.push((
+                    current_header.clone(),
+                    current_content.trim_end().to_string(),
+                ));
             }
             current_header = line.to_string();
             current_content.clear();
@@ -55,11 +58,7 @@ fn render_attachment_block(header: &str, content: &str) -> String {
     let line_info = format!(" ({} lines)", total);
     let header_text = format!(" {} {}", label, line_info);
     let header_pad = box_width.saturating_sub(header_text.len() + 2);
-    let mut out = format!(
-        "{DIM}╭─{}{}{RESET}",
-        header_text,
-        "─".repeat(header_pad)
-    );
+    let mut out = format!("{DIM}╭─{}{}{RESET}", header_text, "─".repeat(header_pad));
 
     for line in lines.iter().take(preview_count) {
         let truncated = if line.len() > box_width - 4 {
@@ -68,7 +67,10 @@ fn render_attachment_block(header: &str, content: &str) -> String {
             line.to_string()
         };
         let pad = box_width.saturating_sub(truncated.len() + 4);
-        out.push_str(&format!("\n{DIM}│{RESET} {CODE_BLOCK}{truncated}{RESET}{}", " ".repeat(pad)));
+        out.push_str(&format!(
+            "\n{DIM}│{RESET} {CODE_BLOCK}{truncated}{RESET}{}",
+            " ".repeat(pad)
+        ));
     }
 
     if total > preview_count {
@@ -77,7 +79,10 @@ fn render_attachment_block(header: &str, content: &str) -> String {
         out.push_str(&format!("\n{DIM}│ {more}{}{RESET}", " ".repeat(pad)));
     }
 
-    out.push_str(&format!("\n{DIM}╰{}╯{RESET}", "─".repeat(box_width.saturating_sub(2))));
+    out.push_str(&format!(
+        "\n{DIM}╰{}╯{RESET}",
+        "─".repeat(box_width.saturating_sub(2))
+    ));
 
     out
 }
@@ -127,13 +132,15 @@ pub(crate) fn print_separator_raw() -> String {
 fn wrap_with_user_bg(rendered: &str, prefix: &str, prefix_visible_len: usize) -> String {
     let width = term_width() as usize;
     let bg_safe = rendered.replace(RESET, &format!("{RESET}{BG_INPUT}"));
-    let fg_input_bg = "\x1b[38;5;234m";
+    let fg_input_bg = "\x1b[38;5;235m";
 
     let mut out = String::new();
 
     // Top half-block border
-    out.push_str(&format!("{fg_input_bg}{}{RESET}",
-        HALF_BLOCK_LOWER.to_string().repeat(width)));
+    out.push_str(&format!(
+        "{fg_input_bg}{}{RESET}",
+        HALF_BLOCK_LOWER.to_string().repeat(width)
+    ));
 
     for (i, line) in bg_safe.lines().enumerate() {
         out.push('\n');
@@ -141,18 +148,26 @@ fn wrap_with_user_bg(rendered: &str, prefix: &str, prefix_visible_len: usize) ->
         if i == 0 {
             let total = prefix_visible_len + line_visible;
             let pad = width.saturating_sub(total);
-            out.push_str(&format!("{BG_INPUT}{prefix}{line}{}{RESET}", " ".repeat(pad)));
+            out.push_str(&format!(
+                "{BG_INPUT}{prefix}{line}{}{RESET}",
+                " ".repeat(pad)
+            ));
         } else {
             let indent = " ".repeat(prefix_visible_len);
             let total = prefix_visible_len + line_visible;
             let pad = width.saturating_sub(total);
-            out.push_str(&format!("{BG_INPUT}{indent}{line}{}{RESET}", " ".repeat(pad)));
+            out.push_str(&format!(
+                "{BG_INPUT}{indent}{line}{}{RESET}",
+                " ".repeat(pad)
+            ));
         }
     }
 
     // Bottom half-block border
-    out.push_str(&format!("\n{fg_input_bg}{}{RESET}",
-        HALF_BLOCK_UPPER.to_string().repeat(width)));
+    out.push_str(&format!(
+        "\n{fg_input_bg}{}{RESET}",
+        HALF_BLOCK_UPPER.to_string().repeat(width)
+    ));
 
     out
 }
@@ -186,6 +201,7 @@ pub(crate) fn print_help_raw() -> String {
          \x20 /project [name]       List projects or switch to one\n\
          \x20 /agent [@project] [n] List/switch agents (@ for other project)\n\
          \x20 /new [agent@project]  Clear screen, new context\n\
+         \x20 /reference            New conversation referencing current one\n\
          \x20 /conversations [@proj] Browse and open conversations\n\
          \x20 /config [@agent] [--set-pm|--global|--model]\n\
          \x20                       Configure agent tools/model/flags\n\
@@ -193,6 +209,7 @@ pub(crate) fn print_help_raw() -> String {
          \x20 /boot [name]          Boot an offline project\n\
          \x20 /active               Active work across all projects\n\
          \x20 /status               Show current context\n\
+         \x20 /info                 Show current conversation info\n\
          \x20 /help                 Show this help\n\
          \x20 /quit                 Exit"
     )
@@ -201,6 +218,7 @@ pub(crate) fn print_help_raw() -> String {
 // ─── Tool Summary ───────────────────────────────────────────────────────────
 
 const TOOL_DIM: &str = "\x1b[38;5;243m";
+const TODO_BG: &str = "\x1b[48;5;236m";
 
 pub(crate) fn is_tool_use(msg: &Message) -> bool {
     msg.tool_name.is_some() || !msg.q_tags.is_empty()
@@ -220,12 +238,21 @@ fn tool_summary(tool_name: Option<&str>, tool_args: Option<&str>, content: &str)
     };
 
     let truncate = |s: &str, max: usize| -> String {
-        if s.len() <= max { s.to_string() } else { format!("{}...", &s[..max.saturating_sub(3)]) }
+        if s.len() <= max {
+            s.to_string()
+        } else {
+            format!("{}...", &s[..max.saturating_sub(3)])
+        }
     };
 
     // TodoWrite
-    if matches!(name.as_str(), "todo_write" | "todowrite" | "mcp__tenex__todo_write") {
-        let count = args.get("todos").or(args.get("items"))
+    if matches!(
+        name.as_str(),
+        "todo_write" | "todowrite" | "mcp__tenex__todo_write"
+    ) {
+        let count = args
+            .get("todos")
+            .or(args.get("items"))
             .and_then(|v| v.as_array())
             .map(|a| a.len())
             .unwrap_or(0);
@@ -234,8 +261,7 @@ fn tool_summary(tool_name: Option<&str>, tool_args: Option<&str>, content: &str)
 
     match name.as_str() {
         "bash" | "execute_bash" | "shell" => {
-            let target = get("description")
-                .or_else(|| get("command").map(|c| truncate(&c, 50)));
+            let target = get("description").or_else(|| get("command").map(|c| truncate(&c, 50)));
             format!("$ {}", target.unwrap_or_default())
         }
         "ask" | "askuserquestion" => {
@@ -250,8 +276,10 @@ fn tool_summary(tool_name: Option<&str>, tool_args: Option<&str>, content: &str)
             let target = extract_file_target(&args);
             format!("✏️ {}", target.unwrap_or_default())
         }
-        "glob" | "find" | "grep" | "search" | "web_search" | "websearch" | "fs_glob" | "fs_grep" => {
-            let target = get("pattern").or_else(|| get("query"))
+        "glob" | "find" | "grep" | "search" | "web_search" | "websearch" | "fs_glob"
+        | "fs_grep" => {
+            let target = get("pattern")
+                .or_else(|| get("query"))
                 .map(|s| format!("\"{}\"", truncate(&s, 30)));
             format!("🔍 {}", target.unwrap_or_default())
         }
@@ -282,10 +310,14 @@ fn tool_summary(tool_name: Option<&str>, tool_args: Option<&str>, content: &str)
 
 fn extract_file_target(args: &serde_json::Value) -> Option<String> {
     for key in &["file_path", "path", "filePath", "file", "target"] {
-        if let Some(val) = args.get(*key).and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+        if let Some(val) = args
+            .get(*key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
             let parts: Vec<&str> = val.split('/').filter(|s| !s.is_empty()).collect();
             if parts.len() > 2 {
-                return Some(format!(".../{}",  parts[parts.len()-2..].join("/")));
+                return Some(format!(".../{}", parts[parts.len() - 2..].join("/")));
             }
             return Some(val.to_string());
         }
@@ -304,9 +336,12 @@ fn print_tool_use_raw(msg: &Message) -> String {
 
 /// Render a todo_write call inline, always showing all items.
 /// Returns (formatted_output, new_todo_state).
-fn format_todo_inline(
-    args: &serde_json::Value,
-) -> (String, Vec<(String, String)>) {
+fn format_todo_inline(args: &serde_json::Value) -> (String, Vec<(String, String)>) {
+    let with_todo_bg = |line: &str| -> String {
+        let bg_safe = line.replace(RESET, &format!("{RESET}{TODO_BG}"));
+        format!("  {TODO_BG} {bg_safe} {RESET}")
+    };
+
     let items = args
         .get("todos")
         .or_else(|| args.get("items"))
@@ -314,7 +349,10 @@ fn format_todo_inline(
 
     let items = match items {
         Some(arr) => arr,
-        None => return (format!("{TOOL_DIM}  ☑ 0 tasks{RESET}"), Vec::new()),
+        None => {
+            let header = format!("{TOOL_DIM}☑{RESET} {ACCENT}0 tasks{RESET}");
+            return (with_todo_bg(&header), Vec::new());
+        }
     };
 
     let current: Vec<(String, String)> = items
@@ -336,7 +374,10 @@ fn format_todo_inline(
         .collect();
 
     let total = current.len();
-    let done = current.iter().filter(|(_, s)| s == "completed" || s == "done").count();
+    let done = current
+        .iter()
+        .filter(|(_, s)| s == "completed" || s == "done")
+        .count();
 
     let truncate_title = |s: &str| -> String {
         if s.len() <= 50 {
@@ -348,30 +389,23 @@ fn format_todo_inline(
 
     let mut lines = Vec::new();
 
-    let header = if done > 0 {
-        format!("{TOOL_DIM}  ☑ {done}/{total} tasks{RESET}")
+    let count_label = if done > 0 {
+        format!("{done}/{total} tasks")
     } else {
-        format!("{TOOL_DIM}  ☑ {total} tasks{RESET}")
+        format!("{total} tasks")
     };
-    lines.push(header);
+    let header = format!("{TOOL_DIM}☑{RESET} {ACCENT}{count_label}{RESET}");
+    lines.push(with_todo_bg(&header));
 
     for (title, status) in &current {
         let display_title = truncate_title(title);
         let line = match status.as_str() {
-            "completed" | "done" => {
-                format!("{GREEN}    ✓{RESET} {DIM}{display_title}{RESET}")
-            }
-            "in_progress" => {
-                format!("{ACCENT}    ◒ {display_title}{RESET}")
-            }
-            "cancelled" | "skipped" => {
-                format!("{DIM}    ✗ {display_title}{RESET}")
-            }
-            _ => {
-                format!("{DIM}    ◯ {display_title}{RESET}")
-            }
+            "completed" | "done" => format!("{GREEN}✓{RESET} {DIM}{display_title}{RESET}"),
+            "in_progress" => format!("{ACCENT}◒{RESET} {ACCENT}{display_title}{RESET}"),
+            "cancelled" | "skipped" => format!("{DIM}✗ {display_title}{RESET}"),
+            _ => format!("{DIM}◯ {display_title}{RESET}"),
         };
-        lines.push(line);
+        lines.push(with_todo_bg(&line));
     }
 
     (lines.join("\n"), current)
@@ -409,8 +443,12 @@ fn render_ask_event_inline(
     if let Some(ref answer_text) = response {
         // Answered: show response
         lines.push(format!("  {ASK_ACCENT}│{RESET}"));
-        lines.push(format!("  {ASK_ACCENT}│{RESET} {GREEN}✓ Response submitted{RESET}"));
-        lines.push(format!("  {ASK_ACCENT}│{RESET} {DIM}╭──────────────────╮{RESET}"));
+        lines.push(format!(
+            "  {ASK_ACCENT}│{RESET} {GREEN}✓ Response submitted{RESET}"
+        ));
+        lines.push(format!(
+            "  {ASK_ACCENT}│{RESET} {DIM}╭──────────────────╮{RESET}"
+        ));
         for answer_line in answer_text.lines().take(5) {
             let truncated = if answer_line.len() > 60 {
                 format!("{}...", &answer_line[..57])
@@ -419,30 +457,46 @@ fn render_ask_event_inline(
             };
             lines.push(format!("  {ASK_ACCENT}│{RESET} {DIM}│{RESET} {truncated}"));
         }
-        lines.push(format!("  {ASK_ACCENT}│{RESET} {DIM}╰──────────────────╯{RESET}"));
+        lines.push(format!(
+            "  {ASK_ACCENT}│{RESET} {DIM}╰──────────────────╯{RESET}"
+        ));
     } else {
         // Unanswered: show questions and options
         lines.push(format!("  {ASK_ACCENT}│{RESET}"));
         for (qi, question) in ask_event.questions.iter().enumerate() {
             let (q_title, q_text, options) = match question {
-                AskQuestion::SingleSelect { title, question, suggestions } => {
-                    (title.as_str(), question.as_str(), suggestions.as_slice())
-                }
-                AskQuestion::MultiSelect { title, question, options } => {
-                    (title.as_str(), question.as_str(), options.as_slice())
-                }
+                AskQuestion::SingleSelect {
+                    title,
+                    question,
+                    suggestions,
+                } => (title.as_str(), question.as_str(), suggestions.as_slice()),
+                AskQuestion::MultiSelect {
+                    title,
+                    question,
+                    options,
+                } => (title.as_str(), question.as_str(), options.as_slice()),
             };
             if ask_event.questions.len() > 1 {
-                lines.push(format!("  {ASK_ACCENT}│{RESET}   {WHITE_BOLD}Q{}: {q_title}{RESET}: {q_text}", qi + 1));
+                lines.push(format!(
+                    "  {ASK_ACCENT}│{RESET}   {WHITE_BOLD}Q{}: {q_title}{RESET}: {q_text}",
+                    qi + 1
+                ));
             } else {
-                lines.push(format!("  {ASK_ACCENT}│{RESET}   {WHITE_BOLD}{q_title}{RESET}: {q_text}"));
+                lines.push(format!(
+                    "  {ASK_ACCENT}│{RESET}   {WHITE_BOLD}{q_title}{RESET}: {q_text}"
+                ));
             }
             for (oi, opt) in options.iter().enumerate() {
-                lines.push(format!("  {ASK_ACCENT}│{RESET}   {DIM}{}. {opt}{RESET}", oi + 1));
+                lines.push(format!(
+                    "  {ASK_ACCENT}│{RESET}   {DIM}{}. {opt}{RESET}",
+                    oi + 1
+                ));
             }
         }
         lines.push(format!("  {ASK_ACCENT}│{RESET}"));
-        lines.push(format!("  {ASK_ACCENT}│{RESET} {ASK_ACCENT}⟶  Waiting for your answer{RESET}"));
+        lines.push(format!(
+            "  {ASK_ACCENT}│{RESET} {ASK_ACCENT}⟶  Waiting for your answer{RESET}"
+        ));
     }
 
     lines.join("\n")
@@ -454,7 +508,12 @@ fn try_render_ask_event(msg: &Message, store: &AppDataStore) -> Option<String> {
     for q_tag in &msg.q_tags {
         if let Some((ask_event, author_pubkey)) = store.get_ask_event_by_id(q_tag) {
             let agent_name = store.get_profile_name(&author_pubkey);
-            return Some(render_ask_event_inline(&ask_event, q_tag, &agent_name, store));
+            return Some(render_ask_event_inline(
+                &ask_event,
+                q_tag,
+                &agent_name,
+                store,
+            ));
         }
     }
     None
@@ -491,7 +550,10 @@ pub(crate) fn format_message(
         // Don't update last_pubkey for tool use messages so the next
         // text message from this agent will always show its header.
         let tool_name = msg.tool_name.as_deref().unwrap_or("").to_lowercase();
-        if matches!(tool_name.as_str(), "todo_write" | "todowrite" | "mcp__tenex__todo_write") {
+        if matches!(
+            tool_name.as_str(),
+            "todo_write" | "todowrite" | "mcp__tenex__todo_write"
+        ) {
             if let Some(args_str) = &msg.tool_args {
                 if let Ok(args) = serde_json::from_str::<serde_json::Value>(args_str) {
                     let (formatted, new_items) = format_todo_inline(&args);
@@ -504,10 +566,13 @@ pub(crate) fn format_message(
         return Some(print_tool_use_raw(msg));
     }
 
-    let is_consecutive = !has_p_tags
-        && last_pubkey.as_deref() == Some(&msg.pubkey);
+    let is_consecutive = !has_p_tags && last_pubkey.as_deref() == Some(&msg.pubkey);
 
-    let gap = if !is_consecutive && last_pubkey.is_some() { "\n" } else { "" };
+    let gap = if !is_consecutive && last_pubkey.is_some() {
+        "\n"
+    } else {
+        ""
+    };
 
     *last_pubkey = Some(msg.pubkey.clone());
 
@@ -524,7 +589,9 @@ pub(crate) fn format_message(
     let mut out = String::from(gap);
 
     if has_p_tags {
-        let recipients: Vec<String> = msg.p_tags.iter()
+        let recipients: Vec<String> = msg
+            .p_tags
+            .iter()
             .map(|pk| format!("@{}", store.get_profile_name(pk)))
             .collect();
         out.push_str(&format!(
@@ -545,7 +612,9 @@ pub(crate) fn format_message(
     } else if is_consecutive {
         let colored = render_content_with_attachments(&msg.content);
         for (i, line) in colored.lines().enumerate() {
-            if i > 0 { out.push('\n'); }
+            if i > 0 {
+                out.push('\n');
+            }
             out.push_str("  ");
             out.push_str(line);
         }

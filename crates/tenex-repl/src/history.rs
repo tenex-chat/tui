@@ -159,17 +159,14 @@ impl HistoryStore {
              LIMIT ?2",
         )?;
 
-        let rows = stmt.query_map(
-            params![pattern, limit as i64, exclude_id],
-            |row| {
-                Ok(HistoryEntry {
-                    content: row.get(0)?,
-                    project_atag: row.get(1)?,
-                    source: row.get(2)?,
-                    updated_at: row.get(3)?,
-                })
-            },
-        )?;
+        let rows = stmt.query_map(params![pattern, limit as i64, exclude_id], |row| {
+            Ok(HistoryEntry {
+                content: row.get(0)?,
+                project_atag: row.get(1)?,
+                source: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
 
         rows.collect()
     }

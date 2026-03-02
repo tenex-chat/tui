@@ -1,6 +1,6 @@
-use std::collections::HashSet;
-use crate::{CYAN, GREEN, WHITE_BOLD, DIM, RESET};
 use crate::util::{format_day_label, format_runtime};
+use crate::{CYAN, DIM, GREEN, RESET, WHITE_BOLD};
+use std::collections::HashSet;
 use tenex_core::nostr::NostrCommand;
 use tenex_core::runtime::CoreRuntime;
 
@@ -201,7 +201,10 @@ impl ConfigPanel {
         {
             Some(a) => a,
             None => {
-                return format!("Agent {} no longer found in project status", self.agent_name);
+                return format!(
+                    "Agent {} no longer found in project status",
+                    self.agent_name
+                );
             }
         };
 
@@ -223,12 +226,14 @@ impl ConfigPanel {
         let save_type = if self.is_global { "global" } else { "project" };
 
         if self.is_global {
-            let _ = runtime.handle().send(NostrCommand::UpdateGlobalAgentConfig {
-                agent_pubkey: self.agent_pubkey.clone(),
-                model,
-                tools,
-                tags,
-            });
+            let _ = runtime
+                .handle()
+                .send(NostrCommand::UpdateGlobalAgentConfig {
+                    agent_pubkey: self.agent_pubkey.clone(),
+                    model,
+                    tools,
+                    tags,
+                });
         } else {
             let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
                 project_a_tag: self.project_a_tag.clone(),
@@ -242,7 +247,10 @@ impl ConfigPanel {
         // Build descriptive message
         let mut changes = Vec::new();
         if self.pending_model.is_some() {
-            changes.push(format!("model → {}", self.pending_model.as_deref().unwrap_or("?")));
+            changes.push(format!(
+                "model → {}",
+                self.pending_model.as_deref().unwrap_or("?")
+            ));
         }
         if self.is_set_pm {
             changes.push("set as PM".to_string());
@@ -268,7 +276,10 @@ impl ConfigPanel {
         {
             Some(a) => a,
             None => {
-                return format!("Agent {} no longer found in project status", self.agent_name);
+                return format!(
+                    "Agent {} no longer found in project status",
+                    self.agent_name
+                );
             }
         };
 
@@ -283,12 +294,14 @@ impl ConfigPanel {
         drop(store_ref);
 
         if self.is_global {
-            let _ = runtime.handle().send(NostrCommand::UpdateGlobalAgentConfig {
-                agent_pubkey: self.agent_pubkey.clone(),
-                model: model.clone(),
-                tools,
-                tags,
-            });
+            let _ = runtime
+                .handle()
+                .send(NostrCommand::UpdateGlobalAgentConfig {
+                    agent_pubkey: self.agent_pubkey.clone(),
+                    model: model.clone(),
+                    tools,
+                    tags,
+                });
         } else {
             let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
                 project_a_tag: self.project_a_tag.clone(),
@@ -388,7 +401,10 @@ impl StatusBarNav {
 
 pub(crate) enum StatusBarAction {
     ShowCompletion(String),
-    OpenConversation { thread_id: String, project_a_tag: Option<String> },
+    OpenConversation {
+        thread_id: String,
+        project_a_tag: Option<String>,
+    },
     OpenStats,
 }
 
@@ -492,7 +508,10 @@ impl StatsPanel {
                     lines.push(format!("  {DIM}No cost data yet{RESET}"));
                     widths.push(18);
                 } else {
-                    lines.push(format!("  {WHITE_BOLD}{:<40} {:>10}{RESET}", "Project", "Cost"));
+                    lines.push(format!(
+                        "  {WHITE_BOLD}{:<40} {:>10}{RESET}",
+                        "Project", "Cost"
+                    ));
                     widths.push(54);
                     lines.push(format!("  {DIM}{}{RESET}", "─".repeat(52)));
                     widths.push(54);
@@ -502,13 +521,19 @@ impl StatsPanel {
                         } else {
                             name.clone()
                         };
-                        lines.push(format!("  {:<40} {GREEN}${:>8.2}{RESET}", display_name, cost));
+                        lines.push(format!(
+                            "  {:<40} {GREEN}${:>8.2}{RESET}",
+                            display_name, cost
+                        ));
                         widths.push(54);
                     }
                     let total: f64 = costs.iter().map(|(_, _, c)| c).sum();
                     lines.push(format!("  {DIM}{}{RESET}", "─".repeat(52)));
                     widths.push(54);
-                    lines.push(format!("  {WHITE_BOLD}{:<40} ${:>8.2}{RESET}", "Total", total));
+                    lines.push(format!(
+                        "  {WHITE_BOLD}{:<40} ${:>8.2}{RESET}",
+                        "Total", total
+                    ));
                     widths.push(54);
                 }
             }
@@ -523,9 +548,16 @@ impl StatsPanel {
                     for (ts, ms) in &data {
                         let date = format_day_label(*ts);
                         let runtime_str = format_runtime(*ms);
-                        let filled = if max_ms > 0 { (*ms as f64 / max_ms as f64 * bar_width as f64) as usize } else { 0 };
-                        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled));
-                        lines.push(format!("  {DIM}{date}{RESET}  {GREEN}{bar}{RESET}  {runtime_str}"));
+                        let filled = if max_ms > 0 {
+                            (*ms as f64 / max_ms as f64 * bar_width as f64) as usize
+                        } else {
+                            0
+                        };
+                        let bar =
+                            format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled));
+                        lines.push(format!(
+                            "  {DIM}{date}{RESET}  {GREEN}{bar}{RESET}  {runtime_str}"
+                        ));
                         widths.push(2 + date.len() + 2 + bar_width + 2 + runtime_str.len());
                     }
                 }
@@ -542,9 +574,16 @@ impl StatsPanel {
                         let user_count = user_data.get(i).map(|(_, c)| *c).unwrap_or(0);
                         let date = format_day_label(*ts);
                         let count_str = format!("{}/{}", user_count, all_count);
-                        let filled = if max_count > 0 { (*all_count as f64 / max_count as f64 * bar_width as f64) as usize } else { 0 };
-                        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled));
-                        lines.push(format!("  {DIM}{date}{RESET}  {CYAN}{bar}{RESET}  {count_str}"));
+                        let filled = if max_count > 0 {
+                            (*all_count as f64 / max_count as f64 * bar_width as f64) as usize
+                        } else {
+                            0
+                        };
+                        let bar =
+                            format!("{}{}", "█".repeat(filled), "░".repeat(bar_width - filled));
+                        lines.push(format!(
+                            "  {DIM}{date}{RESET}  {CYAN}{bar}{RESET}  {count_str}"
+                        ));
                         widths.push(2 + date.len() + 2 + bar_width + 2 + count_str.len());
                     }
                 }
@@ -564,6 +603,7 @@ pub(crate) struct ConversationStackEntry {
 
 pub(crate) struct DelegationEntry {
     pub(crate) thread_id: String,
+    pub(crate) depth: usize,
     pub(crate) label: String,
     pub(crate) is_busy: bool,
     pub(crate) is_parent: bool,
@@ -660,7 +700,13 @@ impl NudgeSkillPanel {
         }
     }
 
-    pub(crate) fn activate(&mut self, runtime: &CoreRuntime, mode: NudgeSkillMode, state_nudge_ids: &[String], state_skill_ids: &[String]) {
+    pub(crate) fn activate(
+        &mut self,
+        runtime: &CoreRuntime,
+        mode: NudgeSkillMode,
+        state_nudge_ids: &[String],
+        state_skill_ids: &[String],
+    ) {
         self.active = true;
         self.mode = mode;
         self.filter.clear();
@@ -683,20 +729,26 @@ impl NudgeSkillPanel {
         let store = runtime.data_store();
         let store_ref = store.borrow();
         self.items = match self.mode {
-            NudgeSkillMode::Nudges => {
-                store_ref.content.get_nudges().into_iter().map(|n| NudgeSkillItem {
+            NudgeSkillMode::Nudges => store_ref
+                .content
+                .get_nudges()
+                .into_iter()
+                .map(|n| NudgeSkillItem {
                     id: n.id.clone(),
                     title: n.title.clone(),
                     description: n.description.clone(),
-                }).collect()
-            }
-            NudgeSkillMode::Skills => {
-                store_ref.content.get_skills().into_iter().map(|s| NudgeSkillItem {
+                })
+                .collect(),
+            NudgeSkillMode::Skills => store_ref
+                .content
+                .get_skills()
+                .into_iter()
+                .map(|s| NudgeSkillItem {
                     id: s.id.clone(),
                     title: s.title.clone(),
                     description: s.description.clone(),
-                }).collect()
-            }
+                })
+                .collect(),
         };
     }
 
@@ -770,11 +822,15 @@ impl NudgeSkillPanel {
         let store = runtime.data_store();
         let store_ref = store.borrow();
 
-        let nudge_ids: HashSet<String> = store_ref.content.get_nudges()
+        let nudge_ids: HashSet<String> = store_ref
+            .content
+            .get_nudges()
             .iter()
             .map(|n| n.id.clone())
             .collect();
-        let skill_ids: HashSet<String> = store_ref.content.get_skills()
+        let skill_ids: HashSet<String> = store_ref
+            .content
+            .get_skills()
             .iter()
             .map(|s| s.id.clone())
             .collect();
