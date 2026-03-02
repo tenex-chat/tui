@@ -1,7 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{
-    Event, EventStream, KeyCode, KeyEvent, KeyModifiers,
-};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::terminal::{self, ClearType};
 use crossterm::{cursor, execute};
 use futures::StreamExt;
@@ -22,7 +20,7 @@ pub(crate) const RED: &str = "\x1b[31m";
 pub(crate) const WHITE_BOLD: &str = "\x1b[1;37m";
 pub(crate) const DIM: &str = "\x1b[2m";
 pub(crate) const RESET: &str = "\x1b[0m";
-pub(crate) const BG_INPUT: &str = "\x1b[48;5;234m";
+pub(crate) const BG_INPUT: &str = "\x1b[48;5;235m";
 pub(crate) const BG_HIGHLIGHT: &str = "\x1b[48;5;239m";
 
 macro_rules! raw_println {
@@ -40,33 +38,37 @@ macro_rules! raw_println {
     }};
 }
 
+mod commands;
+mod completion;
 mod editor;
+mod format;
 mod history;
 mod markdown;
 mod panels;
-mod util;
-mod state;
-mod completion;
-mod format;
 mod render;
-mod commands;
+mod state;
+mod util;
 
 use clap::Parser;
-use editor::LineEditor;
-use completion::CompletionMenu;
-use panels::{ConfigPanel, PanelMode, StatusBarNav, StatsPanel, StatusBarAction, NudgeSkillPanel, NudgeSkillMode};
-use state::ReplState;
-use format::{print_separator_raw, print_error_raw, print_system_raw, print_help_raw};
-use render::{redraw_input, clear_input_area, print_above_input, update_delegation_bar, apply_clear_screen};
 use commands::{
-    CommandResult, handle_project_command, handle_agent_command, handle_open_command,
-    handle_active_command, handle_new_command, handle_send_message, handle_boot_command,
-    handle_status_command, handle_config_command, handle_model_command, handle_core_event,
-    navigate_to_delegation, pop_conversation_stack, auto_select_project,
-    handle_status_bar_open, UploadResult, try_upload_image_file,
-    handle_clipboard_paste, handle_bunker_command, maybe_open_ask_modal,
-    rebuild_conversation_view,
+    auto_select_project, handle_active_command, handle_agent_command, handle_boot_command,
+    handle_bunker_command, handle_clipboard_paste, handle_config_command, handle_core_event,
+    handle_info_command, handle_model_command, handle_new_command, handle_open_command,
+    handle_project_command, handle_reference_command, handle_send_message, handle_status_bar_open,
+    handle_status_command, maybe_open_ask_modal, navigate_to_delegation, pop_conversation_stack,
+    rebuild_conversation_view, try_upload_image_file, CommandResult, UploadResult,
 };
+use completion::CompletionMenu;
+use editor::LineEditor;
+use format::{print_error_raw, print_help_raw, print_separator_raw, print_system_raw};
+use panels::{
+    ConfigPanel, NudgeSkillMode, NudgeSkillPanel, PanelMode, StatsPanel, StatusBarAction,
+    StatusBarNav,
+};
+use render::{
+    apply_clear_screen, clear_input_area, print_above_input, redraw_input, update_delegation_bar,
+};
+use state::ReplState;
 
 #[derive(Parser, Debug)]
 #[command(name = "tenex-repl")]
@@ -128,14 +130,20 @@ fn history_entry_label(entry: &history::HistoryEntry) -> String {
 }
 
 fn history_entry_description(entry: &history::HistoryEntry, runtime: &CoreRuntime) -> String {
-    let project_name = entry.project_atag.as_ref().map(|atag| {
-        let store = runtime.data_store();
-        let store_ref = store.borrow();
-        store_ref.get_projects().iter()
-            .find(|p| p.a_tag() == *atag)
-            .map(|p| p.title.clone())
-            .unwrap_or_else(|| "?".to_string())
-    }).unwrap_or_else(|| "global".to_string());
+    let project_name = entry
+        .project_atag
+        .as_ref()
+        .map(|atag| {
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            store_ref
+                .get_projects()
+                .iter()
+                .find(|p| p.a_tag() == *atag)
+                .map(|p| p.title.clone())
+                .unwrap_or_else(|| "?".to_string())
+        })
+        .unwrap_or_else(|| "global".to_string());
     let age = history::relative_time(entry.updated_at);
     let source_icon = match entry.source.as_str() {
         "draft" => "\u{270e}",
@@ -146,15 +154,19 @@ fn history_entry_description(entry: &history::HistoryEntry, runtime: &CoreRuntim
     format!("{source_icon} {project_name} \u{00b7} {age}")
 }
 
-fn history_search_items(entries: &[history::HistoryEntry], runtime: &CoreRuntime) -> Vec<completion::CompletionItem> {
-    entries.iter().map(|e| {
-        completion::CompletionItem {
+fn history_search_items(
+    entries: &[history::HistoryEntry],
+    runtime: &CoreRuntime,
+) -> Vec<completion::CompletionItem> {
+    entries
+        .iter()
+        .map(|e| completion::CompletionItem {
             label: history_entry_label(e),
             description: history_entry_description(e, runtime),
             fill: e.content.clone(),
             completed: false,
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 async fn run_repl(
@@ -186,9 +198,20 @@ async fn run_repl(
     // Auto-select the first online project (if any)
     auto_select_project(state, runtime);
 
-    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+    redraw_input(
+        &mut stdout,
+        state,
+        runtime,
+        &editor,
+        &mut completion,
+        &panel,
+        &status_nav,
+        &stats_panel,
+        &nudge_skill_panel,
+    );
 
-    let mut tick = tokio::time::interval(tokio::time::Duration::from_millis(util::TICK_INTERVAL_MS));
+    let mut tick =
+        tokio::time::interval(tokio::time::Duration::from_millis(util::TICK_INTERVAL_MS));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
@@ -786,8 +809,8 @@ async fn run_repl(
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                     }
 
-                    // Enter
-                    (KeyCode::Enter, _) => {
+                    // Enter / Shift+Enter / Cmd+Enter
+                    (KeyCode::Enter, m) => {
                         if state.delegation_bar.focused {
                             let target = state.delegation_bar.selected_entry()
                                 .map(|e| e.thread_id.clone());
@@ -801,11 +824,39 @@ async fn run_repl(
                             }
                             continue;
                         }
-                        if completion.visible && !completion.items.is_empty() {
-                            editor.set_buffer(&completion.items[completion.selected].fill);
-                            completion.hide();
-                        } else if completion.visible {
-                            completion.hide();
+
+                        let multiline_send_mode = editor.buffer.contains('\n');
+                        let cmd_enter = m.contains(KeyModifiers::SUPER);
+                        let shift_enter = m.contains(KeyModifiers::SHIFT);
+
+                        // In multiline mode, Enter keeps inserting lines.
+                        // Submit is explicit via Cmd+Enter.
+                        if multiline_send_mode && !cmd_enter {
+                            state.delegation_bar.unfocus();
+                            editor.selected_attachment = None;
+                            editor.insert_char('\n');
+                            completion.update_from_buffer(&editor.buffer, state, runtime);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            continue;
+                        }
+
+                        // Outside multiline mode, Shift+Enter starts a multiline draft.
+                        if !multiline_send_mode && shift_enter {
+                            state.delegation_bar.unfocus();
+                            editor.selected_attachment = None;
+                            editor.insert_char('\n');
+                            completion.update_from_buffer(&editor.buffer, state, runtime);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            continue;
+                        }
+
+                        if !cmd_enter {
+                            if completion.visible && !completion.items.is_empty() {
+                                editor.set_buffer(&completion.items[completion.selected].fill);
+                                completion.hide();
+                            } else if completion.visible {
+                                completion.hide();
+                            }
                         }
                         {
                             clear_input_area(&mut stdout, &mut completion);
@@ -833,6 +884,7 @@ async fn run_repl(
                                     "/project" | "/p" => CommandResult::Lines(handle_project_command(arg, state, runtime)),
                                     "/agent" | "/a" => CommandResult::Lines(handle_agent_command(arg, state, runtime)),
                                     "/new" | "/n" => handle_new_command(arg.unwrap_or(""), state, runtime),
+                                    "/reference" | "/r" => handle_reference_command(state, runtime),
                                     "/conversations" | "/c" | "/open" | "/o" => handle_open_command(arg, state, runtime),
                                     "/config" => handle_config_command(arg, state, runtime, &mut panel),
                                     "/model" | "/m" => handle_model_command(arg, state, runtime, &mut panel),
@@ -844,6 +896,7 @@ async fn run_repl(
                                     "/bunker" => CommandResult::Lines(handle_bunker_command(arg, state, runtime)),
                                     "/boot" | "/b" => CommandResult::Lines(handle_boot_command(arg, runtime)),
                                     "/status" | "/s" => CommandResult::Lines(handle_status_command(state, runtime)),
+                                    "/info" => CommandResult::Lines(handle_info_command(state, runtime)),
                                     "/help" | "/h" => CommandResult::Lines(vec![print_help_raw()]),
                                     "/quit" | "/q" => {
                                         raw_println!("{}", print_system_raw("Goodbye."));
@@ -941,7 +994,7 @@ async fn run_repl(
                     // Up arrow
                     (KeyCode::Up, _) => {
                         if state.delegation_bar.focused {
-                            state.delegation_bar.unfocus();
+                            state.delegation_bar.select_prev();
                         } else if editor.selected_attachment.is_some() {
                             editor.selected_attachment = None;
                         } else if completion.visible {
@@ -957,7 +1010,7 @@ async fn run_repl(
                     // Down arrow
                     (KeyCode::Down, _) => {
                         if state.delegation_bar.focused {
-                            state.delegation_bar.unfocus();
+                            state.delegation_bar.select_next();
                         } else if !completion.visible && editor.selected_attachment.is_none()
                             && editor.cursor == editor.buffer.len() && editor.has_attachments()
                         {
@@ -1285,7 +1338,8 @@ fn drain_data_changes(
                         clear_input_area(stdout, completion);
                         completion.input_area_drawn = false;
 
-                        let is_consecutive = state.last_displayed_pubkey.as_deref() == state.current_agent.as_deref()
+                        let is_consecutive = state.last_displayed_pubkey.as_deref()
+                            == state.current_agent.as_deref()
                             && state.current_agent.is_some();
 
                         if is_consecutive {
@@ -1316,7 +1370,17 @@ fn drain_data_changes(
                     state.stream_buffer.clear();
                     state.stream_finished_conv = Some(conversation_id.clone());
 
-                    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+                    redraw_input(
+                        stdout,
+                        state,
+                        runtime,
+                        editor,
+                        completion,
+                        panel,
+                        status_nav,
+                        stats_panel,
+                        nudge_skill_panel,
+                    );
                 }
             }
             Ok(DataChange::ProjectStatus { json }) => {
@@ -1333,19 +1397,38 @@ fn drain_data_changes(
 
                 drop(store_ref);
 
-                if state.current_project.is_none()
-                    && auto_select_project(state, runtime) {
+                if state.current_project.is_none() && auto_select_project(state, runtime) {
                     needs_redraw = true;
                 }
 
                 if needs_redraw && !state.streaming_in_progress {
-                    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+                    redraw_input(
+                        stdout,
+                        state,
+                        runtime,
+                        editor,
+                        completion,
+                        panel,
+                        status_nav,
+                        stats_panel,
+                        nudge_skill_panel,
+                    );
                 }
             }
             Ok(DataChange::BunkerSignRequest { request }) => {
                 state.pending_bunker_requests.push_back(request);
                 if !state.streaming_in_progress {
-                    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+                    redraw_input(
+                        stdout,
+                        state,
+                        runtime,
+                        editor,
+                        completion,
+                        panel,
+                        status_nav,
+                        stats_panel,
+                        nudge_skill_panel,
+                    );
                 }
             }
             Ok(_) => {}

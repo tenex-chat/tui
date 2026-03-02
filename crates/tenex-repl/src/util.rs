@@ -70,8 +70,9 @@ pub(crate) fn format_runtime(total_ms: u64) -> String {
 }
 
 pub(crate) fn format_day_label(timestamp: u64) -> String {
-    use chrono::{TimeZone, Datelike, Local};
-    let dt = Local.timestamp_opt(timestamp as i64, 0)
+    use chrono::{Datelike, Local, TimeZone};
+    let dt = Local
+        .timestamp_opt(timestamp as i64, 0)
         .single()
         .unwrap_or_else(Local::now);
     let weekday = match dt.weekday() {
@@ -84,9 +85,18 @@ pub(crate) fn format_day_label(timestamp: u64) -> String {
         chrono::Weekday::Sun => "Sun",
     };
     let month = match dt.month() {
-        1 => "Jan", 2 => "Feb", 3 => "Mar", 4 => "Apr",
-        5 => "May", 6 => "Jun", 7 => "Jul", 8 => "Aug",
-        9 => "Sep", 10 => "Oct", 11 => "Nov", 12 => "Dec",
+        1 => "Jan",
+        2 => "Feb",
+        3 => "Mar",
+        4 => "Apr",
+        5 => "May",
+        6 => "Jun",
+        7 => "Jul",
+        8 => "Aug",
+        9 => "Sep",
+        10 => "Oct",
+        11 => "Nov",
+        12 => "Dec",
         _ => "???",
     };
     format!("{} {} {:>2}", weekday, month, dt.day())
@@ -104,4 +114,3 @@ pub(crate) const TICK_INTERVAL_MS: u64 = 50;
 pub(crate) const ANIMATION_DURATION_MS: u128 = 5000;
 pub(crate) const ANIMATION_DURATION_F64: f64 = 5000.0;
 pub(crate) const DELEGATION_STALENESS_SECS: u64 = 120;
-pub(crate) const MESSAGES_TO_LOAD: usize = 10;

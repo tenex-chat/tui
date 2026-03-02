@@ -1,8 +1,10 @@
+use crate::panels::{ConversationStackEntry, DelegationBar, StatusBarAction};
+use crate::util::{
+    strip_ansi, thread_display_name, wave_colorize, ANIMATION_DURATION_F64, ANIMATION_DURATION_MS,
+};
+use crate::{ACCENT, CYAN, DIM, GREEN, RED, RESET};
 use std::collections::VecDeque;
 use std::time::Instant;
-use crate::{CYAN, GREEN, RED, DIM, ACCENT, RESET};
-use crate::panels::{DelegationBar, ConversationStackEntry, StatusBarAction};
-use crate::util::{strip_ansi, thread_display_name, wave_colorize, ANIMATION_DURATION_MS, ANIMATION_DURATION_F64};
 use tenex_core::models::AskInputState;
 use tenex_core::nostr::bunker::BunkerSignRequest;
 use tenex_core::runtime::CoreRuntime;
@@ -123,7 +125,9 @@ impl ReplState {
         let name = {
             let store = runtime.data_store();
             let store_ref = store.borrow();
-            store_ref.get_projects().iter()
+            store_ref
+                .get_projects()
+                .iter()
                 .find(|p| p.a_tag() == a_tag)
                 .map(|p| p.title.clone())
                 .unwrap_or_else(|| "project".to_string())
@@ -167,9 +171,7 @@ impl ReplState {
                     .map(|pk| store_ref.get_profile_name(pk))
                     .collect();
                 let names_str = names.join(", ");
-                text.push_str(&format!(
-                    "  {ACCENT}⟡ {names_str} working{RESET}"
-                ));
+                text.push_str(&format!("  {ACCENT}⟡ {names_str} working{RESET}"));
                 plain_width += 2 + 2 + names_str.len() + " working".len();
             }
         }
@@ -189,9 +191,7 @@ impl ReplState {
                 .map(|t| thread_display_name(t, 40))
                 .unwrap_or_else(|| format!("{}…", &thread_id[..thread_id.len().min(12)]));
             let names_str = names.join(", ");
-            text.push_str(&format!(
-                "  {DIM}⚡ {names_str} → \"{title}\"{RESET}"
-            ));
+            text.push_str(&format!("  {DIM}⚡ {names_str} → \"{title}\"{RESET}"));
             plain_width += 2 + 2 + names_str.len() + " → \"".len() + title.len() + "\"".len();
         }
 
@@ -249,7 +249,11 @@ impl ReplState {
         segments
     }
 
-    pub(crate) fn status_bar_text_navigable(&self, runtime: &CoreRuntime, focused: usize) -> (String, usize) {
+    pub(crate) fn status_bar_text_navigable(
+        &self,
+        runtime: &CoreRuntime,
+        focused: usize,
+    ) -> (String, usize) {
         let segments = self.status_bar_segments(runtime);
         let mut text = String::new();
         let mut plain_width = 0;
@@ -279,7 +283,11 @@ impl ReplState {
         (text, plain_width)
     }
 
-    pub(crate) fn status_bar_enter_action(&self, segment: usize, runtime: &CoreRuntime) -> StatusBarAction {
+    pub(crate) fn status_bar_enter_action(
+        &self,
+        segment: usize,
+        runtime: &CoreRuntime,
+    ) -> StatusBarAction {
         let segments = self.status_bar_segments(runtime);
         if segment >= segments.len() {
             return StatusBarAction::OpenStats;

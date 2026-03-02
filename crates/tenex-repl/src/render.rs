@@ -1,13 +1,19 @@
-use std::collections::HashSet;
-use std::io::{Stdout, Write};
-use crossterm::{cursor, execute, queue};
-use crossterm::terminal::{self, ClearType};
-use crate::{DIM, GREEN, ACCENT, WHITE_BOLD, RED, RESET, BG_INPUT, BG_HIGHLIGHT};
-use crate::editor::{LineEditor, AttachmentKind};
 use crate::completion::CompletionMenu;
-use crate::panels::{ConfigPanel, PanelMode, StatusBarNav, StatsTab, StatsPanel, DelegationEntry, Q_TAG_DELEGATION_DENYLIST, NudgeSkillPanel, NudgeSkillMode};
+use crate::editor::{AttachmentKind, LineEditor};
+use crate::panels::{
+    ConfigPanel, DelegationEntry, NudgeSkillMode, NudgeSkillPanel, PanelMode, StatsPanel, StatsTab,
+    StatusBarNav, Q_TAG_DELEGATION_DENYLIST,
+};
 use crate::state::ReplState;
-use crate::util::{term_width, thread_display_name, format_runtime, PROMPT_PREFIX_WIDTH, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER};
+use crate::util::{
+    format_runtime, term_width, thread_display_name, HALF_BLOCK_LOWER, HALF_BLOCK_UPPER,
+    PROMPT_PREFIX_WIDTH,
+};
+use crate::{ACCENT, BG_HIGHLIGHT, BG_INPUT, DIM, GREEN, RED, RESET, WHITE_BOLD};
+use crossterm::terminal::{self, ClearType};
+use crossterm::{cursor, execute, queue};
+use std::collections::{HashSet, VecDeque};
+use std::io::{Stdout, Write};
 use tenex_core::models::{AskQuestion, InputMode as AskInputMode, Message};
 use tenex_core::runtime::CoreRuntime;
 
@@ -95,96 +101,110 @@ fn collect_delegation_entries(state: &ReplState, runtime: &CoreRuntime) -> Vec<D
     let store = runtime.data_store();
     let store_ref = store.borrow();
     let mut entries: Vec<DelegationEntry> = Vec::new();
-    let mut seen_ids: HashSet<String> = HashSet::new();
+    let collect_direct_children = |thread_id: &str| -> Vec<String> {
+        let mut children: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
 
-    // 1. If current thread has a parent, add "← parent" entry
-    let has_parent = store_ref
-        .get_thread_by_id(&conv_id)
-        .and_then(|t| t.parent_conversation_id.as_ref())
-        .is_some()
-        || store_ref.runtime_hierarchy.get_parent(&conv_id).is_some();
-
-    if has_parent {
-        let parent_id = store_ref
-            .get_thread_by_id(&conv_id)
-            .and_then(|t| t.parent_conversation_id.clone())
-            .or_else(|| store_ref.runtime_hierarchy.get_parent(&conv_id).cloned())
-            .unwrap_or_default();
-
-        if !parent_id.is_empty() {
-            entries.push(DelegationEntry {
-                thread_id: parent_id,
-                label: "← parent".to_string(),
-                is_busy: false,
-                is_parent: true,
-                current_activity: None,
-                todo_summary: None,
-            });
-        }
-    }
-
-    // 2. Collect child thread IDs from hierarchy + q_tags from messages
-    let mut child_ids: Vec<String> = Vec::new();
-
-    if let Some(children) = store_ref.runtime_hierarchy.get_children(&conv_id) {
-        for child in children {
-            child_ids.push(child.clone());
-        }
-    }
-
-    let messages = store_ref.get_messages(&conv_id);
-    for msg in messages {
-        if !msg.q_tags.is_empty() {
-            let tool = msg.tool_name.as_deref().unwrap_or("");
-            if !Q_TAG_DELEGATION_DENYLIST.contains(&tool) {
-                for q_tag in &msg.q_tags {
-                    child_ids.push(q_tag.clone());
+        if let Some(runtime_children) = store_ref.runtime_hierarchy.get_children(thread_id) {
+            for child_id in runtime_children {
+                if child_id != thread_id && !child_id.is_empty() && seen.insert(child_id.clone()) {
+                    children.push(child_id.clone());
                 }
+            }
+        }
+
+        let messages = store_ref.get_messages(thread_id);
+        for msg in messages {
+            if msg.q_tags.is_empty() {
+                continue;
+            }
+            let tool = msg.tool_name.as_deref().unwrap_or("");
+            if Q_TAG_DELEGATION_DENYLIST.contains(&tool) {
+                continue;
+            }
+            for q_tag in &msg.q_tags {
+                if q_tag != thread_id && !q_tag.is_empty() && seen.insert(q_tag.clone()) {
+                    children.push(q_tag.clone());
+                }
+            }
+        }
+
+        children.sort_by(|a, b| {
+            let a_activity = store_ref
+                .get_thread_by_id(a)
+                .map(|t| t.effective_last_activity)
+                .unwrap_or(0);
+            let b_activity = store_ref
+                .get_thread_by_id(b)
+                .map(|t| t.effective_last_activity)
+                .unwrap_or(0);
+            b_activity.cmp(&a_activity).then_with(|| a.cmp(b))
+        });
+        children
+    };
+
+    // Traverse the delegation tree (children + grandchildren + deeper descendants).
+    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+    for child_id in collect_direct_children(&conv_id) {
+        queue.push_back((child_id, 1));
+    }
+
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut discovered: Vec<(String, usize)> = Vec::new();
+    while let Some((thread_id, depth)) = queue.pop_front() {
+        if !seen_ids.insert(thread_id.clone()) {
+            continue;
+        }
+        discovered.push((thread_id.clone(), depth));
+        for child_id in collect_direct_children(&thread_id) {
+            if !seen_ids.contains(&child_id) {
+                queue.push_back((child_id, depth + 1));
             }
         }
     }
 
-    // 3. Filter and build entries
+    // Keep only unfinished delegations and build entries.
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    for child_id in &child_ids {
-        if !seen_ids.insert(child_id.clone()) {
+    for (child_id, depth) in discovered {
+        let is_busy = store_ref.operations.is_event_busy(&child_id);
+        let thread = store_ref.get_thread_by_id(&child_id);
+        let is_recent = thread
+            .map(|t| {
+                now_secs.saturating_sub(t.effective_last_activity)
+                    <= crate::util::DELEGATION_STALENESS_SECS
+            })
+            .unwrap_or(false);
+
+        let current_activity = thread.and_then(|t| t.status_current_activity.clone());
+        let has_activity = current_activity
+            .as_ref()
+            .map(|a| !a.trim().is_empty())
+            .unwrap_or(false);
+
+        let child_messages = store_ref.get_messages(&child_id);
+        let todo_summary = get_delegation_todo_summary(child_messages);
+
+        // "Unfinished" means actively busy, has an unfinished todo item, or has fresh activity.
+        if !(is_busy || todo_summary.is_some() || (has_activity && is_recent)) {
             continue;
         }
 
-        let is_busy = store_ref.operations.is_event_busy(child_id);
-
-        if !is_busy {
-            if let Some(thread) = store_ref.get_thread_by_id(child_id) {
-                if now_secs.saturating_sub(thread.effective_last_activity) > crate::util::DELEGATION_STALENESS_SECS {
-                    continue;
-                }
-            } else {
-                continue;
-            }
-        }
-
-        let working = store_ref.operations.get_working_agents(child_id);
+        let working = store_ref.operations.get_working_agents(&child_id);
         let label = if !working.is_empty() {
             store_ref.get_profile_name(&working[0])
-        } else if let Some(thread) = store_ref.get_thread_by_id(child_id) {
+        } else if let Some(thread) = thread {
             thread_display_name(thread, 16)
         } else {
             format!("{}…", &child_id[..child_id.len().min(8)])
         };
 
-        let current_activity = store_ref
-            .get_thread_by_id(child_id)
-            .and_then(|t| t.status_current_activity.clone());
-
-        let child_messages = store_ref.get_messages(child_id);
-        let todo_summary = get_delegation_todo_summary(child_messages);
-
         entries.push(DelegationEntry {
-            thread_id: child_id.clone(),
+            thread_id: child_id,
+            depth,
             label,
             is_busy,
             is_parent: false,
@@ -204,100 +224,143 @@ pub(crate) fn update_delegation_bar(state: &mut ReplState, runtime: &CoreRuntime
     }
 }
 
-/// Render the delegation bar as a single line with BG_INPUT background.
-/// Left: delegation chips, Right: todo/activity summary.
-/// Returns the number of lines rendered (0 or 1).
+const BG_DELEGATION_CARD: &str = "\x1b[48;5;236m";
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let total = value.chars().count();
+    if total <= max_chars {
+        return value.to_string();
+    }
+    if max_chars == 1 {
+        return "…".to_string();
+    }
+    let mut out: String = value.chars().take(max_chars - 1).collect();
+    out.push('…');
+    out
+}
+
+fn delegation_tree_prefix(depth: usize) -> String {
+    if depth <= 1 {
+        "↳".to_string()
+    } else {
+        format!("{}↳", "  ".repeat(depth.saturating_sub(1)))
+    }
+}
+
+fn delegation_summary(entry: &DelegationEntry) -> Option<String> {
+    if let Some((title, is_in_progress)) = &entry.todo_summary {
+        let icon = if *is_in_progress { "⊙" } else { "○" };
+        return Some(format!("{icon} {}", truncate_chars(title, 36)));
+    }
+    entry
+        .current_activity
+        .as_ref()
+        .map(|activity| activity.trim())
+        .filter(|activity| !activity.is_empty())
+        .map(|activity| format!("⊙ {}", truncate_chars(activity, 36)))
+}
+
+fn wrapped_rows(visible_len: usize, width: usize) -> usize {
+    if width == 0 {
+        1
+    } else {
+        visible_len.saturating_sub(1) / width + 1
+    }
+}
+
+fn input_total_rows(display_buffer: &str, prompt_width: usize, width: usize) -> usize {
+    display_buffer
+        .split('\n')
+        .map(|line| wrapped_rows(prompt_width + line.chars().count(), width))
+        .sum::<usize>()
+        .max(1)
+}
+
+fn input_cursor_position(
+    display_buffer: &str,
+    cursor: usize,
+    prompt_width: usize,
+    width: usize,
+) -> (usize, usize) {
+    let clamped_cursor = cursor.min(display_buffer.len());
+    let before_cursor = &display_buffer[..clamped_cursor];
+    let before_lines: Vec<&str> = before_cursor.split('\n').collect();
+    let current_line_idx = before_lines.len().saturating_sub(1);
+    let col_chars = before_lines
+        .last()
+        .map(|line| line.chars().count())
+        .unwrap_or(0);
+
+    let all_lines: Vec<&str> = display_buffer.split('\n').collect();
+    let mut row = 0usize;
+    for line in all_lines.iter().take(current_line_idx) {
+        row += wrapped_rows(prompt_width + line.chars().count(), width);
+    }
+
+    if width == 0 {
+        return (row, 0);
+    }
+
+    let visible_to_cursor = prompt_width + col_chars;
+    row += visible_to_cursor.saturating_sub(1) / width;
+    let col = (visible_to_cursor.saturating_sub(1) % width) + 1;
+    (row, col)
+}
+
+/// Render delegation cards stacked vertically between chat and input.
+/// Returns the number of lines rendered.
 fn render_delegation_bar(stdout: &mut Stdout, state: &ReplState, width: usize) -> u16 {
     if !state.delegation_bar.has_content() {
         return 0;
     }
 
     let bar = &state.delegation_bar;
-    let mut left_parts: Vec<String> = Vec::new();
-    let mut left_plain_width: usize = 2;
+    let max_plain_width = width.saturating_sub(8).max(24);
+    let mut rendered_lines: u16 = 0;
 
     for (i, entry) in bar.visible_delegations.iter().enumerate() {
         let is_selected = bar.focused && i == bar.selected;
-
-        let (chip, chip_plain_len) = if entry.is_parent {
-            if is_selected {
-                (
-                    format!("{BG_HIGHLIGHT}{WHITE_BOLD} ← parent {RESET}{BG_INPUT}"),
-                    10,
-                )
-            } else {
-                (format!("{DIM} ← parent {RESET}{BG_INPUT}"), 10)
-            }
+        let bg = if is_selected {
+            BG_HIGHLIGHT
         } else {
-            let indicator = if entry.is_busy { "⟡" } else { "○" };
-            let label = &entry.label;
-            if is_selected {
-                (
-                    format!(
-                        " {indicator} {BG_HIGHLIGHT}{WHITE_BOLD}[▸{label}]{RESET}{BG_INPUT}"
-                    ),
-                    3 + 2 + label.chars().count() + 1,
-                )
-            } else {
-                (
-                    format!(" {indicator} [{label}]"),
-                    3 + 1 + label.chars().count() + 1,
-                )
-            }
+            BG_DELEGATION_CARD
         };
+        let tree_prefix = if entry.is_parent {
+            "↑".to_string()
+        } else {
+            delegation_tree_prefix(entry.depth)
+        };
+        let state_icon = if entry.is_parent {
+            "←"
+        } else if entry.is_busy {
+            "⟡"
+        } else {
+            "○"
+        };
+        let nav = if is_selected { "▸" } else { " " };
+        let mut plain = format!("{nav} {tree_prefix} {state_icon} {}", entry.label);
+        if let Some(summary) = delegation_summary(entry) {
+            plain.push_str(" · ");
+            plain.push_str(&summary);
+        }
+        plain = truncate_chars(&plain, max_plain_width);
 
-        left_plain_width += chip_plain_len;
-        left_parts.push(chip);
+        let styled = if is_selected {
+            format!("{WHITE_BOLD}{plain}{RESET}")
+        } else if entry.is_busy {
+            format!("{ACCENT}{plain}{RESET}")
+        } else {
+            format!("{DIM}{plain}{RESET}")
+        };
+        let bg_safe = styled.replace(RESET, &format!("{RESET}{bg}"));
+        write!(stdout, "\r\n  {bg} {bg_safe} {RESET}").ok();
+        rendered_lines = rendered_lines.saturating_add(1);
     }
 
-    let right_entry = if bar.focused {
-        bar.selected_entry()
-    } else {
-        bar.visible_delegations
-            .iter()
-            .find(|e| e.is_busy && !e.is_parent)
-    };
-
-    let (right_text, right_plain_width) = if let Some(entry) = right_entry {
-        if let Some((ref title, is_in_progress)) = entry.todo_summary {
-            let icon = if is_in_progress { "⊙" } else { "○" };
-            let short_title = if title.chars().count() > 30 {
-                let truncated: String = title.chars().take(29).collect();
-                format!("{truncated}…")
-            } else {
-                title.clone()
-            };
-            let text = format!("{DIM}{icon} {short_title}{RESET}{BG_INPUT}");
-            let plain = 2 + short_title.chars().count();
-            (text, plain)
-        } else if let Some(ref activity) = entry.current_activity {
-            let short = if activity.chars().count() > 30 {
-                let truncated: String = activity.chars().take(29).collect();
-                format!("{truncated}…")
-            } else {
-                activity.clone()
-            };
-            let text = format!("{DIM}⊙ {short}{RESET}{BG_INPUT}");
-            let plain = 2 + short.chars().count();
-            (text, plain)
-        } else {
-            (String::new(), 0)
-        }
-    } else {
-        (String::new(), 0)
-    };
-
-    let gap = width.saturating_sub(left_plain_width + right_plain_width + 2);
-    write!(
-        stdout,
-        "\r\n{BG_INPUT}  {}{}{right_text}{}{RESET}",
-        left_parts.join(""),
-        " ".repeat(gap),
-        " ".repeat(2),
-    )
-    .ok();
-
-    1
+    rendered_lines
 }
 
 // ─── Terminal Drawing ───────────────────────────────────────────────────────
@@ -331,8 +394,7 @@ pub(crate) fn build_runtime_indicator(
 
     let mut out = String::new();
     for (i, ch) in label.chars().enumerate() {
-        let phase = ((offset * wave_phase_speed * speed_multiplier)
-            + (i as f32 * wave_wavelength))
+        let phase = ((offset * wave_phase_speed * speed_multiplier) + (i as f32 * wave_wavelength))
             * std::f32::consts::PI
             * 2.0
             / wave_period;
@@ -365,10 +427,15 @@ pub(crate) fn redraw_input(
     clear_input_area(stdout, completion);
 
     // ── Top edge: lower half-blocks in input bg color ──
-    let fg_input_bg = "\x1b[38;5;234m";
-    write!(stdout, "{fg_input_bg}{}{RESET}", HALF_BLOCK_LOWER.to_string().repeat(width)).ok();
+    let fg_input_bg = "\x1b[38;5;235m";
+    write!(
+        stdout,
+        "{fg_input_bg}{}{RESET}",
+        HALF_BLOCK_LOWER.to_string().repeat(width)
+    )
+    .ok();
 
-    // ── Delegation bar (0 or 1 lines between top edge and input) ──
+    // ── Delegation cards (0+ lines between top edge and input) ──
     completion.delegation_bar_lines = render_delegation_bar(stdout, state, width);
 
     // ── Backend approval prompt (replaces normal input when pending) ──
@@ -386,15 +453,34 @@ pub(crate) fn redraw_input(
         });
         drop(store_ref);
         if let Some((name, short_pk)) = pending_info {
-            let prompt = format!("  New backend: {ACCENT}{name}{RESET}{BG_INPUT}{DIM} ({short_pk}…){RESET}{BG_INPUT}  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[b]{RESET}{BG_INPUT}lock");
-            let visible_len = 2 + "New backend: ".len() + name.len() + 2 + short_pk.len() + 2 + 2 + "[a]pprove  [b]lock".len();
+            let prompt = format!(
+                "  New backend: {ACCENT}{name}{RESET}{BG_INPUT}{DIM} ({short_pk}…){RESET}{BG_INPUT}  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[b]{RESET}{BG_INPUT}lock"
+            );
+            let visible_len = 2
+                + "New backend: ".len()
+                + name.len()
+                + 2
+                + short_pk.len()
+                + 2
+                + 2
+                + "[a]pprove  [b]lock".len();
             let prompt_pad = width.saturating_sub(visible_len);
-            write!(stdout, "\r\n{BG_INPUT}{prompt}{}{RESET}", " ".repeat(prompt_pad)).ok();
+            write!(
+                stdout,
+                "\r\n{BG_INPUT}{prompt}{}{RESET}",
+                " ".repeat(prompt_pad)
+            )
+            .ok();
             completion.input_wrap_lines = 0;
             completion.attachment_indicator_lines = 0;
             completion.rendered_lines = 0;
 
-            write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
+            write!(
+                stdout,
+                "\r\n{fg_input_bg}{}{RESET}",
+                HALF_BLOCK_UPPER.to_string().repeat(width)
+            )
+            .ok();
             let (status_text, status_plain_width) = state.status_bar_text(runtime);
             let (rt_ms, rt_active, rt_count) = {
                 let store = runtime.data_store();
@@ -428,31 +514,70 @@ pub(crate) fn redraw_input(
         } else {
             req.requester_pubkey.clone()
         };
-        let kind_str = req.event_kind.map(|k| format!("kind:{k}")).unwrap_or_else(|| "unknown".to_string());
-        let content_preview = req.event_content.as_deref().unwrap_or("").chars().take(40).collect::<String>();
+        let kind_str = req
+            .event_kind
+            .map(|k| format!("kind:{k}"))
+            .unwrap_or_else(|| "unknown".to_string());
+        let content_preview = req
+            .event_content
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .take(40)
+            .collect::<String>();
 
-        let line1 = format!("  {ACCENT}Bunker sign request{RESET}{BG_INPUT} from {DIM}{short_pk}…{RESET}{BG_INPUT}  {kind_str}");
-        let line1_plain = 2 + "Bunker sign request".len() + " from ".len() + short_pk.len() + 1 + 2 + kind_str.len();
+        let line1 = format!(
+            "  {ACCENT}Bunker sign request{RESET}{BG_INPUT} from {DIM}{short_pk}…{RESET}{BG_INPUT}  {kind_str}"
+        );
+        let line1_plain = 2
+            + "Bunker sign request".len()
+            + " from ".len()
+            + short_pk.len()
+            + 1
+            + 2
+            + kind_str.len();
         let line1_pad = width.saturating_sub(line1_plain);
-        write!(stdout, "\r\n{BG_INPUT}{line1}{}{RESET}", " ".repeat(line1_pad)).ok();
+        write!(
+            stdout,
+            "\r\n{BG_INPUT}{line1}{}{RESET}",
+            " ".repeat(line1_pad)
+        )
+        .ok();
 
         if !content_preview.is_empty() {
             let line2 = format!("  {DIM}\"{content_preview}\"{RESET}{BG_INPUT}");
             let line2_plain = 2 + 1 + content_preview.chars().count() + 1;
             let line2_pad = width.saturating_sub(line2_plain);
-            write!(stdout, "\r\n{BG_INPUT}{line2}{}{RESET}", " ".repeat(line2_pad)).ok();
+            write!(
+                stdout,
+                "\r\n{BG_INPUT}{line2}{}{RESET}",
+                " ".repeat(line2_pad)
+            )
+            .ok();
         }
 
-        let prompt = format!("  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[A]{RESET}{BG_INPUT}lways  {WHITE_BOLD}[r]{RESET}{BG_INPUT}eject");
+        let prompt = format!(
+            "  {WHITE_BOLD}[a]{RESET}{BG_INPUT}pprove  {WHITE_BOLD}[A]{RESET}{BG_INPUT}lways  {WHITE_BOLD}[r]{RESET}{BG_INPUT}eject"
+        );
         let prompt_plain = 2 + "[a]pprove  [A]lways  [r]eject".len();
         let prompt_pad = width.saturating_sub(prompt_plain);
-        write!(stdout, "\r\n{BG_INPUT}{prompt}{}{RESET}", " ".repeat(prompt_pad)).ok();
+        write!(
+            stdout,
+            "\r\n{BG_INPUT}{prompt}{}{RESET}",
+            " ".repeat(prompt_pad)
+        )
+        .ok();
 
         completion.input_wrap_lines = 0;
         completion.attachment_indicator_lines = 0;
         completion.rendered_lines = 0;
 
-        write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
+        write!(
+            stdout,
+            "\r\n{fg_input_bg}{}{RESET}",
+            HALF_BLOCK_UPPER.to_string().repeat(width)
+        )
+        .ok();
         let (status_text, status_plain_width) = state.status_bar_text(runtime);
         let (rt_ms, rt_active, rt_count) = {
             let store = runtime.data_store();
@@ -490,7 +615,9 @@ pub(crate) fn redraw_input(
             for (qi, _) in input_state.questions.iter().enumerate() {
                 let label = format!("Q{}", qi + 1);
                 let answered = input_state.answers.iter().any(|a| a.question_index == qi);
-                if qi > 0 { tabs.push_str(&format!("{DIM} │ {RESET}{BG_INPUT}")); }
+                if qi > 0 {
+                    tabs.push_str(&format!("{DIM} │ {RESET}{BG_INPUT}"));
+                }
                 if qi == input_state.current_question_index {
                     tabs.push_str(&format!("{ACCENT}{WHITE_BOLD} {label} {RESET}{BG_INPUT}"));
                 } else if answered {
@@ -505,11 +632,21 @@ pub(crate) fn redraw_input(
         // Question text
         if let Some(question) = input_state.current_question() {
             let (q_title, q_text) = match question {
-                AskQuestion::SingleSelect { title, question, .. } => (title.as_str(), question.as_str()),
-                AskQuestion::MultiSelect { title, question, .. } => (title.as_str(), question.as_str()),
+                AskQuestion::SingleSelect {
+                    title, question, ..
+                } => (title.as_str(), question.as_str()),
+                AskQuestion::MultiSelect {
+                    title, question, ..
+                } => (title.as_str(), question.as_str()),
             };
-            let multi_label = if input_state.is_multi_select() { " (multi-select)" } else { "" };
-            content_lines.push(format!("  {WHITE_BOLD}{q_title}{RESET}{BG_INPUT}{DIM}{multi_label}{RESET}{BG_INPUT}"));
+            let multi_label = if input_state.is_multi_select() {
+                " (multi-select)"
+            } else {
+                ""
+            };
+            content_lines.push(format!(
+                "  {WHITE_BOLD}{q_title}{RESET}{BG_INPUT}{DIM}{multi_label}{RESET}{BG_INPUT}"
+            ));
             if !q_text.is_empty() && q_text != q_title {
                 content_lines.push(format!("  {DIM}{q_text}{RESET}{BG_INPUT}"));
             }
@@ -522,14 +659,30 @@ pub(crate) fn redraw_input(
             for (oi, opt) in options.iter().enumerate() {
                 let marker = if oi == input_state.selected_option_index {
                     if input_state.is_multi_select() {
-                        let checked = input_state.multi_select_state.get(oi).copied().unwrap_or(false);
-                        if checked { format!("{WHITE_BOLD}▸ ☑{RESET}{BG_INPUT}") } else { format!("{WHITE_BOLD}▸ ☐{RESET}{BG_INPUT}") }
+                        let checked = input_state
+                            .multi_select_state
+                            .get(oi)
+                            .copied()
+                            .unwrap_or(false);
+                        if checked {
+                            format!("{WHITE_BOLD}▸ ☑{RESET}{BG_INPUT}")
+                        } else {
+                            format!("{WHITE_BOLD}▸ ☐{RESET}{BG_INPUT}")
+                        }
                     } else {
                         format!("{WHITE_BOLD}▸{RESET}{BG_INPUT}")
                     }
                 } else if input_state.is_multi_select() {
-                    let checked = input_state.multi_select_state.get(oi).copied().unwrap_or(false);
-                    if checked { format!("{DIM}  ☑{RESET}{BG_INPUT}") } else { format!("{DIM}  ☐{RESET}{BG_INPUT}") }
+                    let checked = input_state
+                        .multi_select_state
+                        .get(oi)
+                        .copied()
+                        .unwrap_or(false);
+                    if checked {
+                        format!("{DIM}  ☑{RESET}{BG_INPUT}")
+                    } else {
+                        format!("{DIM}  ☐{RESET}{BG_INPUT}")
+                    }
                 } else {
                     format!("{DIM} {RESET}{BG_INPUT}")
                 };
@@ -575,7 +728,12 @@ pub(crate) fn redraw_input(
         for line in &content_lines {
             let plain_len = crate::util::strip_ansi(line).chars().count();
             let line_pad = width.saturating_sub(plain_len);
-            write!(stdout, "\r\n{BG_INPUT}{line}{}{RESET}", " ".repeat(line_pad)).ok();
+            write!(
+                stdout,
+                "\r\n{BG_INPUT}{line}{}{RESET}",
+                " ".repeat(line_pad)
+            )
+            .ok();
         }
 
         completion.input_wrap_lines = 0;
@@ -583,7 +741,12 @@ pub(crate) fn redraw_input(
         completion.rendered_lines = 0;
 
         // Bottom edge + status bar
-        write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
+        write!(
+            stdout,
+            "\r\n{fg_input_bg}{}{RESET}",
+            HALF_BLOCK_UPPER.to_string().repeat(width)
+        )
+        .ok();
         let (status_text, status_plain_width) = state.status_bar_text(runtime);
         let (rt_ms, rt_active, rt_count) = {
             let store = runtime.data_store();
@@ -610,8 +773,12 @@ pub(crate) fn redraw_input(
         return;
     }
 
-    // ── Input line (dark background, full width) ──
-    let display_buffer = if panel.active { &panel.origin_command } else { &editor.buffer };
+    // ── Input lines (dark background, full width; supports explicit newlines) ──
+    let display_buffer = if panel.active {
+        &panel.origin_command
+    } else {
+        &editor.buffer
+    };
     let (prompt_str, prompt_width) = if state.search_mode {
         if state.search_all_projects {
             (format!("{WHITE_BOLD}  \u{27f2} all:{RESET}{BG_INPUT} "), 9)
@@ -619,20 +786,53 @@ pub(crate) fn redraw_input(
             (format!("{WHITE_BOLD}  \u{27f2} {RESET}{BG_INPUT}"), 4)
         }
     } else {
-        (format!("{WHITE_BOLD}  \u{203a} {RESET}{BG_INPUT}"), PROMPT_PREFIX_WIDTH as usize)
+        (
+            format!("{WHITE_BOLD}  \u{203a} {RESET}{BG_INPUT}"),
+            PROMPT_PREFIX_WIDTH as usize,
+        )
     };
-    let input_visible_len = prompt_width + display_buffer.chars().count();
-    let input_total_rows = if width > 0 { input_visible_len.saturating_sub(1) / width + 1 } else { 1 };
-    let last_row_chars = if width > 0 { ((input_visible_len.saturating_sub(1)) % width) + 1 } else { input_visible_len };
-    let pad = width.saturating_sub(last_row_chars);
-    write!(stdout, "\r\n{BG_INPUT}{prompt_str}{}{}{RESET}",
-        display_buffer,
-        " ".repeat(pad),
-    ).ok();
-    completion.input_wrap_lines = (input_total_rows as u16).saturating_sub(1);
+    let continuation_prefix = " ".repeat(prompt_width);
+    for (idx, line) in display_buffer.split('\n').enumerate() {
+        let prefix = if idx == 0 {
+            &prompt_str
+        } else {
+            &continuation_prefix
+        };
+        let visible_len = prompt_width + line.chars().count();
+        let last_row_chars = if width > 0 {
+            ((visible_len.saturating_sub(1)) % width) + 1
+        } else {
+            visible_len
+        };
+        let pad = width.saturating_sub(last_row_chars);
+        write!(
+            stdout,
+            "\r\n{BG_INPUT}{prefix}{line}{}{RESET}",
+            " ".repeat(pad)
+        )
+        .ok();
+    }
+    completion.input_wrap_lines =
+        (input_total_rows(display_buffer, prompt_width, width) as u16).saturating_sub(1);
 
-    // ── Attachment strip (below input, if attachments or selected nudges/skills exist) ──
-    let has_nudge_skill_chips = !state.selected_nudge_ids.is_empty() || !state.selected_skill_ids.is_empty();
+    // ── Helper + attachment strip (below input) ──
+    let mut aux_input_lines: u16 = 0;
+    let multiline_send_mode = !panel.active && !state.search_mode && editor.buffer.contains('\n');
+    if multiline_send_mode {
+        let helper = "  Multiline mode: press Cmd+Enter to send";
+        let helper_pad = width.saturating_sub(helper.chars().count());
+        write!(
+            stdout,
+            "\r\n{BG_INPUT}{DIM}{helper}{RESET}{BG_INPUT}{}{RESET}",
+            " ".repeat(helper_pad)
+        )
+        .ok();
+        aux_input_lines = aux_input_lines.saturating_add(1);
+    }
+
+    // Attachment strip (below input, if attachments or selected nudges/skills exist)
+    let has_nudge_skill_chips =
+        !state.selected_nudge_ids.is_empty() || !state.selected_skill_ids.is_empty();
     if editor.has_attachments() || has_nudge_skill_chips {
         write!(stdout, "\r\n{BG_INPUT}  📎 ").ok();
         let mut strip_chars: usize = 5;
@@ -640,13 +840,22 @@ pub(crate) fn redraw_input(
             let label = match &att.kind {
                 AttachmentKind::Text { content } => {
                     let lines = content.lines().count();
-                    format!("Text Att. {} ({} line{})", att.id, lines, if lines == 1 { "" } else { "s" })
+                    format!(
+                        "Text Att. {} ({} line{})",
+                        att.id,
+                        lines,
+                        if lines == 1 { "" } else { "s" }
+                    )
                 }
                 AttachmentKind::Image { .. } => format!("Image #{}", att.id),
             };
             let is_selected = editor.selected_attachment == Some(i);
             if is_selected {
-                write!(stdout, " {WHITE_BOLD}{BG_HIGHLIGHT} {label} {RESET}{BG_INPUT}").ok();
+                write!(
+                    stdout,
+                    " {WHITE_BOLD}{BG_HIGHLIGHT} {label} {RESET}{BG_INPUT}"
+                )
+                .ok();
             } else {
                 write!(stdout, " {DIM} {label} {RESET}{BG_INPUT}").ok();
             }
@@ -657,7 +866,10 @@ pub(crate) fn redraw_input(
             let store = runtime.data_store();
             let store_ref = store.borrow();
             for nid in &state.selected_nudge_ids {
-                let title = store_ref.content.get_nudges().iter()
+                let title = store_ref
+                    .content
+                    .get_nudges()
+                    .iter()
                     .find(|n| n.id == *nid)
                     .map(|n| n.title.as_str())
                     .unwrap_or("nudge");
@@ -666,7 +878,10 @@ pub(crate) fn redraw_input(
                 strip_chars += 1 + chip.chars().count();
             }
             for sid in &state.selected_skill_ids {
-                let title = store_ref.content.get_skills().iter()
+                let title = store_ref
+                    .content
+                    .get_skills()
+                    .iter()
                     .find(|s| s.id == *sid)
                     .map(|s| s.title.as_str())
                     .unwrap_or("skill");
@@ -677,10 +892,9 @@ pub(crate) fn redraw_input(
         }
         let strip_pad = width.saturating_sub(strip_chars);
         write!(stdout, "{}{RESET}", " ".repeat(strip_pad)).ok();
-        completion.attachment_indicator_lines = 1;
-    } else {
-        completion.attachment_indicator_lines = 0;
+        aux_input_lines = aux_input_lines.saturating_add(1);
     }
+    completion.attachment_indicator_lines = aux_input_lines;
 
     // ── Config panel or completion menu ──
     if panel.active {
@@ -707,7 +921,12 @@ pub(crate) fn redraw_input(
         let header_pad = width.saturating_sub(header_len);
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-        write!(stdout, "{BG_INPUT}{WHITE_BOLD}{header}{}{RESET}", " ".repeat(header_pad)).ok();
+        write!(
+            stdout,
+            "{BG_INPUT}{WHITE_BOLD}{header}{}{RESET}",
+            " ".repeat(header_pad)
+        )
+        .ok();
 
         // Items list — use filtered_items() for the visible subset
         let filtered = panel.filtered_items();
@@ -745,9 +964,19 @@ pub(crate) fn redraw_input(
             write!(stdout, "\r\n").ok();
             queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
             if fi == panel.cursor {
-                write!(stdout, "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                write!(
+                    stdout,
+                    "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}",
+                    " ".repeat(item_pad)
+                )
+                .ok();
             } else {
-                write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                write!(
+                    stdout,
+                    "{BG_INPUT}{DIM}{text}{}{RESET}",
+                    " ".repeat(item_pad)
+                )
+                .ok();
             }
         }
 
@@ -762,7 +991,12 @@ pub(crate) fn redraw_input(
         let footer_pad = width.saturating_sub(footer_len);
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-        write!(stdout, "{BG_INPUT}{DIM}{footer}{}{RESET}", " ".repeat(footer_pad)).ok();
+        write!(
+            stdout,
+            "{BG_INPUT}{DIM}{footer}{}{RESET}",
+            " ".repeat(footer_pad)
+        )
+        .ok();
 
         completion.rendered_lines = (1 + visible_count + 1) as u16;
     } else if nudge_skill_panel.active {
@@ -776,16 +1010,35 @@ pub(crate) fn redraw_input(
             NudgeSkillMode::Skills => "Nudges",
         };
         let header = if nudge_skill_panel.filter.is_empty() {
-            format!("  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}")
+            format!(
+                "  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}"
+            )
         } else {
-            format!("  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}  filter: {}", nudge_skill_panel.filter)
+            format!(
+                "  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}  filter: {}",
+                nudge_skill_panel.filter
+            )
         };
-        let header_plain = 2 + mode_label.len() + 2 + 2 + other_label.len() + 1
-            + if nudge_skill_panel.filter.is_empty() { 0 } else { 10 + nudge_skill_panel.filter.len() };
+        let header_plain = 2
+            + mode_label.len()
+            + 2
+            + 2
+            + other_label.len()
+            + 1
+            + if nudge_skill_panel.filter.is_empty() {
+                0
+            } else {
+                10 + nudge_skill_panel.filter.len()
+            };
         let header_pad = width.saturating_sub(header_plain);
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-        write!(stdout, "{BG_INPUT}{header}{}{RESET}", " ".repeat(header_pad)).ok();
+        write!(
+            stdout,
+            "{BG_INPUT}{header}{}{RESET}",
+            " ".repeat(header_pad)
+        )
+        .ok();
 
         // Items list
         let filtered = nudge_skill_panel.filtered_items();
@@ -807,15 +1060,31 @@ pub(crate) fn redraw_input(
                 format!(" {DIM}— {short}{RESET}")
             };
             let text = format!("  {marker}{}{desc_preview}", item.title);
-            let text_plain = 2 + 4 + item.title.chars().count()
-                + if item.description.is_empty() { 0 } else { 3 + item.description.chars().take(30).count() };
+            let text_plain = 2
+                + 4
+                + item.title.chars().count()
+                + if item.description.is_empty() {
+                    0
+                } else {
+                    3 + item.description.chars().take(30).count()
+                };
             let item_pad = width.saturating_sub(text_plain);
             write!(stdout, "\r\n").ok();
             queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
             if fi == nudge_skill_panel.cursor {
-                write!(stdout, "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                write!(
+                    stdout,
+                    "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}",
+                    " ".repeat(item_pad)
+                )
+                .ok();
             } else {
-                write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                write!(
+                    stdout,
+                    "{BG_INPUT}{DIM}{text}{}{RESET}",
+                    " ".repeat(item_pad)
+                )
+                .ok();
             }
         }
 
@@ -824,7 +1093,12 @@ pub(crate) fn redraw_input(
         let footer_pad = width.saturating_sub(footer_len);
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-        write!(stdout, "{BG_INPUT}{DIM}{footer}{}{RESET}", " ".repeat(footer_pad)).ok();
+        write!(
+            stdout,
+            "{BG_INPUT}{DIM}{footer}{}{RESET}",
+            " ".repeat(footer_pad)
+        )
+        .ok();
 
         completion.rendered_lines = (1 + visible_count + 1) as u16;
     } else if stats_panel.active {
@@ -847,7 +1121,12 @@ pub(crate) fn redraw_input(
         let tab_bar_pad = width.saturating_sub(tab_bar_plain_len);
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-        write!(stdout, "{BG_INPUT}{tab_bar}{}{RESET}", " ".repeat(tab_bar_pad)).ok();
+        write!(
+            stdout,
+            "{BG_INPUT}{tab_bar}{}{RESET}",
+            " ".repeat(tab_bar_pad)
+        )
+        .ok();
 
         let sep = format!("  {}", "─".repeat(width.saturating_sub(4)));
         write!(stdout, "\r\n").ok();
@@ -871,7 +1150,12 @@ pub(crate) fn redraw_input(
         let footer_pad = width.saturating_sub(footer_len);
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-        write!(stdout, "{BG_INPUT}{DIM}{footer}{}{RESET}", " ".repeat(footer_pad)).ok();
+        write!(
+            stdout,
+            "{BG_INPUT}{DIM}{footer}{}{RESET}",
+            " ".repeat(footer_pad)
+        )
+        .ok();
 
         completion.rendered_lines = (2 + visible_count + 1) as u16;
     } else if completion.visible && !completion.items.is_empty() {
@@ -886,18 +1170,38 @@ pub(crate) fn redraw_input(
                 let text_len = 2 + 2 + label.chars().count().max(22) + 1 + desc.chars().count();
                 let item_pad = width.saturating_sub(text_len);
                 if i == completion.selected {
-                    write!(stdout, "{BG_INPUT}{GREEN}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                    write!(
+                        stdout,
+                        "{BG_INPUT}{GREEN}{text}{}{RESET}",
+                        " ".repeat(item_pad)
+                    )
+                    .ok();
                 } else {
-                    write!(stdout, "{BG_INPUT}\x1b[38;5;242m{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                    write!(
+                        stdout,
+                        "{BG_INPUT}\x1b[38;5;242m{text}{}{RESET}",
+                        " ".repeat(item_pad)
+                    )
+                    .ok();
                 }
             } else {
                 let text = format!("  {label:<24} {desc}");
                 let text_len = 2 + label.chars().count().max(24) + 1 + desc.chars().count();
                 let item_pad = width.saturating_sub(text_len);
                 if i == completion.selected {
-                    write!(stdout, "{BG_INPUT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                    write!(
+                        stdout,
+                        "{BG_INPUT}{WHITE_BOLD}{text}{}{RESET}",
+                        " ".repeat(item_pad)
+                    )
+                    .ok();
                 } else {
-                    write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                    write!(
+                        stdout,
+                        "{BG_INPUT}{DIM}{text}{}{RESET}",
+                        " ".repeat(item_pad)
+                    )
+                    .ok();
                 }
             }
         }
@@ -907,8 +1211,13 @@ pub(crate) fn redraw_input(
     }
 
     // ── Bottom edge: upper half-blocks in input bg color ──
-    let fg_input_bg = "\x1b[38;5;234m";
-    write!(stdout, "\r\n{fg_input_bg}{}{RESET}", HALF_BLOCK_UPPER.to_string().repeat(width)).ok();
+    let fg_input_bg = "\x1b[38;5;235m";
+    write!(
+        stdout,
+        "\r\n{fg_input_bg}{}{RESET}",
+        HALF_BLOCK_UPPER.to_string().repeat(width)
+    )
+    .ok();
 
     // ── Status bar (project/agent on left, runtime on right) ──
     let (runtime_ms, has_active, active_count) = {
@@ -921,7 +1230,8 @@ pub(crate) fn redraw_input(
         let last_seg = segments.len().saturating_sub(1);
         let is_runtime_focused = status_nav.segment == last_seg;
 
-        let (nav_text, nav_plain_width) = state.status_bar_text_navigable(runtime, status_nav.segment);
+        let (nav_text, nav_plain_width) =
+            state.status_bar_text_navigable(runtime, status_nav.segment);
         let (runtime_ansi, runtime_plain_width) = if is_runtime_focused {
             let label = format!("Today: {} ", format_runtime(runtime_ms));
             let pw = label.len();
@@ -953,16 +1263,17 @@ pub(crate) fn redraw_input(
 
     // ── Position cursor back on input line ──
     let lines_below = completion.attachment_indicator_lines + completion.rendered_lines + 2;
-    let cursor_char_pos = if state.search_mode {
-        let pw = if state.search_all_projects { 9 } else { 4 };
-        pw + editor.buffer[..editor.cursor].chars().count()
+    let (cursor_row, col) = if panel.active {
+        input_cursor_position(display_buffer, 0, prompt_width, width)
     } else {
-        PROMPT_PREFIX_WIDTH as usize + editor.buffer[..editor.cursor].chars().count()
+        input_cursor_position(display_buffer, editor.cursor, prompt_width, width)
     };
-    let cursor_row = if width > 0 && cursor_char_pos > 0 { (cursor_char_pos - 1) / width } else { 0 };
     let wrap_lines_after_cursor = (completion.input_wrap_lines as usize).saturating_sub(cursor_row);
-    queue!(stdout, cursor::MoveUp(lines_below + wrap_lines_after_cursor as u16)).ok();
-    let col = if width > 0 && cursor_char_pos > 0 { ((cursor_char_pos - 1) % width) + 1 } else { 0 };
+    queue!(
+        stdout,
+        cursor::MoveUp(lines_below + wrap_lines_after_cursor as u16)
+    )
+    .ok();
     queue!(stdout, cursor::MoveToColumn(col as u16)).ok();
     stdout.flush().ok();
 
@@ -981,7 +1292,12 @@ pub(crate) fn clear_input_area(stdout: &mut Stdout, completion: &mut CompletionM
     queue!(stdout, cursor::MoveUp(up_to_top), cursor::MoveToColumn(0)).ok();
     queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
 
-    let lines_below = completion.delegation_bar_lines + 1 + completion.input_wrap_lines + completion.attachment_indicator_lines + completion.rendered_lines + 2;
+    let lines_below = completion.delegation_bar_lines
+        + 1
+        + completion.input_wrap_lines
+        + completion.attachment_indicator_lines
+        + completion.rendered_lines
+        + 2;
     for _ in 0..lines_below {
         write!(stdout, "\r\n").ok();
         queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
@@ -1011,7 +1327,12 @@ pub(crate) fn apply_clear_screen(
 ) {
     state.search_mode = false;
     state.search_all_projects = false;
-    execute!(stdout, terminal::Clear(ClearType::All), cursor::MoveTo(0, 0)).ok();
+    execute!(
+        stdout,
+        terminal::Clear(ClearType::All),
+        cursor::MoveTo(0, 0)
+    )
+    .ok();
     completion.input_area_drawn = false;
     let (_, rows) = terminal::size().unwrap_or((80, 24));
     let content_rows = lines.len() as u16;
@@ -1024,7 +1345,17 @@ pub(crate) fn apply_clear_screen(
     }
     stdout.flush().ok();
     update_delegation_bar(state, runtime);
-    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+    redraw_input(
+        stdout,
+        state,
+        runtime,
+        editor,
+        completion,
+        panel,
+        status_nav,
+        stats_panel,
+        nudge_skill_panel,
+    );
 }
 
 /// Print text above the input area, then redraw the input area.
@@ -1048,5 +1379,15 @@ pub(crate) fn print_above_input(
     }
     stdout.flush().ok();
 
-    redraw_input(stdout, state, runtime, editor, completion, panel, status_nav, stats_panel, nudge_skill_panel);
+    redraw_input(
+        stdout,
+        state,
+        runtime,
+        editor,
+        completion,
+        panel,
+        status_nav,
+        stats_panel,
+        nudge_skill_panel,
+    );
 }

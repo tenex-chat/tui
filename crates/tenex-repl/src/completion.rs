@@ -1,7 +1,7 @@
-use std::collections::HashSet;
 use crate::commands::find_project_split;
 use crate::state::ReplState;
 use crate::util::thread_display_name;
+use std::collections::HashSet;
 use tenex_core::models::{Project, ProjectAgent, Thread};
 use tenex_core::runtime::CoreRuntime;
 use tenex_core::store::app_data_store::AppDataStore;
@@ -10,6 +10,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("/project", "list or switch project"),
     ("/agent", "list or switch agent"),
     ("/new", "new context [agent@project]"),
+    ("/reference", "new conversation from current context"),
     ("/conversations", "browse/open conversations"),
     ("/config", "configure agent tools/model"),
     ("/model", "change agent model"),
@@ -18,6 +19,7 @@ pub(crate) const COMMANDS: &[(&str, &str)] = &[
     ("/active", "active work across all projects"),
     ("/stats", "usage statistics"),
     ("/status", "show current context"),
+    ("/info", "show current conversation metadata"),
     ("/help", "show commands"),
     ("/quit", "exit"),
 ];
@@ -154,7 +156,10 @@ pub(crate) fn active_completion_items(store: &AppDataStore, filter: &str) -> Vec
             }
         }
     }
-    recent_threads.sort_by(|a, b| b.0.effective_last_activity.cmp(&a.0.effective_last_activity));
+    recent_threads.sort_by(|a, b| {
+        b.0.effective_last_activity
+            .cmp(&a.0.effective_last_activity)
+    });
 
     for (thread, project_name) in recent_threads.into_iter().take(15) {
         if !seen_ids.insert(thread.id.clone()) {
@@ -245,12 +250,15 @@ fn project_picker_items(runtime: &CoreRuntime, filter: &str, cmd: &str) -> Vec<C
         .map(|p| {
             let online = store_ref.is_project_online(&p.a_tag());
             let status = if online { "online" } else { "offline" };
-            (online, CompletionItem {
-                label: p.title.clone(),
-                description: status.to_string(),
-                fill: format!("{cmd} @{} ", p.title),
-                completed: false,
-            })
+            (
+                online,
+                CompletionItem {
+                    label: p.title.clone(),
+                    description: status.to_string(),
+                    fill: format!("{cmd} @{} ", p.title),
+                    completed: false,
+                },
+            )
         })
         .collect();
     items.sort_by(|a, b| b.0.cmp(&a.0));
@@ -273,7 +281,12 @@ impl CompletionMenu {
         }
     }
 
-    pub(crate) fn update_from_buffer(&mut self, buffer: &str, state: &ReplState, runtime: &CoreRuntime) {
+    pub(crate) fn update_from_buffer(
+        &mut self,
+        buffer: &str,
+        state: &ReplState,
+        runtime: &CoreRuntime,
+    ) {
         if let Some(stripped) = buffer.strip_prefix('@') {
             let filter = stripped.to_lowercase();
             let store = runtime.data_store();
@@ -287,7 +300,14 @@ impl CompletionMenu {
                     .find(|p| p.a_tag() == *current_a_tag)
                     .map(|p| p.title.as_str())
                     .unwrap_or("unknown");
-                items.extend(agent_completion_items(&store_ref, current_a_tag, &filter, "/agent ", None, current_project_name));
+                items.extend(agent_completion_items(
+                    &store_ref,
+                    current_a_tag,
+                    &filter,
+                    "/agent ",
+                    None,
+                    current_project_name,
+                ));
             }
 
             for project in store_ref.get_projects().iter().filter(|p| !p.is_deleted) {
@@ -295,7 +315,14 @@ impl CompletionMenu {
                 if state.current_project.as_deref() == Some(&a_tag) {
                     continue;
                 }
-                let other_items = agent_completion_items(&store_ref, &a_tag, &filter, "/agent ", Some(&project.title), &project.title);
+                let other_items = agent_completion_items(
+                    &store_ref,
+                    &a_tag,
+                    &filter,
+                    "/agent ",
+                    Some(&project.title),
+                    &project.title,
+                );
                 items.extend(other_items);
             }
 
@@ -342,16 +369,21 @@ impl CompletionMenu {
                             .collect();
                         let mut items: Vec<(bool, CompletionItem)> = projects
                             .iter()
-                            .filter(|p| filter.is_empty() || p.title.to_lowercase().contains(&filter))
+                            .filter(|p| {
+                                filter.is_empty() || p.title.to_lowercase().contains(&filter)
+                            })
                             .map(|p| {
                                 let online = store_ref.is_project_online(&p.a_tag());
                                 let status = if online { "online" } else { "offline" };
-                                (online, CompletionItem {
-                                    label: p.title.clone(),
-                                    description: status.to_string(),
-                                    fill: format!("/project {}", p.title),
-                                    completed: false,
-                                })
+                                (
+                                    online,
+                                    CompletionItem {
+                                        label: p.title.clone(),
+                                        description: status.to_string(),
+                                        fill: format!("/project {}", p.title),
+                                        completed: false,
+                                    },
+                                )
                             })
                             .collect();
                         items.sort_by(|a, b| b.0.cmp(&a.0));
@@ -368,22 +400,39 @@ impl CompletionMenu {
                                 let store = runtime.data_store();
                                 let store_ref = store.borrow();
                                 let lower_proj = project_part.to_lowercase();
-                                if let Some(project) = store_ref.get_projects().iter()
+                                if let Some(project) = store_ref
+                                    .get_projects()
+                                    .iter()
                                     .filter(|p| !p.is_deleted)
                                     .find(|p| p.title.to_lowercase().contains(&lower_proj))
                                 {
                                     let a_tag = project.a_tag();
-                                    self.items = agent_completion_items(&store_ref, &a_tag, &agent_filter, "/agent ", Some(project_part), &project.title);
+                                    self.items = agent_completion_items(
+                                        &store_ref,
+                                        &a_tag,
+                                        &agent_filter,
+                                        "/agent ",
+                                        Some(project_part),
+                                        &project.title,
+                                    );
                                 }
                             } else {
                                 let project_filter = after_at.to_lowercase();
-                                self.items = project_picker_items(runtime, &project_filter, cmd_part);
+                                self.items =
+                                    project_picker_items(runtime, &project_filter, cmd_part);
                             }
                         } else if let Some(ref a_tag) = state.current_project {
                             let store = runtime.data_store();
                             let store_ref = store.borrow();
-                            let proj_name = store_ref.get_projects().iter().find(|p| p.a_tag() == *a_tag).map(|p| p.title.as_str()).unwrap_or("unknown");
-                            self.items = agent_completion_items(&store_ref, a_tag, &filter, "/agent ", None, proj_name);
+                            let proj_name = store_ref
+                                .get_projects()
+                                .iter()
+                                .find(|p| p.a_tag() == *a_tag)
+                                .map(|p| p.title.as_str())
+                                .unwrap_or("unknown");
+                            self.items = agent_completion_items(
+                                &store_ref, a_tag, &filter, "/agent ", None, proj_name,
+                            );
                         } else {
                             self.items.clear();
                         }
@@ -399,21 +448,36 @@ impl CompletionMenu {
                                 let store = runtime.data_store();
                                 let store_ref = store.borrow();
                                 let lower_proj = project_part.to_lowercase();
-                                if let Some(project) = store_ref.get_projects().iter()
+                                if let Some(project) = store_ref
+                                    .get_projects()
+                                    .iter()
                                     .filter(|p| !p.is_deleted)
                                     .find(|p| p.title.to_lowercase().contains(&lower_proj))
                                 {
                                     let a_tag = project.a_tag();
-                                    self.items = thread_completion_items(&store_ref, &a_tag, &conv_filter, "/conversations ", Some(project_part));
+                                    self.items = thread_completion_items(
+                                        &store_ref,
+                                        &a_tag,
+                                        &conv_filter,
+                                        "/conversations ",
+                                        Some(project_part),
+                                    );
                                 }
                             } else {
                                 let project_filter = after_at.to_lowercase();
-                                self.items = project_picker_items(runtime, &project_filter, cmd_part);
+                                self.items =
+                                    project_picker_items(runtime, &project_filter, cmd_part);
                             }
                         } else if let Some(ref a_tag) = state.current_project {
                             let store = runtime.data_store();
                             let store_ref = store.borrow();
-                            self.items = thread_completion_items(&store_ref, a_tag, &filter, "/conversations ", None);
+                            self.items = thread_completion_items(
+                                &store_ref,
+                                a_tag,
+                                &filter,
+                                "/conversations ",
+                                None,
+                            );
                         } else {
                             self.items.clear();
                         }
@@ -445,24 +509,33 @@ impl CompletionMenu {
                                 let mut items: Vec<(bool, CompletionItem)> = Vec::new();
                                 for project in &projects {
                                     let a_tag = project.a_tag();
-                                    if !project_filter.is_empty() && !project.title.to_lowercase().contains(&project_filter) {
+                                    if !project_filter.is_empty()
+                                        && !project.title.to_lowercase().contains(&project_filter)
+                                    {
                                         continue;
                                     }
                                     let has_agent = store_ref
                                         .get_online_agents(&a_tag)
-                                        .map(|agents| agents.iter().any(|a| a.name.to_lowercase().contains(&agent_lower)))
+                                        .map(|agents| {
+                                            agents.iter().any(|a| {
+                                                a.name.to_lowercase().contains(&agent_lower)
+                                            })
+                                        })
                                         .unwrap_or(false);
                                     if !has_agent {
                                         continue;
                                     }
                                     let online = store_ref.is_project_online(&a_tag);
                                     let status = if online { "online" } else { "offline" };
-                                    items.push((online, CompletionItem {
-                                        label: project.title.clone(),
-                                        description: status.to_string(),
-                                        fill: format!("/new {}@{}", agent_part, project.title),
-                                        completed: false,
-                                    }));
+                                    items.push((
+                                        online,
+                                        CompletionItem {
+                                            label: project.title.clone(),
+                                            description: status.to_string(),
+                                            fill: format!("/new {}@{}", agent_part, project.title),
+                                            completed: false,
+                                        },
+                                    ));
                                 }
                                 items.sort_by(|a, b| b.0.cmp(&a.0));
                                 self.items = items.into_iter().map(|(_, item)| item).collect();
@@ -477,32 +550,60 @@ impl CompletionMenu {
                                         .filter(|p| !p.is_deleted)
                                         .collect();
 
-                                    find_project_split(after_at, &projects).and_then(|(project_part, rest)| {
-                                        let agent_filter = rest.to_lowercase();
-                                        let lower_proj = project_part.to_lowercase();
-                                        projects.iter()
-                                            .find(|p| p.title.to_lowercase() == lower_proj)
-                                            .or_else(|| projects.iter().find(|p| p.title.to_lowercase().contains(&lower_proj)))
-                                            .and_then(|project| {
-                                                let a_tag = project.a_tag();
-                                                store_ref.get_online_agents(&a_tag).map(|agents| {
-                                                    agents
-                                                        .iter()
-                                                        .filter(|a| agent_filter.is_empty() || a.name.to_lowercase().contains(&agent_filter))
-                                                        .map(|a| {
-                                                            let model = a.model.as_deref().unwrap_or("unknown");
-                                                            let pm = if a.is_pm { " [PM]" } else { "" };
-                                                            CompletionItem {
-                                                                label: format!("{}{pm}", a.name),
-                                                                description: model.to_string(),
-                                                                fill: format!("/new {}@{}", a.name, project_part),
-                                                                completed: false,
-                                                            }
-                                                        })
-                                                        .collect::<Vec<_>>()
+                                    find_project_split(after_at, &projects).and_then(
+                                        |(project_part, rest)| {
+                                            let agent_filter = rest.to_lowercase();
+                                            let lower_proj = project_part.to_lowercase();
+                                            projects
+                                                .iter()
+                                                .find(|p| p.title.to_lowercase() == lower_proj)
+                                                .or_else(|| {
+                                                    projects.iter().find(|p| {
+                                                        p.title.to_lowercase().contains(&lower_proj)
+                                                    })
                                                 })
-                                            })
-                                    })
+                                                .and_then(|project| {
+                                                    let a_tag = project.a_tag();
+                                                    store_ref.get_online_agents(&a_tag).map(
+                                                        |agents| {
+                                                            agents
+                                                                .iter()
+                                                                .filter(|a| {
+                                                                    agent_filter.is_empty()
+                                                                        || a.name
+                                                                            .to_lowercase()
+                                                                            .contains(&agent_filter)
+                                                                })
+                                                                .map(|a| {
+                                                                    let model = a
+                                                                        .model
+                                                                        .as_deref()
+                                                                        .unwrap_or("unknown");
+                                                                    let pm = if a.is_pm {
+                                                                        " [PM]"
+                                                                    } else {
+                                                                        ""
+                                                                    };
+                                                                    CompletionItem {
+                                                                        label: format!(
+                                                                            "{}{pm}",
+                                                                            a.name
+                                                                        ),
+                                                                        description: model
+                                                                            .to_string(),
+                                                                        fill: format!(
+                                                                            "/new {}@{}",
+                                                                            a.name, project_part
+                                                                        ),
+                                                                        completed: false,
+                                                                    }
+                                                                })
+                                                                .collect::<Vec<_>>()
+                                                        },
+                                                    )
+                                                })
+                                        },
+                                    )
                                 };
 
                                 match found {
@@ -510,13 +611,18 @@ impl CompletionMenu {
                                     None => {
                                         // No exact project prefix match — show project picker
                                         let project_filter = after_at.to_lowercase();
-                                        self.items = project_picker_items(runtime, &project_filter, cmd_part);
+                                        self.items = project_picker_items(
+                                            runtime,
+                                            &project_filter,
+                                            cmd_part,
+                                        );
                                     }
                                 }
                             } else {
                                 // No agent before @, no space — just project filter
                                 let project_filter = after_at.to_lowercase();
-                                self.items = project_picker_items(runtime, &project_filter, cmd_part);
+                                self.items =
+                                    project_picker_items(runtime, &project_filter, cmd_part);
                             }
                         } else if let Some(ref a_tag) = state.current_project {
                             let store = runtime.data_store();
@@ -527,7 +633,9 @@ impl CompletionMenu {
                                 .unwrap_or_default();
                             self.items = agents
                                 .iter()
-                                .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(&filter))
+                                .filter(|a| {
+                                    filter.is_empty() || a.name.to_lowercase().contains(&filter)
+                                })
                                 .map(|a| {
                                     let model = a.model.as_deref().unwrap_or("unknown");
                                     let pm = if a.is_pm { " [PM]" } else { "" };
@@ -555,7 +663,9 @@ impl CompletionMenu {
                             .iter()
                             .filter(|p| {
                                 let online = store_ref.is_project_online(&p.a_tag());
-                                !online && (filter.is_empty() || p.title.to_lowercase().contains(&filter))
+                                !online
+                                    && (filter.is_empty()
+                                        || p.title.to_lowercase().contains(&filter))
                             })
                             .map(|p| CompletionItem {
                                 label: p.title.clone(),
@@ -579,13 +689,28 @@ impl CompletionMenu {
                             if let Some(ref a_tag) = state.current_project {
                                 let store = runtime.data_store();
                                 let store_ref = store.borrow();
-                                let proj_name = store_ref.get_projects().iter().find(|p| p.a_tag() == *a_tag).map(|p| p.title.as_str()).unwrap_or("unknown");
-                                self.items = agent_completion_items(&store_ref, a_tag, &agent_filter, "/config @", None, proj_name);
+                                let proj_name = store_ref
+                                    .get_projects()
+                                    .iter()
+                                    .find(|p| p.a_tag() == *a_tag)
+                                    .map(|p| p.title.as_str())
+                                    .unwrap_or("unknown");
+                                self.items = agent_completion_items(
+                                    &store_ref,
+                                    a_tag,
+                                    &agent_filter,
+                                    "/config @",
+                                    None,
+                                    proj_name,
+                                );
                             } else {
                                 self.items.clear();
                             }
                         } else if first.starts_with("--") {
-                            let flag_filter = if first.starts_with("--") && rest.is_empty() && !first.contains(' ') {
+                            let flag_filter = if first.starts_with("--")
+                                && rest.is_empty()
+                                && !first.contains(' ')
+                            {
                                 first
                             } else {
                                 ""
@@ -594,7 +719,9 @@ impl CompletionMenu {
 
                             let mut items = Vec::new();
 
-                            if !first.starts_with("--") || (first.starts_with("--") && rest.is_empty()) {
+                            if !first.starts_with("--")
+                                || (first.starts_with("--") && rest.is_empty())
+                            {
                                 let flags = [
                                     ("--model", "change model"),
                                     ("--set-pm", "set as project manager"),
@@ -621,16 +748,35 @@ impl CompletionMenu {
                                 let store = runtime.data_store();
                                 let store_ref = store.borrow();
                                 let agent_filter_lower = agent_filter.to_lowercase();
-                                let proj_name = store_ref.get_projects().iter().find(|p| p.a_tag() == *a_tag).map(|p| p.title.as_str()).unwrap_or("unknown");
-                                items.extend(agent_completion_items(&store_ref, a_tag, &agent_filter_lower, &config_prefix, None, proj_name));
+                                let proj_name = store_ref
+                                    .get_projects()
+                                    .iter()
+                                    .find(|p| p.a_tag() == *a_tag)
+                                    .map(|p| p.title.as_str())
+                                    .unwrap_or("unknown");
+                                items.extend(agent_completion_items(
+                                    &store_ref,
+                                    a_tag,
+                                    &agent_filter_lower,
+                                    &config_prefix,
+                                    None,
+                                    proj_name,
+                                ));
                             }
 
                             self.items = items;
                         } else if let Some(ref a_tag) = state.current_project {
                             let store = runtime.data_store();
                             let store_ref = store.borrow();
-                            let proj_name = store_ref.get_projects().iter().find(|p| p.a_tag() == *a_tag).map(|p| p.title.as_str()).unwrap_or("unknown");
-                            self.items = agent_completion_items(&store_ref, a_tag, &filter, "/config ", None, proj_name);
+                            let proj_name = store_ref
+                                .get_projects()
+                                .iter()
+                                .find(|p| p.a_tag() == *a_tag)
+                                .map(|p| p.title.as_str())
+                                .unwrap_or("unknown");
+                            self.items = agent_completion_items(
+                                &store_ref, a_tag, &filter, "/config ", None, proj_name,
+                            );
                         } else {
                             self.items.clear();
                         }
@@ -642,8 +788,15 @@ impl CompletionMenu {
                         } else if let Some(ref a_tag) = state.current_project {
                             let store = runtime.data_store();
                             let store_ref = store.borrow();
-                            let proj_name = store_ref.get_projects().iter().find(|p| p.a_tag() == *a_tag).map(|p| p.title.as_str()).unwrap_or("unknown");
-                            self.items = agent_completion_items(&store_ref, a_tag, &filter, "/model ", None, proj_name);
+                            let proj_name = store_ref
+                                .get_projects()
+                                .iter()
+                                .find(|p| p.a_tag() == *a_tag)
+                                .map(|p| p.title.as_str())
+                                .unwrap_or("unknown");
+                            self.items = agent_completion_items(
+                                &store_ref, a_tag, &filter, "/model ", None, proj_name,
+                            );
                         } else {
                             self.items.clear();
                         }
@@ -654,7 +807,8 @@ impl CompletionMenu {
                             ("rules", "list auto-approve rules"),
                             ("rules remove", "remove a rule by index"),
                         ];
-                        self.items = subcmds.iter()
+                        self.items = subcmds
+                            .iter()
                             .filter(|(cmd, _)| filter.is_empty() || cmd.contains(&filter.as_str()))
                             .map(|(cmd, desc)| CompletionItem {
                                 label: cmd.to_string(),
@@ -697,5 +851,4 @@ impl CompletionMenu {
             };
         }
     }
-
 }

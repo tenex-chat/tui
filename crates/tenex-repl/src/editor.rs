@@ -152,7 +152,9 @@ impl LineEditor {
             let id = self.next_id;
             self.attachments.push(Attachment {
                 id,
-                kind: AttachmentKind::Text { content: text.to_string() },
+                kind: AttachmentKind::Text {
+                    content: text.to_string(),
+                },
             });
             self.next_id += 1;
             let marker = format!("[Text Attachment {}]", id);
@@ -233,8 +235,7 @@ impl LineEditor {
             return Some("html");
         }
         if text.to_uppercase().contains("SELECT ")
-            && (text.to_uppercase().contains(" FROM ")
-                || text.to_uppercase().contains(" WHERE "))
+            && (text.to_uppercase().contains(" FROM ") || text.to_uppercase().contains(" WHERE "))
         {
             return Some("sql");
         }
@@ -263,7 +264,9 @@ impl LineEditor {
             }
         }
 
-        let text_attachments: Vec<&Attachment> = self.attachments.iter()
+        let text_attachments: Vec<&Attachment> = self
+            .attachments
+            .iter()
             .filter(|a| matches!(a.kind, AttachmentKind::Text { .. }))
             .collect();
         if !text_attachments.is_empty() {
