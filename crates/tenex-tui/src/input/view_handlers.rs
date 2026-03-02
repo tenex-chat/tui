@@ -44,6 +44,14 @@ impl ActiveWorkCache {
     }
 }
 
+fn configured_relay_urls(app: &App) -> Vec<String> {
+    app.preferences
+        .borrow()
+        .configured_relay_url()
+        .map(|url| vec![url.to_string()])
+        .unwrap_or_default()
+}
+
 // =============================================================================
 // HOME VIEW
 // =============================================================================
@@ -1615,7 +1623,7 @@ pub(super) fn handle_editing_mode(
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {
                                         keys: keys.clone(),
                                         user_pubkey: user_pubkey.clone(),
-                                        relay_urls: vec![],
+                                        relay_urls: configured_relay_urls(app),
                                         response_tx: None,
                                     }) {
                                         app.set_warning_status(&format!(
@@ -1655,7 +1663,7 @@ pub(super) fn handle_editing_mode(
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {
                                         keys: keys.clone(),
                                         user_pubkey: user_pubkey.clone(),
-                                        relay_urls: vec![],
+                                        relay_urls: configured_relay_urls(app),
                                         response_tx: None,
                                     }) {
                                         app.set_warning_status(&format!(

@@ -147,6 +147,9 @@ pub struct Preferences {
     /// Stored credentials (nsec or ncryptsec)
     #[serde(default)]
     pub stored_credentials: Option<String>,
+    /// Preferred relay URL for app connections.
+    #[serde(default)]
+    pub configured_relay_url: Option<String>,
     /// Legacy: if true, hide scheduled events (migrated to scheduled_filter on load)
     #[serde(default, skip_serializing)]
     pub hide_scheduled: bool,
@@ -246,6 +249,7 @@ impl Default for Preferences {
             approved_backend_pubkeys: HashSet::new(),
             blocked_backend_pubkeys: HashSet::new(),
             stored_credentials: None,
+            configured_relay_url: None,
             hide_scheduled: false,
             scheduled_filter: ScheduledFilter::ShowAll,
             workspaces: Vec::new(),
@@ -513,6 +517,22 @@ impl PreferencesStorage {
 
     pub fn store_credentials(&mut self, credentials: &str) {
         self.prefs.stored_credentials = Some(credentials.to_string());
+        self.save_to_file();
+    }
+
+    pub fn configured_relay_url(&self) -> Option<&str> {
+        self.prefs.configured_relay_url.as_deref()
+    }
+
+    pub fn set_configured_relay_url(&mut self, relay_url: Option<String>) {
+        self.prefs.configured_relay_url = relay_url.and_then(|url| {
+            let trimmed = url.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
         self.save_to_file();
     }
 
@@ -788,5 +808,28 @@ mod tests {
         let storage = PreferencesStorage::new(dir.path().to_str().expect("utf8 path"));
         assert!(storage.bunker_enabled());
         assert!(storage.bunker_auto_approve_rules().is_empty());
+    }
+
+    #[test]
+    fn configured_relay_url_persists() {
+        let dir = tempdir().expect("tempdir");
+        let mut storage = PreferencesStorage::new(dir.path().to_str().expect("utf8 path"));
+
+        storage.set_configured_relay_url(Some("wss://relay.example".to_string()));
+        assert_eq!(storage.configured_relay_url(), Some("wss://relay.example"));
+
+        let reloaded = PreferencesStorage::new(dir.path().to_str().expect("utf8 path"));
+        assert_eq!(reloaded.configured_relay_url(), Some("wss://relay.example"));
+    }
+
+    #[test]
+    fn empty_configured_relay_url_clears_value() {
+        let dir = tempdir().expect("tempdir");
+        let mut storage = PreferencesStorage::new(dir.path().to_str().expect("utf8 path"));
+
+        storage.set_configured_relay_url(Some("wss://relay.example".to_string()));
+        storage.set_configured_relay_url(Some("   ".to_string()));
+
+        assert_eq!(storage.configured_relay_url(), None);
     }
 }

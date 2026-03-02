@@ -76,7 +76,7 @@ struct Args {
     #[arg(long)]
     nsec: Option<String>,
 
-    /// Relay URL to connect to (defaults to wss://tenex.chat)
+    /// Relay URL to connect to and persist in preferences.
     #[arg(long)]
     relay: Option<String>,
 }
@@ -1361,6 +1361,9 @@ async fn main() -> Result<()> {
 
     let config = CoreConfig::default();
     let mut prefs = PreferencesStorage::new(config.data_dir.to_str().unwrap_or("~/.tenex/cli"));
+    if let Some(relay_url) = args.relay.as_ref() {
+        prefs.set_configured_relay_url(Some(relay_url.clone()));
+    }
     let keys = resolve_keys(&args, &mut prefs)?;
     let user_pubkey = get_current_pubkey(&keys);
 
@@ -1381,7 +1384,10 @@ async fn main() -> Result<()> {
     // Connect to relays
     println!("{DIM}Connecting...{RESET}");
     let (response_tx, response_rx) = std::sync::mpsc::channel();
-    let relay_urls = args.relay.map(|r| vec![r]).unwrap_or_default();
+    let relay_urls = prefs
+        .configured_relay_url()
+        .map(|url| vec![url.to_string()])
+        .unwrap_or_default();
     handle.send(NostrCommand::Connect {
         keys,
         user_pubkey: user_pubkey.clone(),
