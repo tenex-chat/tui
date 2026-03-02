@@ -1778,7 +1778,13 @@ impl AppDataStore {
 
             // Check if message already exists (avoid duplicates)
             let is_dup = messages.iter().any(|m| m.id == message_id);
-            crate::tlog!("STORE", "handle_message id={} thread={} dup={}", &message_id, &thread_id, is_dup);
+            crate::tlog!(
+                "STORE",
+                "handle_message id={} thread={} dup={}",
+                &message_id,
+                &thread_id,
+                is_dup
+            );
             if !is_dup {
                 let message_created_at = message.created_at;
                 let message_pubkey = message.pubkey.clone();
@@ -2845,9 +2851,8 @@ impl AppDataStore {
                             let content = note.content().to_string();
 
                             if !terms.is_empty() {
-                                let all_match = terms
-                                    .iter()
-                                    .all(|term| text_contains_term(&content, term));
+                                let all_match =
+                                    terms.iter().all(|term| text_contains_term(&content, term));
                                 if !all_match {
                                     continue;
                                 }

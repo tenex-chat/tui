@@ -1455,12 +1455,8 @@ impl NostrWorker {
             .await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new(
-                "User projects".to_string(),
-                vec![KIND_PROJECT_DRAFT],
-                None,
-            )
-            .with_raw_filter(filters_json.unwrap_or_default()),
+            SubscriptionInfo::new("User projects".to_string(), vec![KIND_PROJECT_DRAFT], None)
+                .with_raw_filter(filters_json.unwrap_or_default()),
         );
         tlog!(
             "CONN",
@@ -1547,9 +1543,7 @@ impl NostrWorker {
             .kind(Kind::from(KIND_TEXT_NOTE))
             .author(pubkey);
         let user_messages_json = serde_json::to_string(&user_messages_filter).ok();
-        let output = client
-            .subscribe(user_messages_filter.clone(), None)
-            .await?;
+        let output = client.subscribe(user_messages_filter.clone(), None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
             SubscriptionInfo::new(
@@ -3910,7 +3904,10 @@ mod tests {
         let project_a_tag =
             "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:project";
         let result = NostrWorker::parse_report_coordinate(project_a_tag);
-        assert!(result.is_err(), "expected non-report coordinate to be rejected");
+        assert!(
+            result.is_err(),
+            "expected non-report coordinate to be rejected"
+        );
     }
 
     #[test]
