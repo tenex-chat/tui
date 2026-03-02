@@ -27,6 +27,7 @@ pub(crate) struct CompletionItem {
     pub(crate) label: String,
     pub(crate) description: String,
     pub(crate) fill: String,
+    pub(crate) completed: bool,
 }
 
 pub(crate) struct CompletionMenu {
@@ -85,10 +86,12 @@ pub(crate) fn thread_completion_items(
                 None => format!("{cmd_prefix}{display}"),
             };
 
+            let completed = t.status_label.as_deref() == Some("Done");
             CompletionItem {
                 label: display,
                 description: desc_parts.join(" · "),
                 fill,
+                completed,
             }
         })
         .collect()
@@ -133,10 +136,12 @@ pub(crate) fn active_completion_items(store: &AppDataStore, filter: &str) -> Vec
             .map(|pk| store.get_profile_name(pk))
             .collect();
 
+        let completed = thread.status_label.as_deref() == Some("Done");
         items.push(CompletionItem {
             label: display.clone(),
             description: format!("⟡ {} · {}", agent_names.join(", "), project_name),
-            fill: format!("/active {display}"),
+            fill: format!("/active {thread_id}"),
+            completed,
         });
     }
 
@@ -181,10 +186,12 @@ pub(crate) fn active_completion_items(store: &AppDataStore, filter: &str) -> Vec
         }
         desc_parts.push(project_name);
 
+        let completed = thread.status_label.as_deref() == Some("Done");
         items.push(CompletionItem {
             label: display.clone(),
             description: desc_parts.join(" · "),
-            fill: format!("/active {display}"),
+            fill: format!("/active {}", thread.id),
+            completed,
         });
     }
 
@@ -218,6 +225,7 @@ pub(crate) fn agent_completion_items(
                 label,
                 description: format!("{model} · {project_name}"),
                 fill,
+                completed: false,
             }
         })
         .collect()
@@ -241,6 +249,7 @@ fn project_picker_items(runtime: &CoreRuntime, filter: &str, cmd: &str) -> Vec<C
                 label: p.title.clone(),
                 description: status.to_string(),
                 fill: format!("{cmd} @{} ", p.title),
+                completed: false,
             })
         })
         .collect();
@@ -316,6 +325,7 @@ impl CompletionMenu {
                         label: cmd.to_string(),
                         description: desc.to_string(),
                         fill: format!("{cmd} "),
+                        completed: false,
                     })
                     .collect();
             }
@@ -340,6 +350,7 @@ impl CompletionMenu {
                                     label: p.title.clone(),
                                     description: status.to_string(),
                                     fill: format!("/project {}", p.title),
+                                    completed: false,
                                 })
                             })
                             .collect();
@@ -450,6 +461,7 @@ impl CompletionMenu {
                                         label: project.title.clone(),
                                         description: status.to_string(),
                                         fill: format!("/new {}@{}", agent_part, project.title),
+                                        completed: false,
                                     }));
                                 }
                                 items.sort_by(|a, b| b.0.cmp(&a.0));
@@ -484,6 +496,7 @@ impl CompletionMenu {
                                                                 label: format!("{}{pm}", a.name),
                                                                 description: model.to_string(),
                                                                 fill: format!("/new {}@{}", a.name, project_part),
+                                                                completed: false,
                                                             }
                                                         })
                                                         .collect::<Vec<_>>()
@@ -522,6 +535,7 @@ impl CompletionMenu {
                                         label: format!("{}{pm}", a.name),
                                         description: model.to_string(),
                                         fill: format!("/new {}", a.name),
+                                        completed: false,
                                     }
                                 })
                                 .collect();
@@ -547,6 +561,7 @@ impl CompletionMenu {
                                 label: p.title.clone(),
                                 description: "offline".to_string(),
                                 fill: format!("/boot {}", p.title),
+                                completed: false,
                             })
                             .collect();
                     }
@@ -591,6 +606,7 @@ impl CompletionMenu {
                                             label: flag.to_string(),
                                             description: desc.to_string(),
                                             fill: format!("/config {flag} "),
+                                            completed: false,
                                         });
                                     }
                                 }
@@ -644,6 +660,7 @@ impl CompletionMenu {
                                 label: cmd.to_string(),
                                 description: desc.to_string(),
                                 fill: format!("/bunker {cmd}"),
+                                completed: false,
                             })
                             .collect();
                     }

@@ -494,13 +494,17 @@ pub(crate) fn handle_active_command(arg: Option<&str>, state: &mut ReplState, ru
     let matched_entry = if let Ok(idx) = search.parse::<usize>() {
         ordered_threads.get(idx.saturating_sub(1))
     } else {
-        let lower = search.to_lowercase();
-        ordered_threads.iter().find(|(tid, _)| {
-            store_ref.get_thread_by_id(tid).map(|t|
-                t.title.to_lowercase().contains(&lower)
-                || t.summary.as_ref().map(|s| s.to_lowercase().contains(&lower)).unwrap_or(false)
-            ).unwrap_or(false)
-        })
+        // Try direct thread_id match first (from completion fill), then text search
+        ordered_threads.iter().find(|(tid, _)| tid == search)
+            .or_else(|| {
+                let lower = search.to_lowercase();
+                ordered_threads.iter().find(|(tid, _)| {
+                    store_ref.get_thread_by_id(tid).map(|t|
+                        t.title.to_lowercase().contains(&lower)
+                        || t.summary.as_ref().map(|s| s.to_lowercase().contains(&lower)).unwrap_or(false)
+                    ).unwrap_or(false)
+                })
+            })
     };
 
     let Some((thread_id, project_a_tag)) = matched_entry else {

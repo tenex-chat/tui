@@ -881,13 +881,24 @@ pub(crate) fn redraw_input(
             let desc = &item.description;
             write!(stdout, "\r\n").ok();
             queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-            let text = format!("  {label:<24} {desc}");
-            let text_len = 2 + label.chars().count().max(24) + 1 + desc.chars().count();
-            let item_pad = width.saturating_sub(text_len);
-            if i == completion.selected {
-                write!(stdout, "{BG_INPUT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+            if item.completed {
+                let text = format!("  \u{2714} {label:<22} {desc}");
+                let text_len = 2 + 2 + label.chars().count().max(22) + 1 + desc.chars().count();
+                let item_pad = width.saturating_sub(text_len);
+                if i == completion.selected {
+                    write!(stdout, "{BG_INPUT}{GREEN}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                } else {
+                    write!(stdout, "{BG_INPUT}\x1b[38;5;242m{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                }
             } else {
-                write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                let text = format!("  {label:<24} {desc}");
+                let text_len = 2 + label.chars().count().max(24) + 1 + desc.chars().count();
+                let item_pad = width.saturating_sub(text_len);
+                if i == completion.selected {
+                    write!(stdout, "{BG_INPUT}{WHITE_BOLD}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                } else {
+                    write!(stdout, "{BG_INPUT}{DIM}{text}{}{RESET}", " ".repeat(item_pad)).ok();
+                }
             }
         }
         completion.rendered_lines = count;
