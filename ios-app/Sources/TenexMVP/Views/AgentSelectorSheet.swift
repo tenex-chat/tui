@@ -28,8 +28,6 @@ struct AgentSelectorSheet: View {
 
     // MARK: - State
 
-    /// Local copy of selection - only committed on Done, discarded on Cancel
-    @State private var localSelectedPubkey: String?
     @State private var searchText = ""
     @State private var agentToConfig: ProjectAgent?
     @State private var agentToDelete: ProjectAgent?
@@ -61,23 +59,11 @@ struct AgentSelectorSheet: View {
         }
     }
 
-    private var selectedAgent: ProjectAgent? {
-        agents.first { $0.pubkey == localSelectedPubkey }
-    }
-
     // MARK: - Body
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Selected agent bar (if any)
-                if let agent = selectedAgent {
-                    selectedAgentBar(agent)
-                }
-
-                // Search and agent list
-                agentList
-            }
+            agentList
             .searchable(text: $searchText, prompt: "Search agents...")
             .navigationTitle("Select Agent")
             #if os(iOS)
@@ -88,32 +74,14 @@ struct AgentSelectorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        // Discard local changes
                         dismiss()
                     }
-                }
-
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Done") {
-                        // Commit local changes to parent binding
-                        selectedPubkey = localSelectedPubkey
-                        onDone?()
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                    .keyboardShortcut(.defaultAction)
                 }
             }
             .onAppear {
-                // Initialize local state from parent binding
-                localSelectedPubkey = selectedPubkey
                 if !initialSearchQuery.isEmpty {
                     searchText = initialSearchQuery
-                    autoSelectBestMatch(for: initialSearchQuery)
                 }
-            }
-            .onChange(of: searchText) { _, newQuery in
-                autoSelectBestMatch(for: newQuery)
             }
             .sheet(item: $agentToConfig) { agent in
                 AgentConfigSheet(agent: agent, projectId: projectId)
@@ -138,20 +106,16 @@ struct AgentSelectorSheet: View {
     @ViewBuilder
     private var agentList: some View {
         #if os(macOS)
-        List(selection: $localSelectedPubkey) {
+        List {
             if filteredAgents.isEmpty {
                 emptyStateView
             } else {
                 ForEach(filteredAgents, id: \.pubkey) { agent in
                     OnlineAgentRowView(
                         agent: agent,
-                        isSelected: localSelectedPubkey == agent.pubkey,
-                        onTap: nil,
-                        onConfig: {
-                            agentToConfig = agent
-                        }
+                        onTap: { selectAgent(agent) },
+                        onConfig: { agentToConfig = agent }
                     )
-                    .tag(agent.pubkey)
                 }
             }
         }
@@ -164,13 +128,8 @@ struct AgentSelectorSheet: View {
                 ForEach(filteredAgents, id: \.pubkey) { agent in
                     OnlineAgentRowView(
                         agent: agent,
-                        isSelected: localSelectedPubkey == agent.pubkey,
-                        onTap: {
-                            selectAgent(agent)
-                        },
-                        onConfig: {
-                            agentToConfig = agent
-                        }
+                        onTap: { selectAgent(agent) },
+                        onConfig: { agentToConfig = agent }
                     )
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
@@ -184,27 +143,6 @@ struct AgentSelectorSheet: View {
         }
         .listStyle(.insetGrouped)
         #endif
-    }
-
-    private func selectedAgentBar(_ agent: ProjectAgent) -> some View {
-        HStack(spacing: 8) {
-            Text("@\(agent.name)")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(Color.agentBrand)
-
-            Button(action: { localSelectedPubkey = nil }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.borderless)
-
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.bar)
     }
 
     private var emptyStateView: some View {
@@ -236,66 +174,9 @@ struct AgentSelectorSheet: View {
     // MARK: - Actions
 
     private func selectAgent(_ agent: ProjectAgent) {
-        // Toggle selection (single-select)
-        if localSelectedPubkey == agent.pubkey {
-            localSelectedPubkey = nil
-        } else {
-            localSelectedPubkey = agent.pubkey
-        }
-    }
-
-    /// Auto-select the best matching agent for the current query.
-    /// Ranking: exact > prefix > substring > subsequence.
-    private func autoSelectBestMatch(for query: String) {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        var best: (score: Int, distance: Int, pubkey: String)?
-        let normalizedQuery = trimmed.lowercased()
-
-        for agent in filteredAgents {
-            let name = agent.name.lowercased()
-            if let rank = matchRank(name: name, query: normalizedQuery) {
-                if let current = best {
-                    if rank.score < current.score || (rank.score == current.score && rank.distance < current.distance) {
-                        best = (rank.score, rank.distance, agent.pubkey)
-                    }
-                } else {
-                    best = (rank.score, rank.distance, agent.pubkey)
-                }
-            }
-        }
-
-        if let bestPubkey = best?.pubkey {
-            localSelectedPubkey = bestPubkey
-        }
-    }
-
-    private func matchRank(name: String, query: String) -> (score: Int, distance: Int)? {
-        if name == query {
-            return (0, 0)
-        }
-        if name.hasPrefix(query) {
-            return (1, name.count - query.count)
-        }
-        if let range = name.range(of: query) {
-            let startDistance = name.distance(from: name.startIndex, to: range.lowerBound)
-            return (2, startDistance)
-        }
-
-        // Subsequence match for tolerant matching (e.g. "hr" -> "human-resources")
-        var queryIndex = query.startIndex
-        var consumed = 0
-        for ch in name {
-            consumed += 1
-            if queryIndex < query.endIndex && ch == query[queryIndex] {
-                queryIndex = query.index(after: queryIndex)
-                if queryIndex == query.endIndex {
-                    return (3, consumed - query.count)
-                }
-            }
-        }
-        return nil
+        selectedPubkey = agent.pubkey
+        onDone?()
+        dismiss()
     }
 }
 
@@ -310,7 +191,6 @@ extension ProjectAgent: Identifiable {
 struct OnlineAgentRowView: View {
     @Environment(TenexCoreManager.self) var coreManager
     let agent: ProjectAgent
-    let isSelected: Bool
     var onTap: (() -> Void)?
     var onConfig: (() -> Void)?
 
@@ -322,7 +202,7 @@ struct OnlineAgentRowView: View {
                 pubkey: agent.pubkey,
                 size: 36,
                 showBorder: false,
-                isSelected: isSelected
+                isSelected: false
             )
             .environment(coreManager)
 
@@ -332,7 +212,7 @@ struct OnlineAgentRowView: View {
                     Text(agent.name)
                         .font(.subheadline)
                         .fontWeight(.medium)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.primary)
 
                     if agent.isPm {
                         Text("PM")
@@ -346,25 +226,16 @@ struct OnlineAgentRowView: View {
                                     .fill(Color.agentBrand)
                             )
                     }
-
-                    if let model = agent.model, !model.isEmpty {
-                        Text(model)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
-                Text("@\(agent.name)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let model = agent.model, !model.isEmpty {
+                    Text(model)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Spacer()
-
-            // Selection indicator
-            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                .font(.body)
-                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
         }
     }
 
@@ -391,7 +262,6 @@ struct OnlineAgentRowView: View {
                 .buttonStyle(.borderless)
             }
         }
-        .padding(.vertical, 4)
     }
 }
 
@@ -626,7 +496,7 @@ struct AgentDeletionSheet: View {
             )
         ],
         projectId: "test-project",
-        selectedPubkey: .constant("abc123def456")
+        selectedPubkey: .constant(nil)
     )
     .environment(TenexCoreManager())
 }
