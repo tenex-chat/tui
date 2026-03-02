@@ -31,6 +31,10 @@ struct Args {
     /// Prefer TENEX_NSEC environment variable for safer usage.
     #[arg(long)]
     nsec: Option<String>,
+
+    /// Relay URL to connect to and persist in preferences.
+    #[arg(long)]
+    relay: Option<String>,
 }
 
 /// Authentication source for the nsec key
@@ -69,6 +73,14 @@ fn resolve_nsec_source(args: &Args) -> NsecSource {
     NsecSource::Stored
 }
 
+fn configured_relay_urls(app: &App) -> Vec<String> {
+    app.preferences
+        .borrow()
+        .configured_relay_url()
+        .map(|url| vec![url.to_string()])
+        .unwrap_or_default()
+}
+
 /// Connect and initialize the app with authenticated keys
 fn connect_and_init(
     app: &mut App,
@@ -85,7 +97,7 @@ fn connect_and_init(
         .send(NostrCommand::Connect {
             keys: keys.clone(),
             user_pubkey: user_pubkey.clone(),
-            relay_urls: vec![],
+            relay_urls: configured_relay_urls(app),
             response_tx: None,
         })
         .map_err(|e| format!("Failed to connect: {}", e))?;
@@ -199,6 +211,12 @@ async fn main() -> Result<()> {
         .take_data_rx()
         .ok_or_else(|| anyhow::anyhow!("Core runtime already has active data receiver"))?;
     app.set_core_handle(core_handle.clone(), data_rx);
+
+    if let Some(relay_url) = args.relay.as_ref() {
+        app.preferences
+            .borrow_mut()
+            .set_configured_relay_url(Some(relay_url.clone()));
+    }
 
     // Resolve authentication: CLI arg > env var > stored credentials
     let nsec_source = resolve_nsec_source(&args);
