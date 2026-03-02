@@ -28,7 +28,11 @@ pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Re
         for attempt in 0..MAX_ATTEMPTS {
             if note_exists(ndb, event) {
                 if attempt == 0 && event.kind.as_u16() == 1 {
-                    crate::tlog!("INGEST", "kind:1 id={} already in ndb (skip)", event.id.to_hex());
+                    crate::tlog!(
+                        "INGEST",
+                        "kind:1 id={} already in ndb (skip)",
+                        event.id.to_hex()
+                    );
                 }
                 handled = true;
                 break;
@@ -67,10 +71,8 @@ pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Re
                                 break;
                             }
                             Err(fallback_err) => {
-                                last_error = Some(format!(
-                                    "primary={} fallback={}",
-                                    err, fallback_err
-                                ));
+                                last_error =
+                                    Some(format!("primary={} fallback={}", err, fallback_err));
                                 if note_exists(ndb, event) {
                                     handled = true;
                                     break;

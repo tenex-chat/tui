@@ -3875,8 +3875,7 @@ impl App {
                 )
             };
             if is_busy {
-                if let (Some(core_handle), Some(a_tag)) =
-                    (self.core_handle.clone(), project_a_tag)
+                if let (Some(core_handle), Some(a_tag)) = (self.core_handle.clone(), project_a_tag)
                 {
                     let working_agents = self
                         .data_store
