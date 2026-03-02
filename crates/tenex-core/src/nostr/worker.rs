@@ -736,7 +736,7 @@ impl NostrWorker {
                         response_tx,
                     } => {
                         debug_log("Worker: Publishing thread");
-                        match rt.block_on(self.handle_publish_thread(
+                        if let Err(e) = rt.block_on(self.handle_publish_thread(
                             project_a_tag,
                             title,
                             content,
@@ -746,15 +746,9 @@ impl NostrWorker {
                             reference_conversation_id,
                             reference_report_a_tag,
                             fork_message_id,
+                            response_tx,
                         )) {
-                            Ok(event_id) => {
-                                if let Some(tx) = response_tx {
-                                    let _ = tx.send(event_id);
-                                }
-                            }
-                            Err(e) => {
-                                tlog!("ERROR", "Failed to publish thread: {}", e);
-                            }
+                            tlog!("ERROR", "Failed to publish thread: {}", e);
                         }
                     }
                     NostrCommand::PublishMessage {
@@ -1921,7 +1915,8 @@ impl NostrWorker {
         reference_conversation_id: Option<String>,
         reference_report_a_tag: Option<String>,
         fork_message_id: Option<String>,
-    ) -> Result<String> {
+        response_tx: Option<EventIdSender>,
+    ) -> Result<()> {
         let client = self
             .client
             .as_ref()
@@ -1955,7 +1950,11 @@ impl NostrWorker {
                 event_id
             ));
         }
-        // UI gets notified via nostrdb SubscriptionStream when data is ready
+
+        // Notify caller immediately — local ingest is done, relay send is best-effort.
+        if let Some(tx) = response_tx {
+            let _ = tx.send(event_id);
+        }
 
         // Send to relay with timeout (don't block forever on degraded connections)
         match tokio::time::timeout(
@@ -1972,7 +1971,7 @@ impl NostrWorker {
             ),
         }
 
-        Ok(event_id)
+        Ok(())
     }
 
     fn wait_for_note_persisted(ndb: &Ndb, event_id: &[u8; 32], timeout_ms: u64) -> bool {

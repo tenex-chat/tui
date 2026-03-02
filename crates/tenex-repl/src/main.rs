@@ -884,7 +884,7 @@ async fn run_repl(
                                     "/project" | "/p" => CommandResult::Lines(handle_project_command(arg, state, runtime)),
                                     "/agent" | "/a" => CommandResult::Lines(handle_agent_command(arg, state, runtime)),
                                     "/new" | "/n" => handle_new_command(arg.unwrap_or(""), state, runtime),
-                                    "/reference" | "/r" => handle_reference_command(state, runtime),
+                                    "/reference" | "/r" => handle_reference_command(arg, state, runtime),
                                     "/conversations" | "/c" | "/open" | "/o" => handle_open_command(arg, state, runtime),
                                     "/config" => handle_config_command(arg, state, runtime, &mut panel),
                                     "/model" | "/m" => handle_model_command(arg, state, runtime, &mut panel),
