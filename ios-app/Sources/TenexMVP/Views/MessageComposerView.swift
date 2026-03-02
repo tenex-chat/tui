@@ -579,7 +579,7 @@ struct MessageComposerView: View {
             if !usesWorkspaceInlineLayout {
                 // Project and Agent row (for new conversations)
                 if isNewConversation {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         if let project = selectedProject {
                             projectChipView(project)
                         } else {
@@ -600,7 +600,7 @@ struct MessageComposerView: View {
                         Spacer()
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 10)
                     .background(.bar)
                 }
 
@@ -619,12 +619,12 @@ struct MessageComposerView: View {
                 }
 
                 // Nudge chips (for all conversations)
-                if selectedProject != nil {
+                if selectedProject != nil && !selectedNudges.isEmpty {
                     nudgeChipsView
                 }
 
                 // Skill chips (for all conversations)
-                if selectedProject != nil {
+                if selectedProject != nil && !selectedSkills.isEmpty {
                     skillChipsView
                 }
             }

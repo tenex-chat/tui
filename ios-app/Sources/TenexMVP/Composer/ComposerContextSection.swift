@@ -2,19 +2,13 @@ import SwiftUI
 
 extension MessageComposerView {
     func projectChipView(_ project: Project) -> some View {
-        HStack(spacing: 8) {
-            Menu {
-                projectSelectionMenuContent()
-            } label: {
-                projectMenuChipLabel(project)
-            }
-            .menuIndicator(.hidden)
-            .menuStyle(.borderlessButton)
-            Spacer()
+        Menu {
+            projectSelectionMenuContent()
+        } label: {
+            projectMenuChipLabel(project)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.bar)
+        .menuIndicator(.hidden)
+        .menuStyle(.borderlessButton)
     }
 
     func projectMenuChipLabel(_ project: Project) -> some View {
@@ -31,7 +25,7 @@ extension MessageComposerView {
             Text(project.title)
                 .font(.subheadline)
                 .fontWeight(.medium)
-                .foregroundStyle(.primary)
+                .foregroundStyle(Color.primary)
 
             Image(systemName: "chevron.down")
                 .font(.caption2)
@@ -163,7 +157,7 @@ extension MessageComposerView {
                     Text("@\(name)")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(Color.primary)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
@@ -670,7 +664,7 @@ struct OnlineAgentChipView: View {
                 Text("@\(agent.name)")
                     .font(.subheadline)
                     .fontWeight(.medium)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.primary)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
@@ -802,7 +796,7 @@ struct WorkspaceAgentPopoverContent: View {
                 if selectedPubkey == agent.pubkey {
                     Image(systemName: "checkmark")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.primary)
                 }
 
                 Button {
