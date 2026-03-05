@@ -14,7 +14,6 @@ pub mod secure_storage;
 pub mod slug;
 pub mod stats;
 pub mod store;
-pub mod streaming;
 
 // Re-export FFI types at crate root for convenience
 pub use ffi::{LoginResult, TenexCore, TenexError, UserInfo};

@@ -6,7 +6,7 @@ use crate::ui::views::render_inline_ask_lines;
 use crate::ui::{App, InputMode};
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -102,6 +102,80 @@ fn render_markdown_with_indicator(
     lines
 }
 
+fn take_prefix_chars(text: &str, visible_chars: usize) -> String {
+    text.chars().take(visible_chars).collect()
+}
+
+const STREAM_FADE_TAIL_CHARS: usize = 5;
+
+fn stream_fade_color(distance_from_end: usize) -> Color {
+    match distance_from_end {
+        // Newest revealed character starts effectively invisible.
+        0 => theme::BG_APP,
+        1 => Color::Rgb(70, 70, 70),
+        2 => Color::Rgb(120, 120, 120),
+        3 => Color::Rgb(170, 170, 170),
+        4 => Color::Rgb(208, 208, 208),
+        _ => theme::TEXT_PRIMARY,
+    }
+}
+
+fn apply_stream_tail_fade(lines: &mut [Line<'static>], tail_chars: usize) {
+    if tail_chars == 0 {
+        return;
+    }
+
+    // markdown_lines() prefixes each line with "│" and "  " (2 spans).
+    // Ignore right-padding spaces so the fade targets visible text, not padded columns.
+    let effective_chars_per_line: Vec<usize> = lines
+        .iter()
+        .map(|line| {
+            let content: String = line
+                .spans
+                .iter()
+                .skip(2)
+                .map(|span| span.content.as_ref())
+                .collect();
+            content
+                .trim_end_matches(char::is_whitespace)
+                .chars()
+                .count()
+        })
+        .collect();
+    let total_content_chars: usize = effective_chars_per_line.iter().sum();
+    if total_content_chars == 0 {
+        return;
+    }
+
+    let mut global_char_index = 0usize;
+    for (line, effective_chars) in lines.iter_mut().zip(effective_chars_per_line.into_iter()) {
+        let mut rebuilt: Vec<Span<'static>> = Vec::new();
+        let mut line_content_index = 0usize;
+        for (span_index, span) in line.spans.iter().enumerate() {
+            if span_index < 2 {
+                rebuilt.push(span.clone());
+                continue;
+            }
+
+            for ch in span.content.chars() {
+                let mut style = span.style;
+                // Only apply fading to non-padding chars in this wrapped line.
+                if line_content_index < effective_chars {
+                    let distance_from_end =
+                        total_content_chars.saturating_sub(global_char_index + 1);
+                    if distance_from_end < tail_chars {
+                        style = style.fg(stream_fade_color(distance_from_end));
+                    }
+                    global_char_index += 1;
+                }
+                rebuilt.push(Span::styled(ch.to_string(), style));
+                line_content_index += 1;
+            }
+        }
+        *line = Line::from(rebuilt);
+    }
+}
+
 pub(crate) fn render_messages_panel(
     f: &mut Frame,
     app: &mut App,
@@ -110,6 +184,9 @@ pub(crate) fn render_messages_panel(
 ) {
     // Get thread_id first - needed for reply index filtering
     let thread_id = app.selected_thread().map(|t| t.id.as_str());
+    let suppressed_kind1_message_id = app
+        .local_streaming_content()
+        .and_then(|buffer| buffer.superseded_message_id.clone());
 
     // Build reply index: parent_id -> Vec<&Message>
     // Skip messages that e-tag the thread root - those are siblings, not nested replies
@@ -144,6 +221,15 @@ pub(crate) fn render_messages_panel(
             })
             .collect()
     };
+    let display_messages: Vec<&Message> =
+        if let Some(ref suppressed_id) = suppressed_kind1_message_id {
+            display_messages
+                .into_iter()
+                .filter(|m| m.id != *suppressed_id)
+                .collect()
+        } else {
+            display_messages
+        };
 
     // Messages area
     let mut messages_text: Vec<Line> = Vec::new();
@@ -1017,15 +1103,23 @@ pub(crate) fn render_messages_panel(
         }
     }
 
-    // Check for local streaming content (from Unix socket, not Nostr)
+    // Check for live streaming content (from Nostr ephemeral stream deltas)
     // Clone the buffer to avoid borrowing app across the mutation below
     if let Some(buffer) = app.local_streaming_content().cloned() {
         if !buffer.text_content.is_empty() || !buffer.reasoning_content.is_empty() {
+            let agent_name = if buffer.agent_pubkey.is_empty() {
+                "Agent".to_string()
+            } else {
+                app.data_store
+                    .borrow()
+                    .get_profile_name(&buffer.agent_pubkey)
+            };
+
             // Render agent header with streaming indicator
             messages_text.push(Line::from(vec![
                 Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL)),
                 Span::styled(
-                    "Agent",
+                    agent_name,
                     Style::default()
                         .fg(theme::ACCENT_SPECIAL)
                         .add_modifier(Modifier::BOLD),
@@ -1040,35 +1134,36 @@ pub(crate) fn render_messages_panel(
 
             // Render reasoning content first if present (muted style)
             if !buffer.reasoning_content.is_empty() {
-                let reasoning_style = Style::default()
-                    .fg(theme::TEXT_MUTED)
-                    .add_modifier(Modifier::ITALIC);
-                for line in buffer.reasoning_content.lines() {
-                    messages_text.push(Line::from(vec![
-                        Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL)),
-                        Span::styled(line.to_string(), reasoning_style),
-                    ]));
+                let markdown = render_markdown(&buffer.reasoning_content);
+                for line in reasoning_lines(&markdown, theme::ACCENT_SPECIAL, content_width) {
+                    messages_text.push(line);
                 }
             }
 
-            // Render text content with cursor indicator
+            // Render text content with the same wrapping helper used by finalized messages.
             if !buffer.text_content.is_empty() {
-                let markdown_lines = render_markdown(&buffer.text_content);
-                for (i, line) in markdown_lines.iter().enumerate() {
-                    let mut line_spans = vec![Span::styled(
-                        "│  ",
-                        Style::default().fg(theme::ACCENT_SPECIAL),
-                    )];
-                    line_spans.extend(line.spans.clone());
-
-                    // Add cursor indicator at the end of the last line
-                    if i == markdown_lines.len() - 1 && !buffer.is_complete {
-                        line_spans.push(Span::styled(
-                            "▌",
-                            Style::default().fg(theme::ACCENT_SPECIAL),
-                        ));
-                    }
-                    messages_text.push(Line::from(line_spans));
+                let visible_text =
+                    take_prefix_chars(&buffer.text_content, buffer.visible_text_chars);
+                let markdown = render_markdown(&visible_text);
+                let mut wrapped = markdown_lines(
+                    &markdown,
+                    theme::ACCENT_SPECIAL,
+                    theme::BG_APP,
+                    content_width,
+                );
+                let has_unrevealed = buffer.visible_text_chars < buffer.text_char_count;
+                let should_apply_fade = !buffer.is_complete || has_unrevealed;
+                if should_apply_fade {
+                    apply_stream_tail_fade(&mut wrapped, STREAM_FADE_TAIL_CHARS);
+                }
+                for line in wrapped {
+                    messages_text.push(line);
+                }
+                if !buffer.is_complete || has_unrevealed {
+                    messages_text.push(Line::from(vec![
+                        Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL)),
+                        Span::styled("▌", Style::default().fg(theme::ACCENT_SPECIAL)),
+                    ]));
                 }
             } else if !buffer.is_complete {
                 // Show just cursor if we have no text yet but are streaming

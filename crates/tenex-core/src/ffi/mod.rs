@@ -791,7 +791,7 @@ fn process_data_changes_with_deltas(
                     }
                 }
             }
-            DataChange::LocalStreamChunk {
+            DataChange::StreamTextDelta {
                 agent_pubkey,
                 conversation_id,
                 text_delta,
@@ -1676,7 +1676,7 @@ pub enum DataChangeType {
         project_a_tag: String,
         active_conversation_ids: Vec<String>,
     },
-    /// Streaming text chunk arrived (live typing)
+    /// Streaming text chunk arrived from Nostr ephemeral kind:24135 deltas.
     StreamChunk {
         agent_pubkey: String,
         conversation_id: String,

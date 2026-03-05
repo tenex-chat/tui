@@ -26,6 +26,11 @@ use tenex_core::models::{AgentDefinition, MCPTool};
 use tenex_core::runtime::CoreHandle;
 use tenex_core::tlog;
 
+/// Number of stream characters to reveal per UI tick (~50ms).
+const STREAM_CHARS_PER_TICK: usize = 3;
+/// Faster reveal cadence during stream -> kind:1 handoff.
+const STREAM_KIND1_HANDOFF_CHARS_PER_TICK: usize = 24;
+
 /// Fuzzy match: all chars in pattern must appear in target in order (case-insensitive)
 pub fn fuzzy_matches(target: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
@@ -574,6 +579,8 @@ impl App {
     /// Increment frame counter and update notifications (call on each tick)
     pub fn tick(&mut self) {
         self.animation_clock.tick();
+        self.conversation
+            .tick_stream_animation(STREAM_CHARS_PER_TICK, STREAM_KIND1_HANDOFF_CHARS_PER_TICK);
         self.notification_manager.tick();
         self.tick_tts_playback();
     }
@@ -1637,7 +1644,7 @@ impl App {
         self.data_rx = Some(data_rx);
     }
 
-    /// Process local streaming chunks from the worker channel.
+    /// Process Nostr stream text deltas from the worker channel.
     /// All other updates are handled via the core runtime's nostrdb subscription.
     pub fn check_for_data_updates(&mut self) -> anyhow::Result<()> {
         // Collect all pending changes first to avoid borrow conflicts
@@ -1649,7 +1656,7 @@ impl App {
 
         for change in changes {
             match change {
-                DataChange::LocalStreamChunk {
+                DataChange::StreamTextDelta {
                     agent_pubkey,
                     conversation_id,
                     text_delta,
@@ -2950,14 +2957,14 @@ impl App {
         store.get_user_response_to_ask(message_id)
     }
 
-    // ===== Local Streaming Methods =====
+    // ===== Stream Delta Methods =====
 
     /// Get streaming content for current conversation
     pub fn local_streaming_content(&self) -> Option<&LocalStreamBuffer> {
         self.conversation.local_streaming_content()
     }
 
-    /// Update streaming buffer from local chunk
+    /// Update streaming buffer from Nostr stream delta data
     pub fn handle_local_stream_chunk(
         &mut self,
         agent_pubkey: String,
@@ -2978,6 +2985,23 @@ impl App {
     /// Clear the local stream buffer for a conversation
     pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
         self.conversation.clear_local_stream_buffer(conversation_id);
+    }
+
+    /// Convert live stream buffer into authoritative kind:1 content and animate
+    /// any missing tail before removing the stream row.
+    pub fn handoff_local_stream_to_kind1(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        message_pubkey: &str,
+        message_content: &str,
+    ) -> bool {
+        self.conversation.handoff_local_stream_to_kind1(
+            conversation_id,
+            message_id,
+            message_pubkey,
+            message_content,
+        )
     }
 
     // ===== Filter Management Methods =====

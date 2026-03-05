@@ -116,6 +116,7 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
                 )
 
             case .streamChunk(let agentPubkey, let conversationId, let textDelta):
+                // StreamChunk is emitted by Rust from Nostr ephemeral kind:24135 text deltas.
                 coreManager.applyStreamChunk(
                     agentPubkey: agentPubkey,
                     conversationId: conversationId,

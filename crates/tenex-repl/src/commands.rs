@@ -57,6 +57,14 @@ pub(crate) enum CommandResult {
     ClearScreen(Vec<String>),
 }
 
+pub(crate) enum CoreEventUiAction {
+    None,
+    Print(String),
+    /// Rebuild the current conversation from canonical stored messages.
+    /// Used to replace raw streamed output with formatted kind:1 rendering.
+    RefreshConversation,
+}
+
 // ─── Command Handlers ───────────────────────────────────────────────────────
 
 pub(crate) fn handle_project_command(
@@ -1314,7 +1322,7 @@ pub(crate) fn handle_core_event(
     state: &mut ReplState,
     runtime: &CoreRuntime,
     history_store: &crate::history::HistoryStore,
-) -> Option<String> {
+) -> CoreEventUiAction {
     match event {
         CoreEvent::Message(msg) => {
             if msg.pubkey == state.user_pubkey {
@@ -1343,29 +1351,29 @@ pub(crate) fn handle_core_event(
                         }
                     }
                 }
-                return None;
+                return CoreEventUiAction::None;
             }
 
             if state.current_conversation.as_deref() != Some(&msg.thread_id) {
-                return None;
+                return CoreEventUiAction::None;
             }
 
             if msg.is_reasoning {
-                return None;
+                return CoreEventUiAction::None;
             }
 
             if state.streaming_in_progress {
                 state.streaming_in_progress = false;
                 state.stream_buffer.clear();
                 state.stream_finished_conv = None;
-                state.last_displayed_pubkey = Some(msg.pubkey.clone());
-                return Some(format!("\n{}", print_separator_raw()));
+                // Replace live streamed text with authoritative kind:1 rendering.
+                return CoreEventUiAction::RefreshConversation;
             }
 
             // Suppress duplicate: streaming already displayed this content
             if state.stream_finished_conv.as_deref() == Some(&msg.thread_id) && !is_tool_use(msg) {
                 state.stream_finished_conv = None;
-                return None;
+                return CoreEventUiAction::RefreshConversation;
             }
 
             let store = runtime.data_store();
@@ -1379,15 +1387,17 @@ pub(crate) fn handle_core_event(
             );
             drop(store_ref);
 
-            formatted.map(|f| {
+            if let Some(formatted) = formatted {
                 if is_tool_use(msg) {
-                    f
+                    CoreEventUiAction::Print(formatted)
                 } else {
-                    format!("{f}\n{}", print_separator_raw())
+                    CoreEventUiAction::Print(format!("{formatted}\n{}", print_separator_raw()))
                 }
-            })
+            } else {
+                CoreEventUiAction::None
+            }
         }
-        _ => None,
+        _ => CoreEventUiAction::None,
     }
 }
 

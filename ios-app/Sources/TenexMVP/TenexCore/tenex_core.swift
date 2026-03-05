@@ -8885,7 +8885,7 @@ public enum DataChangeType {
     case activeConversationsChanged(projectId: String, projectATag: String, activeConversationIds: [String]
     )
     /**
-     * Streaming text chunk arrived (live typing)
+     * Streaming text chunk arrived from Nostr ephemeral kind:24135 deltas.
      */
     case streamChunk(agentPubkey: String, conversationId: String, textDelta: String?
     )
