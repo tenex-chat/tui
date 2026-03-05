@@ -281,6 +281,83 @@ fn record_latest_kind1_created_at(
     entry.last_updated = now;
 }
 
+fn latest_kind1_created_at_for_conversation_author(
+    ndb: &Ndb,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) -> Option<u64> {
+    let pubkey_bytes: [u8; 32] = hex::decode(agent_pubkey).ok()?.try_into().ok()?;
+    let txn = Transaction::new(ndb).ok()?;
+    let filter = nostrdb::Filter::new()
+        .kinds([KIND_TEXT_NOTE as u64])
+        .authors([&pubkey_bytes])
+        .build();
+    let results = ndb.query(&txn, &[filter], 10_000).ok()?;
+
+    let mut latest_created_at: Option<u64> = None;
+    for result in results.iter() {
+        if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+            let mut matches_conversation = false;
+            for tag in note.tags() {
+                if tag.get(0).and_then(|v| v.variant().str()) != Some("e") {
+                    continue;
+                }
+                let tag_value_matches = tag.get(1).is_some_and(|value| {
+                    value.variant().str() == Some(conversation_id)
+                        || value
+                            .variant()
+                            .id()
+                            .map(|id_bytes| hex::encode(id_bytes) == conversation_id)
+                            .unwrap_or(false)
+                });
+                if tag_value_matches {
+                    matches_conversation = true;
+                    break;
+                }
+            }
+            if !matches_conversation {
+                continue;
+            }
+            let created_at = note.created_at();
+            latest_created_at = Some(latest_created_at.map_or(created_at, |curr| curr.max(created_at)));
+        }
+    }
+
+    latest_created_at
+}
+
+fn seed_kind1_supersession_from_ndb(
+    ndb: &Ndb,
+    latest_kind1_by_author: &mut HashMap<ConversationAuthorKey, Kind1SupersessionState>,
+    stream_key: &StreamReassemblyKey,
+    now: Instant,
+) {
+    let key = ConversationAuthorKey {
+        conversation_id: stream_key.conversation_id.clone(),
+        agent_pubkey: stream_key.agent_pubkey.clone(),
+    };
+
+    if latest_kind1_by_author.contains_key(&key) {
+        return;
+    }
+
+    let Some(latest_kind1_created_at) = latest_kind1_created_at_for_conversation_author(
+        ndb,
+        &key.conversation_id,
+        &key.agent_pubkey,
+    ) else {
+        return;
+    };
+
+    latest_kind1_by_author.insert(
+        key,
+        Kind1SupersessionState {
+            latest_kind1_created_at,
+            last_updated: now,
+        },
+    );
+}
+
 fn is_stream_delta_superseded_by_kind1(
     latest_kind1_by_author: &HashMap<ConversationAuthorKey, Kind1SupersessionState>,
     stream_key: &StreamReassemblyKey,
@@ -1972,6 +2049,13 @@ impl NostrWorker {
 
                                         match parse_stream_text_delta_event(&event) {
                                             Ok(parsed) => {
+                                                seed_kind1_supersession_from_ndb(
+                                                    &ndb,
+                                                    &mut latest_kind1_by_author,
+                                                    &parsed.key,
+                                                    now,
+                                                );
+
                                                 if is_stream_delta_superseded_by_kind1(
                                                     &latest_kind1_by_author,
                                                     &parsed.key,
@@ -4217,6 +4301,15 @@ mod tests {
         builder.sign_with_keys(keys).unwrap()
     }
 
+    fn build_kind1_message_event(keys: &Keys, conversation_id: &str, content: &str) -> Event {
+        let conversation_event_id =
+            EventId::parse(conversation_id).expect("conversation_id must be valid event id hex");
+        EventBuilder::new(Kind::TextNote, content)
+            .tag(Tag::event(conversation_event_id))
+            .sign_with_keys(keys)
+            .unwrap()
+    }
+
     #[test]
     fn test_ephemeral_filtering_database_rejects_ephemeral_events() {
         let dir = tempdir().unwrap();
@@ -4481,6 +4574,77 @@ mod tests {
         assert!(
             !is_stream_delta_superseded_by_kind1(&latest, &key, 101),
             "newer stream should pass through as new in-progress message"
+        );
+    }
+
+    #[test]
+    fn test_seed_kind1_supersession_from_ndb_suppresses_same_timestamp_stream() {
+        let dir = tempdir().unwrap();
+        let db = crate::store::Database::new(dir.path()).unwrap();
+        let ndb_database =
+            EphemeralFilteringNdbDatabase::new(nostr_ndb::NdbDatabase::from((*db.ndb).clone()));
+
+        let keys = Keys::generate();
+        let conversation_id = "6874c8248e2f5047e110f28d46484e8efafb90bc98dfad0dcf8b162eaa74c7fe";
+        let kind1 = build_kind1_message_event(&keys, conversation_id, "hello world");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let status = rt.block_on(ndb_database.save_event(&kind1)).unwrap();
+        assert_eq!(status, SaveEventStatus::Success);
+        let found = crate::store::events::wait_for_event_processing(
+            &db.ndb,
+            nostrdb::Filter::new().kinds([KIND_TEXT_NOTE as u64]).build(),
+            5000,
+        );
+        assert!(found, "kind:1 event should be visible in ndb");
+
+        let mut latest: HashMap<ConversationAuthorKey, Kind1SupersessionState> = HashMap::new();
+        let stream_key = StreamReassemblyKey {
+            conversation_id: conversation_id.to_string(),
+            agent_pubkey: keys.public_key().to_hex(),
+            llm_ral: 0,
+        };
+
+        seed_kind1_supersession_from_ndb(&db.ndb, &mut latest, &stream_key, Instant::now());
+
+        assert!(
+            is_stream_delta_superseded_by_kind1(&latest, &stream_key, kind1.created_at.as_secs()),
+            "stream delta should be suppressed when persisted kind:1 exists at same timestamp"
+        );
+    }
+
+    #[test]
+    fn test_seed_kind1_supersession_from_ndb_ignores_other_authors() {
+        let dir = tempdir().unwrap();
+        let db = crate::store::Database::new(dir.path()).unwrap();
+        let ndb_database =
+            EphemeralFilteringNdbDatabase::new(nostr_ndb::NdbDatabase::from((*db.ndb).clone()));
+
+        let kind1_author = Keys::generate();
+        let stream_author = Keys::generate();
+        let conversation_id = "6874c8248e2f5047e110f28d46484e8efafb90bc98dfad0dcf8b162eaa74c7fe";
+        let kind1 = build_kind1_message_event(&kind1_author, conversation_id, "hello world");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let status = rt.block_on(ndb_database.save_event(&kind1)).unwrap();
+        assert_eq!(status, SaveEventStatus::Success);
+        let found = crate::store::events::wait_for_event_processing(
+            &db.ndb,
+            nostrdb::Filter::new().kinds([KIND_TEXT_NOTE as u64]).build(),
+            5000,
+        );
+        assert!(found, "kind:1 event should be visible in ndb");
+
+        let mut latest: HashMap<ConversationAuthorKey, Kind1SupersessionState> = HashMap::new();
+        let stream_key = StreamReassemblyKey {
+            conversation_id: conversation_id.to_string(),
+            agent_pubkey: stream_author.public_key().to_hex(),
+            llm_ral: 0,
+        };
+
+        seed_kind1_supersession_from_ndb(&db.ndb, &mut latest, &stream_key, Instant::now());
+
+        assert!(
+            latest.is_empty(),
+            "supersession state must not seed from kind:1 by a different author"
         );
     }
 
