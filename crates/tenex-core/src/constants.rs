@@ -71,6 +71,8 @@ pub mod kinds {
     pub const OPERATIONS_STATUS: u16 = 24133;
     /// Stop operations command
     pub const STOP_OPERATIONS: u16 = 24134;
+    /// Ephemeral text stream delta (live agent typing)
+    pub const STREAM_TEXT_DELTA: u16 = 24135;
     /// Report/article
     pub const REPORT: u16 = 30023;
     /// Project definition (NIP-33 replaceable)

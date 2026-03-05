@@ -1,6 +1,10 @@
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::{self, ClearType};
+use crossterm::event::{
+    DisableBracketedPaste, EnableBracketedPaste, Event, EventStream, KeyCode, KeyEvent,
+    KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
+use crossterm::terminal::{self, supports_keyboard_enhancement, ClearType};
 use crossterm::{cursor, execute};
 use futures::StreamExt;
 use nostr_sdk::prelude::*;
@@ -56,7 +60,8 @@ use commands::{
     handle_info_command, handle_model_command, handle_new_command, handle_open_command,
     handle_project_command, handle_reference_command, handle_send_message, handle_status_bar_open,
     handle_status_command, maybe_open_ask_modal, navigate_to_delegation, pop_conversation_stack,
-    rebuild_conversation_view, try_upload_image_file, CommandResult, UploadResult,
+    rebuild_conversation_view, try_upload_image_file, CommandResult, CoreEventUiAction,
+    UploadResult,
 };
 use completion::CompletionMenu;
 use editor::LineEditor;
@@ -167,6 +172,37 @@ fn history_search_items(
             completed: false,
         })
         .collect()
+}
+
+fn send_stop_for_current_conversation(
+    state: &ReplState,
+    runtime: &CoreRuntime,
+) -> Result<(), String> {
+    let Some(thread_id) = state.current_conversation.clone() else {
+        return Err("No active conversation".to_string());
+    };
+
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    if !store_ref.operations.is_event_busy(&thread_id) {
+        return Err("No active agents on this conversation".to_string());
+    }
+
+    let project_a_tag = store_ref
+        .find_project_for_thread(&thread_id)
+        .or_else(|| state.current_project.clone())
+        .ok_or_else(|| "Could not resolve project for current conversation".to_string())?;
+    let working_agents = store_ref.operations.get_working_agents(&thread_id);
+    drop(store_ref);
+
+    runtime
+        .handle()
+        .send(NostrCommand::StopOperations {
+            project_a_tag,
+            event_ids: vec![thread_id],
+            agent_pubkeys: working_agents,
+        })
+        .map_err(|e| format!("Failed to send stop command: {e}"))
 }
 
 async fn run_repl(
@@ -809,6 +845,17 @@ async fn run_repl(
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                     }
 
+                    // Ctrl+J fallback for terminals that send it for Shift+Enter (e.g. iTerm/macOS).
+                    (KeyCode::Char('j') | KeyCode::Char('J'), m)
+                        if m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) =>
+                    {
+                        state.delegation_bar.unfocus();
+                        editor.selected_attachment = None;
+                        editor.insert_char('\n');
+                        completion.update_from_buffer(&editor.buffer, state, runtime);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    }
+
                     // Enter / Shift+Enter / Cmd+Enter
                     (KeyCode::Enter, m) => {
                         if state.delegation_bar.focused {
@@ -982,11 +1029,98 @@ async fn run_repl(
                             }
                             completion.hide();
                             redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
-                        } else if !state.conversation_stack.is_empty() {
-                            if let Some(CommandResult::ClearScreen(lines)) = pop_conversation_stack(state, runtime) {
-                                apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
-                                maybe_open_ask_modal(state, runtime);
-                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        } else if state.is_current_conversation_busy(runtime) {
+                            if state.consume_stop_confirmation_if_active() {
+                                match send_stop_for_current_conversation(state, runtime) {
+                                    Ok(()) => {
+                                        let msg = print_system_raw("Stop signal sent");
+                                        print_above_input(
+                                            &mut stdout,
+                                            &msg,
+                                            state,
+                                            runtime,
+                                            &editor,
+                                            &mut completion,
+                                            &panel,
+                                            &status_nav,
+                                            &stats_panel,
+                                            &nudge_skill_panel,
+                                        );
+                                    }
+                                    Err(err) => {
+                                        let msg = print_error_raw(&err);
+                                        print_above_input(
+                                            &mut stdout,
+                                            &msg,
+                                            state,
+                                            runtime,
+                                            &editor,
+                                            &mut completion,
+                                            &panel,
+                                            &status_nav,
+                                            &stats_panel,
+                                            &nudge_skill_panel,
+                                        );
+                                    }
+                                }
+                            } else {
+                                state.arm_stop_confirmation();
+                                redraw_input(
+                                    &mut stdout,
+                                    state,
+                                    runtime,
+                                    &editor,
+                                    &mut completion,
+                                    &panel,
+                                    &status_nav,
+                                    &stats_panel,
+                                    &nudge_skill_panel,
+                                );
+                            }
+                        } else {
+                            let had_confirmation = state.stop_confirmation_active();
+                            state.clear_stop_confirmation();
+                            if !state.conversation_stack.is_empty() {
+                                if let Some(CommandResult::ClearScreen(lines)) =
+                                    pop_conversation_stack(state, runtime)
+                                {
+                                    apply_clear_screen(
+                                        &mut stdout,
+                                        &lines,
+                                        state,
+                                        runtime,
+                                        &editor,
+                                        &mut completion,
+                                        &panel,
+                                        &status_nav,
+                                        &stats_panel,
+                                        &nudge_skill_panel,
+                                    );
+                                    maybe_open_ask_modal(state, runtime);
+                                    redraw_input(
+                                        &mut stdout,
+                                        state,
+                                        runtime,
+                                        &editor,
+                                        &mut completion,
+                                        &panel,
+                                        &status_nav,
+                                        &stats_panel,
+                                        &nudge_skill_panel,
+                                    );
+                                }
+                            } else if had_confirmation {
+                                redraw_input(
+                                    &mut stdout,
+                                    state,
+                                    runtime,
+                                    &editor,
+                                    &mut completion,
+                                    &panel,
+                                    &status_nav,
+                                    &stats_panel,
+                                    &nudge_skill_panel,
+                                );
                             }
                         }
                     }
@@ -1243,17 +1377,39 @@ async fn run_repl(
                 if let Some(note_keys) = note_keys {
                     match runtime.process_note_keys(&note_keys) {
                         Ok(events) => {
+                            let mut refreshed_conversation = false;
                             for event in &events {
-                                if let Some(text) = handle_core_event(event, state, runtime, &history_store) {
-                                    if state.streaming_in_progress {
-                                        raw_println!("{}", text);
-                                    } else {
-                                        print_above_input(&mut stdout, &text, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                match handle_core_event(event, state, runtime, &history_store) {
+                                    CoreEventUiAction::Print(text) => {
+                                        if state.streaming_in_progress {
+                                            raw_println!("{}", text);
+                                        } else {
+                                            print_above_input(&mut stdout, &text, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        }
                                     }
+                                    CoreEventUiAction::RefreshConversation => {
+                                        let lines = rebuild_conversation_view(state, runtime);
+                                        apply_clear_screen(
+                                            &mut stdout,
+                                            &lines,
+                                            state,
+                                            runtime,
+                                            &editor,
+                                            &mut completion,
+                                            &panel,
+                                            &status_nav,
+                                            &stats_panel,
+                                            &nudge_skill_panel,
+                                        );
+                                        maybe_open_ask_modal(state, runtime);
+                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        refreshed_conversation = true;
+                                    }
+                                    CoreEventUiAction::None => {}
                                 }
                             }
                             // Auto-open ask modal if a new ask event arrived
-                            if !events.is_empty() {
+                            if !events.is_empty() && !refreshed_conversation {
                                 maybe_open_ask_modal(state, runtime);
                                 redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                             }
@@ -1270,6 +1426,7 @@ async fn run_repl(
                 drain_data_changes(data_rx, state, runtime, &mut stdout, &editor, &mut completion, &mut panel, &status_nav, &stats_panel, &nudge_skill_panel);
                 state.wave_frame = state.wave_frame.wrapping_add(1);
                 update_delegation_bar(state, runtime);
+                let stop_confirm_expired = state.expire_stop_confirmation_if_needed();
 
                 if !editor.buffer.trim().is_empty() && editor.buffer != state.draft_last_content
                     && state.draft_last_saved.elapsed().as_secs() >= 1
@@ -1291,7 +1448,13 @@ async fn run_repl(
                 }
 
                 let agents_active = state.has_active_agents(runtime);
-                if (state.is_animating() || agents_active || state.delegation_bar.has_content()) && !state.streaming_in_progress {
+                if (state.is_animating()
+                    || agents_active
+                    || state.stop_confirmation_active()
+                    || stop_confirm_expired
+                    || state.delegation_bar.has_content())
+                    && !state.streaming_in_progress
+                {
                     redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                 }
             }
@@ -1315,7 +1478,8 @@ fn drain_data_changes(
 ) {
     loop {
         match data_rx.try_recv() {
-            Ok(DataChange::LocalStreamChunk {
+            Ok(DataChange::StreamTextDelta {
+                agent_pubkey,
                 conversation_id,
                 text_delta,
                 is_finish,
@@ -1338,16 +1502,14 @@ fn drain_data_changes(
                         clear_input_area(stdout, completion);
                         completion.input_area_drawn = false;
 
-                        let is_consecutive = state.last_displayed_pubkey.as_deref()
-                            == state.current_agent.as_deref()
-                            && state.current_agent.is_some();
-
-                        if is_consecutive {
-                            write!(stdout, "  ").ok();
+                        let agent_name = if agent_pubkey.is_empty() {
+                            state.agent_display()
                         } else {
-                            let agent_name = state.agent_display();
-                            write!(stdout, "{BRIGHT_GREEN}{agent_name}{RESET}\r\n  ").ok();
-                        }
+                            let store = runtime.data_store();
+                            let store_ref = store.borrow();
+                            store_ref.get_profile_name(&agent_pubkey)
+                        };
+                        write!(stdout, "{BRIGHT_GREEN}{agent_name}{RESET}\r\n  ").ok();
                     }
                     write!(stdout, "{delta}").ok();
                     stdout.flush().ok();
@@ -1508,25 +1670,30 @@ async fn main() -> Result<()> {
         let _ = terminal::disable_raw_mode();
         let _ = execute!(
             io::stdout(),
+            PopKeyboardEnhancementFlags,
             cursor::Show,
-            crossterm::event::DisableBracketedPaste
+            DisableBracketedPaste
         );
         default_panic(info);
     }));
 
     // Enable raw mode + bracketed paste
     terminal::enable_raw_mode()?;
-    execute!(io::stdout(), crossterm::event::EnableBracketedPaste)?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnableBracketedPaste)?;
+    if supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+    }
 
     let result = run_repl(&mut runtime, &data_rx, &mut state, &keys_for_repl).await;
 
     // Restore terminal
+    let _ = execute!(stdout, PopKeyboardEnhancementFlags);
     terminal::disable_raw_mode()?;
-    execute!(
-        io::stdout(),
-        cursor::Show,
-        crossterm::event::DisableBracketedPaste
-    )?;
+    execute!(stdout, cursor::Show, DisableBracketedPaste)?;
 
     runtime.shutdown();
     result

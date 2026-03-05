@@ -1152,13 +1152,20 @@ mod tests {
 use crate::models::{Message, ProjectAgent, Thread, TimeFilter};
 use std::collections::HashMap;
 
-/// Buffer for local streaming content (per conversation)
+/// Buffer for live streaming content (per conversation)
 #[derive(Default, Clone)]
 pub struct LocalStreamBuffer {
     pub agent_pubkey: String,
     pub text_content: String,
+    /// Total text characters received from stream deltas.
+    pub text_char_count: usize,
+    /// Characters currently revealed by animation.
+    pub visible_text_chars: usize,
     pub reasoning_content: String,
     pub is_complete: bool,
+    /// When set, this buffer is performing kind:1 handoff animation and
+    /// temporarily suppresses rendering of this finalized message row.
+    pub superseded_message_id: Option<String>,
 }
 
 /// State for conversation view - thread/agent selection, subthread navigation, and message display.
@@ -1168,7 +1175,7 @@ pub struct LocalStreamBuffer {
 /// - Currently selected thread and agent
 /// - Subthread navigation (viewing replies to a specific message)
 /// - Message selection within the conversation
-/// - Local streaming buffers for real-time message updates
+/// - Live streaming buffers for real-time message updates
 /// - LLM metadata display toggle
 #[derive(Default)]
 pub struct ConversationState {
@@ -1182,10 +1189,14 @@ pub struct ConversationState {
     pub subthread_root_message: Option<Message>,
     /// Index of selected message in chat view (for navigation)
     pub selected_message_index: usize,
-    /// Local streaming buffers by conversation_id
+    /// Live streaming buffers by conversation_id
     pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
     /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
     pub show_llm_metadata: bool,
+}
+
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
 }
 
 impl ConversationState {
@@ -1223,7 +1234,7 @@ impl ConversationState {
         self.local_stream_buffers.get(&conv_id)
     }
 
-    /// Update streaming buffer from local chunk
+    /// Update streaming buffer from Nostr stream delta data
     pub fn handle_local_stream_chunk(
         &mut self,
         agent_pubkey: String,
@@ -1238,7 +1249,9 @@ impl ConversationState {
             .or_default();
 
         buffer.agent_pubkey = agent_pubkey;
+        buffer.superseded_message_id = None;
         if let Some(delta) = text_delta {
+            buffer.text_char_count += delta.chars().count();
             buffer.text_content.push_str(&delta);
         }
         if let Some(delta) = reasoning_delta {
@@ -1249,7 +1262,98 @@ impl ConversationState {
         }
     }
 
-    /// Clear the local stream buffer for a conversation
+    /// Transition a live stream buffer to authoritative kind:1 content.
+    /// Keeps the stream row visible and animates any missing tail quickly.
+    /// Returns true when handoff animation should continue.
+    pub fn handoff_local_stream_to_kind1(
+        &mut self,
+        conversation_id: &str,
+        message_id: &str,
+        message_pubkey: &str,
+        message_content: &str,
+    ) -> bool {
+        let Some(buffer) = self.local_stream_buffers.get_mut(conversation_id) else {
+            return false;
+        };
+
+        // Guard against stale buffer from a different author.
+        if !buffer.agent_pubkey.is_empty() && buffer.agent_pubkey != message_pubkey {
+            self.local_stream_buffers.remove(conversation_id);
+            return false;
+        }
+
+        let final_char_count = message_content.chars().count();
+        if final_char_count == 0 {
+            self.local_stream_buffers.remove(conversation_id);
+            return false;
+        }
+
+        let current_visible = buffer.visible_text_chars.min(buffer.text_char_count);
+        let common_prefix_chars = common_prefix_len(&buffer.text_content, message_content);
+        let next_visible = current_visible.min(common_prefix_chars);
+
+        buffer.agent_pubkey = message_pubkey.to_string();
+        buffer.text_content = message_content.to_string();
+        buffer.text_char_count = final_char_count;
+        buffer.visible_text_chars = next_visible;
+        buffer.is_complete = true;
+        buffer.superseded_message_id = Some(message_id.to_string());
+
+        if buffer.visible_text_chars >= buffer.text_char_count {
+            self.local_stream_buffers.remove(conversation_id);
+            return false;
+        }
+
+        true
+    }
+
+    /// Advance the streaming reveal animation for all active conversations.
+    /// Returns true if any buffer progressed this tick.
+    pub fn tick_stream_animation(
+        &mut self,
+        chars_per_tick: usize,
+        kind1_handoff_chars_per_tick: usize,
+    ) -> bool {
+        if chars_per_tick == 0 && kind1_handoff_chars_per_tick == 0 {
+            return false;
+        }
+
+        let mut advanced = false;
+        let mut finished_handoffs: Vec<String> = Vec::new();
+
+        for (conversation_id, buffer) in self.local_stream_buffers.iter_mut() {
+            let reveal_step = if buffer.superseded_message_id.is_some() {
+                kind1_handoff_chars_per_tick.max(chars_per_tick)
+            } else {
+                chars_per_tick
+            };
+            if reveal_step == 0 {
+                continue;
+            }
+
+            if buffer.visible_text_chars < buffer.text_char_count {
+                buffer.visible_text_chars =
+                    (buffer.visible_text_chars + reveal_step).min(buffer.text_char_count);
+                advanced = true;
+            }
+
+            if buffer.superseded_message_id.is_some()
+                && buffer.visible_text_chars >= buffer.text_char_count
+            {
+                finished_handoffs.push(conversation_id.clone());
+            }
+        }
+
+        if !finished_handoffs.is_empty() {
+            advanced = true;
+            for conversation_id in finished_handoffs {
+                self.local_stream_buffers.remove(&conversation_id);
+            }
+        }
+        advanced
+    }
+
+    /// Clear the stream buffer for a conversation
     pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
         self.local_stream_buffers.remove(conversation_id);
     }
@@ -1337,7 +1441,10 @@ mod conversation_state_tests {
         let buffer = state.local_stream_buffers.get("conv-123").unwrap();
         assert_eq!(buffer.agent_pubkey, "agent-pubkey");
         assert_eq!(buffer.text_content, "Hello ");
+        assert_eq!(buffer.text_char_count, 6);
+        assert_eq!(buffer.visible_text_chars, 0);
         assert!(!buffer.is_complete);
+        assert!(buffer.superseded_message_id.is_none());
 
         // Add more content
         state.handle_local_stream_chunk(
@@ -1350,11 +1457,62 @@ mod conversation_state_tests {
 
         let buffer = state.local_stream_buffers.get("conv-123").unwrap();
         assert_eq!(buffer.text_content, "Hello World!");
+        assert_eq!(buffer.text_char_count, 12);
+        assert_eq!(buffer.visible_text_chars, 0);
         assert_eq!(buffer.reasoning_content, "Reasoning text");
         assert!(buffer.is_complete);
+        assert!(buffer.superseded_message_id.is_none());
 
         // Clear buffer
         state.clear_local_stream_buffer("conv-123");
+        assert!(state.local_stream_buffers.get("conv-123").is_none());
+    }
+
+    #[test]
+    fn test_streaming_animation_tick_progress() {
+        let mut state = ConversationState::new();
+        state.handle_local_stream_chunk(
+            "agent-pubkey".to_string(),
+            "conv-123".to_string(),
+            Some("hello world".to_string()),
+            None,
+            false,
+        );
+
+        assert!(state.tick_stream_animation(3, 12));
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.visible_text_chars, 3);
+
+        assert!(state.tick_stream_animation(20, 12));
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.visible_text_chars, buffer.text_char_count);
+
+        assert!(!state.tick_stream_animation(1, 12));
+    }
+
+    #[test]
+    fn test_kind1_handoff_animates_missing_tail_and_clears_buffer() {
+        let mut state = ConversationState::new();
+        state.handle_local_stream_chunk(
+            "agent-pubkey".to_string(),
+            "conv-123".to_string(),
+            Some("hello".to_string()),
+            None,
+            false,
+        );
+        assert!(state.tick_stream_animation(5, 20));
+
+        let handoff =
+            state.handoff_local_stream_to_kind1("conv-123", "msg-1", "agent-pubkey", "hello world");
+        assert!(handoff);
+
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.text_content, "hello world");
+        assert_eq!(buffer.visible_text_chars, 5);
+        assert_eq!(buffer.superseded_message_id.as_deref(), Some("msg-1"));
+
+        // Fast handoff cadence should complete and remove the temporary stream row.
+        assert!(state.tick_stream_animation(3, 20));
         assert!(state.local_stream_buffers.get("conv-123").is_none());
     }
 

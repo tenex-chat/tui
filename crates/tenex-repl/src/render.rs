@@ -779,12 +779,20 @@ pub(crate) fn redraw_input(
     } else {
         &editor.buffer
     };
+    let show_work_spinner = state.is_current_conversation_busy(runtime);
     let (prompt_str, prompt_width) = if state.search_mode {
         if state.search_all_projects {
             (format!("{WHITE_BOLD}  \u{27f2} all:{RESET}{BG_INPUT} "), 9)
         } else {
             (format!("{WHITE_BOLD}  \u{27f2} {RESET}{BG_INPUT}"), 4)
         }
+    } else if show_work_spinner {
+        let spinner_frames = ['|', '/', '-', '\\'];
+        let frame = spinner_frames[(state.wave_frame as usize) % spinner_frames.len()];
+        (
+            format!("{WHITE_BOLD}  {frame} {RESET}{BG_INPUT}"),
+            PROMPT_PREFIX_WIDTH as usize,
+        )
     } else {
         (
             format!("{WHITE_BOLD}  \u{203a} {RESET}{BG_INPUT}"),
@@ -1290,19 +1298,8 @@ pub(crate) fn clear_input_area(stdout: &mut Stdout, completion: &mut CompletionM
 
     let up_to_top = completion.cursor_row + 1 + completion.delegation_bar_lines;
     queue!(stdout, cursor::MoveUp(up_to_top), cursor::MoveToColumn(0)).ok();
-    queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-
-    let lines_below = completion.delegation_bar_lines
-        + 1
-        + completion.input_wrap_lines
-        + completion.attachment_indicator_lines
-        + completion.rendered_lines
-        + 2;
-    for _ in 0..lines_below {
-        write!(stdout, "\r\n").ok();
-        queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-    }
-    queue!(stdout, cursor::MoveUp(lines_below)).ok();
+    write!(stdout, "{RESET}").ok();
+    queue!(stdout, terminal::Clear(ClearType::FromCursorDown)).ok();
     stdout.flush().ok();
     completion.rendered_lines = 0;
     completion.attachment_indicator_lines = 0;

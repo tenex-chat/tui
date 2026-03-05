@@ -655,7 +655,7 @@ fn create_responses_sse_stream(
             .await;
 
             match recv_result {
-                Ok(Ok(DataChange::LocalStreamChunk {
+                Ok(Ok(DataChange::StreamTextDelta {
                     agent_pubkey: _chunk_agent,
                     conversation_id,
                     text_delta,

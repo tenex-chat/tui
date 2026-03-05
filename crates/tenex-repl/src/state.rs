@@ -2,9 +2,9 @@ use crate::panels::{ConversationStackEntry, DelegationBar, StatusBarAction};
 use crate::util::{
     strip_ansi, thread_display_name, wave_colorize, ANIMATION_DURATION_F64, ANIMATION_DURATION_MS,
 };
-use crate::{ACCENT, CYAN, DIM, GREEN, RED, RESET};
+use crate::{CYAN, DIM, GREEN, RED, RESET};
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tenex_core::models::AskInputState;
 use tenex_core::nostr::bunker::BunkerSignRequest;
 use tenex_core::runtime::CoreRuntime;
@@ -47,6 +47,7 @@ pub(crate) struct ReplState {
     pub(crate) pre_search_buffer: String,
     pub(crate) ask_modal: Option<AskModalState>,
     pub(crate) connected: bool,
+    pub(crate) stop_confirmation_deadline: Option<Instant>,
 }
 
 impl ReplState {
@@ -79,6 +80,7 @@ impl ReplState {
             pre_search_buffer: String::new(),
             ask_modal: None,
             connected: false,
+            stop_confirmation_deadline: None,
         }
     }
 
@@ -97,6 +99,45 @@ impl ReplState {
         let store = runtime.data_store();
         let store_ref = store.borrow();
         store_ref.operations.has_active_agents()
+    }
+
+    pub(crate) fn is_current_conversation_busy(&self, runtime: &CoreRuntime) -> bool {
+        let Some(conv_id) = self.current_conversation.as_deref() else {
+            return false;
+        };
+        let store = runtime.data_store();
+        let store_ref = store.borrow();
+        store_ref.operations.is_event_busy(conv_id)
+    }
+
+    pub(crate) fn arm_stop_confirmation(&mut self) {
+        self.stop_confirmation_deadline = Some(Instant::now() + Duration::from_secs(2));
+    }
+
+    pub(crate) fn consume_stop_confirmation_if_active(&mut self) -> bool {
+        if self.stop_confirmation_active() {
+            self.stop_confirmation_deadline = None;
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn clear_stop_confirmation(&mut self) {
+        self.stop_confirmation_deadline = None;
+    }
+
+    pub(crate) fn stop_confirmation_active(&self) -> bool {
+        self.stop_confirmation_deadline
+            .map(|deadline| Instant::now() < deadline)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn expire_stop_confirmation_if_needed(&mut self) -> bool {
+        if self.stop_confirmation_deadline.is_some() && !self.stop_confirmation_active() {
+            self.stop_confirmation_deadline = None;
+            return true;
+        }
+        false
     }
 
     pub(crate) fn project_display(&self, runtime: &CoreRuntime) -> String {
@@ -162,18 +203,16 @@ impl ReplState {
 
         let store = runtime.data_store();
         let store_ref = store.borrow();
+        let current_conv_busy = self
+            .current_conversation
+            .as_deref()
+            .map(|conv_id| store_ref.operations.is_event_busy(conv_id))
+            .unwrap_or(false);
 
-        if let Some(ref conv_id) = self.current_conversation {
-            let working_agents = store_ref.operations.get_working_agents(conv_id);
-            if !working_agents.is_empty() {
-                let names: Vec<String> = working_agents
-                    .iter()
-                    .map(|pk| store_ref.get_profile_name(pk))
-                    .collect();
-                let names_str = names.join(", ");
-                text.push_str(&format!("  {ACCENT}⟡ {names_str} working{RESET}"));
-                plain_width += 2 + 2 + names_str.len() + " working".len();
-            }
+        if current_conv_busy && self.stop_confirmation_active() {
+            let prompt = "Esc again to confirm";
+            text.push_str(&format!("  {RED}⏹ {prompt}{RESET}"));
+            plain_width += 2 + 2 + prompt.len();
         }
 
         for ops in store_ref.operations.get_all_active_operations() {

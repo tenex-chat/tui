@@ -125,7 +125,8 @@ extension TenexCoreManager {
     }
 
     /// Apply a conversation upsert from callback without triggering a full conversation-list rebuild.
-    /// This path clears streaming state, applies the delta, and only refreshes messages when already cached.
+    /// This path clears ephemeral stream-delta state (kind:24135), applies the authoritative
+    /// kind:1 update, and only refreshes messages when already cached.
     @MainActor
     func applyConversationUpsertDelta(_ conversation: ConversationFullInfo) {
         let conversationId = conversation.thread.id
@@ -361,6 +362,7 @@ extension TenexCoreManager {
 
     @MainActor
     func applyStreamChunk(agentPubkey: String, conversationId: String, textDelta: String?) {
+        // Stream chunks are ordered/coalesced in Rust from Nostr ephemeral kind:24135 events.
         guard let delta = textDelta, !delta.isEmpty else { return }
 
         if var pending = pendingStreamingDeltas[conversationId] {

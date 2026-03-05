@@ -8,7 +8,6 @@ mod ui;
 pub use tenex_core::models;
 pub use tenex_core::nostr;
 pub use tenex_core::store;
-pub use tenex_core::streaming;
 
 use anyhow::Result;
 use clap::Parser;

@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use nostr_ndb::database::{
@@ -13,7 +13,6 @@ use nostr_ndb::database::{
 use nostr_sdk::prelude::*;
 use nostrdb::{Ndb, Transaction};
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::watch;
 use tokio::sync::RwLock;
 
@@ -23,7 +22,6 @@ use crate::stats::{
     SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo,
 };
 use crate::store::ingest_events;
-use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
 // Event kind constants
 const KIND_TEXT_NOTE: u16 = 1;
@@ -40,6 +38,58 @@ const KIND_PROJECT_STATUS: u16 = 24010;
 const KIND_PROJECT_DRAFT: u16 = 31933;
 const KIND_TEAM_PACK: u16 = 34199;
 const KIND_AGENT_STATUS: u16 = 24133;
+const KIND_STREAM_TEXT_DELTA: u16 = crate::constants::kinds::STREAM_TEXT_DELTA;
+
+// Stream delta reassembly limits (defensive against relay reordering/missed packets).
+const STREAM_REASSEMBLY_TTL: Duration = Duration::from_secs(300);
+const STREAM_REASSEMBLY_MAX_KEYS: usize = 1024;
+const STREAM_REASSEMBLY_MAX_PENDING_PER_KEY: usize = 128;
+const STREAM_REASSEMBLY_PRUNE_EVERY: u64 = 64;
+const KIND1_SUPERSESSION_TTL: Duration = Duration::from_secs(3600);
+const KIND1_SUPERSESSION_MAX_KEYS: usize = 4096;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct StreamReassemblyKey {
+    conversation_id: String,
+    agent_pubkey: String,
+    llm_ral: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ConversationAuthorKey {
+    conversation_id: String,
+    agent_pubkey: String,
+}
+
+#[derive(Debug, Clone)]
+struct StreamReassemblyState {
+    next_expected_seq: u64,
+    pending: BTreeMap<u64, String>,
+    last_updated: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct Kind1SupersessionState {
+    latest_kind1_created_at: u64,
+    last_updated: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedStreamTextDelta {
+    key: StreamReassemblyKey,
+    sequence: Option<u64>,
+    created_at: u64,
+    delta: String,
+}
+
+#[derive(Debug, Default, Clone)]
+struct StreamDeltaCounters {
+    received: u64,
+    reordered_flushes: u64,
+    duplicates_dropped: u64,
+    superseded_dropped: u64,
+    malformed_dropped: u64,
+}
 
 /// Wrapper around `nostr_ndb::NdbDatabase` that rejects ephemeral events.
 ///
@@ -161,6 +211,212 @@ fn debug_log(msg: &str) {
     }
 }
 
+fn custom_tag_content(event: &Event, tag_name: &str) -> Option<String> {
+    event.tags.iter().find_map(|tag| match tag.kind() {
+        TagKind::Custom(name) if name.as_ref() == tag_name => {
+            tag.content().map(|value| value.to_string())
+        }
+        _ => None,
+    })
+}
+
+fn parse_stream_text_delta_event(event: &Event) -> Result<ParsedStreamTextDelta, &'static str> {
+    let conversation_id = event
+        .tags
+        .iter()
+        .find(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
+        .and_then(|tag| tag.content())
+        .map(|value| value.to_string())
+        .ok_or("missing e tag")?;
+
+    let delta = event.content.clone();
+    if delta.is_empty() {
+        return Err("empty stream delta");
+    }
+
+    let sequence = custom_tag_content(event, "stream-seq").and_then(|value| value.parse().ok());
+    let llm_ral = custom_tag_content(event, "llm-ral")
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+
+    Ok(ParsedStreamTextDelta {
+        key: StreamReassemblyKey {
+            conversation_id,
+            agent_pubkey: event.pubkey.to_hex(),
+            llm_ral,
+        },
+        sequence,
+        created_at: event.created_at.as_secs(),
+        delta,
+    })
+}
+
+fn extract_kind1_conversation_id(event: &Event) -> String {
+    event
+        .tags
+        .iter()
+        .find(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
+        .and_then(|tag| tag.content())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| event.id.to_hex())
+}
+
+fn record_latest_kind1_created_at(
+    latest_kind1_by_author: &mut HashMap<ConversationAuthorKey, Kind1SupersessionState>,
+    event: &Event,
+    now: Instant,
+) {
+    let key = ConversationAuthorKey {
+        conversation_id: extract_kind1_conversation_id(event),
+        agent_pubkey: event.pubkey.to_hex(),
+    };
+    let created_at = event.created_at.as_secs();
+    let entry = latest_kind1_by_author
+        .entry(key)
+        .or_insert_with(|| Kind1SupersessionState {
+            latest_kind1_created_at: created_at,
+            last_updated: now,
+        });
+    entry.latest_kind1_created_at = entry.latest_kind1_created_at.max(created_at);
+    entry.last_updated = now;
+}
+
+fn is_stream_delta_superseded_by_kind1(
+    latest_kind1_by_author: &HashMap<ConversationAuthorKey, Kind1SupersessionState>,
+    stream_key: &StreamReassemblyKey,
+    stream_created_at: u64,
+) -> bool {
+    let key = ConversationAuthorKey {
+        conversation_id: stream_key.conversation_id.clone(),
+        agent_pubkey: stream_key.agent_pubkey.clone(),
+    };
+    latest_kind1_by_author
+        .get(&key)
+        .map(|state| state.latest_kind1_created_at >= stream_created_at)
+        .unwrap_or(false)
+}
+
+fn clear_stream_reassembly_for_conversation_author(
+    states: &mut HashMap<StreamReassemblyKey, StreamReassemblyState>,
+    conversation_id: &str,
+    agent_pubkey: &str,
+) {
+    states.retain(|key, _| {
+        !(key.conversation_id == conversation_id && key.agent_pubkey == agent_pubkey)
+    });
+}
+
+fn prune_kind1_supersession_states(
+    latest_kind1_by_author: &mut HashMap<ConversationAuthorKey, Kind1SupersessionState>,
+    now: Instant,
+) {
+    latest_kind1_by_author
+        .retain(|_, state| now.duration_since(state.last_updated) <= KIND1_SUPERSESSION_TTL);
+    if latest_kind1_by_author.len() <= KIND1_SUPERSESSION_MAX_KEYS {
+        return;
+    }
+
+    let mut entries: Vec<(ConversationAuthorKey, Instant)> = latest_kind1_by_author
+        .iter()
+        .map(|(key, state)| (key.clone(), state.last_updated))
+        .collect();
+    entries.sort_by_key(|(_, last_updated)| *last_updated);
+
+    let overflow = latest_kind1_by_author
+        .len()
+        .saturating_sub(KIND1_SUPERSESSION_MAX_KEYS);
+    for (key, _) in entries.into_iter().take(overflow) {
+        latest_kind1_by_author.remove(&key);
+    }
+}
+
+fn reassemble_stream_text_delta(
+    states: &mut HashMap<StreamReassemblyKey, StreamReassemblyState>,
+    parsed: ParsedStreamTextDelta,
+    counters: &mut StreamDeltaCounters,
+    now: Instant,
+) -> Option<(StreamReassemblyKey, String)> {
+    let ParsedStreamTextDelta {
+        key,
+        sequence,
+        created_at: _,
+        delta,
+    } = parsed;
+
+    let Some(seq) = sequence else {
+        return Some((key, delta));
+    };
+
+    let state = states
+        .entry(key.clone())
+        .or_insert_with(|| StreamReassemblyState {
+            next_expected_seq: seq,
+            pending: BTreeMap::new(),
+            last_updated: now,
+        });
+    state.last_updated = now;
+
+    if seq < state.next_expected_seq {
+        counters.duplicates_dropped += 1;
+        return None;
+    }
+
+    if seq > state.next_expected_seq {
+        if state.pending.contains_key(&seq) {
+            counters.duplicates_dropped += 1;
+            return None;
+        }
+        state.pending.insert(seq, delta);
+        while state.pending.len() > STREAM_REASSEMBLY_MAX_PENDING_PER_KEY {
+            if let Some(last_seq) = state.pending.keys().next_back().copied() {
+                state.pending.remove(&last_seq);
+                counters.malformed_dropped += 1;
+            } else {
+                break;
+            }
+        }
+        return None;
+    }
+
+    let mut coalesced = delta;
+    state.next_expected_seq += 1;
+
+    let mut flushed_reordered = false;
+    while let Some(next_delta) = state.pending.remove(&state.next_expected_seq) {
+        coalesced.push_str(&next_delta);
+        state.next_expected_seq += 1;
+        flushed_reordered = true;
+    }
+
+    if flushed_reordered {
+        counters.reordered_flushes += 1;
+    }
+
+    Some((key, coalesced))
+}
+
+fn prune_stream_reassembly_states(
+    states: &mut HashMap<StreamReassemblyKey, StreamReassemblyState>,
+    now: Instant,
+) {
+    states.retain(|_, state| now.duration_since(state.last_updated) <= STREAM_REASSEMBLY_TTL);
+    if states.len() <= STREAM_REASSEMBLY_MAX_KEYS {
+        return;
+    }
+
+    // Drop oldest states first when cardinality grows beyond max.
+    let mut entries: Vec<(StreamReassemblyKey, Instant)> = states
+        .iter()
+        .map(|(key, state)| (key.clone(), state.last_updated))
+        .collect();
+    entries.sort_by_key(|(_, last_updated)| *last_updated);
+
+    let overflow = states.len().saturating_sub(STREAM_REASSEMBLY_MAX_KEYS);
+    for (key, _) in entries.into_iter().take(overflow) {
+        states.remove(&key);
+    }
+}
+
 /// Extract project name from a_tag coordinate (format: kind:pubkey:identifier)
 fn extract_project_name(a_tag: &str) -> &str {
     a_tag.split(':').nth(2).unwrap_or("unknown")
@@ -201,7 +457,7 @@ async fn subscribe_project_if_new(
     }
 }
 
-/// Subscribe to all filters for a project (metadata, messages, reports).
+/// Subscribe to all filters for a project (metadata, messages, reports, stream deltas).
 /// Returns Ok(()) only if ALL subscriptions succeed - this is all-or-nothing.
 /// Also registers subscription stats for each filter.
 ///
@@ -305,6 +561,29 @@ async fn subscribe_project_filters(
         .with_raw_filter(longform_filter_json.unwrap_or_default()),
     );
 
+    // Ephemeral stream text deltas (kind:24135)
+    let stream_delta_filter = build_project_stream_delta_filter(project_a_tag);
+    let stream_delta_filter_json = serde_json::to_string(&stream_delta_filter).ok();
+    let stream_delta_output = client
+        .subscribe(stream_delta_filter.clone(), None)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to subscribe to stream deltas for {}: {}",
+                project_name,
+                e
+            )
+        })?;
+    subscription_stats.register(
+        stream_delta_output.val.to_string(),
+        SubscriptionInfo::new(
+            format!("{} stream deltas", project_name),
+            vec![KIND_STREAM_TEXT_DELTA],
+            Some(project_a_tag.to_string()),
+        )
+        .with_raw_filter(stream_delta_filter_json.unwrap_or_default()),
+    );
+
     Ok(())
 }
 
@@ -326,6 +605,15 @@ fn latest_kind_timestamp_for_project(ndb: &Ndb, kind: u16, project_a_tag: &str) 
     }
 
     max_ts
+}
+
+fn build_project_stream_delta_filter(project_a_tag: &str) -> Filter {
+    Filter::new()
+        .kind(Kind::Custom(KIND_STREAM_TEXT_DELTA))
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::A),
+            project_a_tag.to_string(),
+        )
 }
 
 /// Response channel for commands that need to return data (like event IDs)
@@ -591,8 +879,8 @@ pub enum NostrCommand {
 /// Data changes that require the worker channel (not handled by SubscriptionStream).
 #[derive(Debug, Clone)]
 pub enum DataChange {
-    /// Chunk from local streaming socket (not from Nostr)
-    LocalStreamChunk {
+    /// Text delta from Nostr ephemeral stream events (kind:24135)
+    StreamTextDelta {
         agent_pubkey: String,
         conversation_id: String,
         text_delta: Option<String>,
@@ -669,35 +957,6 @@ impl NostrWorker {
         let rt = Runtime::new().expect("Failed to create runtime");
         self.rt_handle = Some(rt.handle().clone());
         debug_log("Nostr worker thread started");
-
-        // Setup local streaming socket client
-        let (local_chunk_tx, mut local_chunk_rx) = tokio_mpsc::channel::<LocalStreamChunk>(256);
-        let socket_client = SocketStreamClient::new();
-        let data_tx_for_socket = self.data_tx.clone();
-
-        // Spawn socket client task
-        rt.spawn(async move {
-            socket_client.run(local_chunk_tx).await;
-        });
-
-        // Spawn task to forward local chunks to data_tx
-        let rt_handle = rt.handle().clone();
-        rt_handle.spawn(async move {
-            while let Some(chunk) = local_chunk_rx.recv().await {
-                // Extract borrowed values before moving owned fields
-                let text_delta = chunk.text_delta().map(String::from);
-                let reasoning_delta = chunk.reasoning_delta().map(String::from);
-                let is_finish = chunk.is_finish();
-                let data_change = DataChange::LocalStreamChunk {
-                    agent_pubkey: chunk.agent_pubkey,
-                    conversation_id: chunk.conversation_id,
-                    text_delta,
-                    reasoning_delta,
-                    is_finish,
-                };
-                let _ = data_tx_for_socket.send(data_change);
-            }
-        });
 
         loop {
             if let Ok(cmd) = self.command_rx.recv() {
@@ -1460,7 +1719,8 @@ impl NostrWorker {
 
         // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
         // kind:24010 is the GLOBAL subscription that tells us which projects are online.
-        // When we receive these events, we create per-project subscriptions for kind:1, 513, 30023.
+        // When we receive these events, we create per-project subscriptions for
+        // kind:1, 513, 30023, and 24135.
         let since_time = Timestamp::now() - 45;
         let project_status_filter = Filter::new()
             .kind(Kind::Custom(KIND_PROJECT_STATUS))
@@ -1599,8 +1859,8 @@ impl NostrWorker {
         // a) Online (discovered via kind:24010 status events)
         // b) Explicitly requested by user (via SubscribeToProjectMessages command)
         //
-        // This dramatically reduces subscription count from 3*N (where N is total projects)
-        // to 3*M (where M is online/active projects).
+        // This dramatically reduces subscription count from 4*N (where N is total projects)
+        // to 4*M (where M is online/active projects).
         //
         // The notification handler will create subscriptions when:
         // - kind:24010 status events arrive for new online projects
@@ -1645,6 +1905,12 @@ impl NostrWorker {
             let mut notifications = client.notifications();
             let mut first_event = true;
             let handler_start = std::time::Instant::now();
+            let mut stream_reassembly_states: HashMap<StreamReassemblyKey, StreamReassemblyState> =
+                HashMap::new();
+            let mut latest_kind1_by_author: HashMap<ConversationAuthorKey, Kind1SupersessionState> =
+                HashMap::new();
+            let mut stream_counters = StreamDeltaCounters::default();
+            let mut stream_events_seen = 0u64;
             tlog!("CONN", "Notification handler started, waiting for events...");
 
             loop {
@@ -1683,6 +1949,92 @@ impl NostrWorker {
                                     subscription_stats.record_event(&subscription_id.to_string());
 
                                     let kind = event.kind.as_u16();
+                                    let now = Instant::now();
+
+                                    if kind == KIND_TEXT_NOTE {
+                                        record_latest_kind1_created_at(
+                                            &mut latest_kind1_by_author,
+                                            &event,
+                                            now,
+                                        );
+                                        let conversation_id = extract_kind1_conversation_id(&event);
+                                        let author_pubkey = event.pubkey.to_hex();
+                                        clear_stream_reassembly_for_conversation_author(
+                                            &mut stream_reassembly_states,
+                                            &conversation_id,
+                                            &author_pubkey,
+                                        );
+                                    }
+
+                                    if kind == KIND_STREAM_TEXT_DELTA {
+                                        stream_counters.received += 1;
+                                        stream_events_seen = stream_events_seen.saturating_add(1);
+
+                                        match parse_stream_text_delta_event(&event) {
+                                            Ok(parsed) => {
+                                                if is_stream_delta_superseded_by_kind1(
+                                                    &latest_kind1_by_author,
+                                                    &parsed.key,
+                                                    parsed.created_at,
+                                                ) {
+                                                    stream_counters.superseded_dropped += 1;
+                                                    stream_reassembly_states.remove(&parsed.key);
+                                                    continue;
+                                                }
+
+                                                if let Some((key, text_delta)) = reassemble_stream_text_delta(
+                                                    &mut stream_reassembly_states,
+                                                    parsed,
+                                                    &mut stream_counters,
+                                                    now,
+                                                ) {
+                                                    if let Err(e) = data_tx.send(DataChange::StreamTextDelta {
+                                                        agent_pubkey: key.agent_pubkey,
+                                                        conversation_id: key.conversation_id,
+                                                        text_delta: Some(text_delta),
+                                                        reasoning_delta: None,
+                                                        is_finish: false,
+                                                    }) {
+                                                        debug_log(&format!(
+                                                            "Failed to send StreamTextDelta data change: {}",
+                                                            e
+                                                        ));
+                                                    }
+                                                }
+                                            }
+                                            Err(reason) => {
+                                                stream_counters.malformed_dropped += 1;
+                                                debug_log(&format!(
+                                                    "Dropping malformed stream delta event {}: {}",
+                                                    event.id.to_hex(),
+                                                    reason
+                                                ));
+                                            }
+                                        }
+
+                                        if stream_events_seen % STREAM_REASSEMBLY_PRUNE_EVERY == 0 {
+                                            prune_stream_reassembly_states(
+                                                &mut stream_reassembly_states,
+                                                now,
+                                            );
+                                            prune_kind1_supersession_states(
+                                                &mut latest_kind1_by_author,
+                                                now,
+                                            );
+                                            tlog!(
+                                                "PERF",
+                                                "stream-delta received={} reorderedFlushes={} duplicatesDropped={} supersededDropped={} malformedDropped={} activeKeys={} latestKind1Keys={}",
+                                                stream_counters.received,
+                                                stream_counters.reordered_flushes,
+                                                stream_counters.duplicates_dropped,
+                                                stream_counters.superseded_dropped,
+                                                stream_counters.malformed_dropped,
+                                                stream_reassembly_states.len(),
+                                                latest_kind1_by_author.len()
+                                            );
+                                        }
+                                        continue;
+                                    }
 
                                     // Ephemeral events (24010, 24133) go through DataChange channel
                                     if kind == KIND_PROJECT_STATUS || kind == KIND_AGENT_STATUS {
@@ -1803,6 +2155,19 @@ impl NostrWorker {
                         }
                     }
                 }
+            }
+            if stream_counters.received > 0 {
+                tlog!(
+                    "PERF",
+                    "stream-delta handler-stop received={} reorderedFlushes={} duplicatesDropped={} supersededDropped={} malformedDropped={} activeKeys={} latestKind1Keys={}",
+                    stream_counters.received,
+                    stream_counters.reordered_flushes,
+                    stream_counters.duplicates_dropped,
+                    stream_counters.superseded_dropped,
+                    stream_counters.malformed_dropped,
+                    stream_reassembly_states.len(),
+                    latest_kind1_by_author.len()
+                );
             }
             tlog!("CONN", "Notification handler stopped");
         });
@@ -3823,6 +4188,35 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn build_stream_delta_event(
+        keys: &Keys,
+        conversation_id: Option<&str>,
+        sequence: Option<&str>,
+        llm_ral: Option<&str>,
+        delta: &str,
+    ) -> Event {
+        let mut builder = EventBuilder::new(Kind::Custom(KIND_STREAM_TEXT_DELTA), delta);
+        if let Some(conversation_id) = conversation_id {
+            builder = builder.tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![conversation_id.to_string()],
+            ));
+        }
+        if let Some(sequence) = sequence {
+            builder = builder.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("stream-seq")),
+                vec![sequence.to_string()],
+            ));
+        }
+        if let Some(llm_ral) = llm_ral {
+            builder = builder.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("llm-ral")),
+                vec![llm_ral.to_string()],
+            ));
+        }
+        builder.sign_with_keys(keys).unwrap()
+    }
+
     #[test]
     fn test_ephemeral_filtering_database_rejects_ephemeral_events() {
         let dir = tempdir().unwrap();
@@ -3848,6 +4242,38 @@ mod tests {
         assert!(
             results.is_empty(),
             "ephemeral events must not be cached in nostrdb"
+        );
+    }
+
+    #[test]
+    fn test_ephemeral_filtering_database_rejects_stream_text_delta_events() {
+        let dir = tempdir().unwrap();
+        let db = crate::store::Database::new(dir.path()).unwrap();
+        let ndb_database =
+            EphemeralFilteringNdbDatabase::new(nostr_ndb::NdbDatabase::from((*db.ndb).clone()));
+
+        let keys = Keys::generate();
+        let event = build_stream_delta_event(
+            &keys,
+            Some("conversation-root-id"),
+            Some("1"),
+            Some("0"),
+            "hello",
+        );
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let status = rt.block_on(ndb_database.save_event(&event)).unwrap();
+
+        assert_eq!(status, SaveEventStatus::Rejected(RejectedReason::Ephemeral));
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let filter = nostrdb::Filter::new()
+            .kinds([KIND_STREAM_TEXT_DELTA as u64])
+            .build();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(
+            results.is_empty(),
+            "stream text deltas must not be cached in nostrdb"
         );
     }
 
@@ -3879,6 +4305,212 @@ mod tests {
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
         assert_eq!(results.len(), 1, "non-ephemeral events should still cache");
+    }
+
+    #[test]
+    fn test_parse_stream_text_delta_event_extracts_fields() {
+        let keys = Keys::generate();
+        let event = build_stream_delta_event(
+            &keys,
+            Some("conversation-root-id"),
+            Some("42"),
+            Some("7"),
+            "delta text",
+        );
+
+        let parsed = parse_stream_text_delta_event(&event).expect("expected valid stream event");
+        assert_eq!(parsed.key.conversation_id, "conversation-root-id");
+        assert_eq!(parsed.key.agent_pubkey, keys.public_key().to_hex());
+        assert_eq!(parsed.key.llm_ral, 7);
+        assert_eq!(parsed.sequence, Some(42));
+        assert_eq!(parsed.created_at, event.created_at.as_secs());
+        assert_eq!(parsed.delta, "delta text");
+    }
+
+    #[test]
+    fn test_parse_stream_text_delta_event_missing_e_tag_is_rejected() {
+        let keys = Keys::generate();
+        let event = build_stream_delta_event(&keys, None, Some("1"), Some("0"), "hello");
+        let err = parse_stream_text_delta_event(&event).expect_err("missing e tag must fail");
+        assert_eq!(err, "missing e tag");
+    }
+
+    #[test]
+    fn test_parse_stream_text_delta_event_invalid_stream_seq_is_passthrough() {
+        let keys = Keys::generate();
+        let event = build_stream_delta_event(
+            &keys,
+            Some("conversation-root-id"),
+            Some("not-a-number"),
+            Some("5"),
+            "hello",
+        );
+
+        let parsed = parse_stream_text_delta_event(&event).expect("expected parse to succeed");
+        assert_eq!(
+            parsed.sequence, None,
+            "invalid stream-seq should be ignored"
+        );
+        assert_eq!(parsed.created_at, event.created_at.as_secs());
+        assert_eq!(parsed.key.llm_ral, 5);
+        assert_eq!(parsed.delta, "hello");
+    }
+
+    #[test]
+    fn test_reassemble_stream_text_delta_orders_out_of_order_sequences() {
+        let key = StreamReassemblyKey {
+            conversation_id: "conversation-root-id".to_string(),
+            agent_pubkey: "agent-pubkey".to_string(),
+            llm_ral: 0,
+        };
+        let now = Instant::now();
+        let mut states: HashMap<StreamReassemblyKey, StreamReassemblyState> = HashMap::new();
+        let mut counters = StreamDeltaCounters::default();
+
+        let first = reassemble_stream_text_delta(
+            &mut states,
+            ParsedStreamTextDelta {
+                key: key.clone(),
+                sequence: Some(1),
+                created_at: 1,
+                delta: "hello ".to_string(),
+            },
+            &mut counters,
+            now,
+        );
+        assert_eq!(first, Some((key.clone(), "hello ".to_string())));
+
+        let third = reassemble_stream_text_delta(
+            &mut states,
+            ParsedStreamTextDelta {
+                key: key.clone(),
+                sequence: Some(3),
+                created_at: 3,
+                delta: "!".to_string(),
+            },
+            &mut counters,
+            now,
+        );
+        assert_eq!(
+            third, None,
+            "out-of-order delta should wait for missing seq"
+        );
+
+        let second = reassemble_stream_text_delta(
+            &mut states,
+            ParsedStreamTextDelta {
+                key: key.clone(),
+                sequence: Some(2),
+                created_at: 2,
+                delta: "world".to_string(),
+            },
+            &mut counters,
+            now,
+        );
+        assert_eq!(second, Some((key, "world!".to_string())));
+        assert_eq!(counters.reordered_flushes, 1);
+    }
+
+    #[test]
+    fn test_reassemble_stream_text_delta_drops_duplicates() {
+        let key = StreamReassemblyKey {
+            conversation_id: "conversation-root-id".to_string(),
+            agent_pubkey: "agent-pubkey".to_string(),
+            llm_ral: 0,
+        };
+        let now = Instant::now();
+        let mut states: HashMap<StreamReassemblyKey, StreamReassemblyState> = HashMap::new();
+        let mut counters = StreamDeltaCounters::default();
+
+        let first = reassemble_stream_text_delta(
+            &mut states,
+            ParsedStreamTextDelta {
+                key: key.clone(),
+                sequence: Some(10),
+                created_at: 10,
+                delta: "hello".to_string(),
+            },
+            &mut counters,
+            now,
+        );
+        assert!(first.is_some());
+
+        let duplicate = reassemble_stream_text_delta(
+            &mut states,
+            ParsedStreamTextDelta {
+                key,
+                sequence: Some(10),
+                created_at: 10,
+                delta: "hello-again".to_string(),
+            },
+            &mut counters,
+            now,
+        );
+        assert!(duplicate.is_none(), "duplicate sequence should be dropped");
+        assert_eq!(counters.duplicates_dropped, 1);
+    }
+
+    #[test]
+    fn test_stream_delta_superseded_when_kind1_at_same_or_newer_timestamp() {
+        let mut latest: HashMap<ConversationAuthorKey, Kind1SupersessionState> = HashMap::new();
+        let key = StreamReassemblyKey {
+            conversation_id: "conversation-root-id".to_string(),
+            agent_pubkey: "agent-pubkey".to_string(),
+            llm_ral: 0,
+        };
+
+        latest.insert(
+            ConversationAuthorKey {
+                conversation_id: "conversation-root-id".to_string(),
+                agent_pubkey: "agent-pubkey".to_string(),
+            },
+            Kind1SupersessionState {
+                latest_kind1_created_at: 100,
+                last_updated: Instant::now(),
+            },
+        );
+
+        assert!(
+            is_stream_delta_superseded_by_kind1(&latest, &key, 100),
+            "stream at same timestamp as kind:1 should be suppressed"
+        );
+        assert!(
+            is_stream_delta_superseded_by_kind1(&latest, &key, 99),
+            "older stream should be suppressed"
+        );
+        assert!(
+            !is_stream_delta_superseded_by_kind1(&latest, &key, 101),
+            "newer stream should pass through as new in-progress message"
+        );
+    }
+
+    #[test]
+    fn test_build_project_stream_delta_filter_contains_kind_and_project_tag() {
+        let project_a_tag = "31933:abc123:project";
+        let filter = build_project_stream_delta_filter(project_a_tag);
+        let filter_json = serde_json::to_value(filter).expect("filter should serialize");
+
+        let kinds = filter_json
+            .get("kinds")
+            .and_then(|v| v.as_array())
+            .expect("kinds array should exist");
+        assert!(
+            kinds
+                .iter()
+                .any(|kind| kind.as_u64() == Some(KIND_STREAM_TEXT_DELTA as u64)),
+            "filter must include kind:24135"
+        );
+
+        let project_tags = filter_json
+            .get("#a")
+            .and_then(|v| v.as_array())
+            .expect("project a-tag filter should exist");
+        assert!(
+            project_tags
+                .iter()
+                .any(|tag| tag.as_str() == Some(project_a_tag)),
+            "filter must include project #a tag"
+        );
     }
 
     #[test]

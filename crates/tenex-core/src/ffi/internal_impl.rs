@@ -406,6 +406,7 @@ fn get_kind_name(kind: u16) -> String {
         4202 => "Skills".to_string(),
         24010 => "Project Status".to_string(),
         24133 => "Operations Status".to_string(),
+        24135 => "Stream Text Deltas".to_string(),
         30023 => "Articles".to_string(),
         31933 => "Projects".to_string(),
         34199 => "Teams".to_string(),
