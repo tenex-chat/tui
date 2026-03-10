@@ -122,29 +122,17 @@ jobs:
             -destination "generic/platform=iOS Simulator" \
             -derivedDataPath ios-app/DerivedData-iOS \
             build \
-            CODE_SIGNING_ALLOWED=NO
-
-      - name: Build iOS device app (unsigned)
-        run: |
-          xcodebuild \
-            -project ios-app/TenexMVP.xcodeproj \
-            -scheme TenexMVP \
-            -configuration Release \
-            -destination "generic/platform=iOS" \
-            -derivedDataPath ios-app/DerivedData-iOS \
-            build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Package iOS artifacts
         run: |
           SIM_APP="ios-app/DerivedData-iOS/Build/Products/Release-iphonesimulator/TenexMVP.app"
-          DEVICE_APP="ios-app/DerivedData-iOS/Build/Products/Release-iphoneos/TenexMVP.app"
 
           test -d "$SIM_APP"
-          test -d "$DEVICE_APP"
 
           ditto -c -k --sequesterRsrc --keepParent "$SIM_APP" tenex-ios-client-simulator.zip
-          ditto -c -k --sequesterRsrc --keepParent "$DEVICE_APP" tenex-ios-client-device-unsigned.zip
 
       - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
@@ -152,7 +140,6 @@ jobs:
           name: ios-client-artifacts
           path: |
             tenex-ios-client-simulator.zip
-            tenex-ios-client-device-unsigned.zip
 
   build-mac-app:
     name: Build macOS App + DMG
@@ -207,6 +194,8 @@ jobs:
             -destination "generic/platform=macOS" \
             -derivedDataPath ios-app/DerivedData-mac \
             build \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
             CODE_SIGNING_ALLOWED=NO
 
       - name: Import signing certificate
@@ -313,7 +302,6 @@ jobs:
             release-assets/tenex-rust-clients-macos-universal.tar.gz
             release-assets/tenex-rust-clients-macos-universal.sha256
             release-assets/tenex-ios-client-simulator.zip
-            release-assets/tenex-ios-client-device-unsigned.zip
             release-assets/tenex-macos-app.dmg
             release-assets/tenex-macos-app.sha256
           generate_release_notes: true
@@ -330,7 +318,6 @@ jobs:
             release-assets/tenex-rust-clients-macos-universal.tar.gz
             release-assets/tenex-rust-clients-macos-universal.sha256
             release-assets/tenex-ios-client-simulator.zip
-            release-assets/tenex-ios-client-device-unsigned.zip
             release-assets/tenex-macos-app.dmg
             release-assets/tenex-macos-app.sha256
           overwrite_files: true
@@ -340,5 +327,4 @@ jobs:
             Included artifacts:
             - `tenex-rust-clients-macos-universal.tar.gz` (`tenex-tui`, `tenex-repl`, `tenex-cli`)
             - `tenex-ios-client-simulator.zip`
-            - `tenex-ios-client-device-unsigned.zip`
             - `tenex-macos-app.dmg`
