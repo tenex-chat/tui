@@ -1106,7 +1106,15 @@ pub(crate) fn render_messages_panel(
     // Check for live streaming content (from Nostr ephemeral stream deltas)
     // Clone the buffer to avoid borrowing app across the mutation below
     if let Some(buffer) = app.local_streaming_content().cloned() {
-        if !buffer.text_content.is_empty() || !buffer.reasoning_content.is_empty() {
+        // If this buffer is NOT in a controlled handoff animation, check whether a
+        // kind:1 from the same agent already exists.  When it does the stream buffer
+        // is stale (kind:1 won the race) and must not be rendered.
+        let stale = buffer.superseded_message_id.is_none()
+            && !buffer.agent_pubkey.is_empty()
+            && all_messages
+                .iter()
+                .any(|m| m.pubkey == buffer.agent_pubkey && m.content == buffer.text_content);
+        if !stale && (!buffer.text_content.is_empty() || !buffer.reasoning_content.is_empty()) {
             let agent_name = if buffer.agent_pubkey.is_empty() {
                 "Agent".to_string()
             } else {
