@@ -206,10 +206,7 @@ struct AgentDefinitionsTabView: View {
     private var listContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                AgentDefinitionsHeroHeader(
-                    mineCount: viewModel.filteredMine.count,
-                    communityCount: viewModel.filteredCommunity.count
-                )
+                AgentDefinitionsHeroHeader()
 
                 featuredTeamsMicroSection
 

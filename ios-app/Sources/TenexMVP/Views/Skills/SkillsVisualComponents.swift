@@ -5,6 +5,7 @@ import Kingfisher
 struct SkillsHeroHeader: View {
     var body: some View {
         ZStack(alignment: .leading) {
+#if !os(macOS)
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(
                     LinearGradient(
@@ -16,14 +17,17 @@ struct SkillsHeroHeader: View {
                         endPoint: .bottomTrailing
                     )
                 )
+#endif
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Skills")
-                    .font(.system(size: 56, weight: .regular, design: .rounded))
+                    .font(titleFont)
+                    .fontDesign(.rounded)
                     .foregroundStyle(.primary)
 
-                Text("Give Codex superpowers.")
-                    .font(.system(size: 48, weight: .regular, design: .rounded))
+                Text("Give your agents superpowers")
+                    .font(subtitleFont)
+                    .fontDesign(.rounded)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
@@ -32,6 +36,22 @@ struct SkillsHeroHeader: View {
             .padding(.vertical, 24)
         }
         .frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
+    }
+
+    private var titleFont: Font {
+#if os(macOS)
+        return .largeTitle.weight(.regular)
+#else
+        return .system(size: 56, weight: .regular, design: .rounded)
+#endif
+    }
+
+    private var subtitleFont: Font {
+#if os(macOS)
+        return .title3.weight(.regular)
+#else
+        return .system(size: 48, weight: .regular, design: .rounded)
+#endif
     }
 }
 
