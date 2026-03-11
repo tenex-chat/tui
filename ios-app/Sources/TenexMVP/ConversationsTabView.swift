@@ -260,7 +260,7 @@ struct ConversationsTabView: View {
                 .navigationSplitViewColumnWidth(min: 340, ideal: 440, max: 520)
                 #endif
         } detail: {
-            conversationDetailContent
+            detailNavigationStackContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
@@ -340,7 +340,7 @@ struct ConversationsTabView: View {
             .accessibilityIdentifier("section_list_column")
     }
 
-    private var shellDetailLayout: some View {
+    private var detailNavigationStackContent: some View {
         NavigationStack(path: $detailNavigationPath) {
             conversationDetailContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -348,12 +348,17 @@ struct ConversationsTabView: View {
         .navigationDestination(for: String.self) { conversationId in
             ConversationByIdAdaptiveDetailView(
                 conversationId: conversationId,
-                onOpenConversationId: pushConversationInDetailStack
+                onOpenConversationId: pushConversationInDetailStack,
+                onReferenceConversationRequested: handleReferenceConversationLaunch
             )
             .environment(coreManager)
             .id("delegated-\(conversationId)")
         }
-        .accessibilityIdentifier("detail_column")
+    }
+
+    private var shellDetailLayout: some View {
+        detailNavigationStackContent
+            .accessibilityIdentifier("detail_column")
     }
 
     private var shellCompositeLayout: some View {
