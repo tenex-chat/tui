@@ -184,10 +184,7 @@ struct NudgesTabView: View {
     private var listContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                NudgesHeroHeader(
-                    mineCount: viewModel.filteredMine.count,
-                    communityCount: viewModel.filteredCommunity.count
-                )
+                NudgesHeroHeader()
 
                 if viewModel.filteredMine.isEmpty, viewModel.filteredCommunity.isEmpty {
                     emptyState

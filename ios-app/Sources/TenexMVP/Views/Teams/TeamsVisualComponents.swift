@@ -535,35 +535,54 @@ private struct AgentDefinitionCardPlaceholder: View {
 // MARK: - Agent Definitions Hero Header
 
 struct AgentDefinitionsHeroHeader: View {
-    let mineCount: Int
-    let communityCount: Int
-
     var body: some View {
         ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color.systemGray6.opacity(0.55))
-
-            TeamsPolygonBackdrop()
-                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+#if !os(macOS)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.38),
+                            Color.black.opacity(0.22)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+#endif
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("Agent Definitions")
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .font(titleFont)
+                    .fontDesign(.rounded)
+                    .foregroundStyle(.primary)
 
-                Text("Reusable agent templates for your projects.")
-                    .font(.subheadline)
+                Text("Define reusable agents for your projects")
+                    .font(subtitleFont)
+                    .fontDesign(.rounded)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-
-                HStack(spacing: 10) {
-                    Label("\(mineCount) mine", systemImage: "person")
-                    Label("\(communityCount) community", systemImage: "person.3")
-                }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
-            .padding(20)
+            .padding(.horizontal, 26)
+            .padding(.vertical, 24)
         }
-        .frame(height: 170)
+        .frame(maxWidth: .infinity, minHeight: 200, alignment: .leading)
+    }
+
+    private var titleFont: Font {
+#if os(macOS)
+        return .largeTitle.weight(.regular)
+#else
+        return .system(size: 56, weight: .regular, design: .rounded)
+#endif
+    }
+
+    private var subtitleFont: Font {
+#if os(macOS)
+        return .title3.weight(.regular)
+#else
+        return .system(size: 48, weight: .regular, design: .rounded)
+#endif
     }
 }
