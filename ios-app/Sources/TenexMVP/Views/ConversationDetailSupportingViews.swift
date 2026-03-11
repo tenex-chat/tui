@@ -290,6 +290,10 @@ struct FullConversationSheet: View {
     @State private var showComposer = false
     @State private var currentUserPubkey: String?
     @State private var visibleMessageLimit = 240
+    @State private var rawEventDestination: FullConversationRawEventDestination?
+    @State private var rawEventErrorMessage: String?
+    /// Shared minute-level transcript clock used by all rows to avoid per-row TimelineView schedulers.
+    @State private var transcriptRelativeTimeNow = Date()
 
     private let bottomAnchorId = "full-conversation-bottom"
     private let initialMessageWindowSize = 240
@@ -375,11 +379,32 @@ struct FullConversationSheet: View {
         .task(id: conversation.thread.id) {
             currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
         }
+        .task(id: "\(conversation.thread.id)-minute-tick") {
+            await runTranscriptMinuteTicker()
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #else
         .toolbarTitleDisplayMode(.inline)
         #endif
+        .sheet(item: $rawEventDestination) { destination in
+            FullConversationRawEventInspectorSheet(
+                eventId: destination.eventId,
+                json: destination.json
+            )
+        }
+        .alert("Raw Event Error", isPresented: Binding(
+            get: { rawEventErrorMessage != nil },
+            set: { shown in
+                if !shown {
+                    rawEventErrorMessage = nil
+                }
+            }
+        )) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(rawEventErrorMessage ?? "")
+        }
         #if os(iOS)
         .sheet(item: $selectedDelegation) { delegationId in
             DelegationSheetFromId(delegationId: delegationId)
@@ -428,6 +453,7 @@ struct FullConversationSheet: View {
                                 isConsecutive: index > 0 && messages[index - 1].pubkey == message.pubkey,
                                 conversationId: conversation.thread.id,
                                 projectId: conversation.extractedProjectId,
+                                relativeTimeNow: transcriptRelativeTimeNow,
                                 authorDisplayName: coreManager.displayName(for: message.pubkey),
                                 directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
                                     .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
@@ -435,6 +461,9 @@ struct FullConversationSheet: View {
                                     .joined(separator: ", "),
                                 onDelegationTap: { delegationId in
                                     selectedDelegation = delegationId
+                                },
+                                onViewRawEvent: { messageId in
+                                    viewRawEvent(for: messageId)
                                 }
                             )
                             .equatable()
@@ -460,17 +489,14 @@ struct FullConversationSheet: View {
                         visibleMessageLimit = min(messages.count, max(initialMessageWindowSize, visibleMessageLimit))
                     }
 
-                    PerformanceProfiler.shared.logEvent(
-                        "fullConversation appear conversationId=\(conversation.thread.id) totalMessages=\(messages.count) visibleMessages=\(messageIndices.count) hiddenMessages=\(hiddenMessageCount)",
-                        category: .swiftUI,
-                        level: messages.count >= 400 ? .error : .info
-                    )
+                    logTranscriptRenderBoundary(reason: "appear")
 
                     DispatchQueue.main.async {
                         proxy.scrollTo(bottomAnchorId, anchor: .bottom)
                     }
                 }
                 .onChange(of: messages.count) { oldCount, newCount in
+                    logTranscriptRenderBoundary(reason: "message-count-change")
                     guard usesMessageWindowing else { return }
                     let growth = max(0, newCount - oldCount)
                     if growth > 0 {
@@ -522,11 +548,58 @@ struct FullConversationSheet: View {
         let nextLimit = min(messages.count, visibleMessageLimit + messageWindowStepSize)
         guard nextLimit != visibleMessageLimit else { return }
         visibleMessageLimit = nextLimit
+        logTranscriptRenderBoundary(reason: "load-older")
+    }
+
+    @MainActor
+    private func runTranscriptMinuteTicker() async {
+        transcriptRelativeTimeNow = Date()
+
+        while !Task.isCancelled {
+            let now = Date()
+            let nextBoundary = Self.nextMinuteBoundary(after: now)
+            let sleepSeconds = max(nextBoundary.timeIntervalSince(now), 0.05)
+            let sleepNs = UInt64(sleepSeconds * 1_000_000_000)
+            do {
+                try await Task.sleep(nanoseconds: sleepNs)
+            } catch {
+                break
+            }
+
+            if Task.isCancelled { break }
+            transcriptRelativeTimeNow = Date()
+        }
+    }
+
+    private static func nextMinuteBoundary(after date: Date) -> Date {
+        if let interval = Calendar.current.dateInterval(of: .minute, for: date) {
+            return interval.end
+        }
+        return date.addingTimeInterval(60)
+    }
+
+    private func logTranscriptRenderBoundary(reason: String) {
         PerformanceProfiler.shared.logEvent(
-            "fullConversation loadOlder conversationId=\(conversation.thread.id) visibleMessages=\(messageIndices.count) hiddenMessages=\(hiddenMessageCount)",
+            "fullConversation transcript boundary reason=\(reason) conversationId=\(conversation.thread.id) totalMessages=\(messages.count) visibleMessages=\(messageIndices.count) hiddenMessages=\(hiddenMessageCount) actionAffordance=context-menu-only timestampMode=minute-tick",
             category: .swiftUI,
-            level: .info
+            level: messages.count >= 400 ? .error : .info
         )
+    }
+
+    private func viewRawEvent(for messageId: String) {
+        Task {
+            let rawEvent = await coreManager.safeCore.getRawEventJson(eventId: messageId)
+            await MainActor.run {
+                if let rawEvent, !rawEvent.isEmpty {
+                    rawEventDestination = FullConversationRawEventDestination(
+                        eventId: messageId,
+                        json: rawEvent
+                    )
+                } else {
+                    rawEventErrorMessage = "Unable to load raw event for message \(messageId)."
+                }
+            }
+        }
     }
 
     #if os(macOS)
@@ -558,6 +631,60 @@ struct FullConversationSheet: View {
         .background(transcriptBackdropColor)
     }
     #endif
+}
+
+private struct FullConversationRawEventDestination: Identifiable, Hashable {
+    let eventId: String
+    let json: String
+
+    var id: String { eventId }
+}
+
+private struct FullConversationRawEventInspectorSheet: View {
+    let eventId: String
+    let json: String
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Event ID")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(eventId)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+
+                ScrollView([.vertical, .horizontal], showsIndicators: true) {
+                    Text(json)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .background(Color.systemGray6)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .padding()
+            .navigationTitle("Raw Event")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .frame(minWidth: 680, minHeight: 460)
+    }
 }
 
 // MARK: - Delegation Sheet From ID

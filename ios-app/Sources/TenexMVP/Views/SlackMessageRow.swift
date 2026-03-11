@@ -15,6 +15,8 @@ struct SlackMessageRow: View, Equatable {
     let isConsecutive: Bool
     let conversationId: String
     let projectId: String
+    /// Shared transcript-level time anchor, updated once per minute by the parent.
+    let relativeTimeNow: Date
     /// Pre-resolved author display name (avoids @EnvironmentObject dependency on coreManager).
     let authorDisplayName: String
     /// Pre-formatted "@name1, @name2" string for p-tag recipients (empty when no p-tags).
@@ -30,6 +32,7 @@ struct SlackMessageRow: View, Equatable {
         lhs.isConsecutive == rhs.isConsecutive &&
         lhs.conversationId == rhs.conversationId &&
         lhs.projectId == rhs.projectId &&
+        lhs.relativeTimeNow == rhs.relativeTimeNow &&
         lhs.authorDisplayName == rhs.authorDisplayName &&
         lhs.directedRecipientsText == rhs.directedRecipientsText
     }
@@ -37,7 +40,6 @@ struct SlackMessageRow: View, Equatable {
     /// State for expanded/collapsed content
     @State private var isExpanded = false
     @State private var contentHeight: CGFloat = 0
-    @State private var isHovered = false
 
     /// Avatar size
     private let avatarSize: CGFloat = 20
@@ -113,7 +115,7 @@ struct SlackMessageRow: View, Equatable {
                                 .foregroundStyle(authorColor)
                         }
 
-                        RelativeTimeText(timestamp: message.createdAt, style: .localizedAbbreviated)
+                        Text(RelativeTime.string(timestamp: message.createdAt, now: relativeTimeNow, style: .localizedAbbreviated))
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
@@ -160,21 +162,8 @@ struct SlackMessageRow: View, Equatable {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, isConsecutive ? 5 : 14)
-        .overlay(alignment: .topTrailing) {
-            #if os(macOS)
-            if let onViewRawEvent {
-                messageActionsMenu(onViewRawEvent: onViewRawEvent)
-                    .padding(.top, shouldShowHeader ? 0 : 2)
-                    .opacity(isHovered ? 1.0 : 0.32)
-                    .animation(.easeInOut(duration: 0.14), value: isHovered)
-            }
-            #endif
-        }
-        #if os(macOS)
-        .onHover { isHovering in
-            isHovered = isHovering
-        }
-        #endif
+        // Keep raw-event inspection in context menu only. Per-row macOS Menu controls
+        // trigger expensive AppKit accessibility updates in large transcripts.
         .contextMenu {
             if let onViewRawEvent {
                 Button {
@@ -290,29 +279,6 @@ struct SlackMessageRow: View, Equatable {
     // MARK: - Helpers
 
     #if os(macOS)
-    @ViewBuilder
-    private func messageActionsMenu(onViewRawEvent: @escaping (String) -> Void) -> some View {
-        Menu {
-            Button {
-                onViewRawEvent(message.id)
-            } label: {
-                Text("View Raw Event")
-            }
-        } label: {
-            Text("...")
-                .font(.callout)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton)
-        .buttonStyle(.plain)
-    }
-    #endif
-
-    #if os(macOS)
     private var accessibilitySummary: String {
         var parts: [String] = []
         if !message.pubkey.isEmpty {
@@ -410,6 +376,7 @@ private struct QTagReferenceRow: View {
             isConsecutive: false,
             conversationId: "test",
             projectId: "test",
+            relativeTimeNow: Date(),
             authorDisplayName: "Test Agent",
             directedRecipientsText: "",
             onViewRawEvent: nil
@@ -437,6 +404,7 @@ private struct QTagReferenceRow: View {
             isConsecutive: true,
             conversationId: "test",
             projectId: "test",
+            relativeTimeNow: Date(),
             authorDisplayName: "Test Agent",
             directedRecipientsText: "",
             onViewRawEvent: nil

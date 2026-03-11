@@ -63,6 +63,7 @@ struct ConversationAdaptiveDetailView: View {
 struct ConversationByIdAdaptiveDetailView: View {
     let conversationId: String
     let onOpenConversationId: ((String) -> Void)?
+    let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
     let showsMetadataInspector: Bool
     @Environment(TenexCoreManager.self) private var coreManager
 
@@ -72,10 +73,12 @@ struct ConversationByIdAdaptiveDetailView: View {
     init(
         conversationId: String,
         onOpenConversationId: ((String) -> Void)? = nil,
+        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
         showsMetadataInspector: Bool = true
     ) {
         self.conversationId = conversationId
         self.onOpenConversationId = onOpenConversationId
+        self.onReferenceConversationRequested = onReferenceConversationRequested
         self.showsMetadataInspector = showsMetadataInspector
     }
 
@@ -85,6 +88,7 @@ struct ConversationByIdAdaptiveDetailView: View {
                 ConversationAdaptiveDetailView(
                     conversation: conversation,
                     onOpenConversationId: onOpenConversationId,
+                    onReferenceConversationRequested: onReferenceConversationRequested,
                     showsMetadataInspector: showsMetadataInspector
                 )
                     .environment(coreManager)
@@ -200,8 +204,12 @@ struct NewThreadComposerSeed: Equatable {
     }
 }
 
-struct ReferenceConversationLaunchPayload: Equatable {
+struct ReferenceConversationLaunchPayload: Equatable, Identifiable {
     let seed: NewThreadComposerSeed
+
+    var id: String {
+        seed.identity
+    }
 }
 
 enum ConversationWorkspaceSource {
@@ -278,6 +286,9 @@ struct ConversationWorkspaceView: View {
     @State private var visibleMessageWindow: Int = 30
     @State private var navigationErrorMessage: String?
     @State private var rawEventDestination: RawEventDestination?
+    @State private var localReferenceLaunchPayload: ReferenceConversationLaunchPayload?
+    /// Shared minute-level transcript clock used by all rows to avoid per-row TimelineView schedulers.
+    @State private var transcriptRelativeTimeNow = Date()
     private let profiler = PerformanceProfiler.shared
 
     private let bottomAnchorId = "workspace-bottom-anchor"
@@ -458,6 +469,8 @@ struct ConversationWorkspaceView: View {
         .navigationDestination(item: $selectedDelegationConversation) { delegatedConversation in
             ConversationAdaptiveDetailView(
                 conversation: delegatedConversation,
+                onOpenConversationId: onOpenConversationId,
+                onReferenceConversationRequested: onReferenceConversationRequested,
                 showsMetadataInspector: showsMetadataInspector
             )
                 .environment(coreManager)
@@ -476,6 +489,9 @@ struct ConversationWorkspaceView: View {
             )
             await initializeWorkspace()
         }
+        .task(id: "\(source.identity)-minute-tick") {
+            await runTranscriptMinuteTicker()
+        }
         // Observation isolation: onChange handlers for coreManager live in a
         // separate lightweight view so this body doesn't observe
         // coreManager.conversations/messagesByConversation/reports/streamingBuffers.
@@ -487,6 +503,9 @@ struct ConversationWorkspaceView: View {
                 eventId: destination.eventId,
                 json: destination.json
             )
+        }
+        .sheet(item: $localReferenceLaunchPayload) { payload in
+            referenceComposerSheet(for: payload)
         }
         .alert("Navigation Error", isPresented: Binding(
             get: { navigationErrorMessage != nil },
@@ -580,6 +599,7 @@ struct ConversationWorkspaceView: View {
                             isConsecutive: index > transcriptMessages.startIndex && transcriptMessages[index - 1].pubkey == message.pubkey,
                             conversationId: currentConversation.thread.id,
                             projectId: currentConversation.extractedProjectId,
+                            relativeTimeNow: transcriptRelativeTimeNow,
                             authorDisplayName: coreManager.displayName(for: message.pubkey),
                             directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
                                 .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
@@ -619,6 +639,15 @@ struct ConversationWorkspaceView: View {
                 #endif
             }
             .background(workspaceBackdropColor)
+            .onAppear {
+                logTranscriptRenderBoundary(reason: "appear")
+            }
+            .onChange(of: transcriptMessages.count) { _, _ in
+                logTranscriptRenderBoundary(reason: "visible-window-change")
+            }
+            .onChange(of: allMessages.count) { _, _ in
+                logTranscriptRenderBoundary(reason: "message-count-change")
+            }
             .onChange(of: transcriptMessages.last?.id) { _, _ in
                 guard let lastMessage = transcriptMessages.last else { return }
                 DispatchQueue.main.async {
@@ -649,7 +678,7 @@ struct ConversationWorkspaceView: View {
                 onSend: isNewThreadMode ? { result in
                     onThreadCreated?(result.eventId)
                 } : nil,
-                onReferenceConversationRequested: isNewThreadMode ? nil : onReferenceConversationRequested
+                onReferenceConversationRequested: isNewThreadMode ? nil : handleReferenceConversationRequested
             )
             .environment(coreManager)
             .background(
@@ -852,6 +881,41 @@ struct ConversationWorkspaceView: View {
         )
     }
 
+    @MainActor
+    private func runTranscriptMinuteTicker() async {
+        transcriptRelativeTimeNow = Date()
+
+        while !Task.isCancelled {
+            let now = Date()
+            let nextBoundary = Self.nextMinuteBoundary(after: now)
+            let sleepSeconds = max(nextBoundary.timeIntervalSince(now), 0.05)
+            let sleepNs = UInt64(sleepSeconds * 1_000_000_000)
+            do {
+                try await Task.sleep(nanoseconds: sleepNs)
+            } catch {
+                break
+            }
+
+            if Task.isCancelled { break }
+            transcriptRelativeTimeNow = Date()
+        }
+    }
+
+    private static func nextMinuteBoundary(after date: Date) -> Date {
+        if let interval = Calendar.current.dateInterval(of: .minute, for: date) {
+            return interval.end
+        }
+        return date.addingTimeInterval(60)
+    }
+
+    private func logTranscriptRenderBoundary(reason: String) {
+        profiler.logEvent(
+            "workspace transcript boundary reason=\(reason) conversationId=\(currentConversation.thread.id) visibleRows=\(transcriptMessages.count) totalRows=\(allMessages.count) actionAffordance=context-menu-only timestampMode=minute-tick",
+            category: .swiftUI,
+            level: allMessages.count >= 400 ? .error : .info
+        )
+    }
+
     private func viewRawEvent(for messageId: String) {
         Task {
             let startedAt = CFAbsoluteTimeGetCurrent()
@@ -880,6 +944,37 @@ struct ConversationWorkspaceView: View {
     private func shortId(_ value: String, prefix: Int = 8, suffix: Int = 6) -> String {
         guard value.count > prefix + suffix else { return value }
         return "\(value.prefix(prefix))...\(value.suffix(suffix))"
+    }
+
+    private func handleReferenceConversationRequested(_ payload: ReferenceConversationLaunchPayload) {
+        if let onReferenceConversationRequested {
+            onReferenceConversationRequested(payload)
+        } else {
+            localReferenceLaunchPayload = payload
+        }
+    }
+
+    @ViewBuilder
+    private func referenceComposerSheet(for payload: ReferenceConversationLaunchPayload) -> some View {
+        if let project = coreManager.projects.first(where: { $0.id == payload.seed.projectId }) {
+            MessageComposerView(
+                project: project,
+                initialAgentPubkey: payload.seed.agentPubkey,
+                initialContent: payload.seed.initialContent,
+                initialTextAttachments: payload.seed.textAttachments,
+                referenceConversationId: payload.seed.referenceConversationId,
+                referenceReportATag: payload.seed.referenceReportATag
+            )
+            .environment(coreManager)
+            .tenexModalPresentation(detents: [.large])
+        } else {
+            ContentUnavailableView(
+                "Project Not Found",
+                systemImage: "exclamationmark.triangle",
+                description: Text("Unable to open a reference composer because the project is unavailable.")
+            )
+            .padding()
+        }
     }
 
     private func openDelegation(byId delegationId: String) {
