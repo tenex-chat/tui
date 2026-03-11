@@ -57,10 +57,16 @@ pub fn build_trace_url(
 ) -> Result<String, String> {
     let normalized_endpoint = validate_and_normalize_endpoint(endpoint)?;
 
+    // Jaeger expects a 32-char hex trace ID, right-padded with zeros
+    let padded_trace_id = format!("{:0<32}", trace_id);
+
     let url = if let Some(span) = span_id {
-        format!("{}/trace/{}?uiFind={}", normalized_endpoint, trace_id, span)
+        format!(
+            "{}/trace/{}?uiFind={}",
+            normalized_endpoint, padded_trace_id, span
+        )
     } else {
-        format!("{}/trace/{}", normalized_endpoint, trace_id)
+        format!("{}/trace/{}", normalized_endpoint, padded_trace_id)
     };
 
     Ok(url)
@@ -127,7 +133,10 @@ mod tests {
     fn test_build_trace_url_without_span() {
         let result = build_trace_url("http://localhost:16686", "abc123", None);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://localhost:16686/trace/abc123");
+        assert_eq!(
+            result.unwrap(),
+            "http://localhost:16686/trace/abc12300000000000000000000000000"
+        );
     }
 
     #[test]
@@ -136,7 +145,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "http://localhost:16686/trace/abc123?uiFind=def456"
+            "http://localhost:16686/trace/abc12300000000000000000000000000?uiFind=def456"
         );
     }
 
@@ -144,7 +153,24 @@ mod tests {
     fn test_build_trace_url_normalizes_endpoint() {
         let result = build_trace_url("http://localhost:16686///", "abc123", None);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://localhost:16686/trace/abc123");
+        assert_eq!(
+            result.unwrap(),
+            "http://localhost:16686/trace/abc12300000000000000000000000000"
+        );
+    }
+
+    #[test]
+    fn test_build_trace_url_full_32char_id_unchanged() {
+        let result = build_trace_url(
+            "http://localhost:16686",
+            "4ed6aca791f4e1070d7ef63218656484",
+            None,
+        );
+        assert!(result.is_ok());
+        assert_eq!(
+            result.unwrap(),
+            "http://localhost:16686/trace/4ed6aca791f4e1070d7ef63218656484"
+        );
     }
 
     #[test]
