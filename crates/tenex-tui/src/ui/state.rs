@@ -1248,8 +1248,12 @@ impl ConversationState {
             .entry(conversation_id)
             .or_default();
 
+        // If kind:1 handoff is already in progress, ignore stale deltas
+        if buffer.superseded_message_id.is_some() {
+            return;
+        }
+
         buffer.agent_pubkey = agent_pubkey;
-        buffer.superseded_message_id = None;
         if let Some(delta) = text_delta {
             buffer.text_char_count += delta.chars().count();
             buffer.text_content.push_str(&delta);
