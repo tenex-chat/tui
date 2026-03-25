@@ -794,6 +794,8 @@ pub enum NostrCommand {
         project_a_tag: String,
         event_ids: Vec<String>,
         agent_pubkeys: Vec<String>,
+        /// Human-readable reason for debugging (included as "reason" tag in the event)
+        reason: String,
     },
     /// Update agent configuration (kind:24020)
     UpdateAgentConfig {
@@ -1240,15 +1242,18 @@ impl NostrWorker {
                         project_a_tag,
                         event_ids,
                         agent_pubkeys,
+                        reason,
                     } => {
                         debug_log(&format!(
-                            "Worker: Sending stop command for {} events",
-                            event_ids.len()
+                            "Worker: Sending stop command for {} events (reason: {})",
+                            event_ids.len(),
+                            reason,
                         ));
                         if let Err(e) = rt.block_on(self.handle_stop_operations(
                             project_a_tag,
                             event_ids,
                             agent_pubkeys,
+                            reason,
                         )) {
                             tlog!("ERROR", "Failed to send stop command: {}", e);
                         }
@@ -3203,6 +3208,7 @@ impl NostrWorker {
         project_a_tag: String,
         event_ids: Vec<String>,
         agent_pubkeys: Vec<String>,
+        reason: String,
     ) -> Result<()> {
         let client = self
             .client
@@ -3224,6 +3230,10 @@ impl NostrWorker {
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
                 vec!["tenex-tui".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("reason")),
+                vec![reason],
             ));
 
         // Add e-tags for events to stop
