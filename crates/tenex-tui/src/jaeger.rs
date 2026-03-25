@@ -57,8 +57,9 @@ pub fn build_trace_url(
 ) -> Result<String, String> {
     let normalized_endpoint = validate_and_normalize_endpoint(endpoint)?;
 
-    // Jaeger expects a 32-char hex trace ID, right-padded with zeros
-    let padded_trace_id = format!("{:0<32}", trace_id);
+    // Jaeger uses the first 12 hex chars of the trace ID, zero-padded to 32
+    let short_id = &trace_id[..12.min(trace_id.len())];
+    let padded_trace_id = format!("{:0<32}", short_id);
 
     let url = if let Some(span) = span_id {
         format!(
@@ -160,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_trace_url_full_32char_id_unchanged() {
+    fn test_build_trace_url_truncates_full_32char_id() {
         let result = build_trace_url(
             "http://localhost:16686",
             "4ed6aca791f4e1070d7ef63218656484",
@@ -169,7 +170,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "http://localhost:16686/trace/4ed6aca791f4e1070d7ef63218656484"
+            "http://localhost:16686/trace/4ed6aca791f400000000000000000000"
         );
     }
 
