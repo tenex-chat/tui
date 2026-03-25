@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Paragraph, Wrap},
     Frame,
 };
 
@@ -28,7 +28,6 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
     let lines: Vec<Line> = json
         .lines()
         .skip(scroll_offset)
-        .take(json_area.height as usize)
         .map(|line| {
             // Simple syntax highlighting for JSON
             if line.trim().starts_with('"') && line.contains(':') {
@@ -49,7 +48,7 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
         })
         .collect();
 
-    let paragraph = Paragraph::new(lines);
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
     f.render_widget(paragraph, json_area);
 
     // Render hints at bottom
