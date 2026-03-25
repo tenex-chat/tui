@@ -51,6 +51,9 @@ pub(super) fn handle_project_actions_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('a') => {
             execute_project_action(app, &state, ProjectAction::ToggleArchive);
         }
+        KeyCode::Char('d') => {
+            execute_project_action(app, &state, ProjectAction::Delete);
+        }
         _ => {}
     }
 }
@@ -140,6 +143,14 @@ fn execute_project_action(
             };
             app.notify(Notification::info(&status));
             app.modal_state = ModalState::None;
+        }
+        ProjectAction::Delete => {
+            app.modal_state = ModalState::ProjectDeleteConfirm(
+                ui::modal::ProjectDeleteConfirmState::new(
+                    state.project_a_tag.clone(),
+                    state.project_name.clone(),
+                ),
+            );
         }
     }
 }
@@ -326,6 +337,74 @@ fn execute_chat_action(
         ChatAction::ExportJsonl => {
             export_thread_as_jsonl(app, &state.thread_id);
             app.modal_state = ModalState::None;
+        }
+    }
+}
+
+pub(super) fn handle_project_delete_confirm_key(app: &mut App, key: KeyEvent) {
+    let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::ProjectDeleteConfirm(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Down => {
+            let mut new_state = state;
+            new_state.toggle();
+            app.modal_state = ModalState::ProjectDeleteConfirm(new_state);
+        }
+        KeyCode::Enter => {
+            if state.selected_index == 1 {
+                if let Some(ref core_handle) = app.core_handle {
+                    if let Err(e) = core_handle.send(NostrCommand::DeleteProject {
+                        project_a_tag: state.project_a_tag.clone(),
+                        client: Some("tenex-tui".to_string()),
+                    }) {
+                        app.set_warning_status(&format!("Failed to delete project: {}", e));
+                    } else {
+                        // Clear selected project if it was the deleted one
+                        if app
+                            .selected_project
+                            .as_ref()
+                            .is_some_and(|p| p.a_tag() == state.project_a_tag)
+                        {
+                            app.selected_project = None;
+                        }
+                        app.set_warning_status(&format!("Deleted project: {}", state.project_name));
+                    }
+                }
+            }
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Char('d') => {
+            // Quick delete shortcut
+            if let Some(ref core_handle) = app.core_handle {
+                if let Err(e) = core_handle.send(NostrCommand::DeleteProject {
+                    project_a_tag: state.project_a_tag.clone(),
+                    client: Some("tenex-tui".to_string()),
+                }) {
+                    app.set_warning_status(&format!("Failed to delete project: {}", e));
+                } else {
+                    if app
+                        .selected_project
+                        .as_ref()
+                        .is_some_and(|p| p.a_tag() == state.project_a_tag)
+                    {
+                        app.selected_project = None;
+                    }
+                    app.set_warning_status(&format!("Deleted project: {}", state.project_name));
+                }
+            }
+            app.modal_state = ModalState::None;
+        }
+        _ => {
+            app.modal_state = ModalState::ProjectDeleteConfirm(state);
         }
     }
 }

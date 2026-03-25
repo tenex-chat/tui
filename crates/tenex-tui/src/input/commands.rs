@@ -408,6 +408,7 @@ pub static COMMANDS: &[Command] = &[
                         project_a_tag: project.a_tag(),
                         event_ids: vec![],
                         agent_pubkeys: vec![],
+                        reason: "User stopped all agents from command palette".to_string(),
                     });
                 }
             }
@@ -448,6 +449,20 @@ pub static COMMANDS: &[Command] = &[
             }
         },
         execute: archive_toggle,
+    },
+    Command {
+        key: 'x',
+        label: "Delete project",
+        section: "Project",
+        available: |app| {
+            if app.view != View::Home || !app.sidebar_focused {
+                return false;
+            }
+            let (online, offline) = app.filtered_projects();
+            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+            all_projects.get(app.sidebar_project_index).is_some()
+        },
+        execute: delete_project,
     },
     // =========================================================================
     // CHAT VIEW - Available in both Normal and Editing modes
@@ -820,6 +835,16 @@ fn boot_project(app: &mut App) {
                 project_pubkey: Some(project.pubkey.clone()),
             });
         }
+    }
+}
+
+fn delete_project(app: &mut App) {
+    let (online, offline) = app.filtered_projects();
+    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+    if let Some(project) = all_projects.get(app.sidebar_project_index) {
+        app.modal_state = ModalState::ProjectDeleteConfirm(
+            modal::ProjectDeleteConfirmState::new(project.a_tag(), project.title.clone()),
+        );
     }
 }
 

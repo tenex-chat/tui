@@ -391,6 +391,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             project_a_tag: a_tag,
                             event_ids,
                             agent_pubkeys,
+                            reason: "User stopped project operations".to_string(),
                         }) {
                             app.set_warning_status(&format!("Failed to stop: {}", e));
                         } else {
@@ -1119,6 +1120,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
             // Escape, 'h', or Left arrow unfocuses sidebar
             KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
                 app.set_sidebar_focused(false);
+                app.last_esc_time = None; // Navigation happened, don't count toward double-Esc stop
                 return Ok(true);
             }
             // Up/k = move selection up
@@ -1378,12 +1380,15 @@ pub(super) fn handle_normal_mode(
                 if app.in_subthread() {
                     // First priority: exit subthread view
                     app.exit_subthread();
+                    app.last_esc_time = None; // Navigation happened, don't count toward double-Esc stop
                 } else if app.has_navigation_stack() {
                     // Second priority: pop navigation stack (return to parent delegation)
                     app.pop_navigation_stack();
+                    app.last_esc_time = None; // Navigation happened, don't count toward double-Esc stop
                 } else {
                     // Third priority: close tab and go to Home
                     app.close_current_tab();
+                    app.last_esc_time = None;
                 }
             }
             View::LessonViewer => {
@@ -1391,6 +1396,7 @@ pub(super) fn handle_normal_mode(
                 app.viewing_lesson_id = None;
                 app.lesson_viewer_section = 0;
                 app.scroll_offset = 0;
+                app.last_esc_time = None;
             }
             View::AgentBrowser => {
                 if app.home.in_agent_detail() {
@@ -1401,6 +1407,7 @@ pub(super) fn handle_normal_mode(
                     app.home.clear_agent_filter();
                     app.home.set_agent_index(0);
                 }
+                app.last_esc_time = None;
             }
             _ => {}
         },

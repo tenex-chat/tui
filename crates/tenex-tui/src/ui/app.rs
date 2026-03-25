@@ -3910,6 +3910,7 @@ impl App {
                         project_a_tag: a_tag,
                         event_ids: vec![stop_thread_id.clone()],
                         agent_pubkeys: working_agents,
+                        reason: "User stopped conversation".to_string(),
                     }) {
                         self.set_warning_status(&format!("Failed to stop: {}", e));
                     } else {

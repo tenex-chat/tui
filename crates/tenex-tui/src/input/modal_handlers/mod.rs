@@ -208,6 +208,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle project delete confirmation when open
+    if matches!(app.modal_state, ModalState::ProjectDeleteConfirm(_)) {
+        actions::handle_project_delete_confirm_key(app, key);
+        return Ok(true);
+    }
+
     // Handle agent deletion confirmation when open
     if matches!(app.modal_state, ModalState::AgentDeletion(_)) {
         agent::handle_agent_deletion_key(app, key);

@@ -197,6 +197,11 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
         super::render_nudge_delete_confirm(f, app, area, state);
     }
 
+    // Project delete confirmation modal
+    if let ModalState::ProjectDeleteConfirm(ref state) = app.modal_state {
+        modals::render_project_delete_confirm(f, area, state);
+    }
+
     // Agent deletion confirmation modal (kind:24030)
     if let ModalState::AgentDeletion(ref state) = app.modal_state {
         super::render_agent_deletion_confirm(f, area, state);

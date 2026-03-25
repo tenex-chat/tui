@@ -201,6 +201,7 @@ fn send_stop_for_current_conversation(
             project_a_tag,
             event_ids: vec![thread_id],
             agent_pubkeys: working_agents,
+            reason: "User stopped from REPL".to_string(),
         })
         .map_err(|e| format!("Failed to send stop command: {e}"))
 }

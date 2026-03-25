@@ -662,6 +662,28 @@ impl NudgeDetailState {
     }
 }
 
+/// State for project delete confirmation
+#[derive(Debug, Clone)]
+pub struct ProjectDeleteConfirmState {
+    pub project_a_tag: String,
+    pub project_name: String,
+    pub selected_index: usize, // 0 = Cancel, 1 = Delete
+}
+
+impl ProjectDeleteConfirmState {
+    pub fn new(project_a_tag: String, project_name: String) -> Self {
+        Self {
+            project_a_tag,
+            project_name,
+            selected_index: 0, // Default to Cancel
+        }
+    }
+
+    pub fn toggle(&mut self) {
+        self.selected_index = 1 - self.selected_index;
+    }
+}
+
 /// State for nudge delete confirmation
 #[derive(Debug, Clone)]
 pub struct NudgeDeleteConfirmState {
@@ -1228,6 +1250,7 @@ pub enum ProjectAction {
     Boot,
     Settings,
     ToggleArchive,
+    Delete,
 }
 
 impl ProjectAction {
@@ -1243,6 +1266,7 @@ impl ProjectAction {
                     "Archive"
                 }
             }
+            ProjectAction::Delete => "Delete Project",
         }
     }
 
@@ -1252,6 +1276,7 @@ impl ProjectAction {
             ProjectAction::Boot => 'b',
             ProjectAction::Settings => 's',
             ProjectAction::ToggleArchive => 'a',
+            ProjectAction::Delete => 'd',
         }
     }
 }
@@ -1292,6 +1317,7 @@ impl ProjectActionsState {
             vec![ProjectAction::Boot, ProjectAction::Settings]
         };
         actions.push(ProjectAction::ToggleArchive);
+        actions.push(ProjectAction::Delete);
         actions
     }
 
@@ -2414,6 +2440,8 @@ pub enum ModalState {
     NudgeDetail(NudgeDetailState),
     /// Nudge delete confirmation - confirm deletion of a nudge
     NudgeDeleteConfirm(NudgeDeleteConfirmState),
+    /// Project delete confirmation - confirm tombstone deletion of a project
+    ProjectDeleteConfirm(ProjectDeleteConfirmState),
     /// Agent deletion confirmation - confirm publishing kind:24030 deletion event
     AgentDeletion(AgentDeletionState),
     /// Workspace manager modal - create, edit, delete, switch workspaces

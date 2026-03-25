@@ -2,7 +2,9 @@ use crate::ui::components::{
     render_modal_items, render_modal_sections, Modal, ModalItem, ModalSection, ModalSize,
 };
 use crate::ui::format::truncate_with_ellipsis;
-use crate::ui::modal::{ConversationAction, ConversationActionsState, ProjectActionsState};
+use crate::ui::modal::{
+    ConversationAction, ConversationActionsState, ProjectActionsState, ProjectDeleteConfirmState,
+};
 use crate::ui::{card, theme, App, View};
 use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
 
@@ -377,6 +379,58 @@ pub(super) fn render_conversation_actions_modal(
         1,
     );
     let hints = Paragraph::new("↑↓ navigate · enter select · esc close")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
+}
+
+/// Render the project delete confirmation dialog
+pub(super) fn render_project_delete_confirm(
+    f: &mut Frame,
+    area: Rect,
+    state: &ProjectDeleteConfirmState,
+) {
+    let popup_area = Modal::new("Delete Project")
+        .size(ModalSize {
+            max_width: 50,
+            height_percent: 0.3,
+        })
+        .render(f, area, |f, content_area| {
+            let warning = Paragraph::new(format!(
+                "Delete '{}' ?\n\nThis publishes a tombstone event and hides the project everywhere.",
+                state.project_name
+            ))
+            .style(Style::default().fg(theme::ACCENT_WARNING));
+            f.render_widget(
+                warning,
+                Rect::new(content_area.x, content_area.y, content_area.width, 3),
+            );
+
+            let actions_area = Rect::new(
+                content_area.x,
+                content_area.y + 4,
+                content_area.width,
+                content_area.height.saturating_sub(4),
+            );
+
+            let items = vec![
+                ModalItem::new("Cancel")
+                    .with_shortcut("Esc")
+                    .selected(state.selected_index == 0),
+                ModalItem::new("Delete")
+                    .with_shortcut("d")
+                    .selected(state.selected_index == 1),
+            ];
+
+            render_modal_items(f, actions_area, &items);
+        });
+
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("↑↓ navigate · Enter confirm · Esc cancel")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
