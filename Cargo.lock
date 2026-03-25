@@ -3562,6 +3562,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tenex-telegram-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "dirs",
+ "nostr-sdk",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tenex-core",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tenex-tui"
 version = "0.1.0"
 dependencies = [
