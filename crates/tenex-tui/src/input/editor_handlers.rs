@@ -51,6 +51,7 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             // Set selection to last item so Up arrow works intuitively
             let count = app.display_item_count();
             app.set_selected_message_index(count.saturating_sub(1));
+            app.last_esc_time = None; // Mode change happened, don't count toward double-Esc stop
         }
         // Tab = cycle focus between input and attachments
         KeyCode::Tab if app.chat_editor().has_attachments() => {
