@@ -1173,8 +1173,8 @@ fn archive_and_close_tab(app: &mut App) {
 fn copy_conversation_id(app: &mut App) {
     if let Some(thread) = app.selected_thread() {
         let conversation_id = &thread.id;
-        // Truncate to first 12 characters (short ID format)
-        let short_id: String = conversation_id.chars().take(12).collect();
+        // Truncate to first 18 characters (short ID format)
+        let short_id: String = conversation_id.chars().take(18).collect();
 
         use arboard::Clipboard;
         match Clipboard::new() {
@@ -1266,10 +1266,10 @@ fn reference_conversation(app: &mut App) {
     let approx_tokens = total_chars / 4;
 
     // Pre-fill the editor with the context message as a text attachment
-    // Use 12-character short ID format for readability
+    // Use 18-character short ID format for readability
     let short_conversation_id: String = app
         .selected_thread()
-        .map(|t| t.id.chars().take(12).collect())
+        .map(|t| t.id.chars().take(18).collect())
         .unwrap_or_else(|| "unknown".to_string());
     let context_message = format!(
         "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
@@ -1320,12 +1320,12 @@ fn fork_conversation(app: &mut App) {
         return;
     };
 
-    // Get source thread ID for the context message (use 12-character short ID format for readability)
+    // Get source thread ID for the context message (use 18-character short ID format for readability)
     let short_conversation_id: String = app
         .selected_thread()
-        .map(|t| t.id.chars().take(12).collect())
+        .map(|t| t.id.chars().take(18).collect())
         .unwrap_or_default();
-    let short_fork_message_id: String = fork_message_id.chars().take(12).collect();
+    let short_fork_message_id: String = fork_message_id.chars().take(18).collect();
 
     // Pre-fill the editor with the fork context message as a text attachment
     let context_message = format!(

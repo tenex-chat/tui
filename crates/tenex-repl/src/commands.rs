@@ -776,7 +776,7 @@ pub(crate) fn handle_reference_command(
         total_chars / 4
     };
 
-    let short_id: String = source_thread_id.chars().take(12).collect();
+    let short_id: String = source_thread_id.chars().take(18).collect();
     let context_message = format!(
         "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
         short_id, approx_tokens
