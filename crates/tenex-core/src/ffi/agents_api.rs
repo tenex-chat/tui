@@ -685,10 +685,12 @@ impl TenexCore {
             Some(s) => Ok(ProjectConfigOptions {
                 all_models: s.all_models.clone(),
                 all_tools: s.all_tools.to_vec(),
+                all_skills: s.all_skills.to_vec(),
             }),
             None => Ok(ProjectConfigOptions {
                 all_models: Vec::new(),
                 all_tools: Vec::new(),
+                all_skills: Vec::new(),
             }),
         }
     }
@@ -703,6 +705,7 @@ impl TenexCore {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        skills: Vec<String>,
         tags: Vec<String>,
     ) -> Result<(), TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
@@ -714,6 +717,7 @@ impl TenexCore {
                 agent_pubkey,
                 model,
                 tools,
+                skills,
                 tags,
             })
             .map_err(|e| TenexError::Internal {
@@ -731,6 +735,7 @@ impl TenexCore {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        skills: Vec<String>,
         tags: Vec<String>,
     ) -> Result<(), TenexError> {
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -740,6 +745,7 @@ impl TenexCore {
                 agent_pubkey,
                 model,
                 tools,
+                skills,
                 tags,
             })
             .map_err(|e| TenexError::Internal {

@@ -1955,15 +1955,16 @@ impl App {
         agent: &crate::models::ProjectAgent,
     ) -> Option<crate::ui::modal::AgentSettingsState> {
         let project = self.selected_project.as_ref()?;
-        // Use status.all_tools() to show ALL tools (including unassigned ones)
-        let (all_tools, all_models) = self
+        // Use status.all_tools()/all_skills() to show ALL options (including unassigned ones)
+        let (all_tools, all_skills, all_models) = self
             .data_store
             .borrow()
             .get_project_status(&project.a_tag())
             .map(|status| {
                 let tools = status.all_tools().iter().map(|s| s.to_string()).collect();
+                let skills = status.all_skills().iter().map(|s| s.to_string()).collect();
                 let models = status.all_models.clone();
-                (tools, models)
+                (tools, skills, models)
             })
             .unwrap_or_default();
 
@@ -1972,9 +1973,11 @@ impl App {
             agent.pubkey.clone(),
             agent.model.clone(),
             agent.tools.clone(),
+            agent.skills.clone(),
             false,
             all_models,
             all_tools,
+            all_skills,
         ))
     }
 
@@ -1984,7 +1987,7 @@ impl App {
         state.selector.clamp_index(filtered.len());
 
         let Some(agent) = filtered.get(state.selector.index) else {
-            state.load_agent_settings(None, None, None, HashSet::new(), false);
+            state.load_agent_settings(None, None, None, HashSet::new(), HashSet::new(), false);
             return;
         };
 
@@ -1998,6 +2001,7 @@ impl App {
             settings,
             agent.model.clone(),
             agent.tools.iter().cloned().collect(),
+            agent.skills.iter().cloned().collect(),
             false,
         );
     }
@@ -4697,6 +4701,13 @@ impl NudgeSkillSelectorItem {
             NudgeSkillSelectorItem::Skill(skill) => skill.file_ids.len(),
         }
     }
+
+    pub fn created_at(&self) -> u64 {
+        match self {
+            NudgeSkillSelectorItem::Nudge(nudge) => nudge.created_at,
+            NudgeSkillSelectorItem::Skill(skill) => skill.created_at,
+        }
+    }
 }
 
 // =============================================================================
@@ -4884,6 +4895,7 @@ mod selected_agent_refresh_tests {
             is_pm: false,
             model: Some("old-model".to_string()),
             tools: vec!["shell".to_string()],
+            skills: vec![],
         };
         let status = make_status(vec![ProjectAgent {
             pubkey: "agent-a".to_string(),
@@ -4891,6 +4903,7 @@ mod selected_agent_refresh_tests {
             is_pm: false,
             model: Some("new-model".to_string()),
             tools: vec!["shell".to_string()],
+            skills: vec![],
         }]);
 
         let resolved = resolve_selected_agent_from_status(Some(&current), &status)
@@ -4907,6 +4920,7 @@ mod selected_agent_refresh_tests {
             is_pm: false,
             model: Some("old-model".to_string()),
             tools: vec!["shell".to_string()],
+            skills: vec![],
         };
         let status = make_status(vec![ProjectAgent {
             pubkey: "agent-b".to_string(),
@@ -4914,6 +4928,7 @@ mod selected_agent_refresh_tests {
             is_pm: true,
             model: Some("pm-model".to_string()),
             tools: vec![],
+            skills: vec![],
         }]);
 
         let resolved = resolve_selected_agent_from_status(Some(&current), &status)
@@ -4932,6 +4947,7 @@ mod selected_agent_refresh_tests {
                 is_pm: false,
                 model: Some("model-a".to_string()),
                 tools: vec![],
+                skills: vec![],
             },
             ProjectAgent {
                 pubkey: "agent-pm".to_string(),
@@ -4939,6 +4955,7 @@ mod selected_agent_refresh_tests {
                 is_pm: true,
                 model: Some("model-pm".to_string()),
                 tools: vec![],
+                skills: vec![],
             },
         ]);
 

@@ -641,7 +641,7 @@ fn render_agent_config_modal(
 
     let (popup_area, content_area) = Modal::new(&title)
         .size(ModalSize {
-            max_width: 112,
+            max_width: 128,
             height_percent,
         })
         .render_frame(f, area);
@@ -670,17 +670,19 @@ fn render_agent_config_modal(
     }
 
     let column_gap = if inner.width >= 54 { 1 } else { 0 };
-    let column_constraints = if inner.width >= 78 {
+    let column_constraints = if inner.width >= 96 {
         [
-            Constraint::Percentage(34),
-            Constraint::Percentage(29),
-            Constraint::Percentage(37),
+            Constraint::Percentage(30),
+            Constraint::Percentage(18),
+            Constraint::Percentage(26),
+            Constraint::Percentage(26),
         ]
     } else {
         [
-            Constraint::Percentage(34),
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
+            Constraint::Percentage(32),
+            Constraint::Percentage(18),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
         ]
     };
     let columns = Layout::horizontal(column_constraints)
@@ -690,6 +692,7 @@ fn render_agent_config_modal(
     let agents_area = columns[0];
     let model_area = columns[1];
     let tools_area = columns[2];
+    let skills_area = columns[3];
 
     // Subtle column differentiation
     f.render_widget(
@@ -703,6 +706,10 @@ fn render_agent_config_modal(
     f.render_widget(
         Block::default().style(Style::default().bg(theme::BG_CARD)),
         tools_area,
+    );
+    f.render_widget(
+        Block::default().style(Style::default().bg(theme::BG_MODAL)),
+        skills_area,
     );
 
     let agents_header_style = if state.focus == AgentConfigFocus::Agents {
@@ -726,6 +733,13 @@ fn render_agent_config_modal(
     } else {
         Style::default().fg(theme::TEXT_DIM)
     };
+    let skills_header_style = if state.focus == AgentConfigFocus::Skills {
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_DIM)
+    };
 
     f.render_widget(
         Paragraph::new("Agents").style(agents_header_style),
@@ -738,11 +752,20 @@ fn render_agent_config_modal(
     let tools_header = if tools_area.width < 24 {
         "Tools"
     } else {
-        "Tools (space toggle, a toggle all)"
+        "Tools (space/a)"
     };
     f.render_widget(
         Paragraph::new(tools_header).style(tools_header_style),
         tools_area,
+    );
+    let skills_header = if skills_area.width < 24 {
+        "Skills"
+    } else {
+        "Skills (space/a)"
+    };
+    f.render_widget(
+        Paragraph::new(skills_header).style(skills_header_style),
+        skills_area,
     );
 
     let agents_search_area = Rect::new(agents_area.x, agents_area.y + 1, agents_area.width, 1);
@@ -908,16 +931,22 @@ fn render_agent_config_modal(
         tools_area.width,
         tools_area.height.saturating_sub(1),
     );
+    let skills_list_area = Rect::new(
+        skills_area.x,
+        skills_area.y + 1,
+        skills_area.width,
+        skills_area.height.saturating_sub(1),
+    );
     if let Some(settings) = state.settings.as_mut() {
-        let visible_height = tools_list_area.height as usize;
-        settings.adjust_tools_scroll(visible_height.max(1));
+        let tools_visible_height = tools_list_area.height as usize;
+        settings.adjust_tools_scroll(tools_visible_height.max(1));
 
         let mut y_offset: u16 = 0;
         let mut cursor_pos: usize = 0;
         let scroll_offset = settings.tools_scroll;
 
         for group in &settings.tool_groups {
-            if y_offset as usize >= visible_height {
+            if y_offset as usize >= tools_visible_height {
                 break;
             }
 
@@ -994,7 +1023,7 @@ fn render_agent_config_modal(
 
             if group.expanded && !is_single_tool {
                 for tool in &group.tools {
-                    if y_offset as usize >= visible_height {
+                    if y_offset as usize >= tools_visible_height {
                         break;
                     }
                     if cursor_pos >= scroll_offset {
@@ -1029,10 +1058,61 @@ fn render_agent_config_modal(
                 }
             }
         }
+
+        if settings.available_skills.is_empty() {
+            f.render_widget(
+                Paragraph::new("No skills available")
+                    .style(Style::default().fg(theme::TEXT_MUTED)),
+                skills_list_area,
+            );
+        } else {
+            let skills_visible_height = skills_list_area.height as usize;
+            settings.adjust_skills_scroll(skills_visible_height.max(1));
+
+            for (row, skill) in settings
+                .available_skills
+                .iter()
+                .skip(settings.skills_scroll)
+                .take(skills_visible_height.max(1))
+                .enumerate()
+            {
+                if row as u16 >= skills_list_area.height {
+                    break;
+                }
+
+                let is_cursor_on_skill = settings.skills_cursor == settings.skills_scroll + row;
+                let is_checked = settings.selected_skills.contains(skill);
+                let prefix = if is_checked { "[x] " } else { "[ ] " };
+                let style = if is_cursor_on_skill && state.focus == AgentConfigFocus::Skills {
+                    Style::default().fg(theme::ACCENT_PRIMARY)
+                } else if is_checked {
+                    Style::default().fg(theme::TEXT_PRIMARY)
+                } else {
+                    Style::default().fg(theme::TEXT_MUTED)
+                };
+
+                let row_area = Rect::new(
+                    skills_list_area.x,
+                    skills_list_area.y + row as u16,
+                    skills_list_area.width,
+                    1,
+                );
+                let content_width = skills_list_area.width as usize;
+                let skill_label = truncate_with_ellipsis(skill, content_width.saturating_sub(4));
+                f.render_widget(
+                    Paragraph::new(format!("{}{}", prefix, skill_label)).style(style),
+                    row_area,
+                );
+            }
+        }
     } else {
         f.render_widget(
             Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
             tools_list_area,
+        );
+        f.render_widget(
+            Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
+            skills_list_area,
         );
     }
 
@@ -1074,9 +1154,10 @@ fn render_agent_config_modal(
         popup_area.width.saturating_sub(2),
         1,
     );
-    let hints =
-        Paragraph::new("space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc")
-            .style(Style::default().fg(theme::TEXT_MUTED));
+    let hints = Paragraph::new(
+        "tab switch panes · space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc",
+    )
+    .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 

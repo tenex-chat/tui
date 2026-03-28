@@ -12,6 +12,7 @@ pub struct ProjectAgent {
     pub is_pm: bool,
     pub model: Option<String>,
     pub tools: Vec<String>,
+    pub skills: Vec<String>,
 }
 
 /// Represents a TENEX project status (Nostr kind:24010)
@@ -26,6 +27,8 @@ pub struct ProjectStatus {
     /// All available tools from tool tags (including unassigned ones).
     /// Use `all_tools()` or `agent_assigned_tools()` methods instead of direct access.
     pub(crate) all_tools: Vec<String>,
+    /// All available skills from skill tags (including unassigned ones).
+    pub(crate) all_skills: Vec<String>,
     pub created_at: u64,
     /// The pubkey of the backend that published this status event
     pub backend_pubkey: String,
@@ -100,8 +103,9 @@ impl ProjectStatus {
         let mut branches: Vec<String> = Vec::new();
         let mut all_models: Vec<String> = Vec::new();
         let mut all_tools: Vec<String> = Vec::new();
+        let mut all_skills: Vec<String> = Vec::new();
 
-        // First pass: collect project coordinate, agents, branches, all models, and all tools
+        // First pass: collect project coordinate, agents, branches, all models, all tools, and all skills
         for tag in &tags {
             if tag.is_empty() {
                 continue;
@@ -123,6 +127,7 @@ impl ProjectStatus {
                             is_pm,
                             model: None,
                             tools: Vec::new(),
+                            skills: Vec::new(),
                         };
                         agent_map.insert(tag[2].clone(), agent);
                     }
@@ -144,6 +149,12 @@ impl ProjectStatus {
                         all_tools.push(tag[1].clone());
                     }
                 }
+                "skill" => {
+                    // Collect skill name (tag[1]) regardless of agent assignments
+                    if tag.len() >= 2 {
+                        all_skills.push(tag[1].clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -153,8 +164,10 @@ impl ProjectStatus {
         all_models.dedup();
         all_tools.sort();
         all_tools.dedup();
+        all_skills.sort();
+        all_skills.dedup();
 
-        // Second pass: apply model and tool tags to agents
+        // Second pass: apply model, tool, and skill tags to agents
         for tag in &tags {
             if tag.is_empty() {
                 continue;
@@ -181,6 +194,16 @@ impl ProjectStatus {
                         }
                     }
                 }
+                "skill" => {
+                    if tag.len() >= 3 {
+                        let skill = &tag[1];
+                        for agent_name in &tag[2..] {
+                            if let Some(agent) = agent_map.get_mut(agent_name) {
+                                agent.skills.push(skill.clone());
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -194,6 +217,7 @@ impl ProjectStatus {
             branches,
             all_models,
             all_tools,
+            all_skills,
             created_at,
             backend_pubkey,
             last_seen_at: created_at,
@@ -244,6 +268,23 @@ impl ProjectStatus {
     /// **Recommended for UI display** to show all available tools to users.
     pub fn all_tools(&self) -> Vec<&str> {
         self.all_tools.iter().map(|s| s.as_str()).collect()
+    }
+
+    /// Returns all available skills (including both assigned and unassigned skills).
+    pub fn all_skills(&self) -> Vec<&str> {
+        self.all_skills.iter().map(|s| s.as_str()).collect()
+    }
+
+    /// Returns skills assigned to at least one agent (excludes unassigned skills).
+    pub fn agent_assigned_skills(&self) -> Vec<&str> {
+        let mut skills: Vec<&str> = self
+            .agents
+            .iter()
+            .flat_map(|a| a.skills.iter().map(|s| s.as_str()))
+            .collect();
+        skills.sort();
+        skills.dedup();
+        skills
     }
 
     /// All available models from the project (including unassigned ones)
@@ -816,5 +857,49 @@ mod tests {
         // Verify pm_agent() returns the correct agent
         let pm = status.pm_agent().expect("Should have a PM agent");
         assert_eq!(pm.name, "architect-orchestrator");
+    }
+
+    #[test]
+    fn test_skill_tags_parsing() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pk",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pk:project_id"],
+                ["agent", "agent1_pk", "claude-code"],
+                ["agent", "agent2_pk", "architect"],
+                ["tool", "Read", "claude-code"],
+                ["skill", "code-review", "claude-code"],
+                ["skill", "testing", "claude-code", "architect"],
+                ["skill", "deployment"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // all_skills() returns all skills (assigned + unassigned)
+        let all = status.all_skills();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&"code-review"));
+        assert!(all.contains(&"testing"));
+        assert!(all.contains(&"deployment"));
+
+        // agent_assigned_skills() returns only skills assigned to agents
+        let assigned = status.agent_assigned_skills();
+        assert_eq!(assigned.len(), 2);
+        assert!(assigned.contains(&"code-review"));
+        assert!(assigned.contains(&"testing"));
+        assert!(!assigned.contains(&"deployment"));
+
+        // Verify per-agent skill assignment
+        let claude = status.agents.iter().find(|a| a.name == "claude-code").unwrap();
+        assert_eq!(claude.skills.len(), 2);
+        assert!(claude.skills.contains(&"code-review".to_string()));
+        assert!(claude.skills.contains(&"testing".to_string()));
+
+        let architect = status.agents.iter().find(|a| a.name == "architect").unwrap();
+        assert_eq!(architect.skills.len(), 1);
+        assert!(architect.skills.contains(&"testing".to_string()));
     }
 }

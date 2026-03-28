@@ -116,19 +116,14 @@ impl ContentStore {
 
     pub fn get_skills(&self) -> Vec<&Skill> {
         // Deduplicate skill versions by author + d-tag, keeping the most recent.
-        // If `d_tag` is empty, fall back to event id so standalone skills remain unique.
+        // d_tag is always populated: either from the event's d-tag or slugified from the title.
         let mut latest_by_key: HashMap<String, &Skill> = HashMap::new();
 
         for skill in self.skills.values() {
-            let identifier = if skill.d_tag.is_empty() {
-                &skill.id
-            } else {
-                &skill.d_tag
-            };
             let key = format!(
                 "{}:{}",
                 skill.pubkey.to_lowercase(),
-                identifier.to_lowercase()
+                skill.d_tag.to_lowercase()
             );
 
             match latest_by_key.get(&key) {
@@ -339,6 +334,7 @@ mod tests {
             tools: vec![],
             mcp_servers: vec![],
             use_criteria: vec![],
+            skill_ids: vec![],
             file_ids: vec![],
             created_at,
         }

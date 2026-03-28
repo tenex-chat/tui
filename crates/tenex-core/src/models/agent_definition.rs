@@ -19,6 +19,8 @@ pub struct AgentDefinition {
     pub tools: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub use_criteria: Vec<String>,
+    /// Skill event IDs (kind:4202 references via `["skill", <event-id>]` tags)
+    pub skill_ids: Vec<String>,
     /// File attachment event IDs (e-tags referencing NIP-94 kind:1063 events)
     pub file_ids: Vec<String>,
     pub created_at: u64,
@@ -47,6 +49,7 @@ impl AgentDefinition {
         let mut tools: Vec<String> = Vec::new();
         let mut mcp_servers: Vec<String> = Vec::new();
         let mut use_criteria: Vec<String> = Vec::new();
+        let mut skill_ids: Vec<String> = Vec::new();
         let mut file_ids: Vec<String> = Vec::new();
 
         for tag in note.tags() {
@@ -80,6 +83,7 @@ impl AgentDefinition {
                             "tool" => tools.push(value.to_string()),
                             "mcp" => mcp_servers.push(value.to_string()),
                             "use-criteria" => use_criteria.push(value.to_string()),
+                            "skill" => skill_ids.push(value.to_string()),
                             _ => {}
                         }
                     }
@@ -102,6 +106,7 @@ impl AgentDefinition {
             tools,
             mcp_servers,
             use_criteria,
+            skill_ids,
             file_ids,
             created_at,
         })

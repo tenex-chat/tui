@@ -213,6 +213,7 @@ impl ConfigPanel {
 
         // Tools: from accumulated tools_selected
         let tools: Vec<String> = self.tools_selected.iter().cloned().collect();
+        let skills = agent.skills.clone();
 
         // Tags: include "pm" if is_set_pm flag is on, or agent was already PM
         let tags: Vec<String> = if self.is_set_pm || agent.is_pm {
@@ -232,6 +233,7 @@ impl ConfigPanel {
                     agent_pubkey: self.agent_pubkey.clone(),
                     model,
                     tools,
+                    skills,
                     tags,
                 });
         } else {
@@ -240,6 +242,7 @@ impl ConfigPanel {
                 agent_pubkey: self.agent_pubkey.clone(),
                 model,
                 tools,
+                skills,
                 tags,
             });
         }
@@ -285,6 +288,7 @@ impl ConfigPanel {
 
         let model = self.pending_model.clone();
         let tools = agent.tools.clone();
+        let skills = agent.skills.clone();
         let tags: Vec<String> = if agent.is_pm {
             vec!["pm".to_string()]
         } else {
@@ -300,6 +304,7 @@ impl ConfigPanel {
                     agent_pubkey: self.agent_pubkey.clone(),
                     model: model.clone(),
                     tools,
+                    skills,
                     tags,
                 });
         } else {
@@ -308,6 +313,7 @@ impl ConfigPanel {
                 agent_pubkey: self.agent_pubkey.clone(),
                 model: model.clone(),
                 tools,
+                skills,
                 tags,
             });
         }

@@ -1,6 +1,7 @@
 use nostrdb::Note;
 
 use crate::constants::DEFAULT_SKILL_TITLE;
+use crate::slug::normalize_slug;
 
 /// Skill - kind:4202 events for agent skills
 /// Skills are reusable instruction sets that can be attached to conversations.
@@ -73,7 +74,10 @@ impl Skill {
         Some(Skill {
             id,
             pubkey,
-            d_tag: d_tag.unwrap_or_default(),
+            d_tag: d_tag.unwrap_or_else(|| {
+                let resolved_title = title.as_deref().unwrap_or(DEFAULT_SKILL_TITLE);
+                normalize_slug(resolved_title)
+            }),
             title: title.unwrap_or_else(|| DEFAULT_SKILL_TITLE.to_string()),
             description: description.unwrap_or_default(),
             image,
@@ -217,6 +221,36 @@ mod tests {
     }
 
     #[test]
+    fn test_from_note_derives_d_tag_from_title_when_missing() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = create_skill_event_builder("Skill content")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Testing This".to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
+
+        let filter = Filter::new().kinds([4202]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+        let skill = Skill::from_note(&note).expect("Should parse skill");
+
+        // d_tag should be slugified from the title
+        assert_eq!(skill.d_tag, "testing-this");
+    }
+
+    #[test]
     fn test_from_note_extracts_hashtags() {
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path()).unwrap();
@@ -314,13 +348,11 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
         let skill = Skill::from_note(&note).expect("Should parse skill");
 
-        // Should use default title
         assert_eq!(skill.title, DEFAULT_SKILL_TITLE);
-        // Description defaults to empty
+        // d_tag derived from slugified default title
+        assert_eq!(skill.d_tag, "untitled");
         assert_eq!(skill.description, "");
-        // Hashtags should be empty
         assert!(skill.hashtags.is_empty());
-        // File IDs should be empty
         assert!(skill.file_ids.is_empty());
     }
 

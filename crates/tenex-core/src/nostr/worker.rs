@@ -803,6 +803,7 @@ pub enum NostrCommand {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        skills: Vec<String>,
         /// Additional marker tags (e.g. ["pm"])
         tags: Vec<String>,
     },
@@ -811,6 +812,7 @@ pub enum NostrCommand {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        skills: Vec<String>,
         /// Additional marker tags (e.g. ["pm"])
         tags: Vec<String>,
     },
@@ -1263,6 +1265,7 @@ impl NostrWorker {
                         agent_pubkey,
                         model,
                         tools,
+                        skills,
                         tags,
                     } => {
                         debug_log(&format!(
@@ -1274,6 +1277,7 @@ impl NostrWorker {
                             agent_pubkey,
                             model,
                             tools,
+                            skills,
                             tags,
                         )) {
                             tlog!("ERROR", "Failed to update agent config: {}", e);
@@ -1283,6 +1287,7 @@ impl NostrWorker {
                         agent_pubkey,
                         model,
                         tools,
+                        skills,
                         tags,
                     } => {
                         debug_log(&format!(
@@ -1293,6 +1298,7 @@ impl NostrWorker {
                             agent_pubkey,
                             model,
                             tools,
+                            skills,
                             tags,
                         )) {
                             tlog!("ERROR", "Failed to update global agent config: {}", e);
@@ -3274,6 +3280,7 @@ impl NostrWorker {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        skills: Vec<String>,
         tags: Vec<String>,
     ) -> Result<()> {
         let client = self
@@ -3292,7 +3299,7 @@ impl NostrWorker {
         // Build kind:24020 agent config update event with project a-tag
         let base =
             EventBuilder::new(Kind::Custom(24020), "").tag(Tag::coordinate(coordinate, None));
-        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &tags);
+        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &skills, &tags);
         let signed_event = event.sign_with_keys(keys)?;
 
         // Send to relay with timeout
@@ -3320,6 +3327,7 @@ impl NostrWorker {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        skills: Vec<String>,
         tags: Vec<String>,
     ) -> Result<()> {
         let client = self
@@ -3333,7 +3341,7 @@ impl NostrWorker {
 
         // Build kind:24020 global agent config event (no a-tag)
         let base = EventBuilder::new(Kind::Custom(24020), "");
-        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &tags);
+        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &skills, &tags);
         let signed_event = event.sign_with_keys(keys)?;
 
         // Send to relay with timeout
@@ -3982,6 +3990,7 @@ fn build_agent_config_event(
     agent_pubkey: &str,
     model: Option<String>,
     tools: &[String],
+    skills: &[String],
     tags: &[String],
 ) -> EventBuilder {
     // NIP-89 client tag
@@ -4003,12 +4012,34 @@ fn build_agent_config_event(
         ));
     }
 
-    // Tool tags (exhaustive list — empty means no tools)
-    for tool in tools {
+    // Tool tags (exhaustive list — empty emits a raw `["tool"]` tag)
+    if tools.is_empty() {
         event = event.tag(Tag::custom(
             TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-            vec![tool.clone()],
+            Vec::<String>::new(),
         ));
+    } else {
+        for tool in tools {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
+                vec![tool.clone()],
+            ));
+        }
+    }
+
+    // Skill tags (exhaustive list — empty emits a raw `["skill"]` tag)
+    if skills.is_empty() {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
+            Vec::<String>::new(),
+        ));
+    } else {
+        for skill in skills {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
+                vec![skill.clone()],
+            ));
+        }
     }
 
     // Marker tags (e.g. ["pm"])
@@ -5060,5 +5091,77 @@ mod tests {
         assert!(!has_tag_type(&tags, "allow-tool"));
         assert!(!has_tag_type(&tags, "deny-tool"));
         assert!(tags.is_empty());
+    }
+
+    #[test]
+    fn test_build_agent_config_event_emits_empty_snapshot_tags() {
+        let keys = Keys::generate();
+        let event = build_agent_config_event(
+            EventBuilder::new(Kind::Custom(24020), ""),
+            &keys.public_key().to_hex(),
+            None,
+            &[],
+            &[],
+            &[],
+        )
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let event_json = serde_json::to_value(event).unwrap();
+        let tags = event_json
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .expect("event tags should be an array");
+
+        let has_empty_tool_tag = tags.iter().any(|tag| {
+            let Some(arr) = tag.as_array() else {
+                return false;
+            };
+            arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("tool")
+        });
+        let has_empty_skill_tag = tags.iter().any(|tag| {
+            let Some(arr) = tag.as_array() else {
+                return false;
+            };
+            arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("skill")
+        });
+
+        assert!(has_empty_tool_tag, "expected raw empty tool tag");
+        assert!(has_empty_skill_tag, "expected raw empty skill tag");
+    }
+
+    #[test]
+    fn test_build_agent_config_event_emits_skill_values_when_present() {
+        let keys = Keys::generate();
+        let event = build_agent_config_event(
+            EventBuilder::new(Kind::Custom(24020), ""),
+            &keys.public_key().to_hex(),
+            None,
+            &["Read".to_string()],
+            &["code-review".to_string(), "testing".to_string()],
+            &[],
+        )
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let event_json = serde_json::to_value(event).unwrap();
+        let tags = event_json
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .expect("event tags should be an array");
+
+        let skill_values: Vec<String> = tags
+            .iter()
+            .filter_map(|tag| {
+                let arr = tag.as_array()?;
+                if arr.first().and_then(|v| v.as_str()) == Some("skill") {
+                    arr.get(1).and_then(|v| v.as_str()).map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(skill_values, vec!["code-review", "testing"]);
     }
 }

@@ -478,21 +478,24 @@ struct AgentDeletionSheet: View {
                 name: "claude-code",
                 isPm: true,
                 model: "claude-3-opus",
-                tools: ["Read", "Write", "Bash"]
+                tools: ["Read", "Write", "Bash"],
+                skills: []
             ),
             ProjectAgent(
                 pubkey: "def456ghi789",
                 name: "architect",
                 isPm: false,
                 model: "claude-3-sonnet",
-                tools: ["Read", "Edit"]
+                tools: ["Read", "Edit"],
+                skills: []
             ),
             ProjectAgent(
                 pubkey: "ghi789jkl012",
                 name: "test-writer",
                 isPm: false,
                 model: nil,
-                tools: []
+                tools: [],
+                skills: []
             )
         ],
         projectId: "test-project",

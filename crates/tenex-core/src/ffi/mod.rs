@@ -1094,6 +1094,8 @@ pub struct ProjectConfigOptions {
     pub all_models: Vec<String>,
     /// All available tools for the project
     pub all_tools: Vec<String>,
+    /// All available skills for the project
+    pub all_skills: Vec<String>,
 }
 
 /// Information about the current logged-in user.

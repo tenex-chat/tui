@@ -1376,6 +1376,7 @@ pub enum AgentConfigFocus {
     Agents,
     Model,
     Tools,
+    Skills,
 }
 
 impl AgentConfigFocus {
@@ -1383,15 +1384,17 @@ impl AgentConfigFocus {
         match self {
             AgentConfigFocus::Agents => AgentConfigFocus::Model,
             AgentConfigFocus::Model => AgentConfigFocus::Tools,
-            AgentConfigFocus::Tools => AgentConfigFocus::Agents,
+            AgentConfigFocus::Tools => AgentConfigFocus::Skills,
+            AgentConfigFocus::Skills => AgentConfigFocus::Agents,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            AgentConfigFocus::Agents => AgentConfigFocus::Tools,
+            AgentConfigFocus::Agents => AgentConfigFocus::Skills,
             AgentConfigFocus::Model => AgentConfigFocus::Agents,
             AgentConfigFocus::Tools => AgentConfigFocus::Model,
+            AgentConfigFocus::Skills => AgentConfigFocus::Tools,
         }
     }
 }
@@ -1436,6 +1439,14 @@ pub struct AgentSettingsState {
     pub tools_cursor: usize,
     /// Scroll offset for tools list
     pub tools_scroll: usize,
+    /// Available skills from project status
+    pub available_skills: Vec<String>,
+    /// Selected skills by name
+    pub selected_skills: std::collections::HashSet<String>,
+    /// Cursor position in skills list
+    pub skills_cursor: usize,
+    /// Scroll offset for skills list
+    pub skills_scroll: usize,
 }
 
 impl AgentSettingsState {
@@ -1444,9 +1455,11 @@ impl AgentSettingsState {
         agent_pubkey: String,
         current_model: Option<String>,
         current_tools: Vec<String>,
+        current_skills: Vec<String>,
         is_pm: bool,
         available_models: Vec<String>,
         all_available_tools: Vec<String>,
+        all_available_skills: Vec<String>,
     ) -> Self {
         // Find index of current model (default to 0 if not found)
         let model_index = current_model
@@ -1460,6 +1473,10 @@ impl AgentSettingsState {
         // Build selected tools set from current tools
         let selected_tools: std::collections::HashSet<String> = current_tools.into_iter().collect();
 
+        // Build selected skills set from current skills
+        let selected_skills: std::collections::HashSet<String> =
+            current_skills.into_iter().collect();
+
         Self {
             agent_name,
             agent_pubkey,
@@ -1470,6 +1487,10 @@ impl AgentSettingsState {
             selected_tools,
             tools_cursor: 0,
             tools_scroll: 0,
+            available_skills: all_available_skills,
+            selected_skills,
+            skills_cursor: 0,
+            skills_scroll: 0,
         }
     }
 
@@ -1546,7 +1567,15 @@ impl AgentSettingsState {
     }
 
     pub fn selected_tools_vec(&self) -> Vec<String> {
-        self.selected_tools.iter().cloned().collect()
+        let mut tools: Vec<String> = self.selected_tools.iter().cloned().collect();
+        tools.sort();
+        tools
+    }
+
+    pub fn selected_skills_vec(&self) -> Vec<String> {
+        let mut skills: Vec<String> = self.selected_skills.iter().cloned().collect();
+        skills.sort();
+        skills
     }
 
     /// Get total number of visible items (groups + expanded tools)
@@ -1671,6 +1700,66 @@ impl AgentSettingsState {
             self.tools_scroll = self.tools_cursor.saturating_sub(visible_height - 1);
         }
     }
+
+    pub fn toggle_skill_at_cursor(&mut self) {
+        let Some(skill) = self.available_skills.get(self.skills_cursor).cloned() else {
+            return;
+        };
+
+        if self.selected_skills.contains(&skill) {
+            self.selected_skills.remove(&skill);
+        } else {
+            self.selected_skills.insert(skill);
+        }
+    }
+
+    pub fn toggle_all_skills(&mut self) {
+        if self.available_skills.is_empty() {
+            return;
+        }
+
+        let all_selected = self
+            .available_skills
+            .iter()
+            .all(|skill| self.selected_skills.contains(skill));
+
+        if all_selected {
+            for skill in &self.available_skills {
+                self.selected_skills.remove(skill);
+            }
+        } else {
+            for skill in &self.available_skills {
+                self.selected_skills.insert(skill.clone());
+            }
+        }
+    }
+
+    pub fn move_skill_up(&mut self) {
+        if self.skills_cursor > 0 {
+            self.skills_cursor -= 1;
+            if self.skills_cursor < self.skills_scroll {
+                self.skills_scroll = self.skills_cursor;
+            }
+        }
+    }
+
+    pub fn move_skill_down(&mut self) {
+        if self.skills_cursor + 1 < self.available_skills.len() {
+            self.skills_cursor += 1;
+        }
+    }
+
+    pub fn adjust_skills_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+
+        if self.skills_cursor < self.skills_scroll {
+            self.skills_scroll = self.skills_cursor;
+        } else if self.skills_cursor >= self.skills_scroll + visible_height {
+            self.skills_scroll = self.skills_cursor.saturating_sub(visible_height - 1);
+        }
+    }
 }
 
 /// State for the unified agent selection + configuration modal.
@@ -1688,6 +1777,8 @@ pub struct AgentConfigState {
     pub original_model: Option<String>,
     /// Original tools for change detection
     pub original_tools: std::collections::HashSet<String>,
+    /// Original skills for change detection
+    pub original_skills: std::collections::HashSet<String>,
     /// Original PM marker for change detection
     pub original_is_pm: bool,
     /// When true, Enter saves config globally (no project a-tag).
@@ -1703,6 +1794,7 @@ impl AgentConfigState {
             settings: None,
             original_model: None,
             original_tools: std::collections::HashSet::new(),
+            original_skills: std::collections::HashSet::new(),
             original_is_pm: false,
             save_globally: false,
         }
@@ -1715,12 +1807,14 @@ impl AgentConfigState {
         settings: Option<AgentSettingsState>,
         original_model: Option<String>,
         original_tools: std::collections::HashSet<String>,
+        original_skills: std::collections::HashSet<String>,
         original_is_pm: bool,
     ) {
         self.active_agent_pubkey = active_agent_pubkey;
         self.settings = settings;
         self.original_model = original_model;
         self.original_tools = original_tools;
+        self.original_skills = original_skills;
         self.original_is_pm = original_is_pm;
     }
 
@@ -1732,6 +1826,7 @@ impl AgentConfigState {
         let current_model = settings.selected_model().map(str::to_string);
         current_model != self.original_model
             || settings.selected_tools != self.original_tools
+            || settings.selected_skills != self.original_skills
             || settings.is_pm != self.original_is_pm
     }
 }
@@ -2470,11 +2565,13 @@ mod tests {
     fn agent_config_focus_cycles_both_directions() {
         assert_eq!(AgentConfigFocus::Agents.next(), AgentConfigFocus::Model);
         assert_eq!(AgentConfigFocus::Model.next(), AgentConfigFocus::Tools);
-        assert_eq!(AgentConfigFocus::Tools.next(), AgentConfigFocus::Agents);
+        assert_eq!(AgentConfigFocus::Tools.next(), AgentConfigFocus::Skills);
+        assert_eq!(AgentConfigFocus::Skills.next(), AgentConfigFocus::Agents);
 
-        assert_eq!(AgentConfigFocus::Agents.prev(), AgentConfigFocus::Tools);
+        assert_eq!(AgentConfigFocus::Agents.prev(), AgentConfigFocus::Skills);
         assert_eq!(AgentConfigFocus::Model.prev(), AgentConfigFocus::Agents);
         assert_eq!(AgentConfigFocus::Tools.prev(), AgentConfigFocus::Model);
+        assert_eq!(AgentConfigFocus::Skills.prev(), AgentConfigFocus::Tools);
     }
 
     #[test]
@@ -2485,9 +2582,11 @@ mod tests {
             "pubkey-a".to_string(),
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
+            vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
+            vec![],
         );
 
         state.load_agent_settings(
@@ -2495,6 +2594,7 @@ mod tests {
             Some(settings),
             Some("model-a".to_string()),
             HashSet::from(["tool_read".to_string()]),
+            HashSet::new(),
             false,
         );
         assert!(!state.has_config_changes());
@@ -2528,9 +2628,11 @@ mod tests {
             "pubkey-a".to_string(),
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
+            vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
+            vec![],
         );
 
         state.load_agent_settings(
@@ -2538,6 +2640,7 @@ mod tests {
             Some(first),
             Some("model-a".to_string()),
             HashSet::from(["tool_read".to_string()]),
+            HashSet::new(),
             false,
         );
         if let Some(s) = state.settings.as_mut() {
@@ -2552,15 +2655,18 @@ mod tests {
             "pubkey-b".to_string(),
             Some("model-b".to_string()),
             vec!["tool_write".to_string()],
+            vec![],
             true,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
+            vec![],
         );
         state.load_agent_settings(
             Some("pubkey-b".to_string()),
             Some(second),
             Some("model-b".to_string()),
             HashSet::from(["tool_write".to_string()]),
+            HashSet::new(),
             true,
         );
 

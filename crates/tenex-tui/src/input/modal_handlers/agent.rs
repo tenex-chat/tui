@@ -249,6 +249,11 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     settings.move_cursor_up();
                 }
             }
+            AgentConfigFocus::Skills => {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.move_skill_up();
+                }
+            }
         },
         KeyCode::Down => match state.focus {
             AgentConfigFocus::Agents => {
@@ -267,17 +272,32 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     settings.move_cursor_down();
                 }
             }
+            AgentConfigFocus::Skills => {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.move_skill_down();
+                }
+            }
         },
         KeyCode::Char(' ') => {
-            if state.focus == AgentConfigFocus::Tools {
-                if let Some(settings) = state.settings.as_mut() {
-                    settings.toggle_at_cursor();
+            if let Some(settings) = state.settings.as_mut() {
+                match state.focus {
+                    AgentConfigFocus::Tools => settings.toggle_at_cursor(),
+                    AgentConfigFocus::Skills => settings.toggle_skill_at_cursor(),
+                    _ => {}
                 }
             }
         }
-        KeyCode::Char('a') if state.focus == AgentConfigFocus::Tools => {
+        KeyCode::Char('a') => {
             if let Some(settings) = state.settings.as_mut() {
-                settings.toggle_group_all();
+                match state.focus {
+                    AgentConfigFocus::Tools => {
+                        settings.toggle_group_all();
+                    }
+                    AgentConfigFocus::Skills => {
+                        settings.toggle_all_skills();
+                    }
+                    _ => {}
+                }
             }
         }
         // Ctrl+G: toggle save scope (project vs global)
@@ -312,6 +332,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     let agent_pubkey = settings.agent_pubkey.clone();
                     let model = settings.selected_model().map(str::to_string);
                     let tools = settings.selected_tools_vec();
+                    let skills = settings.selected_skills_vec();
                     let tags = if settings.is_pm {
                         vec!["pm".to_string()]
                     } else {
@@ -325,6 +346,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                                     agent_pubkey,
                                     model,
                                     tools,
+                                    skills,
                                     tags,
                                 })
                             {
@@ -346,6 +368,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                                             agent_pubkey,
                                             model,
                                             tools,
+                                            skills,
                                             tags,
                                         })
                                     {

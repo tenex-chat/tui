@@ -1900,6 +1900,7 @@ fn handle_request(
                         agent_pubkey: result.agent_pubkey.clone(),
                         model: Some(params.model.clone()),
                         tools: params.tools.clone(),
+                        skills: result.skills.clone(),
                         tags: Vec::new(),
                     }) {
                         Ok(_) => {
@@ -2104,6 +2105,7 @@ fn find_project_a_tag_by_slug(store: &AppDataStore, slug: &str) -> Option<String
 struct AgentLookupResult {
     project_a_tag: String,
     agent_pubkey: String,
+    skills: Vec<String>,
 }
 
 /// Find an agent's pubkey by their name within a specific project (identified by slug).
@@ -2128,6 +2130,7 @@ fn find_agent_in_project(
             return Ok(AgentLookupResult {
                 project_a_tag,
                 agent_pubkey: agent.pubkey.clone(),
+                skills: agent.skills.clone(),
             });
         }
     }

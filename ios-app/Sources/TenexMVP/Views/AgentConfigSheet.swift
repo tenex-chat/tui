@@ -34,6 +34,8 @@ struct AgentConfigSheet: View {
     // User selections
     @State private var selectedModelIndex: Int = 0
     @State private var selectedTools: Set<String> = []
+    @State private var selectedSkills: Set<String> = []
+    @State private var allSkills: [String] = []
     @State private var isPm: Bool = false
     @State private var saveGlobally: Bool = false
     @State private var toolSearchText = ""
@@ -231,6 +233,73 @@ struct AgentConfigSheet: View {
                                         )
                                 )
                             }
+                        }
+                    }
+                }
+
+                if !allSkills.isEmpty {
+                    GlassPanel(
+                        title: "Skills",
+                        subtitle: "Select the skills available to this agent."
+                    ) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("\(selectedSkills.count) selected")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Spacer(minLength: 0)
+
+                                Button("Select All") {
+                                    selectedSkills = Set(allSkills)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(selectedSkills == Set(allSkills))
+
+                                Text("•")
+                                    .foregroundStyle(.tertiary)
+
+                                Button("Clear") {
+                                    selectedSkills.removeAll()
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(selectedSkills.isEmpty)
+                            }
+
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(allSkills.enumerated()), id: \.element) { offset, skill in
+                                    Toggle(isOn: Binding(
+                                        get: { selectedSkills.contains(skill) },
+                                        set: { isSelected in
+                                            if isSelected {
+                                                selectedSkills.insert(skill)
+                                            } else {
+                                                selectedSkills.remove(skill)
+                                            }
+                                        }
+                                    )) {
+                                        Text(skill)
+                                            .foregroundStyle(.primary)
+                                    }
+                                    #if os(macOS)
+                                    .toggleStyle(.checkbox)
+                                    #endif
+                                    if offset < allSkills.count - 1 {
+                                        Divider()
+                                            .opacity(0.30)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.systemBackground.opacity(reduceTransparency ? 1 : 0.36))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
+                                    )
+                            )
                         }
                     }
                 }
@@ -434,6 +503,7 @@ struct AgentConfigSheet: View {
             let options = try await coreManager.safeCore.getProjectConfigOptions(projectId: projectId)
             allModels = options.allModels
             toolGroups = ToolGroup.buildGroups(from: options.allTools)
+            allSkills = options.allSkills
 
             // Set initial selections from agent
             if let currentModel = agent.model,
@@ -441,6 +511,7 @@ struct AgentConfigSheet: View {
                 selectedModelIndex = modelIndex
             }
             selectedTools = Set(agent.tools)
+            selectedSkills = Set(agent.skills)
             isPm = agent.isPm
             toolSearchText = ""
 
@@ -464,6 +535,7 @@ struct AgentConfigSheet: View {
                     agentPubkey: agent.pubkey,
                     model: selectedModel,
                     tools: Array(selectedTools),
+                    skills: Array(selectedSkills),
                     tags: tags
                 )
             } else {
@@ -472,6 +544,7 @@ struct AgentConfigSheet: View {
                     agentPubkey: agent.pubkey,
                     model: selectedModel,
                     tools: Array(selectedTools),
+                    skills: Array(selectedSkills),
                     tags: tags
                 )
             }
@@ -493,7 +566,8 @@ struct AgentConfigSheet: View {
             name: "claude-code",
             isPm: true,
             model: "claude-3-opus",
-            tools: ["Read", "Write", "Bash"]
+            tools: ["Read", "Write", "Bash"],
+            skills: []
         ),
         projectId: "test-project"
     )
