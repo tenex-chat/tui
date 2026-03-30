@@ -269,7 +269,7 @@ fn render_agents_list(
     if state.pending_agent_pubkeys.is_empty() {
         let empty_text = if state.backend_pubkey.is_none() {
             if app.available_install_backends().is_empty() {
-                "No approved backend inventory. Wait for project status and 24011 inventory before assigning agents."
+                "No agents online"
             } else {
                 "Waiting for live project status to identify this project's backend before assigning agents."
             }
@@ -441,7 +441,7 @@ fn render_hints(
             if state.backend_pubkey.is_some() {
                 " add agent"
             } else if app.available_install_backends().is_empty() {
-                " add agent (no backend inventory)"
+                " add agent (no agents online)"
             } else {
                 " add agent (waiting for project status)"
             },
@@ -527,7 +527,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
     if available_agents.is_empty() {
         let msg = if state.backend_pubkey.is_none() {
             if app.available_install_backends().is_empty() {
-                "No approved backend inventory available for agent assignment."
+                "No agents online"
             } else {
                 "Waiting for live project status to identify this project's backend."
             }

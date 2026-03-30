@@ -807,9 +807,7 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('a') => {
                 if state.backend_pubkey.is_none() {
                     if app.available_install_backends().is_empty() {
-                        app.set_warning_status(
-                            "No approved backend inventory available for agent assignment",
-                        );
+                        app.set_warning_status("No agents online");
                     } else {
                         app.set_warning_status(
                             "Waiting for live project status to identify the project backend",
