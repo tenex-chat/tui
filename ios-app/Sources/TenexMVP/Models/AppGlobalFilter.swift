@@ -105,7 +105,7 @@ enum ConversationStatusFilter: Equatable {
     }
 }
 
-/// App-level time window for global filtering across chats/reports/inbox/search.
+/// App-level time window for global filtering across chats, inbox, and search.
 enum AppTimeWindow: String, CaseIterable, Codable {
     case hours4
     case hours12
@@ -242,7 +242,7 @@ struct AppGlobalFilterSnapshot: Equatable {
         return true
     }
 
-    /// Include check for non-conversation items (reports, inbox, search).
+    /// Include check for non-conversation items such as inbox entries and search results.
     /// Applies project/time only by design.
     func includes(projectId: String?, timestamp: UInt64, now: UInt64) -> Bool {
         let matchesProject: Bool

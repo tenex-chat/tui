@@ -4,8 +4,7 @@ pub mod statusbar;
 pub mod tab_bar;
 
 pub use chat_sidebar::{
-    render_chat_sidebar, ConversationMetadata, ReportCoordinate, SidebarDelegation, SidebarReport,
-    SidebarSelection, SidebarState,
+    render_chat_sidebar, ConversationMetadata, SidebarDelegation, SidebarSelection, SidebarState,
 };
 pub use modal_frame::{
     render_modal_items, render_modal_search, render_modal_sections, visible_items_in_content_area,

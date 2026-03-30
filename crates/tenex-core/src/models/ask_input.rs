@@ -233,11 +233,14 @@ impl AskInputState {
     }
 
     pub fn is_complete(&self) -> bool {
-        self.questions.iter().enumerate().all(|(question_index, _)| {
-            self.answers
-                .iter()
-                .any(|answer| answer.question_index == question_index)
-        })
+        self.questions
+            .iter()
+            .enumerate()
+            .all(|(question_index, _)| {
+                self.answers
+                    .iter()
+                    .any(|answer| answer.question_index == question_index)
+            })
     }
 
     pub fn format_response(&self) -> String {

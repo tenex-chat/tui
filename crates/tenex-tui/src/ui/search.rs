@@ -1,4 +1,4 @@
-//! Sidebar search state and logic for Home and Reports tabs.
+//! Sidebar search state and logic for Home tabs.
 //!
 //! This module provides search functionality that appears in the sidebar
 //! when activated via Ctrl+T + /. It searches conversations and their replies,
@@ -42,8 +42,6 @@ pub struct SidebarSearchState {
     pub cursor: usize,
     /// Hierarchical search results (new format with ancestor context)
     pub hierarchical_results: Vec<HierarchicalSearchItem>,
-    /// Cached search results for reports
-    pub report_results: Vec<tenex_core::models::Report>,
     /// Selected result index
     pub selected_index: usize,
     // Note: scroll_offset is computed fresh each frame in the renderer
@@ -63,7 +61,6 @@ impl SidebarSearchState {
             self.query.clear();
             self.cursor = 0;
             self.hierarchical_results.clear();
-            self.report_results.clear();
             self.selected_index = 0;
         }
     }
@@ -132,14 +129,6 @@ impl SidebarSearchState {
         }
     }
 
-    /// Move selection down for reports
-    pub fn move_selection_down_reports(&mut self) {
-        let count = self.report_results.len();
-        if count > 0 && self.selected_index < count - 1 {
-            self.selected_index += 1;
-        }
-    }
-
     /// Get currently selected hierarchical result (clamped to valid range)
     pub fn selected_hierarchical_result(&self) -> Option<&HierarchicalSearchItem> {
         if self.hierarchical_results.is_empty() {
@@ -147,16 +136,6 @@ impl SidebarSearchState {
         } else {
             let idx = self.selected_index.min(self.hierarchical_results.len() - 1);
             self.hierarchical_results.get(idx)
-        }
-    }
-
-    /// Get currently selected report (clamped to valid range)
-    pub fn selected_report(&self) -> Option<&tenex_core::models::Report> {
-        if self.report_results.is_empty() {
-            None
-        } else {
-            let idx = self.selected_index.min(self.report_results.len() - 1);
-            self.report_results.get(idx)
         }
     }
 
@@ -205,51 +184,6 @@ pub enum HierarchicalSearchItem {
         /// For single-term searches, this contains one term
         matched_terms: Vec<String>,
     },
-}
-
-/// Search reports for a query
-/// Empty visible_projects = show nothing (consistent with other lists)
-pub fn search_reports(
-    query: &str,
-    store: &Ref<AppDataStore>,
-    visible_projects: &HashSet<String>,
-) -> Vec<tenex_core::models::Report> {
-    // Empty visible_projects = show nothing (consistent with other lists)
-    if visible_projects.is_empty() {
-        return vec![];
-    }
-
-    if query.trim().is_empty() {
-        return vec![];
-    }
-
-    let filter = query.to_lowercase();
-    let mut results = Vec::new();
-
-    for report in store.reports.get_reports() {
-        // Skip reports not in visible_projects
-        if !visible_projects.contains(&report.project_a_tag) {
-            continue;
-        }
-
-        // Check title, summary, content, and hashtags
-        let title_matches = report.title.to_lowercase().contains(&filter);
-        let summary_matches = report.summary.to_lowercase().contains(&filter);
-        let content_matches = report.content.to_lowercase().contains(&filter);
-        let hashtag_matches = report
-            .hashtags
-            .iter()
-            .any(|h| h.to_lowercase().contains(&filter));
-
-        if title_matches || summary_matches || content_matches || hashtag_matches {
-            results.push(report.clone());
-        }
-    }
-
-    // Sort by created_at (most recent first)
-    results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-    results
 }
 
 // NOTE: parse_search_terms and text_contains_term are now imported from tenex_core::search

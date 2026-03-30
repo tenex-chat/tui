@@ -1,5 +1,5 @@
 use crate::ui::format::truncate_with_ellipsis;
-use crate::ui::{theme, App, HomeTab};
+use crate::ui::{theme, App};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -75,13 +75,9 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    // Placeholder when empty (different hints for different tabs)
+    // Placeholder when empty.
     if query.is_empty() {
-        let placeholder = if app.home_panel_focus == HomeTab::Reports {
-            "type to search..."
-        } else {
-            "type to search (use + for AND)..."
-        };
+        let placeholder = "type to search (use + for AND)...";
         spans.push(Span::styled(
             placeholder,
             Style::default().fg(theme::TEXT_MUTED),
@@ -94,12 +90,7 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the sidebar search results in the main content area
 pub(super) fn render_sidebar_search_results(f: &mut Frame, app: &App, area: Rect) {
-    // Delegate to appropriate renderer based on current tab
-    if app.home_panel_focus == HomeTab::Reports {
-        render_report_search_results(f, app, area);
-    } else {
-        render_conversation_search_results(f, app, area);
-    }
+    render_conversation_search_results(f, app, area);
 }
 
 /// Render conversation search results with hierarchical display
@@ -649,136 +640,6 @@ fn highlight_text_spans_multi(
         )]
     } else {
         spans
-    }
-}
-
-/// Render report search results
-fn render_report_search_results(f: &mut Frame, app: &App, area: Rect) {
-    let results = &app.sidebar_search.report_results;
-    let selected_idx = app
-        .sidebar_search
-        .selected_index
-        .min(results.len().saturating_sub(1));
-    let query = &app.sidebar_search.query;
-
-    if results.is_empty() {
-        let msg = "No matching reports";
-        let empty = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
-        f.render_widget(empty, area);
-        return;
-    }
-
-    // Card height is fixed at 4 lines for reports (Title + Summary + Spacing)
-    let card_height = 4u16;
-    // Available height (reserve 1 line for count at bottom)
-    let available_height = area.height.saturating_sub(1);
-    // Calculate how many items can be visible at once
-    let visible_count = (available_height / card_height) as usize;
-
-    // Compute scroll_offset to ensure selected item is visible
-    // Guard: if available_height < card_height, visible_count is 0 - don't scroll
-    let scroll_offset = if visible_count == 0 {
-        0
-    } else if selected_idx >= visible_count {
-        selected_idx - visible_count + 1
-    } else {
-        0
-    };
-
-    let mut y_offset = 0u16;
-    let query_lower = query.to_lowercase();
-
-    // Render items starting from scroll_offset
-    for (i, report) in results.iter().enumerate().skip(scroll_offset) {
-        let is_selected = i == selected_idx;
-
-        if y_offset + card_height > available_height {
-            break;
-        }
-
-        let card_area = Rect::new(area.x, area.y + y_offset, area.width, card_height);
-
-        render_report_search_result_card(f, report, is_selected, card_area, &query_lower);
-        y_offset += card_height;
-    }
-
-    // Show result count at bottom
-    let result_count = results.len();
-    let count_text = format!(
-        "{} report{}",
-        result_count,
-        if result_count == 1 { "" } else { "s" }
-    );
-    let count_area = Rect::new(
-        area.x,
-        area.y + area.height.saturating_sub(1),
-        area.width,
-        1,
-    );
-    let count_line = Paragraph::new(count_text)
-        .style(Style::default().fg(theme::TEXT_MUTED))
-        .alignment(ratatui::layout::Alignment::Right);
-    f.render_widget(count_line, count_area);
-}
-
-/// Render a single report search result card
-fn render_report_search_result_card(
-    f: &mut Frame,
-    report: &tenex_core::models::Report,
-    is_selected: bool,
-    area: Rect,
-    query: &str,
-) {
-    let bg = if is_selected {
-        theme::BG_SELECTED
-    } else {
-        theme::BG_CARD
-    };
-
-    // Background
-    let block = Block::default()
-        .style(Style::default().bg(bg))
-        .padding(Padding::horizontal(1));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-
-    if inner.height == 0 {
-        return;
-    }
-
-    // Line 1: Title with highlighting
-    let title_line = highlight_text_spans(
-        &report.title,
-        query,
-        theme::TEXT_PRIMARY,
-        theme::ACCENT_PRIMARY,
-    );
-    let title_para = Paragraph::new(Line::from(title_line));
-    let title_area = Rect::new(inner.x, inner.y, inner.width, 1);
-    f.render_widget(title_para, title_area);
-
-    // Line 2: Summary (truncated) with highlighting
-    if inner.height > 1 {
-        let summary: String = report.summary.chars().take(100).collect();
-        let summary_line =
-            highlight_text_spans(&summary, query, theme::TEXT_MUTED, theme::ACCENT_PRIMARY);
-        let summary_para = Paragraph::new(Line::from(summary_line));
-        let summary_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
-        f.render_widget(summary_para, summary_area);
-    }
-
-    // Line 3: Hashtags
-    if inner.height > 2 && !report.hashtags.is_empty() {
-        let tags = report
-            .hashtags
-            .iter()
-            .take(5)
-            .map(|t| format!("#{}", t))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let tags_para = Paragraph::new(tags).style(Style::default().fg(theme::ACCENT_SPECIAL));
-        let tags_area = Rect::new(inner.x, inner.y + 2, inner.width, 1);
-        f.render_widget(tags_para, tags_area);
     }
 }
 

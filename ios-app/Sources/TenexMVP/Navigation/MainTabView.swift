@@ -4,7 +4,6 @@ enum AppSection: String, CaseIterable, Identifiable {
     case chats
     case projects
     case agents
-    case reports
     case inbox
     case search
     case stats
@@ -22,7 +21,6 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .chats: return "Chats"
         case .projects: return "Projects"
         case .agents: return "Agents"
-        case .reports: return "Reports"
         case .inbox: return "Inbox"
         case .search: return "Search"
         case .stats: return "LLM Runtime"
@@ -40,7 +38,6 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .chats: return "bubble.left.and.bubble.right"
         case .projects: return "folder"
         case .agents: return "cpu"
-        case .reports: return "doc.richtext"
         case .inbox: return "tray"
         case .search: return "magnifyingglass"
         case .stats: return "clock"
@@ -182,12 +179,6 @@ struct MainTabView: View {
                     .nowPlayingInset(coreManager: coreManager)
             }
 
-            Tab("Reports", systemImage: "doc.richtext", value: 4) {
-                ReportsTabView()
-                    .environment(coreManager)
-                    .nowPlayingInset(coreManager: coreManager)
-            }
-
             Tab("Inbox", systemImage: "tray", value: 3) {
                 InboxView()
                     .environment(coreManager)
@@ -220,12 +211,6 @@ struct MainTabView: View {
 
             Tab("Projects", systemImage: "folder", value: 1) {
                 ProjectsTabView(layoutMode: .adaptive)
-                    .environment(coreManager)
-                    .nowPlayingInset(coreManager: coreManager)
-            }
-
-            Tab("Reports", systemImage: "doc.richtext", value: 4) {
-                ReportsTabView(layoutMode: .adaptive)
                     .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }

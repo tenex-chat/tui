@@ -604,12 +604,12 @@ struct MatchingMessageRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
 
-                // Kind indicator (report)
+                // Kind indicator (article)
                 if result.kind == 30023 {
                     HStack(spacing: 4) {
                         Image(systemName: "doc.text")
                             .font(.caption2)
-                        Text("Report")
+                        Text("Article")
                             .font(.caption2)
                     }
                     .foregroundStyle(Color.agentBrand.opacity(0.8))

@@ -19,38 +19,7 @@ pub struct SidebarDelegation {
     pub target: String,
 }
 
-/// A report reference extracted from a-tags in conversation messages
-#[derive(Debug, Clone)]
-pub struct SidebarReport {
-    /// The a-tag coordinate (30023:pubkey:slug)
-    pub a_tag: String,
-    /// Report title
-    pub title: String,
-}
-
-/// Parsed report a-tag coordinate
-/// Format: "30023:pubkey:slug" where slug may contain colons
-#[derive(Debug, Clone)]
-pub struct ReportCoordinate {
-    pub slug: String,
-}
-
-impl ReportCoordinate {
-    /// Parse a report a-tag into its components
-    /// Returns None if the format is invalid
-    pub fn parse(a_tag: &str) -> Option<Self> {
-        let parts: Vec<&str> = a_tag.split(':').collect();
-        if parts.len() >= 3 {
-            // Slug may contain colons, so join the rest
-            let slug = parts[2..].join(":");
-            Some(ReportCoordinate { slug })
-        } else {
-            None
-        }
-    }
-}
-
-/// State for the interactive sidebar with delegations and reports
+/// State for the interactive sidebar with delegation references.
 #[derive(Debug, Clone, Default)]
 pub struct SidebarState {
     /// Whether the sidebar currently has focus
@@ -59,8 +28,6 @@ pub struct SidebarState {
     pub selected_index: usize,
     /// Delegations extracted from conversation
     pub delegations: Vec<SidebarDelegation>,
-    /// Reports referenced in conversation (deduped)
-    pub reports: Vec<SidebarReport>,
 }
 
 /// The type of item selected in the sidebar
@@ -68,8 +35,6 @@ pub struct SidebarState {
 pub enum SidebarSelection {
     /// A delegation was selected (thread_id)
     Delegation(String),
-    /// A report was selected (a_tag)
-    Report(String),
 }
 
 impl SidebarState {
@@ -77,10 +42,9 @@ impl SidebarState {
         Self::default()
     }
 
-    /// Update the sidebar with new delegations and reports
-    pub fn update(&mut self, delegations: Vec<SidebarDelegation>, reports: Vec<SidebarReport>) {
+    /// Update the sidebar with new delegations.
+    pub fn update(&mut self, delegations: Vec<SidebarDelegation>) {
         self.delegations = delegations;
-        self.reports = reports;
         // Reset selection if out of bounds
         let total = self.total_items();
         if total == 0 {
@@ -92,12 +56,12 @@ impl SidebarState {
 
     /// Total number of selectable items
     pub fn total_items(&self) -> usize {
-        self.delegations.len() + self.reports.len()
+        self.delegations.len()
     }
 
     /// Check if sidebar has any selectable items
     pub fn has_items(&self) -> bool {
-        !self.delegations.is_empty() || !self.reports.is_empty()
+        !self.delegations.is_empty()
     }
 
     /// Move selection up
@@ -120,35 +84,17 @@ impl SidebarState {
         self.item_at(self.selected_index)
     }
 
-    /// Get the item at a specific global index
-    /// Delegations come first (indices 0..delegations.len()),
-    /// then reports (indices delegations.len()..total_items())
+    /// Get the item at a specific global index.
     pub fn item_at(&self, global_index: usize) -> Option<SidebarSelection> {
-        let del_count = self.delegations.len();
-        if global_index < del_count {
-            // Delegation
-            self.delegations
-                .get(global_index)
-                .map(|d| SidebarSelection::Delegation(d.thread_id.clone()))
-        } else {
-            // Report
-            let report_idx = global_index - del_count;
-            self.reports
-                .get(report_idx)
-                .map(|r| SidebarSelection::Report(r.a_tag.clone()))
-        }
+        self.delegations
+            .get(global_index)
+            .map(|d| SidebarSelection::Delegation(d.thread_id.clone()))
     }
 
     /// Check if a delegation at the given local index is currently selected
     #[inline]
     pub fn is_delegation_selected(&self, local_index: usize) -> bool {
         self.focused && self.selected_index == local_index
-    }
-
-    /// Check if a report at the given local index is currently selected
-    #[inline]
-    pub fn is_report_selected(&self, local_index: usize) -> bool {
-        self.focused && self.selected_index == self.delegations.len() + local_index
     }
 
     /// Toggle focus state
@@ -212,7 +158,7 @@ impl ConversationMetadata {
 }
 
 /// Render the conversation sidebar on the right side of the chat.
-/// Shows summary (first), work indicator (if busy), todos (if any), delegations, reports, and metadata below.
+/// Shows summary (first), work indicator (if busy), todos (if any), delegations, and metadata below.
 pub fn render_chat_sidebar(
     f: &mut Frame,
     todo_state: &TodoState,
@@ -260,15 +206,6 @@ pub fn render_chat_sidebar(
             lines.push(Line::from(""));
         }
         render_delegations_section(&mut lines, sidebar_state, content_width, h_padding);
-        has_content = true;
-    }
-
-    // === REPORTS SECTION ===
-    if !sidebar_state.reports.is_empty() {
-        if has_content {
-            lines.push(Line::from(""));
-        }
-        render_reports_section(&mut lines, sidebar_state, content_width, h_padding);
         has_content = true;
     }
 
@@ -489,54 +426,6 @@ fn render_delegations_section(
             Span::raw(padding.clone()),
             Span::styled(indicator.to_string(), indicator_style),
             Span::styled(target, target_style),
-        ]));
-    }
-}
-
-fn render_reports_section(
-    lines: &mut Vec<Line>,
-    sidebar_state: &SidebarState,
-    content_width: usize,
-    h_padding: usize,
-) {
-    let padding = " ".repeat(h_padding);
-
-    // Section header
-    lines.push(Line::from(vec![
-        Span::raw(padding.clone()),
-        Span::styled("REPORTS", theme::text_muted()),
-        Span::styled(
-            format!(" ({})", sidebar_state.reports.len()),
-            Style::default().fg(theme::TEXT_DIM),
-        ),
-    ]));
-
-    // Render each report
-    for (i, report) in sidebar_state.reports.iter().enumerate() {
-        let is_selected = sidebar_state.is_report_selected(i);
-
-        // Selection indicator
-        let indicator = if is_selected { "▸ " } else { "  " };
-        let indicator_style = if is_selected {
-            Style::default().fg(theme::ACCENT_PRIMARY)
-        } else {
-            Style::default()
-        };
-
-        // Title line with document icon
-        let title = truncate_with_ellipsis(&report.title, content_width.saturating_sub(6));
-        let title_style = if is_selected {
-            Style::default()
-                .fg(theme::ACCENT_PRIMARY)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            theme::text_primary()
-        };
-        lines.push(Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled(indicator.to_string(), indicator_style),
-            Span::styled("📄 ", Style::default()),
-            Span::styled(title, title_style),
         ]));
     }
 }

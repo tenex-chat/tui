@@ -857,10 +857,5 @@ impl NudgeSkillPanel {
 }
 
 /// Tools whose q-tags should NOT be treated as delegations
-pub(crate) const Q_TAG_DELEGATION_DENYLIST: &[&str] = &[
-    "mcp__tenex__report_write",
-    "mcp__tenex__report_read",
-    "mcp__tenex__report_delete",
-    "mcp__tenex__lesson_learn",
-    "mcp__tenex__lesson_get",
-];
+pub(crate) const Q_TAG_DELEGATION_DENYLIST: &[&str] =
+    &["mcp__tenex__lesson_learn", "mcp__tenex__lesson_get"];

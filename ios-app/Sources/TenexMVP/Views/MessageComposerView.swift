@@ -40,11 +40,6 @@ struct MessageComposerView: View {
     /// Reference conversation ID for context tagging (adds ["context", "<id>"] tag when sent)
     let referenceConversationId: String?
 
-    /// Reference report a-tag for context tagging (adds ["context", "<a-tag>"] tag when sent)
-    /// Format: "30023:<pubkey>:<slug>" - the standard Nostr a-tag for addressable events
-    /// Used by "Chat with Author" feature to reference the report being discussed
-    let referenceReportATag: String?
-
     /// Callback when message is sent successfully
     var onSend: ((SendMessageResult) -> Void)?
 
@@ -247,7 +242,6 @@ struct MessageComposerView: View {
         initialContent: String? = nil,
         initialTextAttachments: [TextAttachment] = [],
         referenceConversationId: String? = nil,
-        referenceReportATag: String? = nil,
         displayStyle: DisplayStyle = .modal,
         inlineLayoutStyle: InlineLayoutStyle = .standard,
         onSend: ((SendMessageResult) -> Void)? = nil,
@@ -261,7 +255,6 @@ struct MessageComposerView: View {
         self.initialContent = initialContent
         self.initialTextAttachments = initialTextAttachments
         self.referenceConversationId = referenceConversationId
-        self.referenceReportATag = referenceReportATag
         self.displayStyle = displayStyle
         self.inlineLayoutStyle = inlineLayoutStyle
         self.onSend = onSend
@@ -276,8 +269,7 @@ struct MessageComposerView: View {
             var seededDraft = Draft(
                 conversationId: conversationId,
                 projectId: projectId,
-                referenceConversationId: referenceConversationId,
-                referenceReportATag: referenceReportATag
+                referenceConversationId: referenceConversationId
             )
             seededDraft.setTextAttachments(initialTextAttachments)
             _draft = State(initialValue: seededDraft)
@@ -285,8 +277,7 @@ struct MessageComposerView: View {
             var seededDraft = Draft(
                 projectId: projectId,
                 content: initialContent ?? "",
-                referenceConversationId: referenceConversationId,
-                referenceReportATag: referenceReportATag
+                referenceConversationId: referenceConversationId
             )
             seededDraft.setTextAttachments(initialTextAttachments)
             _draft = State(initialValue: seededDraft)
@@ -295,8 +286,7 @@ struct MessageComposerView: View {
             var seededDraft = Draft(
                 projectId: "",
                 content: initialContent ?? "",
-                referenceConversationId: referenceConversationId,
-                referenceReportATag: referenceReportATag
+                referenceConversationId: referenceConversationId
             )
             seededDraft.setTextAttachments(initialTextAttachments)
             _draft = State(initialValue: seededDraft)

@@ -55,7 +55,6 @@ pub enum HotkeyId {
     TimeFilter,
     AgentBrowser,
     CreateProject,
-    SearchReports,       // '/' in Reports tab
     ToggleHideScheduled, // Shift+S to toggle scheduled events filter
 
     // === Home View - Inbox Tab ===
@@ -97,10 +96,6 @@ pub enum HotkeyId {
     // === Modal Actions ===
     ModalClose,
     ModalConfirm,
-
-    // === Report Viewer ===
-    ToggleReportView,
-    CopyReportId,
 }
 
 /// Context in which a hotkey is active.
@@ -113,7 +108,6 @@ pub enum HotkeyContext {
     /// Home view contexts
     HomeConversations,
     HomeInbox,
-    HomeReports,
     HomeActiveWork,
     HomeStats,
     HomeSidebar,
@@ -135,7 +129,6 @@ pub enum HotkeyContext {
     ViewRawEventModal,
     HotkeyHelpModal,
     NudgeSkillSelectorModal,
-    ReportViewerModal,
     ProjectSettingsModal,
     CreateProjectModal,
     CreateAgentModal,
@@ -186,7 +179,6 @@ impl HotkeyContext {
             ModalState::ViewRawEvent { .. } => return HotkeyContext::ViewRawEventModal,
             ModalState::HotkeyHelp => return HotkeyContext::HotkeyHelpModal,
             ModalState::NudgeSkillSelector(_) => return HotkeyContext::NudgeSkillSelectorModal,
-            ModalState::ReportViewer(_) => return HotkeyContext::ReportViewerModal,
             ModalState::ProjectSettings(_) => return HotkeyContext::ProjectSettingsModal,
             ModalState::CreateProject(_) => return HotkeyContext::CreateProjectModal,
             ModalState::CreateAgent(_) => return HotkeyContext::CreateAgentModal,
@@ -219,7 +211,6 @@ impl HotkeyContext {
                     match home_panel_focus {
                         HomeTab::Conversations => HotkeyContext::HomeConversations,
                         HomeTab::Inbox => HotkeyContext::HomeInbox,
-                        HomeTab::Reports => HotkeyContext::HomeReports,
                         HomeTab::ActiveWork => HotkeyContext::HomeActiveWork,
                         HomeTab::Stats => HotkeyContext::HomeStats,
                     }
@@ -408,11 +399,7 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::OpenSelected,
         KeyCode::Char('o'),
-        &[
-            HotkeyContext::HomeConversations,
-            HotkeyContext::HomeInbox,
-            HotkeyContext::HomeReports,
-        ],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox],
     ),
     HotkeyBinding::new(
         HotkeyId::ArchiveToggle,
@@ -427,11 +414,7 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::new(
         HotkeyId::SwitchProject,
         KeyCode::Char('p'),
-        &[
-            HotkeyContext::HomeConversations,
-            HotkeyContext::HomeInbox,
-            HotkeyContext::HomeReports,
-        ],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox],
     ),
     HotkeyBinding::new(
         HotkeyId::TimeFilter,
@@ -474,7 +457,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
-            HotkeyContext::HomeReports,
             HotkeyContext::HomeActiveWork,
             HotkeyContext::HomeStats,
         ],
@@ -485,15 +467,9 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
-            HotkeyContext::HomeReports,
             HotkeyContext::HomeActiveWork,
             HotkeyContext::HomeStats,
         ],
-    ),
-    HotkeyBinding::new(
-        HotkeyId::SearchReports,
-        KeyCode::Char('/'),
-        &[HotkeyContext::HomeReports],
     ),
     HotkeyBinding::shift(
         HotkeyId::ToggleHideScheduled,
@@ -510,7 +486,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         &[
             HotkeyContext::HomeConversations,
             HotkeyContext::HomeInbox,
-            HotkeyContext::HomeReports,
             HotkeyContext::HomeActiveWork,
         ],
     ),
@@ -658,17 +633,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         HotkeyId::CloneAgent,
         KeyCode::Char('c'),
         &[HotkeyContext::AgentBrowserDetail],
-    ),
-    // === Report Viewer ===
-    HotkeyBinding::new(
-        HotkeyId::ToggleReportView,
-        KeyCode::Tab,
-        &[HotkeyContext::ReportViewerModal],
-    ),
-    HotkeyBinding::new(
-        HotkeyId::CopyReportId,
-        KeyCode::Char('c'),
-        &[HotkeyContext::ReportViewerModal],
     ),
     // === Modal Actions ===
     HotkeyBinding::new(

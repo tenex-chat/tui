@@ -44,7 +44,7 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.detectInlineTrigger(in: "plain text"))
     }
 
-    func testLoadDraftWithInitialContentOverridesStoredDraftAndPersistsReferences() async {
+    func testLoadDraftWithInitialContentOverridesStoredDraftAndPersistsReferenceConversation() async {
         let draftStore = MockDraftStore()
         let existing = Draft(projectId: "project-a", content: "old content")
         draftStore.seedDraft(existing, conversationId: nil, projectId: "project-a")
@@ -56,7 +56,6 @@ final class ComposerViewModelTests: XCTestCase {
             initialContent: "new content",
             initialTextAttachments: [],
             referenceConversationId: "conv-ref",
-            referenceReportATag: "30023:pubkey:slug",
             isDirty: false
         )
 
@@ -65,10 +64,9 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertEqual(result.localText, "new content")
         XCTAssertTrue(draftStore.updatedContents.contains("new content"))
         XCTAssertEqual(draftStore.updatedReferenceConversationIds.last ?? nil, "conv-ref")
-        XCTAssertEqual(draftStore.updatedReferenceReportATags.last ?? nil, "30023:pubkey:slug")
     }
 
-    func testLoadDraftWhenDirtyDoesNotOverwriteAndOnlyPersistsReferences() async {
+    func testLoadDraftWhenDirtyDoesNotOverwriteAndOnlyPersistsReferenceConversation() async {
         let draftStore = MockDraftStore()
         let viewModel = makeViewModel(core: MockCoreGateway(), drafts: draftStore)
 
@@ -78,7 +76,6 @@ final class ComposerViewModelTests: XCTestCase {
             initialContent: "ignored",
             initialTextAttachments: [],
             referenceConversationId: "conv-ref",
-            referenceReportATag: "30023:pubkey:slug",
             isDirty: true
         )
 
@@ -87,29 +84,6 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertFalse(result.shouldShowLoadFailedAlert)
         XCTAssertTrue(draftStore.updatedContents.isEmpty)
         XCTAssertEqual(draftStore.updatedReferenceConversationIds.last ?? nil, "conv-ref")
-        XCTAssertEqual(draftStore.updatedReferenceReportATags.last ?? nil, "30023:pubkey:slug")
-    }
-
-    func testLoadDraftWithoutInitialContentStillPersistsReferenceReportATag() async {
-        let draftStore = MockDraftStore()
-        let existing = Draft(projectId: "project-a", content: "existing")
-        draftStore.seedDraft(existing, conversationId: nil, projectId: "project-a")
-        let viewModel = makeViewModel(core: MockCoreGateway(), drafts: draftStore)
-
-        let result = await viewModel.loadDraft(
-            projectId: "project-a",
-            conversationId: nil,
-            initialContent: nil,
-            initialTextAttachments: [],
-            referenceConversationId: nil,
-            referenceReportATag: "30023:author:report-slug",
-            isDirty: false
-        )
-
-        XCTAssertFalse(result.shouldShowLoadFailedAlert)
-        XCTAssertEqual(result.localText, "existing")
-        XCTAssertEqual(result.draft?.referenceReportATag, "30023:author:report-slug")
-        XCTAssertEqual(draftStore.updatedReferenceReportATags.last ?? nil, "30023:author:report-slug")
     }
 
     func testLoadAgentContextUsesInitialAgentAndResolvesName() async {
@@ -144,15 +118,13 @@ final class ComposerViewModelTests: XCTestCase {
             agentPubkey: "agent",
             nudgeIds: ["n1"],
             skillIds: ["s1"],
-            referenceConversationId: "conv-ref",
-            referenceReportATag: "30023:pubkey:slug"
+            referenceConversationId: "conv-ref"
         )
 
         XCTAssertEqual(result.eventId, "evt-thread")
         XCTAssertEqual(core.sendThreadCalls.count, 1)
         XCTAssertEqual(core.sendMessageCalls.count, 0)
         XCTAssertEqual(core.sendThreadCalls.first?.referenceConversationId, "conv-ref")
-        XCTAssertEqual(core.sendThreadCalls.first?.referenceReportATag, "30023:pubkey:slug")
     }
 
     func testSendMessageUsesReplyEndpointForExistingConversation() async throws {
@@ -168,8 +140,7 @@ final class ComposerViewModelTests: XCTestCase {
             agentPubkey: nil,
             nudgeIds: [],
             skillIds: [],
-            referenceConversationId: nil,
-            referenceReportATag: nil
+            referenceConversationId: nil
         )
 
         XCTAssertEqual(result.eventId, "evt-reply")
@@ -188,7 +159,6 @@ final class ComposerViewModelTests: XCTestCase {
             initialContent: "[Text Attachment 1]",
             initialTextAttachments: seedAttachments,
             referenceConversationId: "conv-ref",
-            referenceReportATag: nil,
             isDirty: false
         )
 
@@ -207,7 +177,6 @@ final class ComposerViewModelTests: XCTestCase {
             initialContent: "[Text Attachment 1]",
             initialTextAttachments: [TextAttachment(id: 1, content: "seeded context")],
             referenceConversationId: "conv-ref",
-            referenceReportATag: nil,
             isDirty: true
         )
 
@@ -307,7 +276,6 @@ private struct SendInvocation: Equatable {
     let nudgeIds: [String]
     let skillIds: [String]
     let referenceConversationId: String?
-    let referenceReportATag: String?
 }
 
 @MainActor
@@ -344,8 +312,7 @@ private final class MockCoreGateway: CoreGateway {
         agentPubkey: String?,
         nudgeIds: [String],
         skillIds: [String],
-        referenceConversationId: String?,
-        referenceReportATag: String?
+        referenceConversationId: String?
     ) async throws -> SendMessageResult {
         sendThreadCalls.append(
             SendInvocation(
@@ -355,8 +322,7 @@ private final class MockCoreGateway: CoreGateway {
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
                 skillIds: skillIds,
-                referenceConversationId: referenceConversationId,
-                referenceReportATag: referenceReportATag
+                referenceConversationId: referenceConversationId
             )
         )
         return threadSendResult
@@ -378,8 +344,7 @@ private final class MockCoreGateway: CoreGateway {
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
                 skillIds: skillIds,
-                referenceConversationId: nil,
-                referenceReportATag: nil
+                referenceConversationId: nil
             )
         )
         return replySendResult
@@ -401,7 +366,6 @@ private final class MockDraftStore: DraftPersisting {
     var updatedContents: [String] = []
     var updatedAgentPubkeys: [String?] = []
     var updatedReferenceConversationIds: [String?] = []
-    var updatedReferenceReportATags: [String?] = []
     var updatedTextAttachments: [[TextAttachment]] = []
 
     func seedDraft(_ draft: Draft, conversationId: String?, projectId: String) {
@@ -439,14 +403,6 @@ private final class MockDraftStore: DraftPersisting {
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
         var draft = drafts[key] ?? (conversationId.map { Draft(conversationId: $0, projectId: projectId) } ?? Draft(projectId: projectId))
         draft.setReferenceConversation(referenceConversationId)
-        drafts[key] = draft
-    }
-
-    func updateReferenceReportATag(_ referenceReportATag: String?, conversationId: String?, projectId: String) async {
-        updatedReferenceReportATags.append(referenceReportATag)
-        let key = Draft.storageKey(for: conversationId, projectId: projectId)
-        var draft = drafts[key] ?? (conversationId.map { Draft(conversationId: $0, projectId: projectId) } ?? Draft(projectId: projectId))
-        draft.setReferenceReportATag(referenceReportATag)
         drafts[key] = draft
     }
 

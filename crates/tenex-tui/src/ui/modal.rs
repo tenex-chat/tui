@@ -1057,9 +1057,7 @@ impl ProjectSettingsState {
     pub fn remove_agent(&mut self, index: usize) {
         if index < self.pending_agent_pubkeys.len() {
             self.pending_agent_pubkeys.remove(index);
-            if self.selector_index >= self.pending_agent_pubkeys.len()
-                && self.selector_index > 0
-            {
+            if self.selector_index >= self.pending_agent_pubkeys.len() && self.selector_index > 0 {
                 self.selector_index -= 1;
             }
         }
@@ -1312,50 +1310,6 @@ impl ProjectActionsState {
 
     pub fn selected_action(&self) -> Option<ProjectAction> {
         self.available_actions().get(self.selected_index).copied()
-    }
-}
-
-/// Focus area in report viewer
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReportViewerFocus {
-    Content,
-    Threads,
-}
-
-/// View mode in report viewer
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReportViewMode {
-    Current,
-    Changes,
-}
-
-/// State for the report viewer modal
-#[derive(Debug, Clone)]
-pub struct ReportViewerState {
-    pub report: tenex_core::models::Report,
-    pub focus: ReportViewerFocus,
-    pub view_mode: ReportViewMode,
-    pub content_scroll: usize,
-    pub selected_thread_index: usize,
-    pub version_index: usize,
-    pub show_threads: bool,
-    pub show_copy_menu: bool,
-    pub copy_menu_index: usize,
-}
-
-impl ReportViewerState {
-    pub fn new(report: tenex_core::models::Report) -> Self {
-        Self {
-            report,
-            focus: ReportViewerFocus::Content,
-            view_mode: ReportViewMode::Current,
-            content_scroll: 0,
-            selected_thread_index: 0,
-            version_index: 0,
-            show_threads: false,
-            show_copy_menu: false,
-            copy_menu_index: 0,
-        }
     }
 }
 
@@ -2287,30 +2241,6 @@ impl CommandPaletteState {
     }
 }
 
-/// Copy menu options for report viewer
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReportCopyOption {
-    Bech32Id,
-    RawEvent,
-    Markdown,
-}
-
-impl ReportCopyOption {
-    pub const ALL: [ReportCopyOption; 3] = [
-        ReportCopyOption::Bech32Id,
-        ReportCopyOption::RawEvent,
-        ReportCopyOption::Markdown,
-    ];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            ReportCopyOption::Bech32Id => "Copy Event ID (bech32)",
-            ReportCopyOption::RawEvent => "Copy Raw Event (JSON)",
-            ReportCopyOption::Markdown => "Copy Markdown Content",
-        }
-    }
-}
-
 /// Tab options for the debug stats modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DebugStatsTab {
@@ -2496,8 +2426,6 @@ pub enum ModalState {
     CreateAgent(CreateAgentState),
     /// Project actions modal (boot, settings)
     ProjectActions(ProjectActionsState),
-    /// Report viewer modal with document, versions, and threads
-    ReportViewer(ReportViewerState),
     /// Expanded editor modal for full-screen text editing (Ctrl+E)
     ExpandedEditor {
         editor: TextEditor,

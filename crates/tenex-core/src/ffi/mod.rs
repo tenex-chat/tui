@@ -1670,13 +1670,21 @@ pub enum DataChangeType {
         message: Message,
     },
     /// A conversation was created or updated
-    ConversationUpsert { conversation: ConversationFullInfo },
+    ConversationUpsert {
+        conversation: ConversationFullInfo,
+    },
     /// A project was created or updated
-    ProjectUpsert { project: Project },
+    ProjectUpsert {
+        project: Project,
+    },
     /// An inbox item was created or updated
-    InboxUpsert { item: InboxItem },
+    InboxUpsert {
+        item: InboxItem,
+    },
     /// A report was created or updated (kind:30023)
-    ReportUpsert { report: Report },
+    ReportUpsert {
+        report: Report,
+    },
     /// Project online status updated (kind:24010)
     ProjectStatusChanged {
         project_id: String,
@@ -1718,9 +1726,13 @@ pub enum DataChangeType {
     /// General data changed - legacy fallback
     General,
     /// NIP-46 bunker signing request requires user approval
-    BunkerSignRequest { request: FfiBunkerSignRequest },
+    BunkerSignRequest {
+        request: FfiBunkerSignRequest,
+    },
     /// Bookmark list changed (kind:14202)
-    BookmarkListChanged { bookmarked_ids: Vec<String> },
+    BookmarkListChanged {
+        bookmarked_ids: Vec<String>,
+    },
 }
 
 /// Callback interface for event notifications to Swift/Kotlin.

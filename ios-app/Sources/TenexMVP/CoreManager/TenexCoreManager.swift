@@ -97,7 +97,6 @@ class TenexCoreManager {
         conversationById = map
     }
     var inboxItems: [InboxItem] = []
-    var reports: [Report] = []
     var messagesByConversation: [String: [Message]] = [:]
     private(set) var statsVersion: UInt64 = 0
     private(set) var teamsVersion: UInt64 = 0

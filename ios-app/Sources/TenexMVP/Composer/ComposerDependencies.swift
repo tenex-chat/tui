@@ -16,8 +16,7 @@ protocol CoreGateway: AnyObject {
         agentPubkey: String?,
         nudgeIds: [String],
         skillIds: [String],
-        referenceConversationId: String?,
-        referenceReportATag: String?
+        referenceConversationId: String?
     ) async throws -> SendMessageResult
     func sendMessage(
         conversationId: String,
@@ -39,7 +38,6 @@ protocol DraftPersisting: AnyObject {
     func updateContent(_ content: String, conversationId: String?, projectId: String) async
     func updateAgent(_ agentPubkey: String?, conversationId: String?, projectId: String) async
     func updateReferenceConversation(_ referenceConversationId: String?, conversationId: String?, projectId: String) async
-    func updateReferenceReportATag(_ referenceReportATag: String?, conversationId: String?, projectId: String) async
     func updateNudgeIds(_ nudgeIds: Set<String>, conversationId: String?, projectId: String) async
     func updateSkillIds(_ skillIds: Set<String>, conversationId: String?, projectId: String) async
     func updateImageAttachments(_ imageAttachments: [ImageAttachment], conversationId: String?, projectId: String) async
@@ -117,8 +115,7 @@ extension TenexCoreManager: CoreGateway {
         agentPubkey: String?,
         nudgeIds: [String],
         skillIds: [String],
-        referenceConversationId: String?,
-        referenceReportATag: String?
+        referenceConversationId: String?
     ) async throws -> SendMessageResult {
         try await safeCore.sendThread(
             projectId: projectId,
@@ -127,8 +124,7 @@ extension TenexCoreManager: CoreGateway {
             agentPubkey: agentPubkey,
             nudgeIds: nudgeIds,
             skillIds: skillIds,
-            referenceConversationId: referenceConversationId,
-            referenceReportATag: referenceReportATag
+            referenceConversationId: referenceConversationId
         )
     }
 

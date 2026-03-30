@@ -119,7 +119,7 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
                 ("p", "Open projects modal"),
                 ("n", "New thread in project"),
                 ("f", "Cycle time filter"),
-                ("/", "Enter search filter (Reports/Search tabs)"),
+                ("/", "Enter search filter"),
                 ("Space", "Toggle project visibility (Sidebar)"),
             ],
         ),

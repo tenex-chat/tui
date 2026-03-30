@@ -443,9 +443,6 @@ private struct DetailViewCoreManagerObserver: View {
             .onChange(of: coreManager.messagesByConversation) { _, _ in
                 viewModel.handleMessagesChanged(coreManager.messagesByConversation)
             }
-            .onChange(of: coreManager.reports) { _, _ in
-                viewModel.handleReportsChanged()
-            }
     }
 }
 

@@ -12,7 +12,6 @@ struct MainShellView: View {
     @State private var selectedProjectId: String?
     @State private var showNewProject = false
     @State private var hasCheckedOnboarding = false
-    @State private var selectedReport: Report?
     @State private var selectedInboxFilter: InboxFilter = .all
     @State private var selectedInboxItemId: String?
     @State private var activeInboxConversationId: String?
@@ -307,9 +306,6 @@ struct MainShellView: View {
                 }
             )
             .accessibilityIdentifier(AppSection.agents.accessibilityContentID)
-        case .reports:
-            ReportsTabView(layoutMode: .adaptive, selectedReport: $selectedReport)
-                .accessibilityIdentifier(AppSection.reports.accessibilityContentID)
         case .inbox:
             InboxView(
                 layoutMode: .adaptive,

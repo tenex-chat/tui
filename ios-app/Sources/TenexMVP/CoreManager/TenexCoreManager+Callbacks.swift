@@ -242,19 +242,6 @@ extension TenexCoreManager {
     }
 
     @MainActor
-    func applyReportUpsert(_ report: Report) {
-        var updated = reports
-        if let index = updated.firstIndex(where: { $0.slug == report.slug && $0.projectATag == report.projectATag }) {
-            updated[index] = report
-        } else {
-            updated.append(report)
-        }
-        // Sort by created date (newest first)
-        updated.sort { $0.createdAt > $1.createdAt }
-        reports = updated
-    }
-
-    @MainActor
     func applyProjectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [ProjectAgent]) {
         let resolvedProjectId: String = {
             if !projectId.isEmpty {

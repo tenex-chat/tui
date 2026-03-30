@@ -198,7 +198,7 @@ fn render_side_by_side_layout(
     );
 
     // Hints at bottom
-    render_hints(f, popup_area, state, agents_focused, tools_focused);
+    render_hints(f, app, popup_area, state, agents_focused, tools_focused);
 }
 
 /// Render vertical single-pane layout (narrow terminal fallback)
@@ -219,10 +219,7 @@ fn render_single_pane_layout(
 
     // Show pane indicator at the top
     let indicator_text = if agents_focused {
-        format!(
-            "◀ Agents ({}) ▶ Tools",
-            state.pending_agent_pubkeys.len()
-        )
+        format!("◀ Agents ({}) ▶ Tools", state.pending_agent_pubkeys.len())
     } else {
         format!("◀ Agents   ▶ Tools ({})", state.pending_mcp_tool_ids.len())
     };
@@ -257,7 +254,7 @@ fn render_single_pane_layout(
     }
 
     // Hints at bottom
-    render_hints(f, popup_area, state, agents_focused, tools_focused);
+    render_hints(f, app, popup_area, state, agents_focused, tools_focused);
 }
 
 /// Render the agents list
@@ -271,7 +268,11 @@ fn render_agents_list(
 ) {
     if state.pending_agent_pubkeys.is_empty() {
         let empty_text = if state.backend_pubkey.is_none() {
-            "Backend offline. Wait for project status and 24011 inventory before assigning agents."
+            if app.available_install_backends().is_empty() {
+                "No approved backend inventory. Wait for project status and 24011 inventory before assigning agents."
+            } else {
+                "Waiting for live project status to identify this project's backend before assigning agents."
+            }
         } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
             "Waiting for backend 24011 inventory before assigning agents."
         } else {
@@ -410,6 +411,7 @@ fn render_tools_list(
 /// Render the hints bar at the bottom
 fn render_hints(
     f: &mut Frame,
+    app: &App,
     popup_area: Rect,
     state: &ProjectSettingsState,
     agents_focused: bool,
@@ -438,8 +440,10 @@ fn render_hints(
         Span::styled(
             if state.backend_pubkey.is_some() {
                 " add agent"
+            } else if app.available_install_backends().is_empty() {
+                " add agent (no backend inventory)"
             } else {
-                " add agent (backend offline)"
+                " add agent (waiting for project status)"
             },
             Style::default().fg(theme::TEXT_MUTED),
         ),
@@ -522,7 +526,11 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
 
     if available_agents.is_empty() {
         let msg = if state.backend_pubkey.is_none() {
-            "Project backend must be online before assigning agents."
+            if app.available_install_backends().is_empty() {
+                "No approved backend inventory available for agent assignment."
+            } else {
+                "Waiting for live project status to identify this project's backend."
+            }
         } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
             "Waiting for backend 24011 inventory."
         } else if state.add_filter.is_empty() {

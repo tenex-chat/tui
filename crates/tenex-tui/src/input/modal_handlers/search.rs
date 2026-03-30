@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::ui::{App, HomeTab, ModalState};
+use crate::ui::{App, ModalState};
 
 pub(super) fn handle_sidebar_search_key(app: &mut App, key: KeyEvent) {
     let code = key.code;
@@ -34,13 +34,7 @@ pub(super) fn handle_sidebar_search_key(app: &mut App, key: KeyEvent) {
             app.sidebar_search.move_selection_up();
         }
         KeyCode::Down => {
-            // Use appropriate move method based on current tab
-            // Note: scroll offset adjustment happens in the renderer where we have real layout data
-            if app.home_panel_focus == HomeTab::Reports {
-                app.sidebar_search.move_selection_down_reports();
-            } else {
-                app.sidebar_search.move_selection_down();
-            }
+            app.sidebar_search.move_selection_down();
         }
         // Left/Right move cursor in query
         KeyCode::Left => {

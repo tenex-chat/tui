@@ -160,11 +160,6 @@ struct ConversationByIdAdaptiveDetailView: View {
     }
 }
 
-private struct SelectedReportDestination: Identifiable, Hashable {
-    let report: Report
-    var id: String { "\(report.projectATag):\(report.slug)" }
-}
-
 private struct RawEventDestination: Identifiable, Hashable {
     let eventId: String
     let json: String
@@ -179,7 +174,6 @@ struct NewThreadComposerSeed: Equatable {
     let initialContent: String
     let textAttachments: [TextAttachment]
     let referenceConversationId: String?
-    let referenceReportATag: String?
 
     init(
         launchId: UUID = UUID(),
@@ -187,8 +181,7 @@ struct NewThreadComposerSeed: Equatable {
         agentPubkey: String? = nil,
         initialContent: String,
         textAttachments: [TextAttachment],
-        referenceConversationId: String?,
-        referenceReportATag: String? = nil
+        referenceConversationId: String?
     ) {
         self.launchId = launchId
         self.projectId = projectId
@@ -196,7 +189,6 @@ struct NewThreadComposerSeed: Equatable {
         self.initialContent = initialContent
         self.textAttachments = textAttachments
         self.referenceConversationId = referenceConversationId
-        self.referenceReportATag = referenceReportATag
     }
 
     var identity: String {
@@ -266,7 +258,7 @@ enum ConversationWorkspaceSource {
 
 /// Native split workspace for a conversation:
 /// - Left: full Slack-style transcript + inline composer
-/// - Right: metadata inspector (status/todos/delegations/reports)
+/// - Right: metadata inspector (status/todos/delegations)
 struct ConversationWorkspaceView: View {
     let source: ConversationWorkspaceSource
     let showsMetadataInspector: Bool
@@ -282,7 +274,6 @@ struct ConversationWorkspaceView: View {
     /// Tracks the workspace width so the inspector auto-hides when space is tight.
     @State private var workspaceWidth: CGFloat = .infinity
     @State private var selectedDelegationConversation: ConversationFullInfo?
-    @State private var selectedReportDestination: SelectedReportDestination?
     @State private var visibleMessageWindow: Int = 30
     @State private var navigationErrorMessage: String?
     @State private var rawEventDestination: RawEventDestination?
@@ -475,13 +466,6 @@ struct ConversationWorkspaceView: View {
             )
                 .environment(coreManager)
         }
-        .navigationDestination(item: $selectedReportDestination) { destination in
-            ReportsTabDetailView(
-                report: destination.report,
-                project: coreManager.projects.first { $0.id == TenexCoreManager.projectId(fromATag: destination.report.projectATag) }
-            )
-            .environment(coreManager)
-        }
         .task(id: source.identity) {
             profiler.logEvent(
                 "workspace task start source=\(source.identity) mode=\(isNewThreadMode ? "new-thread" : "existing")",
@@ -494,7 +478,7 @@ struct ConversationWorkspaceView: View {
         }
         // Observation isolation: onChange handlers for coreManager live in a
         // separate lightweight view so this body doesn't observe
-        // coreManager.conversations/messagesByConversation/reports/streamingBuffers.
+        // coreManager.conversations/messagesByConversation/streamingBuffers.
         // Without this, ANY change to those dictionaries triggers a full body
         // re-evaluation including the ForEach over 30+ message rows.
         .background(CoreManagerObserver(viewModel: viewModel))
@@ -672,7 +656,6 @@ struct ConversationWorkspaceView: View {
                 initialContent: isNewThreadMode ? newThreadComposerSeed?.initialContent : nil,
                 initialTextAttachments: isNewThreadMode ? (newThreadComposerSeed?.textAttachments ?? []) : [],
                 referenceConversationId: isNewThreadMode ? newThreadComposerSeed?.referenceConversationId : nil,
-                referenceReportATag: isNewThreadMode ? newThreadComposerSeed?.referenceReportATag : nil,
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace,
                 onSend: isNewThreadMode ? { result in
@@ -717,9 +700,6 @@ struct ConversationWorkspaceView: View {
                 }
                 if !viewModel.delegations.isEmpty {
                     inspectorDelegationsSection
-                }
-                if !viewModel.referencedReports.isEmpty {
-                    inspectorReportsSection
                 }
             }
             .padding(14)
@@ -803,55 +783,6 @@ struct ConversationWorkspaceView: View {
                         delegationRowLabel(delegation, isWorking: isWorking)
                     }
                     .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var inspectorReportsSection: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Text("Reports (\(viewModel.referencedReports.count))")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.primary.opacity(0.66))
-                .textCase(.uppercase)
-
-            if viewModel.referencedReports.isEmpty {
-                Text("No report references found.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(viewModel.referencedReports) { reportRef in
-                        Button {
-                            openReport(reportRef)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "doc.text")
-                                    .font(.subheadline)
-                                    .foregroundStyle(Color.agentBrand)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(reportRef.title)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                        .lineLimit(2)
-
-                                    Text(reportRef.slug)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .padding(.vertical, 4)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
             }
         }
@@ -962,8 +893,7 @@ struct ConversationWorkspaceView: View {
                 initialAgentPubkey: payload.seed.agentPubkey,
                 initialContent: payload.seed.initialContent,
                 initialTextAttachments: payload.seed.textAttachments,
-                referenceConversationId: payload.seed.referenceConversationId,
-                referenceReportATag: payload.seed.referenceReportATag
+                referenceConversationId: payload.seed.referenceConversationId
             )
             .environment(coreManager)
             .tenexModalPresentation(detents: [.large])
@@ -1025,20 +955,6 @@ struct ConversationWorkspaceView: View {
         }
     }
 
-    private func openReport(_ reportRef: ReferencedReportItem) {
-        if let report = reportRef.report ?? resolveReport(aTag: reportRef.aTag) {
-            selectedReportDestination = SelectedReportDestination(report: report)
-        } else {
-            navigationErrorMessage = "Unable to load the selected report."
-        }
-    }
-
-    private func resolveReport(aTag: String) -> Report? {
-        coreManager.reports.first { report in
-            "30023:\(report.author):\(report.slug)" == aTag
-        }
-    }
-
     @ViewBuilder
     private func delegationRowLabel(_ delegation: DelegationItem, isWorking: Bool) -> some View {
         HStack(spacing: 8) {
@@ -1081,7 +997,7 @@ struct ConversationWorkspaceView: View {
 
 /// Lightweight observer that bridges coreManager changes to the viewModel.
 /// Lives as a background view so that ConversationWorkspaceView's body does NOT
-/// observe coreManager.conversations / messagesByConversation / reports directly.
+/// observe coreManager.conversations / messagesByConversation directly.
 /// This eliminates the root cause of the 100% CPU observation cascade:
 /// previously, any change to messagesByConversation (including messages for OTHER
 /// conversations) triggered a full body re-evaluation of the workspace including
@@ -1098,9 +1014,6 @@ private struct CoreManagerObserver: View {
             }
             .onChange(of: coreManager.messagesByConversation) { _, _ in
                 viewModel.handleMessagesChanged(coreManager.messagesByConversation)
-            }
-            .onChange(of: coreManager.reports) { _, _ in
-                viewModel.handleReportsChanged()
             }
     }
 }

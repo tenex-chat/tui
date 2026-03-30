@@ -24,8 +24,7 @@ final class DraftManagerTests: XCTestCase {
             agentPubkey: "agent-abc",
             selectedNudgeIds: ["n1", "n2"],
             selectedSkillIds: ["s1"],
-            referenceConversationId: "conv-ref",
-            referenceReportATag: "30023:pubkey:slug"
+            referenceConversationId: "conv-ref"
         )
         _ = original.addImageAttachment(url: "https://example.com/img1.png")
         _ = original.addImageAttachment(url: "https://example.com/img2.png")
@@ -45,7 +44,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(decoded.selectedSkillIds, ["s1"])
         XCTAssertTrue(decoded.isNewConversation)
         XCTAssertEqual(decoded.referenceConversationId, "conv-ref")
-        XCTAssertEqual(decoded.referenceReportATag, "30023:pubkey:slug")
         XCTAssertEqual(decoded.imageAttachments.count, 2)
         XCTAssertEqual(decoded.imageAttachments[0].url, "https://example.com/img1.png")
         XCTAssertEqual(decoded.imageAttachments[1].url, "https://example.com/img2.png")
@@ -160,7 +158,6 @@ final class DraftManagerTests: XCTestCase {
         let draft = try decoder.decode(Draft.self, from: data)
 
         XCTAssertNil(draft.referenceConversationId)
-        XCTAssertNil(draft.referenceReportATag)
     }
 
     func testDecodingWithoutImageAttachmentsDefaultsToEmptyArray() throws {
@@ -220,7 +217,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
-        XCTAssertNil(draft.referenceReportATag)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
         XCTAssertTrue(draft.textAttachments.isEmpty)
     }
@@ -303,17 +299,6 @@ final class DraftManagerTests: XCTestCase {
         draft.clearReferenceConversation()
 
         XCTAssertNil(draft.referenceConversationId)
-        XCTAssertGreaterThan(draft.lastEdited, before)
-    }
-
-    func testClearReferenceReportATagResetsAndUpdatesTimestamp() {
-        var draft = Draft(projectId: "p", referenceReportATag: "30023:pub:slug")
-        let before = draft.lastEdited
-
-        Thread.sleep(forTimeInterval: 0.01)
-        draft.clearReferenceReportATag()
-
-        XCTAssertNil(draft.referenceReportATag)
         XCTAssertGreaterThan(draft.lastEdited, before)
     }
 
@@ -582,8 +567,7 @@ final class DraftManagerTests: XCTestCase {
             agentPubkey: "agent",
             selectedNudgeIds: ["n1"],
             selectedSkillIds: ["s1"],
-            referenceConversationId: "ref-conv",
-            referenceReportATag: "30023:pub:slug"
+            referenceConversationId: "ref-conv"
         )
 
         // Update content should NOT affect other fields
@@ -593,7 +577,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(draft.selectedNudgeIds, ["n1"])
         XCTAssertEqual(draft.selectedSkillIds, ["s1"])
         XCTAssertEqual(draft.referenceConversationId, "ref-conv")
-        XCTAssertEqual(draft.referenceReportATag, "30023:pub:slug")
 
         // Clear agent should NOT affect other fields
         draft.clearAgent()
@@ -610,8 +593,7 @@ final class DraftManagerTests: XCTestCase {
             agentPubkey: "a",
             selectedNudgeIds: ["n"],
             selectedSkillIds: ["s"],
-            referenceConversationId: "ref",
-            referenceReportATag: "tag"
+            referenceConversationId: "ref"
         )
         _ = draft.addImageAttachment(url: "https://example.com/img.png")
         _ = draft.addTextAttachment(content: "context payload")
@@ -625,7 +607,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
-        XCTAssertNil(draft.referenceReportATag)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
         XCTAssertTrue(draft.textAttachments.isEmpty)
 
@@ -635,7 +616,6 @@ final class DraftManagerTests: XCTestCase {
         draft.addNudge("new-nudge")
         draft.addSkill("new-skill")
         draft.setReferenceConversation("new-ref")
-        draft.setReferenceReportATag("new-tag")
         _ = draft.addImageAttachment(url: "https://example.com/rebuilt.png")
         _ = draft.addTextAttachment(content: "rebuilt payload")
 
@@ -644,7 +624,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(draft.selectedNudgeIds, ["new-nudge"])
         XCTAssertEqual(draft.selectedSkillIds, ["new-skill"])
         XCTAssertEqual(draft.referenceConversationId, "new-ref")
-        XCTAssertEqual(draft.referenceReportATag, "new-tag")
         XCTAssertEqual(draft.imageAttachments.count, 1)
         XCTAssertEqual(draft.textAttachments.count, 1)
     }

@@ -55,7 +55,6 @@ final class ComposerViewModel {
         initialContent: String?,
         initialTextAttachments: [TextAttachment],
         referenceConversationId: String?,
-        referenceReportATag: String?,
         isDirty: Bool
     ) async -> ComposerDraftLoadResult {
         let loadedDraft = await dependencies.drafts.getOrCreateDraft(
@@ -81,13 +80,6 @@ final class ComposerViewModel {
                     projectId: projectId
                 )
             }
-            if let refATag = referenceReportATag {
-                await dependencies.drafts.updateReferenceReportATag(
-                    refATag,
-                    conversationId: conversationId,
-                    projectId: projectId
-                )
-            }
             return ComposerDraftLoadResult(
                 draft: nil,
                 localText: nil,
@@ -104,7 +96,6 @@ final class ComposerViewModel {
             var modifiedDraft = loadedDraft
             modifiedDraft.updateContent(seededContent)
             modifiedDraft.setReferenceConversation(referenceConversationId)
-            modifiedDraft.setReferenceReportATag(referenceReportATag)
             modifiedDraft.setTextAttachments(initialTextAttachments)
 
             await dependencies.drafts.updateContent(
@@ -122,11 +113,6 @@ final class ComposerViewModel {
                 conversationId: conversationId,
                 projectId: projectId
             )
-            await dependencies.drafts.updateReferenceReportATag(
-                referenceReportATag,
-                conversationId: conversationId,
-                projectId: projectId
-            )
 
             return ComposerDraftLoadResult(
                 draft: modifiedDraft,
@@ -137,18 +123,12 @@ final class ComposerViewModel {
             )
         }
 
-        if referenceConversationId != nil || referenceReportATag != nil {
+        if referenceConversationId != nil {
             var modifiedDraft = loadedDraft
             modifiedDraft.setReferenceConversation(referenceConversationId)
-            modifiedDraft.setReferenceReportATag(referenceReportATag)
 
             await dependencies.drafts.updateReferenceConversation(
                 referenceConversationId,
-                conversationId: conversationId,
-                projectId: projectId
-            )
-            await dependencies.drafts.updateReferenceReportATag(
-                referenceReportATag,
                 conversationId: conversationId,
                 projectId: projectId
             )
@@ -247,8 +227,7 @@ final class ComposerViewModel {
         agentPubkey: String?,
         nudgeIds: [String],
         skillIds: [String],
-        referenceConversationId: String?,
-        referenceReportATag: String?
+        referenceConversationId: String?
     ) async throws -> SendMessageResult {
         if isNewConversation {
             return try await dependencies.core.sendThread(
@@ -258,8 +237,7 @@ final class ComposerViewModel {
                 agentPubkey: agentPubkey,
                 nudgeIds: nudgeIds,
                 skillIds: skillIds,
-                referenceConversationId: referenceConversationId,
-                referenceReportATag: referenceReportATag
+                referenceConversationId: referenceConversationId
             )
         }
 

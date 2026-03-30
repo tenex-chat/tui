@@ -64,7 +64,11 @@ pub fn render_nudge_skill_selector(
 
         // Each item is 1 line (no description) or 2 lines (with description).
         let item_height = |item: &NudgeSkillSelectorItem| -> usize {
-            if item.description().is_empty() { 1 } else { 2 }
+            if item.description().is_empty() {
+                1
+            } else {
+                2
+            }
         };
 
         // Find scroll_offset (first visible item) so the selected item is on screen.

@@ -91,7 +91,7 @@ fn execute_project_action(
                     .find(|p| p.a_tag() == state.project_a_tag)
                     .map(|p| {
                         (
-                            app.project_backend_pubkey(&state.project_a_tag),
+                            app.project_settings_backend_pubkey(&state.project_a_tag),
                             p.agent_pubkeys.clone(),
                             p.mcp_tool_ids.clone(),
                         )
@@ -152,12 +152,11 @@ fn execute_project_action(
             app.modal_state = ModalState::None;
         }
         ProjectAction::Delete => {
-            app.modal_state = ModalState::ProjectDeleteConfirm(
-                ui::modal::ProjectDeleteConfirmState::new(
+            app.modal_state =
+                ModalState::ProjectDeleteConfirm(ui::modal::ProjectDeleteConfirmState::new(
                     state.project_a_tag.clone(),
                     state.project_name.clone(),
-                ),
-            );
+                ));
         }
     }
 }

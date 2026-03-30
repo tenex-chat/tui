@@ -9,7 +9,7 @@ use crate::ui::state::TabContentType;
 use crate::ui::text_editor::TextEditor;
 use crate::ui::theme;
 use crate::ui::todo::aggregate_todo_state;
-use crate::ui::views::{render_report_tab, render_tts_control};
+use crate::ui::views::render_tts_control;
 use crate::ui::{App, ModalState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -37,10 +37,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     match content_type {
         TabContentType::TTSControl => {
             render_tts_tab_layout(f, app, area);
-            return;
-        }
-        TabContentType::Report { .. } => {
-            render_report_tab_layout(f, app, area);
             return;
         }
         TabContentType::Conversation => {
@@ -180,7 +176,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     messages::render_messages_panel(f, app, messages_area, &all_messages);
 
-    // Render chat sidebar (work indicator + todos + delegations + reports + metadata)
+    // Render chat sidebar (work indicator + todos + delegations + metadata)
     if let Some(sidebar) = sidebar_area {
         render_chat_sidebar(
             f,
@@ -261,11 +257,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Render hotkey help modal if showing
     if matches!(app.modal_state, ModalState::HotkeyHelp) {
         actions::render_hotkey_help_modal(f, area);
-    }
-
-    // Render report viewer modal if showing
-    if let ModalState::ReportViewer(ref state) = app.modal_state {
-        super::super::render_report_viewer(f, app, area, state);
     }
 
     // Render unified nudges/skills selector modal if showing
@@ -1061,8 +1052,7 @@ fn render_agent_config_modal(
 
         if settings.available_skills.is_empty() {
             f.render_widget(
-                Paragraph::new("No skills available")
-                    .style(Style::default().fg(theme::TEXT_MUTED)),
+                Paragraph::new("No skills available").style(Style::default().fg(theme::TEXT_MUTED)),
                 skills_list_area,
             );
         } else {
@@ -1242,42 +1232,6 @@ fn render_tts_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Render TTS control content
     render_tts_control(f, app, chunks[0]);
-
-    // Render tab bar
-    render_tab_bar(f, app, chunks[1]);
-
-    // Render statusbar
-    let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
-        app.data_store.borrow_mut().get_statusbar_runtime_ms();
-    let audio_playing = app.audio_player.is_playing();
-    render_statusbar(
-        f,
-        chunks[2],
-        app.current_notification(),
-        cumulative_runtime_ms,
-        has_active_agents,
-        active_agent_count,
-        app.wave_offset(),
-        audio_playing,
-    );
-}
-
-// =============================================================================
-// REPORT TAB LAYOUT
-// =============================================================================
-
-/// Render the report tab with shared chrome (tab bar, statusbar)
-fn render_report_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
-    // Layout: Content | Tab bar | Statusbar
-    let chunks = Layout::vertical([
-        Constraint::Min(0),
-        Constraint::Length(layout::TAB_BAR_HEIGHT),
-        Constraint::Length(layout::STATUSBAR_HEIGHT),
-    ])
-    .split(area);
-
-    // Render report tab content
-    render_report_tab(f, app, chunks[0]);
 
     // Render tab bar
     render_tab_bar(f, app, chunks[1]);

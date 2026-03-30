@@ -6,7 +6,7 @@ use crate::nostr::{DataChange, NostrCommand};
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::audio_player::{AudioPlaybackState, AudioPlayer};
-use crate::ui::components::{ReportCoordinate, SidebarDelegation, SidebarReport, SidebarState};
+use crate::ui::components::{SidebarDelegation, SidebarState};
 use crate::ui::modal::{AgentConfigState, CommandPaletteState, ModalState};
 use crate::ui::notifications::Notification;
 use crate::ui::selector::SelectorState;
@@ -135,7 +135,6 @@ pub enum InputMode {
 pub enum HomeTab {
     Conversations,
     Inbox,
-    Reports,
     ActiveWork,
     Stats,
 }
@@ -312,7 +311,6 @@ pub struct App {
     pub tab_selection: HashMap<HomeTab, usize>,
     /// Multi-selected thread IDs for batch operations
     pub multi_selected_threads: HashSet<String>,
-    pub report_search_filter: String,
     /// Whether sidebar is focused (vs content area)
     pub sidebar_focused: bool,
     /// Selected index in sidebar project list
@@ -356,7 +354,7 @@ pub struct App {
     /// Toggle for showing/hiding the todo sidebar
     pub todo_sidebar_visible: bool,
 
-    /// State for the chat sidebar (delegations, reports, focus)
+    /// State for the chat sidebar (delegations and focus)
     pub sidebar_state: SidebarState,
 
     /// Collapsed thread IDs (parent threads whose children are hidden)
@@ -450,7 +448,6 @@ impl App {
             home_panel_focus: HomeTab::Conversations,
             tab_selection: HashMap::new(),
             multi_selected_threads: HashSet::new(),
-            report_search_filter: String::new(),
             sidebar_focused: false,
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
@@ -2333,7 +2330,7 @@ impl App {
             ))
         );
 
-        // Update sidebar state with delegations and reports from messages
+        // Update sidebar state with delegation references from messages
         // (done here on tab switch rather than during render for purity)
         let messages = self.messages();
         self.update_sidebar_from_messages(&messages);
@@ -2586,36 +2583,6 @@ impl App {
                     true
                 }
             })
-            .collect()
-    }
-
-    /// Get reports for Home view (filtered by visible_projects and search filter)
-    pub fn reports(&self) -> Vec<tenex_core::models::Report> {
-        // Empty visible_projects = show nothing
-        if self.visible_projects.is_empty() {
-            return vec![];
-        }
-
-        let store = self.data_store.borrow();
-        let filter = self.report_search_filter.to_lowercase();
-
-        store
-            .reports
-            .get_reports()
-            .into_iter()
-            .filter(|r| self.visible_projects.contains(&r.project_a_tag))
-            .filter(|r| {
-                if filter.is_empty() {
-                    return true;
-                }
-                r.title.to_lowercase().contains(&filter)
-                    || r.summary.to_lowercase().contains(&filter)
-                    || r.content.to_lowercase().contains(&filter)
-                    || r.hashtags
-                        .iter()
-                        .any(|h| h.to_lowercase().contains(&filter))
-            })
-            .cloned()
             .collect()
     }
 
@@ -3153,6 +3120,19 @@ impl App {
             .get_project_status(project_a_tag)
             .filter(|status| status.is_online())
             .map(|status| status.backend_pubkey.clone())
+    }
+
+    pub fn project_settings_backend_pubkey(&self, project_a_tag: &str) -> Option<String> {
+        if let Some(backend_pubkey) = self.project_backend_pubkey(project_a_tag) {
+            return Some(backend_pubkey);
+        }
+
+        let mut backends = self.available_install_backends();
+        if backends.len() == 1 {
+            backends.pop()
+        } else {
+            None
+        }
     }
 
     pub fn has_installed_agent_inventory(&self, backend_pubkey: Option<&str>) -> bool {
@@ -4473,93 +4453,57 @@ impl App {
 
     /// Update sidebar search results based on current query and active tab
     pub fn update_sidebar_search_results(&mut self) {
-        use crate::ui::search::{search_conversations_hierarchical, search_reports};
+        use crate::ui::search::search_conversations_hierarchical;
         let store = self.data_store.borrow();
 
-        // Clear all result sets
         self.sidebar_search.hierarchical_results.clear();
-        self.sidebar_search.report_results.clear();
-
-        // Search based on current tab
-        match self.home_panel_focus {
-            HomeTab::Reports => {
-                self.sidebar_search.report_results =
-                    search_reports(&self.sidebar_search.query, &store, &self.visible_projects);
-            }
-            _ => {
-                // Use hierarchical search for conversations
-                self.sidebar_search.hierarchical_results = search_conversations_hierarchical(
-                    &self.sidebar_search.query,
-                    &store,
-                    &self.visible_projects,
-                );
-            }
-        }
+        self.sidebar_search.hierarchical_results = search_conversations_hierarchical(
+            &self.sidebar_search.query,
+            &store,
+            &self.visible_projects,
+        );
 
         // Reset selection when results change
         self.sidebar_search.selected_index = 0;
     }
 
-    /// Open the selected search result (conversation or report based on current tab)
+    /// Open the selected search result.
     pub fn open_selected_search_result(&mut self) {
         use crate::ui::search::HierarchicalSearchItem;
 
-        match self.home_panel_focus {
-            HomeTab::Reports => {
-                // Open report (using clamped accessor)
-                if let Some(report) = self.sidebar_search.selected_report().cloned() {
-                    // Close search
-                    self.sidebar_search.visible = false;
-                    self.sidebar_search.query.clear();
-                    self.sidebar_search.hierarchical_results.clear();
-                    self.sidebar_search.report_results.clear();
+        if let Some(item) = self.sidebar_search.selected_hierarchical_result().cloned() {
+            let (thread, project_a_tag) = match item {
+                HierarchicalSearchItem::ContextAncestor {
+                    thread,
+                    project_a_tag,
+                    ..
+                } => (thread, project_a_tag),
+                HierarchicalSearchItem::MatchedConversation {
+                    thread,
+                    project_a_tag,
+                    ..
+                } => (thread, project_a_tag),
+            };
 
-                    // Open the report in a viewer modal
-                    use crate::ui::modal::{ModalState, ReportViewerState};
-                    self.modal_state = ModalState::ReportViewer(ReportViewerState::new(report));
-                }
-            }
-            _ => {
-                // Open conversation from hierarchical results
-                if let Some(item) = self.sidebar_search.selected_hierarchical_result().cloned() {
-                    // Extract thread and project_a_tag from the item
-                    let (thread, project_a_tag) = match item {
-                        HierarchicalSearchItem::ContextAncestor {
-                            thread,
-                            project_a_tag,
-                            ..
-                        } => (thread, project_a_tag),
-                        HierarchicalSearchItem::MatchedConversation {
-                            thread,
-                            project_a_tag,
-                            ..
-                        } => (thread, project_a_tag),
-                    };
+            self.sidebar_search.visible = false;
+            self.sidebar_search.query.clear();
+            self.sidebar_search.hierarchical_results.clear();
 
-                    // Close search
-                    self.sidebar_search.visible = false;
-                    self.sidebar_search.query.clear();
-                    self.sidebar_search.hierarchical_results.clear();
-                    self.sidebar_search.report_results.clear();
-
-                    // Open the thread
-                    self.open_thread_from_home(&thread, &project_a_tag);
-                }
-            }
+            self.open_thread_from_home(&thread, &project_a_tag);
         }
     }
 
     // ===== Sidebar Methods =====
 
-    /// Update the sidebar state with delegations and reports from the current conversation
+    /// Update the sidebar state with delegation references from the current conversation.
     pub fn update_sidebar_from_messages(&mut self, messages: &[Message]) {
         use crate::ui::views::chat::grouping::should_render_q_tags;
         use std::collections::HashSet;
 
         let store = self.data_store.borrow();
 
-        // Extract delegations from q-tags, but filter out tools that use q_tags for internal purposes
-        // (e.g., report_write uses q_tags to link to the article it creates)
+        // Extract delegations from q-tags, but filter out tools that use q_tags for internal
+        // purposes unrelated to conversation navigation.
         let mut delegations = Vec::new();
         let mut seen_thread_ids: HashSet<String> = HashSet::new();
 
@@ -4614,36 +4558,8 @@ impl App {
             }
         }
 
-        // Extract reports from a-tags (dedupe by a_tag)
-        let mut reports = Vec::new();
-        let mut seen_a_tags: HashSet<String> = HashSet::new();
-
-        for msg in messages {
-            for a_tag in &msg.a_tags {
-                if seen_a_tags.contains(a_tag) {
-                    continue;
-                }
-                seen_a_tags.insert(a_tag.clone());
-
-                // Parse a_tag using shared helper
-                if let Some(coord) = ReportCoordinate::parse(a_tag) {
-                    // Look up the report to get its title (use a_tag to avoid slug collisions)
-                    let title = store
-                        .reports
-                        .get_report_by_a_tag(a_tag)
-                        .map(|r| r.title.clone())
-                        .unwrap_or_else(|| coord.slug.clone());
-
-                    reports.push(SidebarReport {
-                        a_tag: a_tag.clone(),
-                        title,
-                    });
-                }
-            }
-        }
-
         drop(store);
-        self.sidebar_state.update(delegations, reports);
+        self.sidebar_state.update(delegations);
     }
 
     /// Toggle sidebar focus

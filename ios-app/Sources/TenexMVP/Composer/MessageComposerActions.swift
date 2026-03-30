@@ -13,7 +13,6 @@ extension MessageComposerView {
             initialContent: initialContent,
             initialTextAttachments: initialTextAttachments,
             referenceConversationId: referenceConversationId,
-            referenceReportATag: referenceReportATag,
             isDirty: isDirty
         )
 
@@ -159,8 +158,7 @@ extension MessageComposerView {
                     agentPubkey: validatedAgentPubkey,
                     nudgeIds: Array(draft.selectedNudgeIds),
                     skillIds: Array(draft.selectedSkillIds),
-                    referenceConversationId: draft.referenceConversationId,
-                    referenceReportATag: draft.referenceReportATag
+                    referenceConversationId: draft.referenceConversationId
                 )
 
                 isSending = false

@@ -118,12 +118,6 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle report viewer modal when open
-    if matches!(app.modal_state, ModalState::ReportViewer(_)) {
-        view::handle_report_viewer_modal_key(app, key);
-        return Ok(true);
-    }
-
     // Handle conversation actions modal when open
     if matches!(app.modal_state, ModalState::ConversationActions(_)) {
         actions::handle_conversation_actions_modal_key(app, key);

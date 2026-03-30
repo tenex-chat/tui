@@ -307,11 +307,6 @@ extension TenexCoreManager {
         }
     }
 
-    func reportMatchesAppFilter(_ report: Report, now: UInt64? = nil) -> Bool {
-        let projectId = Self.projectId(fromATag: report.projectATag)
-        return matchesAppFilter(projectId: projectId, timestamp: report.createdAt, now: now)
-    }
-
     func inboxItemMatchesAppFilter(_ item: InboxItem, now: UInt64? = nil) -> Bool {
         matchesAppFilter(projectId: item.resolvedProjectId, timestamp: item.createdAt, now: now)
     }

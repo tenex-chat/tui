@@ -207,40 +207,6 @@ final class ConversationFormattersTests: XCTestCase {
         XCTAssertTrue(result.contains("This is in reference to conversation id"))
     }
 
-    // MARK: - generateReportContextMessage
-
-    func testGenerateReportContextMessageIncludesTitle() {
-        let report = makeReport(title: "Weekly Summary", slug: "weekly-summary", content: "Report content here")
-        let result = ConversationFormatters.generateReportContextMessage(report: report)
-        XCTAssertTrue(result.contains("Weekly Summary"))
-    }
-
-    func testGenerateReportContextMessageIncludesSlug() {
-        let report = makeReport(title: "Test", slug: "test-slug", content: "Content")
-        let result = ConversationFormatters.generateReportContextMessage(report: report)
-        XCTAssertTrue(result.contains("slug: test-slug"))
-    }
-
-    func testGenerateReportContextMessageTokenEstimate() {
-        // 800 chars / 4 = 200 tokens
-        let content = String(repeating: "x", count: 800)
-        let report = makeReport(title: "Test", slug: "test", content: content)
-        let result = ConversationFormatters.generateReportContextMessage(report: report)
-        XCTAssertTrue(result.contains("200 tokens"))
-    }
-
-    func testGenerateReportContextMessageEmptyContent() {
-        let report = makeReport(title: "Empty", slug: "empty", content: "")
-        let result = ConversationFormatters.generateReportContextMessage(report: report)
-        XCTAssertTrue(result.contains("0 tokens"))
-    }
-
-    func testGenerateReportContextMessageMentionsReportRead() {
-        let report = makeReport(title: "T", slug: "s", content: "c")
-        let result = ConversationFormatters.generateReportContextMessage(report: report)
-        XCTAssertTrue(result.contains("report_read"))
-    }
-
     // MARK: - Helpers
 
     private func makeMessage(content: String) -> Message {
@@ -289,21 +255,6 @@ final class ConversationFormattersTests: XCTestCase {
             isArchived: false,
             hasChildren: false,
             projectATag: "31922:owner:project-1"
-        )
-    }
-
-    private func makeReport(title: String, slug: String, content: String) -> Report {
-        Report(
-            id: "report-id",
-            slug: slug,
-            projectATag: "31922:owner:project-1",
-            author: "author-pubkey",
-            title: title,
-            summary: "Summary",
-            content: content,
-            hashtags: [],
-            createdAt: UInt64(Date().timeIntervalSince1970),
-            readingTimeMins: 1
         )
     }
 }

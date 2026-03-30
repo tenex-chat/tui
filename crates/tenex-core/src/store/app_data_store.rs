@@ -1,7 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{
-    AgentChatter, AskEvent, BookmarkList, ConversationMetadata, InboxEventType, InboxItem, Message,
-    InstalledAgent, Project, ProjectAgent, ProjectStatus, Thread,
+    AgentChatter, AskEvent, BookmarkList, ConversationMetadata, InboxEventType, InboxItem,
+    InstalledAgent, Message, Project, ProjectAgent, ProjectStatus, Thread,
 };
 #[cfg(test)]
 use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, OperationsStatus, Report};

@@ -225,7 +225,7 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         bottom_spans.push(Span::raw(gap));
     }
 
-    // === All Tabs (Conversations, TTS Control, Reports) ===
+    // === All Tabs (Conversations and TTS Control) ===
     let max_title_width = 18;
 
     for (i, tab) in app.open_tabs().iter().enumerate() {
@@ -299,28 +299,6 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
                 let project = "Audio".to_string();
 
                 (ind, ind_fg, title, project)
-            }
-            TabContentType::Report { a_tag, .. } => {
-                // Report tab indicator
-                let (ind, ind_fg) = ("📄".to_string(), Some(theme::ACCENT_PRIMARY));
-
-                // Get report title from store using a_tag (handles slug collisions)
-                let report_title = data_store
-                    .reports
-                    .get_report_by_a_tag(a_tag)
-                    .map(|r| r.title.clone())
-                    .unwrap_or_else(|| tab.thread_title.clone());
-                let (title, title_width) = truncate_to_width(&report_title, max_title_width);
-
-                // Get author name for project line
-                let author = data_store
-                    .reports
-                    .get_report_by_a_tag(a_tag)
-                    .map(|r| data_store.get_profile_name(&r.author))
-                    .unwrap_or_else(|| "Report".to_string());
-                let (proj, _) = truncate_plain_to_width(&format!("@{}", author), title_width);
-
-                (ind, ind_fg, title, proj)
             }
         };
 

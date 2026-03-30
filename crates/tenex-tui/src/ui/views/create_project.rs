@@ -66,7 +66,10 @@ pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &Creat
         ],
         CreateProjectStep::SelectAgents => vec![
             Span::styled("Agents", Style::default().fg(theme::ACCENT_WARNING)),
-            Span::styled(" assigned later via live backend", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(
+                " assigned later via live backend",
+                Style::default().fg(theme::TEXT_MUTED),
+            ),
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS)),
             Span::styled(" next", Style::default().fg(theme::TEXT_MUTED)),
@@ -221,8 +224,9 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
     f.render_widget(empty_msg, list_area);
 
     if !state.agent_pubkeys.is_empty() {
-        let selected = Paragraph::new("Selected agents will be ignored until assignment is republished.")
-            .style(Style::default().fg(theme::ACCENT_WARNING));
+        let selected =
+            Paragraph::new("Selected agents will be ignored until assignment is republished.")
+                .style(Style::default().fg(theme::ACCENT_WARNING));
         f.render_widget(
             selected,
             Rect::new(

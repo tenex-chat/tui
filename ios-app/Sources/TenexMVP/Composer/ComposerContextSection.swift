@@ -358,8 +358,7 @@ extension MessageComposerView {
             agentPubkey: draft.agentPubkey,
             initialContent: "[Text Attachment 1]",
             textAttachments: [TextAttachment(id: 1, content: contextMessage)],
-            referenceConversationId: conversationId,
-            referenceReportATag: nil
+            referenceConversationId: conversationId
         )
 
         onReferenceConversationRequested(

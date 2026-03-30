@@ -127,23 +127,6 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'o',
-        label: "View report",
-        section: "Reports",
-        available: |app| {
-            app.view == View::Home
-                && !app.sidebar_focused
-                && app.home_panel_focus == HomeTab::Reports
-        },
-        execute: |app| {
-            let reports = app.reports();
-            if let Some(report) = reports.get(app.current_selection()) {
-                app.modal_state =
-                    ModalState::ReportViewer(modal::ReportViewerState::new(report.clone()));
-            }
-        },
-    },
-    Command {
         key: 'a',
         label: "Archive/Unarchive",
         section: "Conversation",
@@ -250,10 +233,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(
-                    app.home_panel_focus,
-                    HomeTab::Conversations | HomeTab::Reports
-                )
+                && matches!(app.home_panel_focus, HomeTab::Conversations)
         },
         execute: |app| {
             app.toggle_sidebar_search();
@@ -823,7 +803,7 @@ fn open_project_settings(app: &mut App) {
     if let Some(project) = all_projects.get(app.sidebar_project_index) {
         let a_tag = project.a_tag();
         let project_name = project.title.clone();
-        let backend_pubkey = app.project_backend_pubkey(&a_tag);
+        let backend_pubkey = app.project_settings_backend_pubkey(&a_tag);
         let agent_pubkeys = project.agent_pubkeys.clone();
         let mcp_tool_ids = project.mcp_tool_ids.clone();
         app.modal_state = ModalState::ProjectSettings(modal::ProjectSettingsState::new(
@@ -860,7 +840,9 @@ fn install_selected_agent_definition_to_backend(app: &mut App) {
         if install_backends.is_empty() {
             app.set_warning_status("No approved online backend publishing 24011");
         } else {
-            app.set_warning_status("Multiple live backends available; install from a project-backed flow");
+            app.set_warning_status(
+                "Multiple live backends available; install from a project-backed flow",
+            );
         }
         return;
     };
@@ -896,9 +878,10 @@ fn delete_project(app: &mut App) {
     let (online, offline) = app.filtered_projects();
     let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
     if let Some(project) = all_projects.get(app.sidebar_project_index) {
-        app.modal_state = ModalState::ProjectDeleteConfirm(
-            modal::ProjectDeleteConfirmState::new(project.a_tag(), project.title.clone()),
-        );
+        app.modal_state = ModalState::ProjectDeleteConfirm(modal::ProjectDeleteConfirmState::new(
+            project.a_tag(),
+            project.title.clone(),
+        ));
     }
 }
 

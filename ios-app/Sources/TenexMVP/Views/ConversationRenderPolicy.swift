@@ -5,9 +5,6 @@ import Foundation
 enum ConversationRenderPolicy {
     /// Tools that use q-tags for internal references (not delegation/ask previews).
     static let qTagRenderDenylist: Set<String> = [
-        "mcp__tenex__report_write",
-        "mcp__tenex__report_read",
-        "mcp__tenex__report_delete",
         "mcp__tenex__lesson_learn",
         "mcp__tenex__lesson_get"
     ]

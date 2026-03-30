@@ -105,8 +105,7 @@ fn get_thread_id_at_index(
             }
             None
         }
-        HomeTab::Reports => None, // Reports are not threads
-        HomeTab::Stats => None,   // Stats are not threads
+        HomeTab::Stats => None, // Stats are not threads
     }
 }
 
@@ -122,25 +121,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     } else {
         None
     };
-
-    // Handle Reports search input mode
-    if app.input_mode == InputMode::Editing && app.home_panel_focus == HomeTab::Reports {
-        match code {
-            KeyCode::Char(c) => {
-                app.report_search_filter.push(c);
-                app.tab_selection.insert(HomeTab::Reports, 0);
-            }
-            KeyCode::Backspace => {
-                app.report_search_filter.pop();
-                app.tab_selection.insert(HomeTab::Reports, 0);
-            }
-            KeyCode::Esc | KeyCode::Enter => {
-                app.input_mode = InputMode::Normal;
-            }
-            _ => {}
-        }
-        return Ok(());
-    }
 
     // Handle project settings modal when showing
     if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
@@ -168,10 +148,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         match hotkey_id {
             HotkeyId::Quit => {
                 app.quit();
-                return Ok(());
-            }
-            HotkeyId::SearchReports => {
-                app.input_mode = InputMode::Editing;
                 return Ok(());
             }
             HotkeyId::SwitchProject => {
@@ -210,8 +186,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             HotkeyId::NextHomeTab => {
                 app.home_panel_focus = match app.home_panel_focus {
                     HomeTab::Conversations => HomeTab::Inbox,
-                    HomeTab::Inbox => HomeTab::Reports,
-                    HomeTab::Reports => HomeTab::ActiveWork,
+                    HomeTab::Inbox => HomeTab::ActiveWork,
                     HomeTab::ActiveWork => HomeTab::Stats,
                     HomeTab::Stats => HomeTab::Conversations,
                 };
@@ -221,8 +196,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.home_panel_focus = match app.home_panel_focus {
                     HomeTab::Conversations => HomeTab::Stats,
                     HomeTab::Inbox => HomeTab::Conversations,
-                    HomeTab::Reports => HomeTab::Inbox,
-                    HomeTab::ActiveWork => HomeTab::Reports,
+                    HomeTab::ActiveWork => HomeTab::Inbox,
                     HomeTab::Stats => HomeTab::ActiveWork,
                 };
                 return Ok(());
@@ -301,7 +275,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let max = match app.home_panel_focus {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
-                    HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
@@ -343,7 +316,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let max = match app.home_panel_focus {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
-                    HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
@@ -360,7 +332,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if let Some(project) = all_projects.get(app.sidebar_project_index) {
                 let a_tag = project.a_tag();
                 let project_name = project.title.clone();
-                let backend_pubkey = app.project_backend_pubkey(&a_tag);
+                let backend_pubkey = app.project_settings_backend_pubkey(&a_tag);
                 let agent_pubkeys = project.agent_pubkeys.clone();
                 let mcp_tool_ids = project.mcp_tool_ids.clone();
 
@@ -480,17 +452,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.open_thread_from_home(&thread, &a_tag);
                         }
                     }
-                    HomeTab::Reports => {
-                        let reports = app.reports();
-                        if let Some(report) = reports.get(idx) {
-                            // Open report as a tab instead of modal
-                            let slug = report.slug.clone();
-                            let a_tag = report.a_tag();
-                            let title = report.title.clone();
-                            app.tabs.open_report(slug, a_tag, title);
-                            app.view = View::Chat;
-                        }
-                    }
                     HomeTab::ActiveWork => {
                         // Open conversation from Active Work tab using cached operations
                         let (event_id, thread_id_opt, project_a_tag): (
@@ -597,7 +558,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             let max = match app.home_panel_focus {
                 HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                 HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
-                HomeTab::Reports => app.reports().len().saturating_sub(1),
                 HomeTab::ActiveWork => active_work_cache
                     .as_ref()
                     .map_or(0, |c| c.len().saturating_sub(1)),
@@ -624,7 +584,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             }
         }
         // Archive selected conversations ('a')
-        KeyCode::Char('a') if !app.sidebar_focused && app.home_panel_focus != HomeTab::Reports => {
+        KeyCode::Char('a') if !app.sidebar_focused => {
             if !app.multi_selected_threads.is_empty() {
                 // Archive all multi-selected
                 app.archive_multi_selected();
@@ -641,13 +601,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         app.set_warning_status("Unarchived conversation");
                     }
                 }
-            }
-        }
-        // Esc to clear Reports search filter
-        KeyCode::Esc if app.home_panel_focus == HomeTab::Reports => {
-            if !app.report_search_filter.is_empty() {
-                app.report_search_filter.clear();
-                app.tab_selection.insert(HomeTab::Reports, 0);
             }
         }
         // Number keys for tab switching (1 = stay on Home, 2-9 = tabs)
@@ -853,7 +806,15 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Char('a') => {
                 if state.backend_pubkey.is_none() {
-                    app.set_warning_status("Project backend must be online before assigning agents");
+                    if app.available_install_backends().is_empty() {
+                        app.set_warning_status(
+                            "No approved backend inventory available for agent assignment",
+                        );
+                    } else {
+                        app.set_warning_status(
+                            "Waiting for live project status to identify the project backend",
+                        );
+                    }
                 } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
                     app.set_warning_status("Waiting for backend 24011 inventory");
                 } else {
@@ -1103,9 +1064,6 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
         TabContentType::TTSControl => {
             return handle_tts_control_key(app, key);
         }
-        TabContentType::Report { .. } => {
-            return handle_report_tab_key(app, key);
-        }
         TabContentType::Conversation => {
             // Continue with normal conversation handling below
         }
@@ -1141,24 +1099,6 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                     match selection {
                         SidebarSelection::Delegation(thread_id) => {
                             app.push_delegation(&thread_id);
-                        }
-                        SidebarSelection::Report(a_tag) => {
-                            // Use a_tag-based lookup to avoid slug collisions across different authors
-                            let report = app
-                                .data_store
-                                .borrow()
-                                .reports
-                                .get_report_by_a_tag(&a_tag)
-                                .cloned();
-                            if let Some(report) = report {
-                                // Open report as a tab instead of modal
-                                app.tabs.open_report(
-                                    report.slug.clone(),
-                                    report.a_tag(),
-                                    report.title.clone(),
-                                );
-                                // Stay in Chat view - the tab is now active
-                            }
                         }
                     }
                     app.set_sidebar_focused(false);
@@ -1533,7 +1473,9 @@ fn install_selected_agent_definition_to_backend(app: &mut App) {
         if install_backends.is_empty() {
             app.set_warning_status("No approved online backend publishing 24011");
         } else {
-            app.set_warning_status("Multiple live backends available; install from a project-backed flow");
+            app.set_warning_status(
+                "Multiple live backends available; install from a project-backed flow",
+            );
         }
         return;
     };
@@ -1856,109 +1798,6 @@ fn handle_tts_control_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             if let Some(tts_state) = app.tabs.tts_state_mut() {
                 tts_state.clear_completed();
             }
-            return Ok(true);
-        }
-        _ => {}
-    }
-
-    Ok(false)
-}
-
-// =============================================================================
-// REPORT TAB
-// =============================================================================
-
-/// Handle keyboard input for the Report tab.
-fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
-    let code = key.code;
-
-    // Get current focus state
-    let focus = app
-        .tabs
-        .active_tab()
-        .and_then(|t| t.report_state.as_ref())
-        .map(|s| s.focus)
-        .unwrap_or(crate::ui::state::ReportTabFocus::Content);
-
-    match code {
-        // Close tab with q or Escape
-        KeyCode::Char('q') | KeyCode::Esc => {
-            let (_, prev_view) = app.tabs.close_current();
-            match prev_view {
-                Some(crate::ui::state::ViewLocation::Home) | None => {
-                    app.view = View::Home;
-                }
-                Some(crate::ui::state::ViewLocation::Tab(_)) => {
-                    // Stay in Chat view with the previous tab
-                }
-            }
-            return Ok(true);
-        }
-        // Toggle focus between content and chat with Tab
-        KeyCode::Tab => {
-            if let Some(tab) = app.tabs.active_tab_mut() {
-                if let Some(ref mut state) = tab.report_state {
-                    state.toggle_focus();
-                }
-            }
-            return Ok(true);
-        }
-        // Content-focused navigation
-        KeyCode::Char('j') | KeyCode::Down
-            if focus == crate::ui::state::ReportTabFocus::Content =>
-        {
-            if let Some(tab) = app.tabs.active_tab_mut() {
-                if let Some(ref mut state) = tab.report_state {
-                    state.content_scroll += 1;
-                }
-            }
-            return Ok(true);
-        }
-        KeyCode::Char('k') | KeyCode::Up if focus == crate::ui::state::ReportTabFocus::Content => {
-            if let Some(tab) = app.tabs.active_tab_mut() {
-                if let Some(ref mut state) = tab.report_state {
-                    state.content_scroll = state.content_scroll.saturating_sub(1);
-                }
-            }
-            return Ok(true);
-        }
-        // Toggle diff view with 'd'
-        KeyCode::Char('d') if focus == crate::ui::state::ReportTabFocus::Content => {
-            if let Some(tab) = app.tabs.active_tab_mut() {
-                if let Some(ref mut state) = tab.report_state {
-                    state.show_diff = !state.show_diff;
-                }
-            }
-            return Ok(true);
-        }
-        // Chat input handling when chat is focused
-        KeyCode::Char(c) if focus == crate::ui::state::ReportTabFocus::Chat => {
-            if let Some(tab) = app.tabs.active_tab_mut() {
-                if let Some(ref mut state) = tab.report_state {
-                    state.chat_editor.insert_char(c);
-                }
-            }
-            return Ok(true);
-        }
-        KeyCode::Backspace if focus == crate::ui::state::ReportTabFocus::Chat => {
-            if let Some(tab) = app.tabs.active_tab_mut() {
-                if let Some(ref mut state) = tab.report_state {
-                    state.chat_editor.delete_char_before();
-                }
-            }
-            return Ok(true);
-        }
-        KeyCode::Enter if focus == crate::ui::state::ReportTabFocus::Chat => {
-            // TODO: Send message to report author
-            // For now, just clear the input
-            if let Some(tab) = app.tabs.active_tab_mut() {
-                if let Some(ref mut state) = tab.report_state {
-                    if !state.chat_editor.text.is_empty() {
-                        state.chat_editor.text.clear();
-                    }
-                }
-            }
-            app.set_warning_status("Chat with report author coming soon!");
             return Ok(true);
         }
         _ => {}

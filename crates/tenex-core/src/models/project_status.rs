@@ -893,12 +893,20 @@ mod tests {
         assert!(!assigned.contains(&"deployment"));
 
         // Verify per-agent skill assignment
-        let claude = status.agents.iter().find(|a| a.name == "claude-code").unwrap();
+        let claude = status
+            .agents
+            .iter()
+            .find(|a| a.name == "claude-code")
+            .unwrap();
         assert_eq!(claude.skills.len(), 2);
         assert!(claude.skills.contains(&"code-review".to_string()));
         assert!(claude.skills.contains(&"testing".to_string()));
 
-        let architect = status.agents.iter().find(|a| a.name == "architect").unwrap();
+        let architect = status
+            .agents
+            .iter()
+            .find(|a| a.name == "architect")
+            .unwrap();
         assert_eq!(architect.skills.len(), 1);
         assert!(architect.skills.contains(&"testing".to_string()));
     }

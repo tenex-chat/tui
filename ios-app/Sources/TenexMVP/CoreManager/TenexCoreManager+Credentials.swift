@@ -92,7 +92,6 @@ extension TenexCoreManager {
         conversations = []
         appFilterConversationScope = []
         inboxItems = []
-        reports = []
         messagesByConversation = [:]
         projectOnlineStatus = [:]
         onlineAgents = [:]

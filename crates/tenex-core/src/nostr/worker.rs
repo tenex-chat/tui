@@ -321,7 +321,8 @@ fn latest_kind1_created_at_for_conversation_author(
                 continue;
             }
             let created_at = note.created_at();
-            latest_created_at = Some(latest_created_at.map_or(created_at, |curr| curr.max(created_at)));
+            latest_created_at =
+                Some(latest_created_at.map_or(created_at, |curr| curr.max(created_at)));
         }
     }
 
@@ -3082,7 +3083,11 @@ impl NostrWorker {
             Ok(Ok(output)) => {
                 debug_log(&format!("Requested backend agent create: {}", output.id()));
             }
-            Ok(Err(e)) => tlog!("ERROR", "Failed to send backend agent create request: {}", e),
+            Ok(Err(e)) => tlog!(
+                "ERROR",
+                "Failed to send backend agent create request: {}",
+                e
+            ),
             Err(_) => tlog!("ERROR", "Timeout sending backend agent create request"),
         }
 
@@ -4751,7 +4756,9 @@ mod tests {
         assert_eq!(status, SaveEventStatus::Success);
         let found = crate::store::events::wait_for_event_processing(
             &db.ndb,
-            nostrdb::Filter::new().kinds([KIND_TEXT_NOTE as u64]).build(),
+            nostrdb::Filter::new()
+                .kinds([KIND_TEXT_NOTE as u64])
+                .build(),
             5000,
         );
         assert!(found, "kind:1 event should be visible in ndb");
@@ -4787,7 +4794,9 @@ mod tests {
         assert_eq!(status, SaveEventStatus::Success);
         let found = crate::store::events::wait_for_event_processing(
             &db.ndb,
-            nostrdb::Filter::new().kinds([KIND_TEXT_NOTE as u64]).build(),
+            nostrdb::Filter::new()
+                .kinds([KIND_TEXT_NOTE as u64])
+                .build(),
             5000,
         );
         assert!(found, "kind:1 event should be visible in ndb");

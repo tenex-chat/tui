@@ -19,7 +19,6 @@ final class DraftModelTests: XCTestCase {
         XCTAssertTrue(draft.imageAttachments.isEmpty)
         XCTAssertTrue(draft.textAttachments.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
-        XCTAssertNil(draft.referenceReportATag)
     }
 
     func testExistingConversationDraftInitializesCorrectly() {
@@ -141,7 +140,7 @@ final class DraftModelTests: XCTestCase {
         XCTAssertEqual(draft.selectedSkillIds, ["skill-a"])
     }
 
-    // MARK: - setReferenceConversation / setReferenceReportATag
+    // MARK: - setReferenceConversation
 
     func testSetReferenceConversation() {
         var draft = Draft(projectId: "p")
@@ -151,16 +150,6 @@ final class DraftModelTests: XCTestCase {
 
         draft.setReferenceConversation(nil)
         XCTAssertNil(draft.referenceConversationId)
-    }
-
-    func testSetReferenceReportATag() {
-        var draft = Draft(projectId: "p")
-        draft.setReferenceReportATag("30023:pubkey:slug")
-
-        XCTAssertEqual(draft.referenceReportATag, "30023:pubkey:slug")
-
-        draft.setReferenceReportATag(nil)
-        XCTAssertNil(draft.referenceReportATag)
     }
 
     // MARK: - Image Attachments
@@ -318,7 +307,7 @@ final class DraftModelTests: XCTestCase {
     func testClearResetsAllFields() {
         var draft = Draft(projectId: "p", title: "T", content: "C", agentPubkey: "agent",
                           selectedNudgeIds: ["n"], selectedSkillIds: ["s"],
-                          referenceConversationId: "ref", referenceReportATag: "atag")
+                          referenceConversationId: "ref")
         _ = draft.addImageAttachment(url: "https://example.com/img.png")
         _ = draft.addTextAttachment(content: "context payload")
 
@@ -330,7 +319,6 @@ final class DraftModelTests: XCTestCase {
         XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
-        XCTAssertNil(draft.referenceReportATag)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
         XCTAssertTrue(draft.textAttachments.isEmpty)
         // nextImageId resets to 1, so next add should return 1

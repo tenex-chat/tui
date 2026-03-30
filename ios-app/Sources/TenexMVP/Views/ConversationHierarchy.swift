@@ -612,23 +612,6 @@ enum ConversationFormatters {
         """
     }
 
-    // MARK: - Report Reference
-
-    /// Generate a context message for referencing a report when chatting with its author.
-    /// This message instructs the agent to use the report as context.
-    ///
-    /// - Parameters:
-    ///   - report: The report being referenced
-    /// - Returns: A formatted context message string
-    static func generateReportContextMessage(report: Report) -> String {
-        // Estimate tokens based on content length (approx 4 chars per token)
-        let tokenCount = report.content.count / 4
-
-        return """
-        I'd like to discuss the report "\(report.title)" (slug: \(report.slug)). The report is approximately \(tokenCount) tokens and is already in your context via the report_read tool or your memorized knowledge. Let me know if you need me to share any specific parts.
-        """
-    }
-
     // MARK: - Nudge Reference
 
     /// Generate a context message for commenting on a nudge event.

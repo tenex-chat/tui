@@ -69,7 +69,6 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
                 content::render_conversations_with_feed(f, app, padded_content)
             }
             HomeTab::Inbox => content::render_inbox_cards(f, app, padded_content),
-            HomeTab::Reports => content::render_reports_list(f, app, padded_content),
             HomeTab::ActiveWork => content::render_active_work(f, app, padded_content),
             HomeTab::Stats => super::render_stats(f, app, padded_content),
         }
@@ -136,11 +135,6 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
     // Conversation actions modal overlay
     if let ModalState::ConversationActions(ref state) = app.modal_state {
         modals::render_conversation_actions_modal(f, area, state);
-    }
-
-    // Report viewer modal overlay
-    if let ModalState::ReportViewer(ref state) = app.modal_state {
-        super::render_report_viewer(f, app, area, state);
     }
 
     // Tab modal overlay (Alt+/)
@@ -263,7 +257,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let tabs = vec![
         (HomeTab::Conversations, "Conversations"),
         (HomeTab::Inbox, "Inbox"),
-        (HomeTab::Reports, "Reports"),
         (HomeTab::ActiveWork, "Active"),
         (HomeTab::Stats, "Stats"),
     ];

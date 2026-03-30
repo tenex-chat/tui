@@ -8,7 +8,7 @@ TENEX is a multi-platform client for orchestrating AI agents over [Nostr](https:
 
 ### 🖥 Terminal UI
 
-A full-featured terminal interface for power users. Navigate projects, chat with agents across multiple tabs, browse agent definitions, review reports and lessons — all from your terminal.
+A full-featured terminal interface for power users. Navigate projects, chat with agents across multiple tabs, browse agent definitions, and review lessons — all from your terminal.
 
 ```bash
 cargo run -p tenex-tui

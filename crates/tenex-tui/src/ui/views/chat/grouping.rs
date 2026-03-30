@@ -1,18 +1,12 @@
 use crate::models::Message;
 
 /// Known tool names that should NOT have their q-tags create QTagReference items.
-/// These tools use q-tags for internal purposes (e.g., linking to reports) that
-/// should not be rendered as delegation previews or inline asks.
+/// These tools use q-tags for internal purposes that should not be rendered as
+/// delegation previews or inline asks.
 ///
 /// The denylist approach ensures that ANY new tool using q-tags for delegations
 /// or asks will automatically work without code changes.
-const Q_TAG_RENDER_DENYLIST: &[&str] = &[
-    "mcp__tenex__report_write",
-    "mcp__tenex__report_read",
-    "mcp__tenex__report_delete",
-    "mcp__tenex__lesson_learn",
-    "mcp__tenex__lesson_get",
-];
+const Q_TAG_RENDER_DENYLIST: &[&str] = &["mcp__tenex__lesson_learn", "mcp__tenex__lesson_get"];
 
 /// Determines if a message's q-tags should be rendered as QTagReference items.
 ///
@@ -21,8 +15,7 @@ const Q_TAG_RENDER_DENYLIST: &[&str] = &[
 /// renderer decides WHAT to show based on the referenced event's type.
 ///
 /// The denylist contains tools that use q-tags for internal linking purposes
-/// (e.g., report_write links to the article it creates) rather than for
-/// delegation/ask references.
+/// rather than for delegation/ask references.
 pub fn should_render_q_tags(tool_name: Option<&str>) -> bool {
     match tool_name {
         // No tool name means it's a regular message - q_tags should be rendered
@@ -123,9 +116,8 @@ pub fn group_messages<'a>(messages: &[&'a Message]) -> Vec<DisplayItem<'a>> {
             has_next_consecutive: false,
         });
 
-        // Emit QTagReference items for q_tags
-        // The denylist filters out tools that use q_tags for internal purposes
-        // (e.g., report_write linking to the article it creates)
+        // Emit QTagReference items for q_tags.
+        // The denylist filters out tools that use q_tags for internal purposes.
         if should_render_q_tags(msg.tool_name.as_deref()) {
             for q_tag in &msg.q_tags {
                 // DelegationPreview is used for both delegations AND ask events
@@ -162,9 +154,6 @@ mod tests {
     #[test]
     fn test_should_render_q_tags_with_denylisted_tools() {
         // Tools in the denylist should NOT render q_tags
-        assert!(!should_render_q_tags(Some("mcp__tenex__report_write")));
-        assert!(!should_render_q_tags(Some("mcp__tenex__report_read")));
-        assert!(!should_render_q_tags(Some("mcp__tenex__report_delete")));
         assert!(!should_render_q_tags(Some("mcp__tenex__lesson_learn")));
         assert!(!should_render_q_tags(Some("mcp__tenex__lesson_get")));
     }
@@ -203,32 +192,31 @@ mod tests {
     // Integration tests for group_messages
     // ==========================================================================
 
-    /// Regression test: report_write events with q_tags must NOT produce QTagReference items.
-    /// This was the original bug - report_write events were incorrectly showing as delegations.
+    /// Regression test: denylisted tool events with q_tags must NOT produce delegation previews.
     #[test]
-    fn test_report_write_with_q_tags_does_not_produce_q_tag_reference() {
-        // Create a message simulating a report_write tool call with q_tags
-        let report_write_msg = Message {
-            id: "test-report-write-id".to_string(),
-            content: "Executing tenex's report write".to_string(),
+    fn test_denylisted_tool_with_q_tags_does_not_produce_q_tag_reference() {
+        let lesson_msg = Message {
+            id: "test-lesson-id".to_string(),
+            content: "Executing tenex's lesson write".to_string(),
             pubkey: "dc613b2d2e8e0e916b33f3f427cabab8ca2191cd0b3117e892bdd5a43fc899d7".to_string(),
             thread_id: "test-thread".to_string(),
             created_at: 1769348739,
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
-            // This is the key part: report_write has q_tags that should NOT become QTagReferences
-            q_tags: vec!["9e819e31ecbd1ebd3646a9f4e3a6e712fa682269f7fb08481cf602ed61445953".to_string()],
-            a_tags: vec!["30023:dc613b2d2e8e0e916b33f3f427cabab8ca2191cd0b3117e892bdd5a43fc899d7:tech-debt-quality-gaps-tests-config".to_string()],
+            q_tags: vec![
+                "9e819e31ecbd1ebd3646a9f4e3a6e712fa682269f7fb08481cf602ed61445953".to_string(),
+            ],
+            a_tags: vec![],
             p_tags: vec![],
-            tool_name: Some("mcp__tenex__report_write".to_string()),  // report_write tool (denylisted)
-            tool_args: Some(r#"{"server":"tenex","tool":"report_write"}"#.to_string()),
+            tool_name: Some("mcp__tenex__lesson_learn".to_string()),
+            tool_args: Some(r#"{"server":"tenex","tool":"lesson_learn"}"#.to_string()),
             llm_metadata: HashMap::new(),
             delegation_tag: None,
             branch: None,
         };
 
-        let messages: Vec<&Message> = vec![&report_write_msg];
+        let messages: Vec<&Message> = vec![&lesson_msg];
         let display_items = group_messages(&messages);
 
         // Should have exactly 1 item - the SingleMessage
@@ -243,14 +231,14 @@ mod tests {
         // Verify the single item is a SingleMessage, not a DelegationPreview
         match &display_items[0] {
             DisplayItem::SingleMessage { message, .. } => {
-                assert_eq!(message.id, "test-report-write-id");
+                assert_eq!(message.id, "test-lesson-id");
                 assert_eq!(
                     message.tool_name,
-                    Some("mcp__tenex__report_write".to_string())
+                    Some("mcp__tenex__lesson_learn".to_string())
                 );
             }
             DisplayItem::DelegationPreview { .. } => {
-                panic!("report_write q_tags should NOT produce DelegationPreview items!");
+                panic!("denylisted q_tags should NOT produce DelegationPreview items!");
             }
         }
     }

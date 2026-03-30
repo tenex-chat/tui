@@ -625,7 +625,7 @@ fn handle_core_events(
                         }
                     }
 
-                    // Update sidebar state with delegations and reports from messages
+                    // Update sidebar state with delegation references from messages
                     // (done here on message arrival rather than during render for purity)
                     let messages = app.messages();
                     app.update_sidebar_from_messages(&messages);
@@ -649,7 +649,7 @@ fn handle_core_events(
                 }
             }
             CoreEvent::ReportUpsert(_report) => {
-                // Reports are already stored by the core; no TUI-specific handling needed
+                // Ignored on the TUI side.
             }
         }
     }

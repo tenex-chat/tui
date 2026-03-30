@@ -132,13 +132,6 @@ pub enum TabContentType {
     Conversation,
     /// TTS Control tab for managing audio playback queue
     TTSControl,
-    /// A report document with optional chat sidebar
-    Report {
-        /// The report's slug identifier
-        slug: String,
-        /// The report's a-tag for lookups
-        a_tag: String,
-    },
 }
 
 // =============================================================================
@@ -277,63 +270,10 @@ impl TTSControlState {
     }
 }
 
-// =============================================================================
-// REPORT TAB STATE
-// =============================================================================
-
-/// Focus area in report tab
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ReportTabFocus {
-    /// Report content is focused
-    #[default]
-    Content,
-    /// Chat sidebar is focused
-    Chat,
-}
-
-/// State for a report tab
-#[derive(Debug, Clone)]
-pub struct ReportTabState {
-    /// The report being viewed
-    pub slug: String,
-    /// The report's a-tag
-    pub a_tag: String,
-    /// Current scroll offset in report content
-    pub content_scroll: usize,
-    /// Current focus (content or chat)
-    pub focus: ReportTabFocus,
-    /// Whether showing diff view
-    pub show_diff: bool,
-    /// Chat input editor for sidebar
-    pub chat_editor: TextEditor,
-}
-
-impl ReportTabState {
-    /// Create a new report tab state
-    pub fn new(slug: String, a_tag: String) -> Self {
-        Self {
-            slug,
-            a_tag,
-            content_scroll: 0,
-            focus: ReportTabFocus::Content,
-            show_diff: false,
-            chat_editor: TextEditor::new(),
-        }
-    }
-
-    /// Toggle focus between content and chat
-    pub fn toggle_focus(&mut self) {
-        self.focus = match self.focus {
-            ReportTabFocus::Content => ReportTabFocus::Chat,
-            ReportTabFocus::Chat => ReportTabFocus::Content,
-        };
-    }
-}
-
-/// An open tab representing a thread, draft conversation, TTS control, or report
+/// An open tab representing a thread, draft conversation, or TTS control
 #[derive(Debug, Clone)]
 pub struct OpenTab {
-    /// The type of content in this tab (Conversation, TTSControl, Report)
+    /// The type of content in this tab (Conversation or TTSControl)
     pub content_type: TabContentType,
     /// Thread ID (empty string for draft tabs or non-conversation tabs)
     pub thread_id: String,
@@ -374,8 +314,6 @@ pub struct OpenTab {
     pub fork_message_id: Option<String>,
     /// TTS control state (only used when content_type is TTSControl)
     pub tts_state: Option<TTSControlState>,
-    /// Report tab state (only used when content_type is Report)
-    pub report_state: Option<ReportTabState>,
 }
 
 impl OpenTab {
@@ -421,7 +359,6 @@ impl OpenTab {
             reference_conversation_id: None,
             fork_message_id: None,
             tts_state: None,
-            report_state: None,
         }
     }
 
@@ -452,7 +389,6 @@ impl OpenTab {
             reference_conversation_id: None,
             fork_message_id: None,
             tts_state: None,
-            report_state: None,
         }
     }
 
@@ -476,34 +412,6 @@ impl OpenTab {
             reference_conversation_id: None,
             fork_message_id: None,
             tts_state: Some(TTSControlState::new()),
-            report_state: None,
-        }
-    }
-
-    /// Create a report tab
-    pub fn for_report(slug: String, a_tag: String, title: String) -> Self {
-        Self {
-            content_type: TabContentType::Report {
-                slug: slug.clone(),
-                a_tag: a_tag.clone(),
-            },
-            thread_id: String::new(),
-            thread_title: title,
-            project_a_tag: String::new(),
-            has_unread: false,
-            waiting_for_user: false,
-            is_agent_working: false,
-            draft_id: None,
-            navigation_stack: Vec::new(),
-            message_history: TabMessageHistory::default(),
-            chat_search: ChatSearchState::default(),
-            selected_nudge_ids: Vec::new(),
-            selected_skill_ids: Vec::new(),
-            editor: TextEditor::new(),
-            reference_conversation_id: None,
-            fork_message_id: None,
-            tts_state: None,
-            report_state: Some(ReportTabState::new(slug, a_tag)),
         }
     }
 }
@@ -691,43 +599,6 @@ impl TabManager {
     /// Find the TTS control tab if it exists
     pub fn find_tts_control_tab(&self) -> Option<usize> {
         self.tabs.iter().position(|t| t.is_tts_control())
-    }
-
-    /// Open a report in a tab (or switch to it if already open).
-    /// Returns the tab index.
-    /// Note: This method updates view history so closing the tab returns to the correct previous view.
-    pub fn open_report(&mut self, slug: String, a_tag: String, title: String) -> usize {
-        // Check if this report is already open (use a_tag for uniqueness)
-        if let Some(idx) = self.find_report_tab_by_a_tag(&a_tag) {
-            // Update history before switching (same as switch_to)
-            self.push_history(idx);
-            self.push_view_history(ViewLocation::Tab(idx));
-            self.active_index = idx;
-            self.tabs[idx].clear_attention_flags();
-            return idx;
-        }
-
-        // Create new report tab
-        let tab = OpenTab::for_report(slug, a_tag, title);
-
-        // Evict if at capacity
-        self.evict_if_needed(false);
-
-        self.tabs.push(tab);
-        let new_idx = self.tabs.len() - 1;
-
-        // Update history for the new tab (same as switch_to)
-        self.push_history(new_idx);
-        self.push_view_history(ViewLocation::Tab(new_idx));
-        self.active_index = new_idx;
-        new_idx
-    }
-
-    /// Find a report tab by a_tag (globally unique identifier)
-    pub fn find_report_tab_by_a_tag(&self, a_tag: &str) -> Option<usize> {
-        self.tabs.iter().position(|t| {
-            matches!(&t.content_type, TabContentType::Report { a_tag: tag, .. } if tag == a_tag)
-        })
     }
 
     /// Get mutable reference to TTS state for the TTS control tab
