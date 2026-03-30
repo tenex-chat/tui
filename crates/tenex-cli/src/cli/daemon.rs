@@ -1743,7 +1743,7 @@ fn handle_request(
                 #[serde(default)]
                 description: String,
                 #[serde(default)]
-                agent_definition_ids: Vec<String>,
+                agent_pubkeys: Vec<String>,
                 #[serde(default)]
                 mcp_tool_ids: Vec<String>,
                 /// Client identifier for the client tag (e.g., "tenex-cli", "tenex-tui")
@@ -1824,7 +1824,7 @@ fn handle_request(
                     slug: Some(final_slug.clone()),
                     name: name.to_string(),
                     description: params.description,
-                    agent_definition_ids: params.agent_definition_ids,
+                    agent_pubkeys: params.agent_pubkeys,
                     mcp_tool_ids: params.mcp_tool_ids,
                     client: Some(client_tag),
                 })

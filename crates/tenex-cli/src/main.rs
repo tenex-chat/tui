@@ -184,8 +184,8 @@ enum Commands {
         /// Project description
         #[arg(long, short = 'd', default_value = "")]
         description: String,
-        /// Agent IDs to include in the project (can be specified multiple times).
-        /// Updates replace all existing agents - include all desired agents.
+        /// Agent pubkeys to include in the project (can be specified multiple times).
+        /// Updates replace all existing assigned agents - include all desired pubkeys.
         #[arg(long, short = 'a')]
         agent: Vec<String>,
         /// MCP tool event IDs to include in the project (can be specified multiple times).
@@ -461,7 +461,7 @@ fn main() {
                 slug: Some(final_slug),
                 name: name_trimmed.to_string(),
                 description,
-                agent_definition_ids: agent,
+                agent_pubkeys: agent,
                 mcp_tool_ids: validated_mcp_tool_ids,
             }
         }
