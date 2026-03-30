@@ -65,11 +65,8 @@ pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &Creat
             Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
         ],
         CreateProjectStep::SelectAgents => vec![
-            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
-            Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
-            Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Agents", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" assigned later via live backend", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS)),
             Span::styled(" next", Style::default().fg(theme::TEXT_MUTED)),
@@ -199,10 +196,13 @@ fn render_details_step(f: &mut Frame, area: Rect, state: &CreateProjectState) {
 
 fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjectState) {
     // Search bar
-    let remaining = render_modal_search(f, area, &state.agent_selector.filter, "Search agents...");
-
-    // Get filtered agents using the state's filter
-    let filtered_agents = app.agent_definitions_filtered_by(&state.agent_selector.filter);
+    let _ = app;
+    let remaining = render_modal_search(
+        f,
+        area,
+        &state.agent_selector.filter,
+        "Agent assignment requires a live backend...",
+    );
 
     // List area
     let list_area = Rect::new(
@@ -212,88 +212,26 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
         remaining.height.saturating_sub(3),
     );
 
-    if filtered_agents.is_empty() {
-        let msg = if state.agent_selector.filter.is_empty() {
-            "No agents available."
-        } else {
-            "No agents match your search."
-        };
-        let empty_msg = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
-        f.render_widget(empty_msg, list_area);
+    let msg = if state.agent_selector.filter.is_empty() {
+        "Assign agents after creation, once the project has an online backend publishing 24011."
     } else {
-        let visible_height = list_area.height as usize;
-        let selected_index = state
-            .agent_selector
-            .index
-            .min(filtered_agents.len().saturating_sub(1));
+        "Agent assignment is unavailable during project creation."
+    };
+    let empty_msg = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(empty_msg, list_area);
 
-        let scroll_offset = if selected_index >= visible_height {
-            selected_index - visible_height + 1
-        } else {
-            0
-        };
-
-        let items: Vec<ListItem> = filtered_agents
-            .iter()
-            .enumerate()
-            .skip(scroll_offset)
-            .take(visible_height)
-            .map(|(i, agent)| {
-                let is_cursor = i == selected_index;
-                let is_selected = state.agent_definition_ids.contains(&agent.id);
-
-                let mut spans = vec![];
-
-                // Checkbox
-                let checkbox = if is_selected { "[✓] " } else { "[ ] " };
-                let checkbox_style = if is_selected {
-                    Style::default().fg(theme::ACCENT_SUCCESS)
-                } else {
-                    Style::default().fg(theme::TEXT_MUTED)
-                };
-                spans.push(Span::styled(checkbox, checkbox_style));
-
-                // Cursor indicator
-                if is_cursor {
-                    spans.push(Span::styled(
-                        "▌",
-                        Style::default().fg(theme::ACCENT_PRIMARY),
-                    ));
-                } else {
-                    spans.push(Span::styled(" ", Style::default()));
-                }
-
-                // Agent name
-                let name_style = if is_cursor {
-                    Style::default()
-                        .fg(theme::ACCENT_PRIMARY)
-                        .add_modifier(Modifier::BOLD)
-                } else if is_selected {
-                    Style::default().fg(theme::ACCENT_SUCCESS)
-                } else {
-                    Style::default().fg(theme::TEXT_PRIMARY)
-                };
-                spans.push(Span::styled(agent.name.clone(), name_style));
-
-                // Description preview
-                if !agent.description.is_empty() {
-                    let desc_preview = if agent.description.len() > 40 {
-                        format!(" - {}...", &agent.description[..37])
-                    } else {
-                        format!(" - {}", agent.description)
-                    };
-                    spans.push(Span::styled(
-                        desc_preview,
-                        Style::default().fg(theme::TEXT_MUTED),
-                    ));
-                }
-
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
-
-        let list = List::new(items);
-        f.render_widget(list, list_area);
+    if !state.agent_pubkeys.is_empty() {
+        let selected = Paragraph::new("Selected agents will be ignored until assignment is republished.")
+            .style(Style::default().fg(theme::ACCENT_WARNING));
+        f.render_widget(
+            selected,
+            Rect::new(
+                remaining.x,
+                list_area.y + list_area.height.saturating_sub(1),
+                remaining.width,
+                1,
+            ),
+        );
     }
 
     // Show selected count
@@ -303,7 +241,7 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
         remaining.width,
         1,
     );
-    let count_text = format!("{} agent(s) selected", state.agent_definition_ids.len());
+    let count_text = format!("{} agent(s) selected", state.agent_pubkeys.len());
     let count = Paragraph::new(count_text).style(Style::default().fg(theme::TEXT_DIM));
     f.render_widget(count, count_area);
 }

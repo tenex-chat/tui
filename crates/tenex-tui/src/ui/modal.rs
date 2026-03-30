@@ -773,8 +773,9 @@ pub enum ProjectSettingsFocus {
 pub struct ProjectSettingsState {
     pub project_a_tag: String,
     pub project_name: String,
-    pub original_agent_definition_ids: Vec<String>,
-    pub pending_agent_definition_ids: Vec<String>,
+    pub backend_pubkey: Option<String>,
+    pub original_agent_pubkeys: Vec<String>,
+    pub pending_agent_pubkeys: Vec<String>,
     pub original_mcp_tool_ids: Vec<String>,
     pub pending_mcp_tool_ids: Vec<String>,
     pub selector_index: usize,
@@ -815,7 +816,7 @@ pub struct CreateProjectState {
     pub focus: CreateProjectFocus,
     pub name: String,
     pub description: String,
-    pub agent_definition_ids: Vec<String>,
+    pub agent_pubkeys: Vec<String>,
     pub agent_selector: SelectorState,
     pub mcp_tool_ids: Vec<String>,
     pub tool_selector: SelectorState,
@@ -828,7 +829,7 @@ impl CreateProjectState {
             focus: CreateProjectFocus::Name,
             name: String::new(),
             description: String::new(),
-            agent_definition_ids: Vec::new(),
+            agent_pubkeys: Vec::new(),
             agent_selector: SelectorState::default(),
             mcp_tool_ids: Vec::new(),
             tool_selector: SelectorState::default(),
@@ -843,15 +844,15 @@ impl CreateProjectState {
         }
     }
 
-    pub fn toggle_agent(&mut self, agent_id: String) {
+    pub fn toggle_agent(&mut self, agent_pubkey: String) {
         if let Some(pos) = self
-            .agent_definition_ids
+            .agent_pubkeys
             .iter()
-            .position(|id| id == &agent_id)
+            .position(|pubkey| pubkey == &agent_pubkey)
         {
-            self.agent_definition_ids.remove(pos);
+            self.agent_pubkeys.remove(pos);
         } else {
-            self.agent_definition_ids.push(agent_id);
+            self.agent_pubkeys.push(agent_pubkey);
         }
     }
 
@@ -863,7 +864,7 @@ impl CreateProjectState {
         }
     }
 
-    pub fn all_mcp_tool_ids(&self, app: &crate::ui::app::App) -> Vec<String> {
+    pub fn all_mcp_tool_ids(&self, _app: &crate::ui::app::App) -> Vec<String> {
         use std::collections::HashSet;
 
         let mut tool_ids = HashSet::new();
@@ -871,20 +872,6 @@ impl CreateProjectState {
         // Add manually selected tools
         for id in &self.mcp_tool_ids {
             tool_ids.insert(id.clone());
-        }
-
-        // Add tools from selected agents
-        for agent_id in &self.agent_definition_ids {
-            if let Some(agent) = app
-                .data_store
-                .borrow()
-                .content
-                .get_agent_definition(agent_id)
-            {
-                for mcp_id in &agent.mcp_servers {
-                    tool_ids.insert(mcp_id.clone());
-                }
-            }
         }
 
         tool_ids.into_iter().collect()
@@ -1017,14 +1004,16 @@ impl ProjectSettingsState {
     pub fn new(
         project_a_tag: String,
         project_name: String,
-        agent_definition_ids: Vec<String>,
+        backend_pubkey: Option<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
     ) -> Self {
         Self {
             project_a_tag,
             project_name,
-            original_agent_definition_ids: agent_definition_ids.clone(),
-            pending_agent_definition_ids: agent_definition_ids,
+            backend_pubkey,
+            original_agent_pubkeys: agent_pubkeys.clone(),
+            pending_agent_pubkeys: agent_pubkeys,
             original_mcp_tool_ids: mcp_tool_ids.clone(),
             pending_mcp_tool_ids: mcp_tool_ids,
             selector_index: 0,
@@ -1055,20 +1044,20 @@ impl ProjectSettingsState {
     }
 
     pub fn has_changes(&self) -> bool {
-        self.original_agent_definition_ids != self.pending_agent_definition_ids
+        self.original_agent_pubkeys != self.pending_agent_pubkeys
             || self.original_mcp_tool_ids != self.pending_mcp_tool_ids
     }
 
-    pub fn add_agent(&mut self, event_id: String) {
-        if !self.pending_agent_definition_ids.contains(&event_id) {
-            self.pending_agent_definition_ids.push(event_id);
+    pub fn add_agent(&mut self, agent_pubkey: String) {
+        if !self.pending_agent_pubkeys.contains(&agent_pubkey) {
+            self.pending_agent_pubkeys.push(agent_pubkey);
         }
     }
 
     pub fn remove_agent(&mut self, index: usize) {
-        if index < self.pending_agent_definition_ids.len() {
-            self.pending_agent_definition_ids.remove(index);
-            if self.selector_index >= self.pending_agent_definition_ids.len()
+        if index < self.pending_agent_pubkeys.len() {
+            self.pending_agent_pubkeys.remove(index);
+            if self.selector_index >= self.pending_agent_pubkeys.len()
                 && self.selector_index > 0
             {
                 self.selector_index -= 1;
@@ -1077,9 +1066,9 @@ impl ProjectSettingsState {
     }
 
     pub fn set_pm(&mut self, index: usize) {
-        if index < self.pending_agent_definition_ids.len() && index > 0 {
-            let agent_id = self.pending_agent_definition_ids.remove(index);
-            self.pending_agent_definition_ids.insert(0, agent_id);
+        if index < self.pending_agent_pubkeys.len() && index > 0 {
+            let agent_pubkey = self.pending_agent_pubkeys.remove(index);
+            self.pending_agent_pubkeys.insert(0, agent_pubkey);
             self.selector_index = 0;
         }
     }

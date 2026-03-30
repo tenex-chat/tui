@@ -659,12 +659,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      */
     func createAgentDefinition(name: String, description: String, role: String, instructions: String, version: String, sourceId: String?, isFork: Bool) throws 
     
+    func createBackendAgent(backendPubkey: String, definitionEventId: String, slugOverride: String?) throws 
+    
     func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String]) throws 
     
     /**
      * Create a new project (kind:31933 replaceable event).
      */
-    func createProject(name: String, description: String, agentDefinitionIds: [String], mcpToolIds: [String]) throws 
+    func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String]) throws 
     
     /**
      * Delete an agent from a project or globally by publishing a kind:24030 event.
@@ -728,10 +730,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func generateKeypair() throws  -> GeneratedKeypair
     
     /**
-     * Get agents for a project.
+     * Legacy helper for definition-based project agents.
      *
-     * Returns agents configured for the specified project.
-     * Returns an error if the store cannot be accessed.
+     * Project membership is now expressed as installed agent pubkeys in the
+     * project metadata, so there is no reliable way to map membership back to
+     * definition events from the local cache. This method is retained for ABI
+     * stability and currently returns an empty list.
      */
     func getAgents(projectId: String) throws  -> [AgentDefinition]
     
@@ -883,6 +887,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      */
     func getInbox()  -> [InboxItem]
     
+    func getInstalledAgents(backendPubkey: String) throws  -> [InstalledAgent]
+    
     /**
      * Get messages for a conversation.
      */
@@ -924,6 +930,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * instead of silently returning nil.
      */
     func getProfilePicture(pubkey: String) throws  -> String?
+    
+    func getProjectBackendPubkey(projectId: String)  -> String?
     
     /**
      * Get available configuration options for a project.
@@ -1259,7 +1267,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      *
      * Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
      */
-    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentDefinitionIds: [String], mcpToolIds: [String]) throws 
+    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String]) throws 
     
     /**
      * Upload an image to Blossom and return the URL.
@@ -1473,6 +1481,15 @@ open func createAgentDefinition(name: String, description: String, role: String,
 }
 }
     
+open func createBackendAgent(backendPubkey: String, definitionEventId: String, slugOverride: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_create_backend_agent(self.uniffiClonePointer(),
+        FfiConverterString.lower(backendPubkey),
+        FfiConverterString.lower(definitionEventId),
+        FfiConverterOptionString.lower(slugOverride),$0
+    )
+}
+}
+    
 open func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_create_nudge(self.uniffiClonePointer(),
         FfiConverterString.lower(title),
@@ -1489,11 +1506,11 @@ open func createNudge(title: String, description: String, content: String, hasht
     /**
      * Create a new project (kind:31933 replaceable event).
      */
-open func createProject(name: String, description: String, agentDefinitionIds: [String], mcpToolIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_create_project(self.uniffiClonePointer(),
         FfiConverterString.lower(name),
         FfiConverterString.lower(description),
-        FfiConverterSequenceString.lower(agentDefinitionIds),
+        FfiConverterSequenceString.lower(agentPubkeys),
         FfiConverterSequenceString.lower(mcpToolIds),$0
     )
 }
@@ -1602,10 +1619,12 @@ open func generateKeypair()throws  -> GeneratedKeypair  {
 }
     
     /**
-     * Get agents for a project.
+     * Legacy helper for definition-based project agents.
      *
-     * Returns agents configured for the specified project.
-     * Returns an error if the store cannot be accessed.
+     * Project membership is now expressed as installed agent pubkeys in the
+     * project metadata, so there is no reliable way to map membership back to
+     * definition events from the local cache. This method is retained for ABI
+     * stability and currently returns an empty list.
      */
 open func getAgents(projectId: String)throws  -> [AgentDefinition]  {
     return try  FfiConverterSequenceTypeAgentDefinition.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -1886,6 +1905,14 @@ open func getInbox() -> [InboxItem]  {
 })
 }
     
+open func getInstalledAgents(backendPubkey: String)throws  -> [InstalledAgent]  {
+    return try  FfiConverterSequenceTypeInstalledAgent.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_installed_agents(self.uniffiClonePointer(),
+        FfiConverterString.lower(backendPubkey),$0
+    )
+})
+}
+    
     /**
      * Get messages for a conversation.
      */
@@ -1953,6 +1980,14 @@ open func getProfilePicture(pubkey: String)throws  -> String?  {
     return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_profile_picture(self.uniffiClonePointer(),
         FfiConverterString.lower(pubkey),$0
+    )
+})
+}
+    
+open func getProjectBackendPubkey(projectId: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_project_backend_pubkey(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
     )
 })
 }
@@ -2590,14 +2625,14 @@ open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [S
      *
      * Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
      */
-open func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentDefinitionIds: [String], mcpToolIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_project(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
         FfiConverterString.lower(title),
         FfiConverterString.lower(description),
         FfiConverterOptionString.lower(repoUrl),
         FfiConverterOptionString.lower(pictureUrl),
-        FfiConverterSequenceString.lower(agentDefinitionIds),
+        FfiConverterSequenceString.lower(agentPubkeys),
         FfiConverterSequenceString.lower(mcpToolIds),$0
     )
 }
@@ -4873,6 +4908,92 @@ public func FfiConverterTypeInboxItem_lower(_ value: InboxItem) -> RustBuffer {
 }
 
 
+public struct InstalledAgent {
+    public var backendPubkey: String
+    public var pubkey: String
+    public var slug: String
+    public var createdAt: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(backendPubkey: String, pubkey: String, slug: String, createdAt: UInt64) {
+        self.backendPubkey = backendPubkey
+        self.pubkey = pubkey
+        self.slug = slug
+        self.createdAt = createdAt
+    }
+}
+
+#if compiler(>=6)
+extension InstalledAgent: Sendable {}
+#endif
+
+
+extension InstalledAgent: Equatable, Hashable {
+    public static func ==(lhs: InstalledAgent, rhs: InstalledAgent) -> Bool {
+        if lhs.backendPubkey != rhs.backendPubkey {
+            return false
+        }
+        if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.slug != rhs.slug {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(backendPubkey)
+        hasher.combine(pubkey)
+        hasher.combine(slug)
+        hasher.combine(createdAt)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeInstalledAgent: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InstalledAgent {
+        return
+            try InstalledAgent(
+                backendPubkey: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: InstalledAgent, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.backendPubkey, into: &buf)
+        FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.slug, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInstalledAgent_lift(_ buf: RustBuffer) throws -> InstalledAgent {
+    return try FfiConverterTypeInstalledAgent.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInstalledAgent_lower(_ value: InstalledAgent) -> RustBuffer {
+    return FfiConverterTypeInstalledAgent.lower(value)
+}
+
+
 /**
  * Event count for a specific kind
  */
@@ -6053,13 +6174,13 @@ public struct Project {
     public var isDeleted: Bool
     public var pubkey: String
     public var participants: [String]
-    public var agentDefinitionIds: [String]
+    public var agentPubkeys: [String]
     public var mcpToolIds: [String]
     public var createdAt: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, description: String?, repoUrl: String?, pictureUrl: String?, isDeleted: Bool, pubkey: String, participants: [String], agentDefinitionIds: [String], mcpToolIds: [String], createdAt: UInt64) {
+    public init(id: String, title: String, description: String?, repoUrl: String?, pictureUrl: String?, isDeleted: Bool, pubkey: String, participants: [String], agentPubkeys: [String], mcpToolIds: [String], createdAt: UInt64) {
         self.id = id
         self.title = title
         self.description = description
@@ -6068,7 +6189,7 @@ public struct Project {
         self.isDeleted = isDeleted
         self.pubkey = pubkey
         self.participants = participants
-        self.agentDefinitionIds = agentDefinitionIds
+        self.agentPubkeys = agentPubkeys
         self.mcpToolIds = mcpToolIds
         self.createdAt = createdAt
     }
@@ -6105,7 +6226,7 @@ extension Project: Equatable, Hashable {
         if lhs.participants != rhs.participants {
             return false
         }
-        if lhs.agentDefinitionIds != rhs.agentDefinitionIds {
+        if lhs.agentPubkeys != rhs.agentPubkeys {
             return false
         }
         if lhs.mcpToolIds != rhs.mcpToolIds {
@@ -6126,7 +6247,7 @@ extension Project: Equatable, Hashable {
         hasher.combine(isDeleted)
         hasher.combine(pubkey)
         hasher.combine(participants)
-        hasher.combine(agentDefinitionIds)
+        hasher.combine(agentPubkeys)
         hasher.combine(mcpToolIds)
         hasher.combine(createdAt)
     }
@@ -6149,7 +6270,7 @@ public struct FfiConverterTypeProject: FfiConverterRustBuffer {
                 isDeleted: FfiConverterBool.read(from: &buf), 
                 pubkey: FfiConverterString.read(from: &buf), 
                 participants: FfiConverterSequenceString.read(from: &buf), 
-                agentDefinitionIds: FfiConverterSequenceString.read(from: &buf), 
+                agentPubkeys: FfiConverterSequenceString.read(from: &buf), 
                 mcpToolIds: FfiConverterSequenceString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf)
         )
@@ -6164,7 +6285,7 @@ public struct FfiConverterTypeProject: FfiConverterRustBuffer {
         FfiConverterBool.write(value.isDeleted, into: &buf)
         FfiConverterString.write(value.pubkey, into: &buf)
         FfiConverterSequenceString.write(value.participants, into: &buf)
-        FfiConverterSequenceString.write(value.agentDefinitionIds, into: &buf)
+        FfiConverterSequenceString.write(value.agentPubkeys, into: &buf)
         FfiConverterSequenceString.write(value.mcpToolIds, into: &buf)
         FfiConverterUInt64.write(value.createdAt, into: &buf)
     }
@@ -8917,6 +9038,8 @@ public enum DataChangeType {
      */
     case pendingBackendApproval(backendPubkey: String, projectATag: String
     )
+    case installedAgentsChanged(backendPubkey: String
+    )
     /**
      * Active conversations updated for a project (kind:24133)
      */
@@ -9000,28 +9123,31 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case 7: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
         )
         
-        case 8: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
+        case 8: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
         )
         
-        case 9: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        case 9: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
-        case 10: return .mcpToolsChanged
-        
-        case 11: return .teamsChanged
-        
-        case 12: return .contentCatalogChanged
-        
-        case 13: return .statsUpdated
-        
-        case 14: return .diagnosticsUpdated
-        
-        case 15: return .general
-        
-        case 16: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
+        case 10: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 17: return .bookmarkListChanged(bookmarkedIds: try FfiConverterSequenceString.read(from: &buf)
+        case 11: return .mcpToolsChanged
+        
+        case 12: return .teamsChanged
+        
+        case 13: return .contentCatalogChanged
+        
+        case 14: return .statsUpdated
+        
+        case 15: return .diagnosticsUpdated
+        
+        case 16: return .general
+        
+        case 17: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
+        )
+        
+        case 18: return .bookmarkListChanged(bookmarkedIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -9072,51 +9198,56 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
             FfiConverterString.write(projectATag, into: &buf)
             
         
-        case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
+        case let .installedAgentsChanged(backendPubkey):
             writeInt(&buf, Int32(8))
+            FfiConverterString.write(backendPubkey, into: &buf)
+            
+        
+        case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterSequenceString.write(activeConversationIds, into: &buf)
             
         
         case let .streamChunk(agentPubkey,conversationId,textDelta):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterOptionString.write(textDelta, into: &buf)
             
         
         case .mcpToolsChanged:
-            writeInt(&buf, Int32(10))
-        
-        
-        case .teamsChanged:
             writeInt(&buf, Int32(11))
         
         
-        case .contentCatalogChanged:
+        case .teamsChanged:
             writeInt(&buf, Int32(12))
         
         
-        case .statsUpdated:
+        case .contentCatalogChanged:
             writeInt(&buf, Int32(13))
         
         
-        case .diagnosticsUpdated:
+        case .statsUpdated:
             writeInt(&buf, Int32(14))
         
         
-        case .general:
+        case .diagnosticsUpdated:
             writeInt(&buf, Int32(15))
         
         
-        case let .bunkerSignRequest(request):
+        case .general:
             writeInt(&buf, Int32(16))
+        
+        
+        case let .bunkerSignRequest(request):
+            writeInt(&buf, Int32(17))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
             
         
         case let .bookmarkListChanged(bookmarkedIds):
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(18))
             FfiConverterSequenceString.write(bookmarkedIds, into: &buf)
             
         }
@@ -10139,6 +10270,31 @@ fileprivate struct FfiConverterSequenceTypeInboxItem: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeInstalledAgent: FfiConverterRustBuffer {
+    typealias SwiftType = [InstalledAgent]
+
+    public static func write(_ value: [InstalledAgent], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeInstalledAgent.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [InstalledAgent] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [InstalledAgent]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeInstalledAgent.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeKindEventCount: FfiConverterRustBuffer {
     typealias SwiftType = [KindEventCount]
 
@@ -10773,10 +10929,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_create_agent_definition() != 9741) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_create_backend_agent() != 50510) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_create_nudge() != 31059) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_create_project() != 59641) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_create_project() != 2435) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_delete_agent() != 3202) {
@@ -10800,7 +10959,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_generate_keypair() != 2950) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 19078) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 4301) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_ai_audio_settings() != 57808) {
@@ -10872,6 +11031,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_inbox() != 40776) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_installed_agents() != 44497) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 37498) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -10885,6 +11047,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture() != 63726) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_backend_pubkey() != 6708) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 13106) {
@@ -11034,7 +11199,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 28472) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 39946) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 26050) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_upload_image() != 35002) {

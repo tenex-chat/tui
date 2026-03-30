@@ -51,8 +51,8 @@ use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction
 
 use crate::models::agent_definition::AgentDefinition;
 use crate::models::{
-    AskEvent, ConversationMetadata, InboxItem, MCPTool, Message, Nudge, OperationsStatus, Project,
-    ProjectAgent, ProjectStatus, Report, Skill, TeamPack, Thread,
+    AskEvent, ConversationMetadata, InboxItem, InstalledAgent, MCPTool, Message, Nudge,
+    OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Skill, TeamPack, Thread,
 };
 use crate::nostr::{set_log_path, DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
@@ -423,6 +423,7 @@ struct DeltaSummary {
     diagnostics_updated: usize,
     general: usize,
     bunker_sign_request: usize,
+    installed_agents_changed: usize,
 }
 
 impl DeltaSummary {
@@ -447,13 +448,14 @@ impl DeltaSummary {
             DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
             DataChangeType::General => self.general += 1,
             DataChangeType::BunkerSignRequest { .. } => self.bunker_sign_request += 1,
+            DataChangeType::InstalledAgentsChanged { .. } => self.installed_agents_changed += 1,
             DataChangeType::BookmarkListChanged { .. } => {}
         }
     }
 
     fn compact(&self) -> String {
         format!(
-            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} content={} stats={} diag={} general={} bunker={}",
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} content={} stats={} diag={} general={} bunker={} installed={}",
             self.total,
             self.message_appended,
             self.conversation_upsert,
@@ -470,7 +472,8 @@ impl DeltaSummary {
             self.stats_updated,
             self.diagnostics_updated,
             self.general,
-            self.bunker_sign_request
+            self.bunker_sign_request,
+            self.installed_agents_changed
         )
     }
 }
@@ -722,6 +725,7 @@ fn process_data_changes_with_deltas(
     let started_at = Instant::now();
     let mut deltas: Vec<DataChangeType> = Vec::new();
     let mut project_status_changes = 0usize;
+    let mut installed_agent_changes = 0usize;
     let mut stream_chunks = 0usize;
     let mut mcp_tools_changed = 0usize;
 
@@ -791,6 +795,17 @@ fn process_data_changes_with_deltas(
                     }
                 }
             }
+            DataChange::InstalledAgentList { json } => {
+                installed_agent_changes += 1;
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
+                    if let Some((backend_pubkey, _)) =
+                        crate::models::InstalledAgent::from_value(&event)
+                    {
+                        store.handle_status_event_value(&event);
+                        deltas.push(DataChangeType::InstalledAgentsChanged { backend_pubkey });
+                    }
+                }
+            }
             DataChange::StreamTextDelta {
                 agent_pubkey,
                 conversation_id,
@@ -831,9 +846,10 @@ fn process_data_changes_with_deltas(
     let delta_summary = summarize_deltas(&deltas);
     tlog!(
         "PERF",
-        "process_data_changes_with_deltas input={} projectStatus={} streamChunks={} mcpToolsChanged={} deltas=[{}] elapsedMs={}",
+        "process_data_changes_with_deltas input={} projectStatus={} installedAgents={} streamChunks={} mcpToolsChanged={} deltas=[{}] elapsedMs={}",
         data_changes.len(),
         project_status_changes,
+        installed_agent_changes,
         stream_chunks,
         mcp_tools_changed,
         delta_summary.compact(),
@@ -869,6 +885,7 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
             }
             DataChangeType::ProjectStatusChanged { .. }
             | DataChangeType::PendingBackendApproval { .. }
+            | DataChangeType::InstalledAgentsChanged { .. }
             | DataChangeType::ActiveConversationsChanged { .. }
             | DataChangeType::McpToolsChanged
             | DataChangeType::TeamsChanged => {
@@ -1671,6 +1688,9 @@ pub enum DataChangeType {
     PendingBackendApproval {
         backend_pubkey: String,
         project_a_tag: String,
+    },
+    InstalledAgentsChanged {
+        backend_pubkey: String,
     },
     /// Active conversations updated for a project (kind:24133)
     ActiveConversationsChanged {

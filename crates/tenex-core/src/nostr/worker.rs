@@ -34,7 +34,9 @@ const KIND_MCP_TOOL: u16 = 4200;
 const KIND_NUDGE: u16 = 4201;
 const KIND_SKILL: u16 = 4202;
 const KIND_BOOKMARK_LIST: u16 = 14202;
+const KIND_AGENT_CREATE: u16 = 24001;
 const KIND_PROJECT_STATUS: u16 = 24010;
+const KIND_INSTALLED_AGENT_LIST: u16 = 24011;
 const KIND_PROJECT_DRAFT: u16 = 31933;
 const KIND_TEAM_PACK: u16 = 34199;
 const KIND_AGENT_STATUS: u16 = 24133;
@@ -739,7 +741,7 @@ pub enum NostrCommand {
     },
     UpdateProjectAgents {
         project_a_tag: String,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
     },
     /// Save a project - create new or update existing (kind:31933)
@@ -749,7 +751,7 @@ pub enum NostrCommand {
         slug: Option<String>,
         name: String,
         description: String,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
         /// Client identifier for the client tag (e.g., "tenex-cli", "tenex-tui")
         #[allow(dead_code)]
@@ -762,7 +764,7 @@ pub enum NostrCommand {
         description: String,
         repo_url: Option<String>,
         picture_url: Option<String>,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
         /// Client identifier for the client tag
         client: Option<String>,
@@ -782,6 +784,12 @@ pub enum NostrCommand {
         version: String,
         source_id: Option<String>,
         is_fork: bool,
+    },
+    CreateBackendAgent {
+        backend_pubkey: String,
+        definition_event_id: String,
+        slug_override: Option<String>,
+        client: Option<String>,
     },
     /// Delete an agent definition (kind:5 deletion event referencing kind:4199)
     DeleteAgentDefinition {
@@ -970,6 +978,8 @@ pub enum DataChange {
     },
     /// Ephemeral project status event (kind:24010) - not cached in nostrdb
     ProjectStatus { json: String },
+    /// Ephemeral installed agent inventory (kind:24011) - not cached in nostrdb
+    InstalledAgentList { json: String },
     /// MCP tools changed (kind:4200 events)
     MCPToolsChanged,
     /// NIP-46 bunker signing request requiring user approval
@@ -1136,7 +1146,7 @@ impl NostrWorker {
                     }
                     NostrCommand::UpdateProjectAgents {
                         project_a_tag,
-                        agent_definition_ids,
+                        agent_pubkeys,
                         mcp_tool_ids,
                     } => {
                         debug_log(&format!(
@@ -1145,7 +1155,7 @@ impl NostrWorker {
                         ));
                         if let Err(e) = rt.block_on(self.handle_update_project_agents(
                             project_a_tag,
-                            agent_definition_ids,
+                            agent_pubkeys,
                             mcp_tool_ids,
                         )) {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
@@ -1155,7 +1165,7 @@ impl NostrWorker {
                         slug,
                         name,
                         description,
-                        agent_definition_ids,
+                        agent_pubkeys,
                         mcp_tool_ids,
                         client,
                     } => {
@@ -1164,7 +1174,7 @@ impl NostrWorker {
                             slug,
                             name,
                             description,
-                            agent_definition_ids,
+                            agent_pubkeys,
                             mcp_tool_ids,
                             client,
                         )) {
@@ -1177,7 +1187,7 @@ impl NostrWorker {
                         description,
                         repo_url,
                         picture_url,
-                        agent_definition_ids,
+                        agent_pubkeys,
                         mcp_tool_ids,
                         client,
                     } => {
@@ -1188,7 +1198,7 @@ impl NostrWorker {
                             description,
                             repo_url,
                             picture_url,
-                            agent_definition_ids,
+                            agent_pubkeys,
                             mcp_tool_ids,
                             client,
                         )) {
@@ -1229,6 +1239,25 @@ impl NostrWorker {
                             is_fork,
                         )) {
                             tlog!("ERROR", "Failed to create agent definition: {}", e);
+                        }
+                    }
+                    NostrCommand::CreateBackendAgent {
+                        backend_pubkey,
+                        definition_event_id,
+                        slug_override,
+                        client,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Requesting backend agent install {} on {}",
+                            definition_event_id, backend_pubkey
+                        ));
+                        if let Err(e) = rt.block_on(self.handle_create_backend_agent(
+                            backend_pubkey,
+                            definition_event_id,
+                            slug_override,
+                            client,
+                        )) {
+                            tlog!("ERROR", "Failed to request backend agent create: {}", e);
                         }
                     }
                     NostrCommand::DeleteAgentDefinition { agent_id, client } => {
@@ -1781,13 +1810,13 @@ impl NostrWorker {
         tlog!("CONN", "Starting subscriptions...");
         let sub_start = std::time::Instant::now();
 
-        // 1. User's projects (kind:31933) - authored by user OR where user is a participant
+        // 1. User's projects (kind:31933) - authored by user OR where user is a collaborator
         let project_filter_owned = Filter::new()
             .kind(Kind::Custom(KIND_PROJECT_DRAFT))
             .author(pubkey);
         let project_filter_participant = Filter::new()
             .kind(Kind::Custom(KIND_PROJECT_DRAFT))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex());
+            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), pubkey.to_hex());
         let project_filters = vec![project_filter_owned, project_filter_participant];
         let filters_json = serde_json::to_string(&project_filters).ok();
         let output = client
@@ -1805,7 +1834,7 @@ impl NostrWorker {
             KIND_PROJECT_DRAFT
         );
 
-        // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
+        // 2. Status events (kind:24010, kind:24011, kind:24133) - since 45 seconds ago
         // kind:24010 is the GLOBAL subscription that tells us which projects are online.
         // When we receive these events, we create per-project subscriptions for
         // kind:1, 513, 30023, and 24135.
@@ -1831,6 +1860,27 @@ impl NostrWorker {
             .with_raw_filter(project_status_json.unwrap_or_default()),
         );
 
+        let installed_agent_filter = Filter::new()
+            .kind(Kind::Custom(KIND_INSTALLED_AGENT_LIST))
+            .custom_tag(
+                SingleLetterTag::lowercase(Alphabet::P),
+                user_pubkey.to_string(),
+            )
+            .since(since_time);
+        let installed_agent_json = serde_json::to_string(&installed_agent_filter).ok();
+        let installed_agent_output = client
+            .subscribe(installed_agent_filter.clone(), None)
+            .await?;
+        self.subscription_stats.register(
+            installed_agent_output.val.to_string(),
+            SubscriptionInfo::new(
+                "Installed agent inventory".to_string(),
+                vec![KIND_INSTALLED_AGENT_LIST],
+                None,
+            )
+            .with_raw_filter(installed_agent_json.unwrap_or_default()),
+        );
+
         // Backend uses uppercase P tag for kind:24133
         let agent_status_filter = Filter::new()
             .kind(Kind::Custom(KIND_AGENT_STATUS))
@@ -1853,8 +1903,9 @@ impl NostrWorker {
 
         tlog!(
             "CONN",
-            "Subscribed to status events (kind:{}, kind:{})",
+            "Subscribed to status events (kind:{}, kind:{}, kind:{})",
             KIND_PROJECT_STATUS,
+            KIND_INSTALLED_AGENT_LIST,
             KIND_AGENT_STATUS
         );
 
@@ -2131,11 +2182,23 @@ impl NostrWorker {
                                         continue;
                                     }
 
-                                    // Ephemeral events (24010, 24133) go through DataChange channel
-                                    if kind == KIND_PROJECT_STATUS || kind == KIND_AGENT_STATUS {
+                                    // Ephemeral events (24010, 24011, 24133) go through DataChange channel
+                                    if kind == KIND_PROJECT_STATUS
+                                        || kind == KIND_INSTALLED_AGENT_LIST
+                                        || kind == KIND_AGENT_STATUS
+                                    {
                                         if let Ok(json) = serde_json::to_string(&*event) {
-                                            if let Err(e) = data_tx.send(DataChange::ProjectStatus { json: json.clone() }) {
-                                                debug_log(&format!("Failed to send ProjectStatus data change: {}", e));
+                                            let data_change = if kind == KIND_INSTALLED_AGENT_LIST {
+                                                DataChange::InstalledAgentList { json: json.clone() }
+                                            } else {
+                                                DataChange::ProjectStatus { json: json.clone() }
+                                            };
+
+                                            if let Err(e) = data_tx.send(data_change) {
+                                                debug_log(&format!(
+                                                    "Failed to send ephemeral status data change: {}",
+                                                    e
+                                                ));
                                             }
 
                                             // For kind:24010 (project status), subscribe to project if it's newly online
@@ -2716,7 +2779,7 @@ impl NostrWorker {
         repo_url: Option<String>,
         picture_url: Option<String>,
         participants: &[String],
-        agent_definition_ids: &[String],
+        agent_pubkeys: &[String],
         mcp_tool_ids: &[String],
         client_name: String,
         is_deleted: bool,
@@ -2757,16 +2820,16 @@ impl NostrWorker {
         }
 
         for participant in participants {
-            if let Ok(pk) = PublicKey::parse(participant) {
-                event = event.tag(Tag::public_key(pk));
-            }
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("P")),
+                vec![participant.clone()],
+            ));
         }
 
-        for agent_id in agent_definition_ids {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
-                vec![agent_id.clone()],
-            ));
+        for agent_pubkey in agent_pubkeys {
+            if let Ok(pk) = PublicKey::parse(agent_pubkey) {
+                event = event.tag(Tag::public_key(pk));
+            }
         }
 
         for tool_id in mcp_tool_ids {
@@ -2809,7 +2872,7 @@ impl NostrWorker {
     async fn handle_update_project_agents(
         &self,
         project_a_tag: String,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
     ) -> Result<()> {
         let client = self
@@ -2835,7 +2898,7 @@ impl NostrWorker {
             project.repo_url.clone(),
             project.picture_url.clone(),
             &project.participants,
-            &agent_definition_ids,
+            &agent_pubkeys,
             &mcp_tool_ids,
             "tenex-tui".to_string(),
             false,
@@ -2850,7 +2913,7 @@ impl NostrWorker {
         slug: Option<String>,
         name: String,
         description: String,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
         client_tag: Option<String>,
     ) -> Result<()> {
@@ -2878,7 +2941,7 @@ impl NostrWorker {
             None,
             None,
             &[],
-            &agent_definition_ids,
+            &agent_pubkeys,
             &mcp_tool_ids,
             client_name,
             false,
@@ -2896,7 +2959,7 @@ impl NostrWorker {
         description: String,
         repo_url: Option<String>,
         picture_url: Option<String>,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
         client_tag: Option<String>,
     ) -> Result<()> {
@@ -2923,7 +2986,7 @@ impl NostrWorker {
             repo_url,
             picture_url,
             &project.participants,
-            &agent_definition_ids,
+            &agent_pubkeys,
             &mcp_tool_ids,
             client_name,
             false,
@@ -2961,7 +3024,7 @@ impl NostrWorker {
             project.repo_url.clone(),
             project.picture_url.clone(),
             &project.participants,
-            &project.agent_definition_ids,
+            &project.agent_pubkeys,
             &project.mcp_tool_ids,
             client_name,
             true,
@@ -2969,6 +3032,61 @@ impl NostrWorker {
 
         self.publish_project_event(client, keys, event, "Deleted project")
             .await
+    }
+
+    async fn handle_create_backend_agent(
+        &self,
+        backend_pubkey: String,
+        definition_event_id: String,
+        slug_override: Option<String>,
+        client_tag: Option<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let backend_pk = PublicKey::parse(&backend_pubkey)?;
+        let mut event = EventBuilder::new(Kind::Custom(KIND_AGENT_CREATE), "")
+            .tag(Tag::public_key(backend_pk))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![definition_event_id],
+            ));
+
+        if let Some(slug) = slug_override.filter(|value| !value.trim().is_empty()) {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("slug")),
+                vec![slug],
+            ));
+        }
+
+        if let Some(client_name) = client_tag.filter(|value| !value.trim().is_empty()) {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec![client_name],
+            ));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => {
+                debug_log(&format!("Requested backend agent create: {}", output.id()));
+            }
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send backend agent create request: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending backend agent create request"),
+        }
+
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4135,9 +4253,9 @@ async fn sync_all_filters(
     let project_filter = Filter::new().kind(Kind::Custom(31933)).author(*user_pubkey);
     total_new += sync_filter(client, project_filter, "31933-authored", stats).await;
 
-    // Projects where user is a participant (kind 31933) - via p-tag
+    // Projects where user is a collaborator (kind 31933) - via uppercase P-tag
     let project_p_filter = Filter::new().kind(Kind::Custom(31933)).custom_tag(
-        SingleLetterTag::lowercase(Alphabet::P),
+        SingleLetterTag::uppercase(Alphabet::P),
         user_pubkey_hex.clone(),
     );
     total_new += sync_filter(client, project_p_filter, "31933-p-tagged", stats).await;

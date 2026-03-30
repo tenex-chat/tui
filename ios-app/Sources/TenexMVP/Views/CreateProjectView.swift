@@ -20,7 +20,7 @@ private enum CreateProjectStep: Int, CaseIterable, Identifiable {
     var subtitle: String {
         switch self {
         case .projectInfo: return "Name and describe your project"
-        case .agents: return "Assign agents to your project"
+        case .agents: return "Assign agents later from a live backend"
         case .configuration: return "Connect repos and tools"
         case .review: return "Final check before launch"
         }
@@ -66,15 +66,9 @@ struct CreateProjectView: View {
     private var trimmedName: String { projectName.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedDescription: String { projectDescription.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    // All agent IDs to submit: individually selected + all from selected teams
+    // New projects no longer assign agent definitions directly.
     private var allSelectedAgentIds: Set<String> {
-        var ids = selectedAgentIds
-        for teamId in selectedTeamIds {
-            if let team = teamsViewModel.featuredTeams.first(where: { $0.id == teamId }) {
-                ids.formUnion(team.team.agentDefinitionIds)
-            }
-        }
-        return ids
+        []
     }
 
     private var canProceed: Bool {
@@ -337,83 +331,25 @@ struct CreateProjectView: View {
         }
     }
 
-    // MARK: Step 2: Agents (teams + definitions using same components as AgentDefinitionsTabView)
+    // MARK: Step 2: Agents
 
     private var agentsStep: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Featured Teams
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Featured Teams")
-                    .font(.title3.weight(.bold))
-                Text("Select a team to add all its agents at once.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            sectionHeader(
+                "Assign Agents Later",
+                subtitle: "Projects now store assigned agent pubkeys, so initial creation skips agent selection."
+            )
 
-                if teamsViewModel.isLoading, teamsViewModel.featuredTeams.isEmpty {
-                    ProgressView().frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 10)
-                } else if teamsViewModel.featuredTeams.isEmpty {
-                    Text("No featured teams yet.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 8)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 14) {
-                            ForEach(teamsViewModel.featuredTeams.prefix(10)) { item in
-                                let isSelected = selectedTeamIds.contains(item.id)
-                                Button { toggleTeam(item) } label: {
-                                    TeamFeaturedCard(item: item)
-                                        .overlay(alignment: .topTrailing) {
-                                            if isSelected {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .font(.title3)
-                                                    .foregroundStyle(.white, Color.projectBrand)
-                                                    .padding(10)
-                                                    .shadow(radius: 2)
-                                            }
-                                        }
-                                        .overlay {
-                                            if isSelected {
-                                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                                    .stroke(Color.projectBrand, lineWidth: 3)
-                                            }
-                                        }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Create the project first", systemImage: "checkmark.circle")
+                Label("Boot it on a backend", systemImage: "bolt.horizontal.circle")
+                Label("Assign installed backend agents from Project Settings", systemImage: "person.crop.circle.badge.plus")
             }
-
-            // Agent Definitions
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 12) {
-                    TextField("Search agents…", text: $agentDefViewModel.searchText)
-                        .textFieldStyle(.plain)
-                        .padding(10)
-                        .background(Color.systemGray6.opacity(0.8), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    if agentDefViewModel.isLoading {
-                        ProgressView().controlSize(.small)
-                    }
-                }
-
-                if agentDefViewModel.filteredMine.isEmpty && agentDefViewModel.filteredCommunity.isEmpty && !agentDefViewModel.isLoading {
-                    Text(agentDefViewModel.searchText.isEmpty ? "No agent definitions found." : "No agents match your search.")
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 20)
-                } else {
-                    if !agentDefViewModel.filteredMine.isEmpty {
-                        agentCardSection(title: "Mine", subtitle: "Definitions you authored", items: agentDefViewModel.filteredMine)
-                    }
-                    if !agentDefViewModel.filteredCommunity.isEmpty {
-                        agentCardSection(title: "Community", subtitle: "Definitions from other authors", items: agentDefViewModel.filteredCommunity)
-                    }
-                }
-            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.systemGray6.opacity(0.8), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
     }
 
@@ -616,10 +552,7 @@ struct CreateProjectView: View {
             VStack(alignment: .leading, spacing: 10) {
                 reviewRow(icon: "folder.fill", title: "Project", value: trimmedName)
                 reviewRow(icon: "text.alignleft", title: "Description", value: trimmedDescription.isEmpty ? "No description" : trimmedDescription)
-                reviewRow(icon: "person.3.sequence.fill", title: "Agents", value: "\(allSelectedAgentIds.count) assigned")
-                if !selectedTeamIds.isEmpty {
-                    reviewRow(icon: "person.2.fill", title: "Teams", value: "\(selectedTeamIds.count) selected")
-                }
+                reviewRow(icon: "person.3.sequence.fill", title: "Agents", value: "Assigned later from backend")
                 reviewRow(icon: "wrench.and.screwdriver.fill", title: "Tools", value: "\(selectedToolIds.count) configured")
                 reviewRow(icon: "link", title: "Repository", value: repoUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "None" : repoUrl.trimmingCharacters(in: .whitespacesAndNewlines))
             }
@@ -737,7 +670,7 @@ struct CreateProjectView: View {
                 try await coreManager.safeCore.createProject(
                     name: trimmedName,
                     description: trimmedDescription,
-                    agentDefinitionIds: Array(allSelectedAgentIds),
+                    agentPubkeys: [],
                     mcpToolIds: Array(selectedToolIds)
                 )
                 await coreManager.fetchData()

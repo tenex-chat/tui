@@ -7,7 +7,7 @@ impl TenexCore {
         &self,
         name: String,
         description: String,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
     ) -> Result<(), TenexError> {
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -17,7 +17,7 @@ impl TenexCore {
                 slug: None,
                 name,
                 description,
-                agent_definition_ids,
+                agent_pubkeys,
                 mcp_tool_ids,
                 client: Some("tenex-ios".to_string()),
             })
@@ -38,7 +38,7 @@ impl TenexCore {
         description: String,
         repo_url: Option<String>,
         picture_url: Option<String>,
-        agent_definition_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
     ) -> Result<(), TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
@@ -51,7 +51,7 @@ impl TenexCore {
                 description,
                 repo_url,
                 picture_url,
-                agent_definition_ids,
+                agent_pubkeys,
                 mcp_tool_ids,
                 client: Some("tenex-ios".to_string()),
             })
@@ -108,6 +108,16 @@ impl TenexCore {
             .get_project_status(&project.a_tag())
             .map(|s| s.is_online())
             .unwrap_or(false)
+    }
+
+    pub fn get_project_backend_pubkey(&self, project_id: String) -> Option<String> {
+        let store_guard = self.store.read().ok()?;
+        let store = store_guard.as_ref()?;
+        let project = store.get_projects().iter().find(|p| p.id == project_id)?;
+        store
+            .get_project_status(&project.a_tag())
+            .filter(|status| status.is_online())
+            .map(|status| status.backend_pubkey.clone())
     }
 
     /// Boot/start a project (sends kind:24000 event).

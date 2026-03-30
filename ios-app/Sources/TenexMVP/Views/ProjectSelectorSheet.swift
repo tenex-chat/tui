@@ -301,7 +301,7 @@ struct ProjectRowSelectView: View {
                 isDeleted: false,
                 pubkey: "",
                 participants: [],
-                agentDefinitionIds: [],
+                agentPubkeys: [],
                 mcpToolIds: [],
                 createdAt: 0
             ),
@@ -314,7 +314,7 @@ struct ProjectRowSelectView: View {
                 isDeleted: false,
                 pubkey: "",
                 participants: [],
-                agentDefinitionIds: [],
+                agentPubkeys: [],
                 mcpToolIds: [],
                 createdAt: 0
             ),
@@ -327,7 +327,7 @@ struct ProjectRowSelectView: View {
                 isDeleted: false,
                 pubkey: "",
                 participants: [],
-                agentDefinitionIds: [],
+                agentPubkeys: [],
                 mcpToolIds: [],
                 createdAt: 0
             )
@@ -342,7 +342,7 @@ struct ProjectRowSelectView: View {
                 isDeleted: false,
                 pubkey: "",
                 participants: [],
-                agentDefinitionIds: [],
+                agentPubkeys: [],
                 mcpToolIds: [],
                 createdAt: 0
             )

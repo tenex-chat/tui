@@ -83,19 +83,26 @@ fn execute_project_action(
             app.modal_state = ModalState::None;
         }
         ProjectAction::Settings => {
-            let (agent_definition_ids, mcp_tool_ids) = {
+            let (backend_pubkey, agent_pubkeys, mcp_tool_ids) = {
                 let store = app.data_store.borrow();
                 store
                     .get_projects()
                     .iter()
                     .find(|p| p.a_tag() == state.project_a_tag)
-                    .map(|p| (p.agent_definition_ids.clone(), p.mcp_tool_ids.clone()))
+                    .map(|p| {
+                        (
+                            app.project_backend_pubkey(&state.project_a_tag),
+                            p.agent_pubkeys.clone(),
+                            p.mcp_tool_ids.clone(),
+                        )
+                    })
                     .unwrap_or_default()
             };
             app.modal_state = ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
                 state.project_a_tag.clone(),
                 state.project_name.clone(),
-                agent_definition_ids,
+                backend_pubkey,
+                agent_pubkeys,
                 mcp_tool_ids,
             ));
         }

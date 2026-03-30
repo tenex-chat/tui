@@ -16,14 +16,14 @@ struct ProjectSettingsView: View {
 
     @State private var generalDraft = ProjectGeneralDraft()
     @State private var baselineGeneralDraft = ProjectGeneralDraft()
-    @State private var pendingAgentIds: [String] = []
-    @State private var baselineAgentIds: [String] = []
+    @State private var pendingAgentPubkeys: [String] = []
+    @State private var baselineAgentPubkeys: [String] = []
     @State private var pendingToolIds: [String] = []
     @State private var baselineToolIds: [String] = []
 
-    @State private var allAgents: [AgentDefinition] = []
+    @State private var installedAgents: [InstalledAgent] = []
+    @State private var projectBackendPubkey: String?
     @State private var allMcpTools: [McpTool] = []
-    @State private var hasLoadedSelectionData = false
 
     @State private var showAddAgentSheet = false
     @State private var showAddToolSheet = false
@@ -50,7 +50,7 @@ struct ProjectSettingsView: View {
     }
 
     private var agentsHaveChanges: Bool {
-        pendingAgentIds != baselineAgentIds
+        pendingAgentPubkeys != baselineAgentPubkeys
     }
 
     private var toolsHaveChanges: Bool {
@@ -65,18 +65,21 @@ struct ProjectSettingsView: View {
         coreManager.onlineAgents[projectId]?.count ?? 0
     }
 
-    private var filteredAvailableAgents: [AgentDefinition] {
-        let remaining = allAgents.filter { !pendingAgentIds.contains($0.id) }
+    private var filteredAvailableAgents: [InstalledAgent] {
+        let remaining = installedAgents.filter { !pendingAgentPubkeys.contains($0.pubkey) }
         guard !agentSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return remaining
         }
 
         let query = agentSearch.lowercased()
         return remaining.filter { agent in
-            agent.name.lowercased().contains(query)
-                || agent.role.lowercased().contains(query)
-                || agent.description.lowercased().contains(query)
+            agent.slug.lowercased().contains(query)
+                || agent.pubkey.lowercased().contains(query)
         }
+    }
+
+    private var canAddAgents: Bool {
+        projectBackendPubkey != nil
     }
 
     private var filteredAvailableTools: [McpTool] {
@@ -116,10 +119,13 @@ struct ProjectSettingsView: View {
         .navigationTitle("Project Settings")
         .onAppear {
             syncDraftsFromProject()
-            Task { await loadSelectionDataIfNeeded() }
+            Task { await reloadSelectionData() }
         }
         .onChange(of: project?.createdAt ?? 0) { _, _ in
             syncDraftsFromProject()
+        }
+        .onChange(of: coreManager.projectOnlineStatus[projectId] ?? false) { _, _ in
+            Task { await reloadSelectionData() }
         }
         .sheet(isPresented: $showAddAgentSheet) {
             addAgentSheet
@@ -286,30 +292,27 @@ struct ProjectSettingsView: View {
     @ViewBuilder
     private func agentsSection(project: Project) -> some View {
         Section {
-            if pendingAgentIds.isEmpty {
+            if pendingAgentPubkeys.isEmpty {
                 ContentUnavailableView(
                     "No Agents Assigned",
                     systemImage: "person.2",
-                    description: Text("Add at least one agent definition to this project.")
+                    description: Text(
+                        projectBackendPubkey == nil
+                            ? "Bring the project backend online before assigning agents."
+                            : "Assign installed backend agents to this project."
+                    )
                 )
             } else {
-                ForEach(Array(pendingAgentIds.enumerated()), id: \.element) { index, agentId in
+                ForEach(Array(pendingAgentPubkeys.enumerated()), id: \.element) { index, agentPubkey in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(agentName(for: agentId))
+                            Text(agentName(for: agentPubkey))
                                 .font(.body.weight(.medium))
                                 .lineLimit(1)
-                            if let description = agentDescription(for: agentId) {
-                                Text(description)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            } else {
-                                Text(agentId)
-                                    .font(.caption2.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
+                            Text(shortPubkey(agentPubkey))
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
 
                         Spacer()
@@ -325,11 +328,11 @@ struct ProjectSettingsView: View {
                         Menu {
                             if index != 0 {
                                 Button("Set as PM") {
-                                    setProjectManager(agentId: agentId)
+                                    setProjectManager(agentPubkey: agentPubkey)
                                 }
                             }
                             Button("Remove", role: .destructive) {
-                                removeAgent(agentId: agentId)
+                                removeAgent(agentPubkey: agentPubkey)
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
@@ -345,11 +348,11 @@ struct ProjectSettingsView: View {
                 Label("Add Agent", systemImage: "plus")
             }
             .adaptiveGlassButtonStyle()
-            .disabled(isSavingAgents || isDeleting)
+            .disabled(!canAddAgents || isSavingAgents || isDeleting)
 
             HStack(spacing: 12) {
                 Button("Cancel") {
-                    pendingAgentIds = baselineAgentIds
+                    pendingAgentPubkeys = baselineAgentPubkeys
                 }
                 .disabled(!agentsHaveChanges || isSavingAgents)
 
@@ -368,7 +371,11 @@ struct ProjectSettingsView: View {
         } header: {
             Text("Agents")
         } footer: {
-            Text("The first agent is treated as the default PM.")
+            Text(
+                projectBackendPubkey == nil
+                    ? "Agent assignment requires the project backend to be online and publishing installed agents."
+                    : "The first agent pubkey is treated as the default PM."
+            )
         }
     }
 
@@ -467,29 +474,36 @@ struct ProjectSettingsView: View {
 
     private var addAgentSheet: some View {
         NavigationStack {
-            List(filteredAvailableAgents, id: \.id) { agent in
+            List(filteredAvailableAgents, id: \.pubkey) { agent in
                 Button {
-                    addAgent(agentId: agent.id)
+                    addAgent(agentPubkey: agent.pubkey)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(agent.name)
+                        Text(agent.slug)
                             .font(.body.weight(.medium))
                             .foregroundStyle(.primary)
-                        Text(agent.role)
-                            .font(.caption)
+                        Text(shortPubkey(agent.pubkey))
+                            .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
-                        if !agent.description.isEmpty {
-                            Text(agent.description)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.plain)
             }
-            .searchable(text: $agentSearch, prompt: "Search agents")
+            .overlay {
+                if filteredAvailableAgents.isEmpty {
+                    ContentUnavailableView(
+                        projectBackendPubkey == nil ? "Backend Offline" : "No Installed Agents",
+                        systemImage: "person.crop.circle.badge.exclamationmark",
+                        description: Text(
+                            projectBackendPubkey == nil
+                                ? "Wait for the project backend to come online before assigning agents."
+                                : "Install an agent into this backend before assigning it to the project."
+                        )
+                    )
+                }
+            }
+            .searchable(text: $agentSearch, prompt: "Search installed agents")
             .navigationTitle("Add Agents")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -555,25 +569,30 @@ struct ProjectSettingsView: View {
         generalDraft = syncedGeneral
         baselineGeneralDraft = syncedGeneral
 
-        pendingAgentIds = project.agentDefinitionIds
-        baselineAgentIds = project.agentDefinitionIds
+        pendingAgentPubkeys = project.agentPubkeys
+        baselineAgentPubkeys = project.agentPubkeys
 
         pendingToolIds = project.mcpToolIds
         baselineToolIds = project.mcpToolIds
     }
 
-    private func loadSelectionDataIfNeeded() async {
-        guard !hasLoadedSelectionData else { return }
+    private func reloadSelectionData() async {
+        let backendPubkey = coreManager.safeCore.getProjectBackendPubkey(projectId: projectId)
 
         do {
-            async let fetchedAgents = coreManager.safeCore.getAllAgents()
             async let fetchedTools = coreManager.safeCore.getAllMcpTools()
-            let (agents, tools) = try await (fetchedAgents, fetchedTools)
+            async let fetchedInstalledAgents: [InstalledAgent] = {
+                guard let backendPubkey else { return [] }
+                return try coreManager.safeCore.getInstalledAgents(backendPubkey: backendPubkey)
+            }()
+            let (installedAgents, tools) = try await (fetchedInstalledAgents, fetchedTools)
 
             await MainActor.run {
-                allAgents = agents.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                projectBackendPubkey = backendPubkey
+                self.installedAgents = installedAgents.sorted {
+                    $0.slug.localizedCaseInsensitiveCompare($1.slug) == .orderedAscending
+                }
                 allMcpTools = tools.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-                hasLoadedSelectionData = true
             }
         } catch {
             presentError(error)
@@ -603,7 +622,7 @@ struct ProjectSettingsView: View {
                 description: generalDraft.description,
                 repoUrl: normalizedOptional(generalDraft.repoUrl),
                 pictureUrl: normalizedOptional(generalDraft.pictureUrl),
-                agentDefinitionIds: project.agentDefinitionIds,
+                agentPubkeys: project.agentPubkeys,
                 mcpToolIds: project.mcpToolIds
             )
             baselineGeneralDraft = generalDraft
@@ -623,10 +642,10 @@ struct ProjectSettingsView: View {
                 description: project.description ?? "",
                 repoUrl: project.repoUrl,
                 pictureUrl: project.pictureUrl,
-                agentDefinitionIds: pendingAgentIds,
+                agentPubkeys: pendingAgentPubkeys,
                 mcpToolIds: project.mcpToolIds
             )
-            baselineAgentIds = pendingAgentIds
+            baselineAgentPubkeys = pendingAgentPubkeys
         } catch {
             presentError(error)
         }
@@ -643,7 +662,7 @@ struct ProjectSettingsView: View {
                 description: project.description ?? "",
                 repoUrl: project.repoUrl,
                 pictureUrl: project.pictureUrl,
-                agentDefinitionIds: project.agentDefinitionIds,
+                agentPubkeys: project.agentPubkeys,
                 mcpToolIds: pendingToolIds
             )
             baselineToolIds = pendingToolIds
@@ -665,19 +684,19 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func addAgent(agentId: String) {
-        guard !pendingAgentIds.contains(agentId) else { return }
-        pendingAgentIds.append(agentId)
+    private func addAgent(agentPubkey: String) {
+        guard !pendingAgentPubkeys.contains(agentPubkey) else { return }
+        pendingAgentPubkeys.append(agentPubkey)
     }
 
-    private func removeAgent(agentId: String) {
-        pendingAgentIds.removeAll { $0 == agentId }
+    private func removeAgent(agentPubkey: String) {
+        pendingAgentPubkeys.removeAll { $0 == agentPubkey }
     }
 
-    private func setProjectManager(agentId: String) {
-        guard let index = pendingAgentIds.firstIndex(of: agentId), index > 0 else { return }
-        pendingAgentIds.remove(at: index)
-        pendingAgentIds.insert(agentId, at: 0)
+    private func setProjectManager(agentPubkey: String) {
+        guard let index = pendingAgentPubkeys.firstIndex(of: agentPubkey), index > 0 else { return }
+        pendingAgentPubkeys.remove(at: index)
+        pendingAgentPubkeys.insert(agentPubkey, at: 0)
     }
 
     private func addTool(toolId: String) {
@@ -689,12 +708,13 @@ struct ProjectSettingsView: View {
         pendingToolIds.removeAll { $0 == toolId }
     }
 
-    private func agentName(for id: String) -> String {
-        allAgents.first(where: { $0.id == id })?.name ?? "Unknown Agent"
+    private func agentName(for pubkey: String) -> String {
+        installedAgents.first(where: { $0.pubkey == pubkey })?.slug ?? shortPubkey(pubkey)
     }
 
-    private func agentDescription(for id: String) -> String? {
-        allAgents.first(where: { $0.id == id })?.description
+    private func shortPubkey(_ pubkey: String) -> String {
+        guard pubkey.count > 16 else { return pubkey }
+        return "\(pubkey.prefix(8))…\(pubkey.suffix(8))"
     }
 
     private func toolName(for id: String) -> String {

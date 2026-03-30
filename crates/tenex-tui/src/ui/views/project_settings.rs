@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
+use tenex_core::models::InstalledAgent;
 
 /// Render the project settings modal
 pub fn render_project_settings(
@@ -27,6 +28,28 @@ pub fn render_project_settings(
 /// Minimum width for side-by-side (horizontal) layout.
 /// Below this, we switch to single-pane (vertical) layout showing only the focused pane.
 const MIN_SIDE_BY_SIDE_WIDTH: u16 = 60;
+
+fn short_pubkey(pubkey: &str) -> String {
+    if pubkey.len() <= 16 {
+        pubkey.to_string()
+    } else {
+        format!("{}…{}", &pubkey[..8], &pubkey[pubkey.len() - 8..])
+    }
+}
+
+fn installed_agent_for_pubkey(
+    app: &App,
+    backend_pubkey: Option<&str>,
+    agent_pubkey: &str,
+) -> Option<InstalledAgent> {
+    let backend_pubkey = backend_pubkey?;
+    app.data_store
+        .borrow()
+        .get_installed_agents(backend_pubkey)
+        .iter()
+        .find(|agent| agent.pubkey == agent_pubkey)
+        .cloned()
+}
 
 fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &mut ProjectSettingsState) {
     let title = format!("Settings: {}", state.project_name);
@@ -102,7 +125,7 @@ fn render_side_by_side_layout(
 
     // === Agents pane (left side) ===
     let agents_header_area = Rect::new(remaining.x, remaining.y, agents_width, 1);
-    let agent_count = state.pending_agent_definition_ids.len();
+    let agent_count = state.pending_agent_pubkeys.len();
     let header_text = format!("Agents ({})", agent_count);
     let header_style = if agents_focused {
         Style::default()
@@ -198,7 +221,7 @@ fn render_single_pane_layout(
     let indicator_text = if agents_focused {
         format!(
             "◀ Agents ({}) ▶ Tools",
-            state.pending_agent_definition_ids.len()
+            state.pending_agent_pubkeys.len()
         )
     } else {
         format!("◀ Agents   ▶ Tools ({})", state.pending_mcp_tool_ids.len())
@@ -210,7 +233,7 @@ fn render_single_pane_layout(
     // Header for current pane
     let header_area = Rect::new(remaining.x, remaining.y + 1, pane_width, 1);
     if agents_focused {
-        let header_text = format!("Agents ({})", state.pending_agent_definition_ids.len());
+        let header_text = format!("Agents ({})", state.pending_agent_pubkeys.len());
         let header = Paragraph::new(header_text).style(
             Style::default()
                 .fg(theme::ACCENT_PRIMARY)
@@ -246,53 +269,33 @@ fn render_agents_list(
     show_selection: bool,
     visible_height: usize,
 ) {
-    if state.pending_agent_definition_ids.is_empty() {
-        let empty_msg = Paragraph::new("No agents. Press 'a' to add.")
-            .style(Style::default().fg(theme::TEXT_MUTED));
+    if state.pending_agent_pubkeys.is_empty() {
+        let empty_text = if state.backend_pubkey.is_none() {
+            "Backend offline. Wait for project status and 24011 inventory before assigning agents."
+        } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
+            "Waiting for backend 24011 inventory before assigning agents."
+        } else {
+            "No agents assigned. Press 'a' to add."
+        };
+        let empty_msg = Paragraph::new(empty_text).style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(empty_msg, list_area);
     } else {
         let scroll_offset = state.agents_scroll_offset;
         let items: Vec<ListItem> = state
-            .pending_agent_definition_ids
+            .pending_agent_pubkeys
             .iter()
             .enumerate()
             .skip(scroll_offset)
             .take(visible_height)
-            .map(|(i, agent_id)| {
+            .map(|(i, agent_pubkey)| {
                 let is_selected = show_selection && i == state.selector_index;
                 let is_pm = i == 0;
-
-                // Try to get agent name from data store
-                let agent_name = app
-                    .data_store
-                    .borrow()
-                    .content
-                    .get_agent_definition(agent_id)
-                    .map(|a| a.name.clone())
-                    .unwrap_or_else(|| format!("{}...", &agent_id[..16.min(agent_id.len())]));
-
-                let agent_role = app
-                    .data_store
-                    .borrow()
-                    .content
-                    .get_agent_definition(agent_id)
-                    .map(|a| a.role.clone())
-                    .unwrap_or_else(|| "unknown".to_string());
-
-                let author_pubkey = app
-                    .data_store
-                    .borrow()
-                    .content
-                    .get_agent_definition(agent_id)
-                    .map(|a| a.pubkey.clone());
+                let installed_agent =
+                    installed_agent_for_pubkey(app, state.backend_pubkey.as_deref(), agent_pubkey);
 
                 let mut spans = vec![];
 
-                // Left border indicator using author color
-                let border_color = author_pubkey
-                    .as_ref()
-                    .map(|pk| theme::user_color(pk))
-                    .unwrap_or(theme::TEXT_MUTED);
+                let border_color = theme::user_color(agent_pubkey);
 
                 if is_selected {
                     spans.push(Span::styled("▌", Style::default().fg(border_color)));
@@ -312,7 +315,10 @@ fn render_agents_list(
                     spans.push(Span::styled("     ", Style::default()));
                 }
 
-                // Agent name
+                let agent_name = installed_agent
+                    .as_ref()
+                    .map(|agent| format!("@{}", agent.slug))
+                    .unwrap_or_else(|| short_pubkey(agent_pubkey));
                 let name_style = if is_selected {
                     Style::default()
                         .fg(theme::ACCENT_PRIMARY)
@@ -320,15 +326,9 @@ fn render_agents_list(
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
-                spans.push(Span::styled(format!("@{}", agent_name), name_style));
+                spans.push(Span::styled(agent_name, name_style));
 
-                // Role (truncate if needed for side-by-side layout)
-                // Use char-based truncation to avoid panics on non-ASCII characters
-                let role_display = if agent_role.chars().count() > 10 {
-                    format!(" [{}…]", agent_role.chars().take(9).collect::<String>())
-                } else {
-                    format!(" [{}]", agent_role)
-                };
+                let role_display = format!(" [{}]", short_pubkey(agent_pubkey));
                 spans.push(Span::styled(
                     role_display,
                     Style::default().fg(theme::ACCENT_SPECIAL),
@@ -427,15 +427,29 @@ fn render_hints(
         Span::styled("←→", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" switch pane", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("a", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" add agent", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "a",
+            Style::default().fg(if state.backend_pubkey.is_some() {
+                theme::ACCENT_WARNING
+            } else {
+                theme::TEXT_DIM
+            }),
+        ),
+        Span::styled(
+            if state.backend_pubkey.is_some() {
+                " add agent"
+            } else {
+                " add agent (backend offline)"
+            },
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("t", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" add tool", Style::default().fg(theme::TEXT_MUTED)),
     ];
 
     // Show context-sensitive hints based on focus
-    if agents_focused && !state.pending_agent_definition_ids.is_empty() {
+    if agents_focused && !state.pending_agent_pubkeys.is_empty() {
         hint_spans.extend(vec![
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("d", Style::default().fg(theme::ACCENT_WARNING)),
@@ -493,18 +507,9 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
     // Get available agents (exclude already added)
     let filter = &state.add_filter;
     let available_agents: Vec<_> = app
-        .data_store
-        .borrow()
-        .content
-        .get_agent_definitions()
+        .installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter)
         .into_iter()
-        .filter(|a| !state.pending_agent_definition_ids.contains(&a.id))
-        .filter(|a| {
-            fuzzy_matches(&a.name, filter)
-                || fuzzy_matches(&a.description, filter)
-                || fuzzy_matches(&a.role, filter)
-        })
-        .cloned()
+        .filter(|agent| !state.pending_agent_pubkeys.contains(&agent.pubkey))
         .collect();
 
     // List area
@@ -516,8 +521,12 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
     );
 
     if available_agents.is_empty() {
-        let msg = if state.add_filter.is_empty() {
-            "No available agents found."
+        let msg = if state.backend_pubkey.is_none() {
+            "Project backend must be online before assigning agents."
+        } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
+            "Waiting for backend 24011 inventory."
+        } else if state.add_filter.is_empty() {
+            "No installed agents available."
         } else {
             "No agents match your search."
         };
@@ -561,18 +570,9 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
-                spans.push(Span::styled(format!("@{}", agent.name), name_style));
-
-                // Role
+                spans.push(Span::styled(format!("@{}", agent.slug), name_style));
                 spans.push(Span::styled(
-                    format!(" [{}]", agent.role),
-                    Style::default().fg(theme::ACCENT_SPECIAL),
-                ));
-
-                // Author
-                let author_name = app.data_store.borrow().get_profile_name(&agent.pubkey);
-                spans.push(Span::styled(
-                    format!(" by {}", author_name),
+                    format!(" [{}]", short_pubkey(&agent.pubkey)),
                     Style::default().fg(theme::TEXT_MUTED),
                 ));
 
@@ -583,7 +583,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         let list = List::new(items);
         f.render_widget(list, list_area);
 
-        // Show description of selected agent
+        // Show backend pubkey of selected agent
         if let Some(agent) = available_agents.get(selected_index) {
             let desc_area = Rect::new(
                 remaining.x,
@@ -591,15 +591,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                 remaining.width,
                 2,
             );
-            let desc_preview = if agent.description.chars().count() > 80 {
-                format!(
-                    "{}...",
-                    agent.description.chars().take(77).collect::<String>()
-                )
-            } else {
-                agent.description.clone()
-            };
-            let desc = Paragraph::new(desc_preview)
+            let desc = Paragraph::new(format!("Pubkey: {}", short_pubkey(&agent.pubkey)))
                 .style(Style::default().fg(theme::TEXT_DIM))
                 .block(Block::default().borders(Borders::NONE));
             f.render_widget(desc, desc_area);
@@ -632,17 +624,9 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
 /// Get count of available agents for add mode (for bounds checking)
 pub fn available_agent_count(app: &App, state: &ProjectSettingsState) -> usize {
     let filter = &state.add_filter;
-    app.data_store
-        .borrow()
-        .content
-        .get_agent_definitions()
+    app.installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter)
         .into_iter()
-        .filter(|a| !state.pending_agent_definition_ids.contains(&a.id))
-        .filter(|a| {
-            fuzzy_matches(&a.name, filter)
-                || fuzzy_matches(&a.description, filter)
-                || fuzzy_matches(&a.role, filter)
-        })
+        .filter(|agent| !state.pending_agent_pubkeys.contains(&agent.pubkey))
         .count()
 }
 
@@ -653,19 +637,11 @@ pub fn get_agent_id_at_index(
     index: usize,
 ) -> Option<String> {
     let filter = &state.add_filter;
-    app.data_store
-        .borrow()
-        .content
-        .get_agent_definitions()
+    app.installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter)
         .into_iter()
-        .filter(|a| !state.pending_agent_definition_ids.contains(&a.id))
-        .filter(|a| {
-            fuzzy_matches(&a.name, filter)
-                || fuzzy_matches(&a.description, filter)
-                || fuzzy_matches(&a.role, filter)
-        })
+        .filter(|agent| !state.pending_agent_pubkeys.contains(&agent.pubkey))
         .nth(index)
-        .map(|a| a.id.clone())
+        .map(|agent| agent.pubkey)
 }
 
 fn render_add_mcp_tool_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSettingsState) {

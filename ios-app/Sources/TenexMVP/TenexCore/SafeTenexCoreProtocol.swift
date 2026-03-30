@@ -39,6 +39,8 @@ protocol SafeTenexCoreProtocol: Actor {
     // MARK: - Agents
     func getAgents(projectId: String) throws -> [AgentDefinition]
     func getAllAgents() throws -> [AgentDefinition]
+    func getInstalledAgents(backendPubkey: String) throws -> [InstalledAgent]
+    func createBackendAgent(backendPubkey: String, definitionEventId: String, slugOverride: String?) throws
     func getAllMcpTools() throws -> [McpTool]
     func getOnlineAgents(projectId: String) throws -> [ProjectAgent]
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
@@ -63,7 +65,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func createProject(
         name: String,
         description: String,
-        agentDefinitionIds: [String],
+        agentPubkeys: [String],
         mcpToolIds: [String]
     ) throws
     func updateProject(
@@ -72,7 +74,7 @@ protocol SafeTenexCoreProtocol: Actor {
         description: String,
         repoUrl: String?,
         pictureUrl: String?,
-        agentDefinitionIds: [String],
+        agentPubkeys: [String],
         mcpToolIds: [String]
     ) throws
     func deleteProject(projectId: String) throws
@@ -93,6 +95,7 @@ protocol SafeTenexCoreProtocol: Actor {
     // MARK: - Project Status
     func isProjectOnline(projectId: String) -> Bool
     func bootProject(projectId: String) throws
+    func getProjectBackendPubkey(projectId: String) -> String?
 
     // MARK: - Nudges
     func getNudges() throws -> [Nudge]

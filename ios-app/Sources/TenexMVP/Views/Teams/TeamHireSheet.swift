@@ -36,48 +36,11 @@ struct TeamHireSheet: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(team.title.isEmpty ? "Untitled Team" : team.title)
                             .font(.headline)
-                        Text("Hire \(team.agentDefinitionIds.count) agent definition\(team.agentDefinitionIds.count == 1 ? "" : "s") into one project")
+                        Text("Hiring team definitions into a project is disabled until projects can target installed backend agents.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 2)
-                }
-
-                Section {
-                    if filteredProjects.isEmpty {
-                        ContentUnavailableView(
-                            "No Projects",
-                            systemImage: "folder.badge.questionmark",
-                            description: Text(searchText.isEmpty ? "No projects available." : "No projects match your search.")
-                        )
-                    } else {
-                        ForEach(filteredProjects, id: \.id) { project in
-                            Button {
-                                selectedProjectId = project.id
-                            } label: {
-                                HStack(spacing: 10) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(project.title)
-                                            .font(.body.weight(.medium))
-                                            .foregroundStyle(.primary)
-
-                                        Text(project.id)
-                                            .font(.caption2.monospaced())
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-
-                                    Spacer()
-
-                                    Image(systemName: selectedProjectId == project.id ? "checkmark.circle.fill" : "circle")
-                                        .font(.title3)
-                                        .foregroundStyle(selectedProjectId == project.id ? Color.accentColor : .secondary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
                 }
             }
             #if os(iOS)
@@ -85,7 +48,6 @@ struct TeamHireSheet: View {
             #else
             .listStyle(.inset)
             #endif
-            .searchable(text: $searchText, prompt: "Search projects")
             .navigationTitle("Hire Team")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -101,15 +63,10 @@ struct TeamHireSheet: View {
 
                 ToolbarItem(placement: .primaryAction) {
                     Button("Hire") {
-                        guard let selectedProjectId,
-                              let project = sortedProjects.first(where: { $0.id == selectedProjectId }) else {
-                            return
-                        }
-                        onConfirm(project)
                         dismiss()
                     }
                     .fontWeight(.semibold)
-                    .disabled(selectedProjectId == nil)
+                    .disabled(true)
                 }
             }
         }

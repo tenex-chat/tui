@@ -1,7 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{
     AgentChatter, AskEvent, BookmarkList, ConversationMetadata, InboxEventType, InboxItem, Message,
-    Project, ProjectAgent, ProjectStatus, Thread,
+    InstalledAgent, Project, ProjectAgent, ProjectStatus, Thread,
 };
 #[cfg(test)]
 use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, OperationsStatus, Report};
@@ -36,6 +36,7 @@ pub struct AppDataStore {
     // events from reviving deleted projects when events arrive out of order.
     project_tombstones: HashMap<String, u64>,
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
+    pub installed_agents_by_backend: HashMap<String, Vec<InstalledAgent>>,
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
     pub profiles: HashMap<String, String>,                // pubkey -> display name
@@ -87,6 +88,7 @@ impl AppDataStore {
             projects: Vec::new(),
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
+            installed_agents_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -123,6 +125,7 @@ impl AppDataStore {
             projects: Vec::new(),
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
+            installed_agents_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -208,6 +211,7 @@ impl AppDataStore {
         self.projects.clear();
         self.project_tombstones.clear();
         self.project_statuses.clear();
+        self.installed_agents_by_backend.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
         self.profiles.clear();
@@ -1524,6 +1528,7 @@ impl AppDataStore {
         if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
             match kind {
                 24010 => self.handle_project_status_event_value(event),
+                24011 => self.handle_installed_agent_list_event_value(event),
                 24133 => self.handle_operations_status_event_value(event),
                 _ => {} // Ignore unknown kinds
             }
@@ -1568,6 +1573,21 @@ impl AppDataStore {
     /// Handle an operations status event from pre-parsed Value (kind:24133)
     fn handle_operations_status_event_value(&mut self, event: &serde_json::Value) {
         self.operations.handle_operations_status_event_value(event);
+    }
+
+    fn handle_installed_agent_list_event_value(&mut self, event: &serde_json::Value) {
+        let Some((backend_pubkey, installed_agents)) = InstalledAgent::from_value(event) else {
+            return;
+        };
+
+        if self.trust.is_blocked(&backend_pubkey) {
+            return;
+        }
+
+        if self.trust.is_approved(&backend_pubkey) {
+            self.installed_agents_by_backend
+                .insert(backend_pubkey, installed_agents);
+        }
     }
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
@@ -2046,6 +2066,13 @@ impl AppDataStore {
 
     pub fn get_project_status(&self, a_tag: &str) -> Option<&ProjectStatus> {
         self.project_statuses.get(a_tag)
+    }
+
+    pub fn get_installed_agents(&self, backend_pubkey: &str) -> &[InstalledAgent] {
+        self.installed_agents_by_backend
+            .get(backend_pubkey)
+            .map(|agents| agents.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Get online agents for a project (from ProjectStatus if online)
@@ -6025,7 +6052,7 @@ mod tests {
             is_deleted: false,
             pubkey: "pk".to_string(),
             participants: vec![],
-            agent_definition_ids: vec![],
+            agent_pubkeys: vec![],
             mcp_tool_ids: vec![],
             created_at: 100,
         });
@@ -6079,7 +6106,7 @@ mod tests {
             is_deleted: false,
             pubkey: "pk".to_string(),
             participants: vec![],
-            agent_definition_ids: vec![],
+            agent_pubkeys: vec![],
             mcp_tool_ids: vec![],
             created_at: 0,
         });

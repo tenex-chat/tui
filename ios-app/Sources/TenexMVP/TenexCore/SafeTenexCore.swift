@@ -362,6 +362,34 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    func getInstalledAgents(backendPubkey: String) throws -> [InstalledAgent] {
+        try profiler.measureFFI("getInstalledAgents") {
+            do {
+                return try core.getInstalledAgents(backendPubkey: backendPubkey)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func createBackendAgent(
+        backendPubkey: String,
+        definitionEventId: String,
+        slugOverride: String?
+    ) throws {
+        try profiler.measureFFI("createBackendAgent") {
+            do {
+                try core.createBackendAgent(
+                    backendPubkey: backendPubkey,
+                    definitionEventId: definitionEventId,
+                    slugOverride: slugOverride
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     /// Get all MCP tool definitions (kind:4200 events).
     func getAllMcpTools() throws -> [McpTool] {
         try profiler.measureFFI("getAllMcpTools") {
@@ -571,7 +599,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     func createProject(
         name: String,
         description: String,
-        agentDefinitionIds: [String],
+        agentPubkeys: [String],
         mcpToolIds: [String]
     ) throws {
         try profiler.measureFFI("createProject") {
@@ -579,7 +607,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                 try core.createProject(
                     name: name,
                     description: description,
-                    agentDefinitionIds: agentDefinitionIds,
+                    agentPubkeys: agentPubkeys,
                     mcpToolIds: mcpToolIds
                 )
             } catch let error as TenexError {
@@ -595,7 +623,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         description: String,
         repoUrl: String?,
         pictureUrl: String?,
-        agentDefinitionIds: [String],
+        agentPubkeys: [String],
         mcpToolIds: [String]
     ) throws {
         try profiler.measureFFI("updateProject") {
@@ -606,7 +634,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     description: description,
                     repoUrl: repoUrl,
                     pictureUrl: pictureUrl,
-                    agentDefinitionIds: agentDefinitionIds,
+                    agentPubkeys: agentPubkeys,
                     mcpToolIds: mcpToolIds
                 )
             } catch let error as TenexError {
@@ -714,6 +742,12 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
+        }
+    }
+
+    func getProjectBackendPubkey(projectId: String) -> String? {
+        profiler.measureFFI("getProjectBackendPubkey") {
+            core.getProjectBackendPubkey(projectId: projectId)
         }
     }
 

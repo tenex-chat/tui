@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use tenex_core::models::{AgentDefinition, MCPTool};
+use tenex_core::models::{AgentDefinition, InstalledAgent, MCPTool};
 use tenex_core::runtime::CoreHandle;
 use tenex_core::tlog;
 
@@ -1675,6 +1675,9 @@ impl App {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
                     self.refresh_selected_agent_from_project_status();
                 }
+                DataChange::InstalledAgentList { json } => {
+                    self.data_store.borrow_mut().handle_status_event_json(&json);
+                }
                 DataChange::MCPToolsChanged => {
                     // MCP tools are already updated in the store by the worker
                 }
@@ -3144,18 +3147,70 @@ impl App {
             .collect()
     }
 
-    /// Get agent definitions filtered by a custom filter string
-    pub fn agent_definitions_filtered_by(&self, filter: &str) -> Vec<AgentDefinition> {
+    pub fn project_backend_pubkey(&self, project_a_tag: &str) -> Option<String> {
         self.data_store
             .borrow()
-            .content
-            .get_agent_definitions()
-            .into_iter()
-            .filter(|d| {
+            .get_project_status(project_a_tag)
+            .filter(|status| status.is_online())
+            .map(|status| status.backend_pubkey.clone())
+    }
+
+    pub fn has_installed_agent_inventory(&self, backend_pubkey: Option<&str>) -> bool {
+        let Some(backend_pubkey) = backend_pubkey else {
+            return false;
+        };
+
+        self.data_store
+            .borrow()
+            .installed_agents_by_backend
+            .contains_key(backend_pubkey)
+    }
+
+    pub fn available_install_backends(&self) -> Vec<String> {
+        let mut backends: Vec<String> = self
+            .data_store
+            .borrow()
+            .installed_agents_by_backend
+            .keys()
+            .cloned()
+            .collect();
+        backends.sort();
+        backends
+    }
+
+    pub fn install_target_backend_pubkey(&self) -> Option<String> {
+        if let Some(project) = &self.selected_project {
+            let backend_pubkey = self.project_backend_pubkey(&project.a_tag());
+            if self.has_installed_agent_inventory(backend_pubkey.as_deref()) {
+                return backend_pubkey;
+            }
+        }
+
+        let mut backends = self.available_install_backends();
+        if backends.len() == 1 {
+            backends.pop()
+        } else {
+            None
+        }
+    }
+
+    pub fn installed_agents_filtered_by(
+        &self,
+        backend_pubkey: Option<&str>,
+        filter: &str,
+    ) -> Vec<InstalledAgent> {
+        let Some(backend_pubkey) = backend_pubkey else {
+            return Vec::new();
+        };
+
+        self.data_store
+            .borrow()
+            .get_installed_agents(backend_pubkey)
+            .iter()
+            .filter(|agent| {
                 filter.is_empty()
-                    || fuzzy_matches(&d.name, filter)
-                    || fuzzy_matches(&d.description, filter)
-                    || fuzzy_matches(&d.role, filter)
+                    || fuzzy_matches(&agent.slug, filter)
+                    || fuzzy_matches(&agent.pubkey, filter)
             })
             .cloned()
             .collect()

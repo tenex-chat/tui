@@ -360,14 +360,16 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if let Some(project) = all_projects.get(app.sidebar_project_index) {
                 let a_tag = project.a_tag();
                 let project_name = project.title.clone();
-                let agent_definition_ids = project.agent_definition_ids.clone();
+                let backend_pubkey = app.project_backend_pubkey(&a_tag);
+                let agent_pubkeys = project.agent_pubkeys.clone();
                 let mcp_tool_ids = project.mcp_tool_ids.clone();
 
                 app.modal_state =
                     ui::modal::ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
                         a_tag,
                         project_name,
-                        agent_definition_ids,
+                        backend_pubkey,
+                        agent_pubkeys,
                         mcp_tool_ids,
                     ));
             }
@@ -773,33 +775,26 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && code == KeyCode::Char('d')
             && state.focus == ProjectSettingsFocus::Agents
-            && !state.pending_agent_definition_ids.is_empty()
+            && !state.pending_agent_pubkeys.is_empty()
         {
             use ui::modal::AgentDeletionState;
-            let agent_id = state.pending_agent_definition_ids[state.selector_index].clone();
+            let agent_pubkey = state.pending_agent_pubkeys[state.selector_index].clone();
             let project_a_tag = state.project_a_tag.clone();
 
-            let (agent_pubkey, agent_name) = {
+            let agent_name = {
                 let ds = app.data_store.borrow();
-                if let Some(agent) = ds.content.get_agent_definition(&agent_id) {
-                    (agent.pubkey.clone(), agent.name.clone())
-                } else {
-                    (
-                        String::new(),
-                        agent_id[..16.min(agent_id.len())].to_string(),
-                    )
-                }
+                ds.get_installed_agents(state.backend_pubkey.as_deref().unwrap_or(""))
+                    .iter()
+                    .find(|agent| agent.pubkey == agent_pubkey)
+                    .map(|agent| agent.slug.clone())
+                    .unwrap_or_else(|| agent_pubkey[..16.min(agent_pubkey.len())].to_string())
             };
 
-            if !agent_pubkey.is_empty() {
-                app.modal_state = ModalState::AgentDeletion(AgentDeletionState::new(
-                    agent_pubkey,
-                    agent_name,
-                    project_a_tag,
-                ));
-            } else {
-                app.modal_state = ModalState::ProjectSettings(state);
-            }
+            app.modal_state = ModalState::AgentDeletion(AgentDeletionState::new(
+                agent_pubkey,
+                agent_name,
+                project_a_tag,
+            ));
             return;
         }
 
@@ -841,7 +836,7 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 let visible_height = state.visible_height();
                 match state.focus {
                     ProjectSettingsFocus::Agents => {
-                        let count = state.pending_agent_definition_ids.len();
+                        let count = state.pending_agent_pubkeys.len();
                         if state.selector_index + 1 < count {
                             state.selector_index += 1;
                             state.adjust_agents_scroll(visible_height);
@@ -857,9 +852,15 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Char('a') => {
-                state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
-                state.add_filter.clear();
-                state.add_index = 0;
+                if state.backend_pubkey.is_none() {
+                    app.set_warning_status("Project backend must be online before assigning agents");
+                } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
+                    app.set_warning_status("Waiting for backend 24011 inventory");
+                } else {
+                    state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
+                    state.add_filter.clear();
+                    state.add_index = 0;
+                }
             }
             KeyCode::Char('t') => {
                 state.in_add_mode = Some(ProjectSettingsAddMode::McpTool);
@@ -871,9 +872,9 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 let visible_height = state.visible_height();
                 match state.focus {
                     ProjectSettingsFocus::Agents => {
-                        if !state.pending_agent_definition_ids.is_empty() {
+                        if !state.pending_agent_pubkeys.is_empty() {
                             state.remove_agent(state.selector_index);
-                            if state.selector_index >= state.pending_agent_definition_ids.len()
+                            if state.selector_index >= state.pending_agent_pubkeys.len()
                                 && state.selector_index > 0
                             {
                                 state.selector_index -= 1;
@@ -897,7 +898,7 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('p') => {
                 // Set PM only works in agents pane
                 if state.focus == ProjectSettingsFocus::Agents
-                    && !state.pending_agent_definition_ids.is_empty()
+                    && !state.pending_agent_pubkeys.is_empty()
                     && state.selector_index > 0
                 {
                     state.set_pm(state.selector_index);
@@ -908,13 +909,13 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
             KeyCode::Enter => {
                 if state.has_changes() {
                     let project_a_tag = state.project_a_tag.clone();
-                    let agent_definition_ids = state.pending_agent_definition_ids.clone();
+                    let agent_pubkeys = state.pending_agent_pubkeys.clone();
                     let mcp_tool_ids = state.pending_mcp_tool_ids.clone();
 
                     if let Some(ref core_handle) = app.core_handle {
                         if let Err(e) = core_handle.send(NostrCommand::UpdateProjectAgents {
                             project_a_tag,
-                            agent_definition_ids,
+                            agent_pubkeys,
                             mcp_tool_ids,
                         }) {
                             app.set_warning_status(&format!("Failed to update agents: {}", e));
@@ -979,7 +980,7 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
             _ => {}
         },
         CreateProjectStep::SelectAgents => {
-            let filtered_agents = app.agent_definitions_filtered_by(&state.agent_selector.filter);
+            let filtered_agents: Vec<tenex_core::models::AgentDefinition> = Vec::new();
             let item_count = filtered_agents.len();
 
             match code {
@@ -1006,7 +1007,7 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                 }
                 KeyCode::Char(' ') => {
                     if let Some(agent) = filtered_agents.get(state.agent_selector.index) {
-                        state.toggle_agent(agent.id.clone());
+                        state.toggle_agent(agent.pubkey.clone());
                     }
                 }
                 KeyCode::Enter => {
@@ -1062,7 +1063,7 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                             slug: None, // Generate from name
                             name: state.name.clone(),
                             description: state.description.clone(),
-                            agent_definition_ids: state.agent_definition_ids.clone(),
+                            agent_pubkeys: state.agent_pubkeys.clone(),
                             mcp_tool_ids: all_tool_ids,
                             client: Some("tenex-tui".to_string()),
                         }) {
@@ -1464,6 +1465,8 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
         }
     } else if c == 'C' && app.view == View::AgentBrowser {
         open_create_project_from_agent_browser(app);
+    } else if c == 'i' && app.view == View::AgentBrowser {
+        install_selected_agent_definition_to_backend(app);
     } else if c == 'n' && app.view == View::AgentBrowser && !app.home.in_agent_detail() {
         app.modal_state = ui::modal::ModalState::CreateAgent(ui::modal::CreateAgentState::new());
     } else if app.view == View::AgentBrowser && !app.home.in_agent_detail() && c != 'q' && c != 'n'
@@ -1500,11 +1503,53 @@ fn open_create_project_from_agent_browser(app: &mut App) {
 
     let mut state = ui::modal::CreateProjectState::new();
     if let Some(agent) = selected_agent {
-        state.agent_definition_ids.push(agent.id);
         state.name = format!("{} Team", agent.name);
     }
 
     app.modal_state = ui::modal::ModalState::CreateProject(state);
+}
+
+fn install_selected_agent_definition_to_backend(app: &mut App) {
+    let selected_agent = if app.home.in_agent_detail() {
+        app.home.viewing_agent_id.as_ref().and_then(|agent_id| {
+            app.data_store
+                .borrow()
+                .content
+                .get_agent_definition(agent_id)
+                .cloned()
+        })
+    } else {
+        let agents = app.filtered_agent_definitions();
+        agents.get(app.home.agent_browser_index).cloned()
+    };
+
+    let Some(agent) = selected_agent else {
+        app.set_warning_status("No agent definition selected");
+        return;
+    };
+
+    let Some(backend_pubkey) = app.install_target_backend_pubkey() else {
+        let install_backends = app.available_install_backends();
+        if install_backends.is_empty() {
+            app.set_warning_status("No approved online backend publishing 24011");
+        } else {
+            app.set_warning_status("Multiple live backends available; install from a project-backed flow");
+        }
+        return;
+    };
+
+    if let Some(core_handle) = app.core_handle.clone() {
+        if let Err(e) = core_handle.send(NostrCommand::CreateBackendAgent {
+            backend_pubkey,
+            definition_event_id: agent.id,
+            slug_override: None,
+            client: Some("tenex-tui".to_string()),
+        }) {
+            app.set_warning_status(&format!("Failed to install agent: {}", e));
+        } else {
+            app.set_warning_status(&format!("Install request sent for {}", agent.name));
+        }
+    }
 }
 
 fn handle_chat_enter(app: &mut App) -> Result<()> {

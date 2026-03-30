@@ -11,7 +11,7 @@ import SwiftUI
             isDeleted: false,
             pubkey: "",
             participants: [],
-            agentDefinitionIds: [],
+            agentPubkeys: [],
             mcpToolIds: [],
             createdAt: 0
         )
@@ -30,7 +30,7 @@ import SwiftUI
             isDeleted: false,
             pubkey: "",
             participants: [],
-            agentDefinitionIds: [],
+            agentPubkeys: [],
             mcpToolIds: [],
             createdAt: 0
         ),

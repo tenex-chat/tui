@@ -226,63 +226,11 @@ final class TeamsViewModel: ObservableObject {
     }
 
     func hireTeam(_ team: TeamInfo, into project: Project) async -> TeamHireResult {
-        guard let coreManager else {
-            return TeamHireResult(
-                title: "Unable to Hire",
-                message: "Core manager is unavailable."
-            )
-        }
-
-        var mergedAgentIds = project.agentDefinitionIds
-        var existing = Set(project.agentDefinitionIds)
-        var newlyAdded = 0
-
-        for agentId in team.agentDefinitionIds {
-            if existing.insert(agentId).inserted {
-                mergedAgentIds.append(agentId)
-                newlyAdded += 1
-            }
-        }
-
-        let alreadyPresent = max(0, team.agentDefinitionIds.count - newlyAdded)
-
-        if newlyAdded == 0 {
-            return TeamHireResult(
-                title: "Already Hired",
-                message: "All \(team.agentDefinitionIds.count) agent definition\(team.agentDefinitionIds.count == 1 ? " is" : "s are") already in \(project.title)."
-            )
-        }
-
-        do {
-            try await coreManager.safeCore.updateProject(
-                projectId: project.id,
-                title: project.title,
-                description: project.description ?? "",
-                repoUrl: project.repoUrl,
-                pictureUrl: project.pictureUrl,
-                agentDefinitionIds: mergedAgentIds,
-                mcpToolIds: project.mcpToolIds
-            )
-
-            await coreManager.fetchData()
-
-            if alreadyPresent > 0 {
-                return TeamHireResult(
-                    title: "Partially Hired",
-                    message: "Added \(newlyAdded) new agent\(newlyAdded == 1 ? "" : "s") to \(project.title). \(alreadyPresent) were already present."
-                )
-            }
-
-            return TeamHireResult(
-                title: "Team Hired",
-                message: "Added \(newlyAdded) agent\(newlyAdded == 1 ? "" : "s") to \(project.title)."
-            )
-        } catch {
-            return TeamHireResult(
-                title: "Unable to Hire",
-                message: error.localizedDescription
-            )
-        }
+        let _ = (team, project)
+        return TeamHireResult(
+            title: "Unavailable",
+            message: "Hiring a team directly into a project is disabled until project membership can be mapped to installed backend agents."
+        )
     }
 
     private func apply(items: [TeamListItem]) {

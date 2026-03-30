@@ -205,7 +205,7 @@ struct ProjectsTabView: View {
                             ProjectRowView(
                                 project: project,
                                 isOnline: coreManager.projectOnlineStatus[project.id] ?? false,
-                                agentCount: project.agentDefinitionIds.count,
+                                agentCount: project.agentPubkeys.count,
                                 toolCount: project.mcpToolIds.count,
                                 showsChevron: false
                             )
@@ -215,7 +215,7 @@ struct ProjectsTabView: View {
                                 ProjectRowView(
                                     project: project,
                                     isOnline: coreManager.projectOnlineStatus[project.id] ?? false,
-                                    agentCount: project.agentDefinitionIds.count,
+                                    agentCount: project.agentPubkeys.count,
                                     toolCount: project.mcpToolIds.count,
                                     showsChevron: true
                                 )

@@ -10,8 +10,8 @@ pub struct Project {
     pub is_deleted: bool,
     pub pubkey: String,
     pub participants: Vec<String>,
-    pub agent_definition_ids: Vec<String>, // Agent definition event IDs (kind 4199)
-    pub mcp_tool_ids: Vec<String>,         // MCP tool event IDs (kind 4200)
+    pub agent_pubkeys: Vec<String>,
+    pub mcp_tool_ids: Vec<String>,
     pub created_at: u64,
 }
 
@@ -31,7 +31,7 @@ impl Project {
         let mut picture_url: Option<String> = None;
         let mut is_deleted = false;
         let mut participants = Vec::new();
-        let mut agent_definition_ids = Vec::new();
+        let mut agent_pubkeys = Vec::new();
         let mut mcp_tool_ids = Vec::new();
 
         for tag in note.tags() {
@@ -70,20 +70,19 @@ impl Project {
                 Some("deleted") => {
                     is_deleted = true;
                 }
-                Some("p") => {
+                Some("P") => {
                     if let Some(p) = tag.get(1).and_then(|t| t.variant().str()) {
                         participants.push(p.to_string());
                     } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
                         participants.push(hex::encode(id_bytes));
                     }
                 }
-                Some("agent") => {
+                Some("p") => {
                     if let Some(elem) = tag.get(1) {
-                        // nostrdb stores event IDs as binary Id variant, not as strings
                         if let Some(id_bytes) = elem.variant().id() {
-                            agent_definition_ids.push(hex::encode(id_bytes));
+                            agent_pubkeys.push(hex::encode(id_bytes));
                         } else if let Some(s) = elem.variant().str() {
-                            agent_definition_ids.push(s.to_string());
+                            agent_pubkeys.push(s.to_string());
                         }
                     }
                 }
@@ -119,7 +118,7 @@ impl Project {
             is_deleted,
             pubkey,
             participants,
-            agent_definition_ids,
+            agent_pubkeys,
             mcp_tool_ids,
             created_at: note.created_at(),
         })
@@ -167,7 +166,7 @@ mod tests {
             is_deleted: false,
             pubkey: "a".repeat(64),
             participants: vec![],
-            agent_definition_ids: vec![],
+            agent_pubkeys: vec![],
             mcp_tool_ids: vec![],
             created_at: 0,
         };
@@ -179,7 +178,7 @@ mod tests {
     fn test_from_note_parses_project_metadata_and_assignments() {
         let keys = Keys::generate();
         let participant = "b".repeat(64);
-        let agent_id = "c".repeat(64);
+        let agent_pubkey = "c".repeat(64);
         let mcp_id = "d".repeat(64);
 
         let event = EventBuilder::new(Kind::Custom(31933), "Project description")
@@ -200,12 +199,12 @@ mod tests {
                 vec!["https://cdn.example.com/project.png".to_string()],
             ))
             .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("p")),
+                TagKind::Custom(std::borrow::Cow::Borrowed("P")),
                 vec![participant.clone()],
             ))
             .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
-                vec![agent_id.clone()],
+                TagKind::Custom(std::borrow::Cow::Borrowed("p")),
+                vec![agent_pubkey.clone()],
             ))
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
@@ -227,7 +226,7 @@ mod tests {
             Some("https://cdn.example.com/project.png")
         );
         assert_eq!(project.participants, vec![participant]);
-        assert_eq!(project.agent_definition_ids, vec![agent_id]);
+        assert_eq!(project.agent_pubkeys, vec![agent_pubkey]);
         assert_eq!(project.mcp_tool_ids, vec![mcp_id]);
         assert!(!project.is_deleted);
     }

@@ -520,9 +520,9 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
 
         let keys = Keys::generate();
-        // Use valid 64-character hex strings (event IDs)
-        let agent_id_1 = "abc123def456abc123def456abc123def456abc123def456abc123def456abc1";
-        let agent_id_2 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        // Use valid 64-character hex strings (agent pubkeys)
+        let agent_pubkey_1 = "abc123def456abc123def456abc123def456abc123def456abc123def456abc1";
+        let agent_pubkey_2 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
         let event = EventBuilder::new(Kind::Custom(31933), "Description")
             .tag(Tag::custom(
@@ -534,12 +534,12 @@ mod tests {
                 vec!["Project With Agents".to_string()],
             ))
             .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
-                vec![agent_id_1.to_string()],
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+                vec![agent_pubkey_1.to_string()],
             ))
             .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
-                vec![agent_id_2.to_string()],
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+                vec![agent_pubkey_2.to_string()],
             ))
             .sign_with_keys(&keys)
             .unwrap();
@@ -554,13 +554,13 @@ mod tests {
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].title, "Project With Agents");
         assert_eq!(
-            projects[0].agent_definition_ids.len(),
+            projects[0].agent_pubkeys.len(),
             2,
-            "Expected 2 agent IDs, got {:?}",
-            projects[0].agent_definition_ids
+            "Expected 2 agent pubkeys, got {:?}",
+            projects[0].agent_pubkeys
         );
-        assert_eq!(projects[0].agent_definition_ids[0], agent_id_1);
-        assert_eq!(projects[0].agent_definition_ids[1], agent_id_2);
+        assert_eq!(projects[0].agent_pubkeys[0], agent_pubkey_1);
+        assert_eq!(projects[0].agent_pubkeys[1], agent_pubkey_2);
     }
 
     #[test]

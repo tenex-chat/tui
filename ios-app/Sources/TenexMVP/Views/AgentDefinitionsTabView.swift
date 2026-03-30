@@ -398,13 +398,7 @@ struct AgentDefinitionsTabView: View {
             Button {
                 presentAssignmentSheet(for: item)
             } label: {
-                Label("Add to Projects", systemImage: "plus")
-            }
-
-            Button {
-                presentTeamCreationSheet(for: item)
-            } label: {
-                Label("Create Team", systemImage: "person.3")
+                Label("Install to Backend", systemImage: "bolt.horizontal.circle")
             }
         }
     }
@@ -740,52 +734,9 @@ private struct AgentDefinitionDetailView: View {
                         Button {
                             showAssignmentSheet = true
                         } label: {
-                            Label("Hire", systemImage: "play.fill")
+                            Label("Install", systemImage: "bolt.horizontal.circle")
                         }
                         .adaptiveProminentGlassButtonStyle()
-
-                        if ownedTeams.isEmpty {
-                            Button {
-                                showTeamCreationSheet = true
-                            } label: {
-                                Label("Create team", systemImage: "plus")
-                            }
-                            .adaptiveGlassButtonStyle()
-                        } else {
-                            Menu {
-                                ForEach(ownedTeams, id: \.id) { team in
-                                    let alreadyHasAgent = team.agentDefinitionIds.contains(item.agent.id)
-                                    Button {
-                                        Task { await addAgent(to: team) }
-                                    } label: {
-                                        Label(
-                                            teamTitle(team),
-                                            systemImage: alreadyHasAgent ? "checkmark.circle.fill" : "person.3"
-                                        )
-                                    }
-                                    .disabled(isAddingToTeam || alreadyHasAgent)
-                                }
-
-                                Divider()
-
-                                Button {
-                                    showTeamCreationSheet = true
-                                } label: {
-                                    Label("Create new team", systemImage: "plus")
-                                }
-                            } label: {
-                                if isAddingToTeam {
-                                    HStack(spacing: 8) {
-                                        ProgressView()
-                                            .controlSize(.small)
-                                        Text("Add to team")
-                                    }
-                                } else {
-                                    Label("Add to team", systemImage: "plus")
-                                }
-                            }
-                            .adaptiveGlassButtonStyle()
-                        }
                     }
                     .controlSize(.extraLarge)
                 }
@@ -957,57 +908,26 @@ private struct AgentDefinitionDetailView: View {
 
     @MainActor
     private func addAgent(to team: Project) async {
-        guard !isAddingToTeam else { return }
-
-        let teamName = teamTitle(team)
-        if team.agentDefinitionIds.contains(item.agent.id) {
-            onAssignmentResult(
-                AgentAssignmentResult(
-                    title: "Already in Team",
-                    message: "\(displayName) is already in \(teamName)."
-                )
+        let _ = team
+        onAssignmentResult(
+            AgentAssignmentResult(
+                title: "Unavailable",
+                message: "Definition-based team assignment is disabled until teams can target installed backend agents."
             )
-            return
-        }
-
-        isAddingToTeam = true
-        defer { isAddingToTeam = false }
-
-        var updatedAgentIds = team.agentDefinitionIds
-        updatedAgentIds.append(item.agent.id)
-
-        do {
-            try await coreManager.safeCore.updateProject(
-                projectId: team.id,
-                title: team.title,
-                description: team.description ?? "",
-                repoUrl: team.repoUrl,
-                pictureUrl: team.pictureUrl,
-                agentDefinitionIds: updatedAgentIds,
-                mcpToolIds: team.mcpToolIds
-            )
-            await coreManager.fetchData()
-
-            onAssignmentResult(
-                AgentAssignmentResult(
-                    title: "Added to Team",
-                    message: "Added \(displayName) to \(teamName)."
-                )
-            )
-        } catch {
-            onAssignmentResult(
-                AgentAssignmentResult(
-                    title: "Unable to Add",
-                    message: "Couldn't add \(displayName) to \(teamName)."
-                )
-            )
-        }
+        )
     }
 
     private func openAuthorProfile() {
         guard let url = authorProfileURL else { return }
         openURL(url)
     }
+}
+
+private struct BackendInstallTarget: Identifiable, Hashable {
+    let pubkey: String
+    let projectTitles: [String]
+
+    var id: String { pubkey }
 }
 
 private struct AgentDefinitionProjectAssignmentSheet: View {
@@ -1017,7 +937,7 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
     let item: AgentDefinitionListItem
     let onFinished: (AgentAssignmentResult) -> Void
 
-    @State private var selectedProjectIds: Set<String> = []
+    @State private var selectedBackendPubkeys: Set<String> = []
     @State private var searchText = ""
     @State private var isSaving = false
 
@@ -1025,37 +945,52 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
         item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name
     }
 
-    private var sortedProjects: [Project] {
-        coreManager.projects
-            .filter { !$0.isDeleted }
+    private var sortedBackends: [BackendInstallTarget] {
+        var backends: [String: Set<String>] = [:]
+
+        for project in coreManager.projects where !project.isDeleted {
+            guard coreManager.projectOnlineStatus[project.id] ?? false else { continue }
+            guard let backendPubkey = coreManager.safeCore.getProjectBackendPubkey(projectId: project.id) else { continue }
+            backends[backendPubkey, default: []].insert(project.title)
+        }
+
+        return backends
+            .map { pubkey, titles in
+                BackendInstallTarget(pubkey: pubkey, projectTitles: titles.sorted())
+            }
             .sorted { lhs, rhs in
-                lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+                let lhsLabel = lhs.projectTitles.first ?? lhs.pubkey
+                let rhsLabel = rhs.projectTitles.first ?? rhs.pubkey
+                return lhsLabel.localizedCaseInsensitiveCompare(rhsLabel) == .orderedAscending
             }
     }
 
-    private var filteredProjects: [Project] {
+    private var filteredBackends: [BackendInstallTarget] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return sortedProjects }
+        guard !query.isEmpty else { return sortedBackends }
 
-        return sortedProjects.filter { project in
-            project.title.localizedCaseInsensitiveContains(query)
-                || project.id.localizedCaseInsensitiveContains(query)
-                || (project.description?.localizedCaseInsensitiveContains(query) ?? false)
+        return sortedBackends.filter { backend in
+            backend.pubkey.localizedCaseInsensitiveContains(query)
+                || backend.projectTitles.contains(where: { $0.localizedCaseInsensitiveContains(query) })
         }
     }
 
     var body: some View {
         NavigationStack {
             List {
-                if filteredProjects.isEmpty {
+                if filteredBackends.isEmpty {
                     ContentUnavailableView(
-                        "No Projects",
-                        systemImage: "folder.badge.questionmark",
-                        description: Text(searchText.isEmpty ? "No kind:31933 project events found." : "No projects match your search.")
+                        "No Live Backends",
+                        systemImage: "bolt.horizontal.circle",
+                        description: Text(
+                            searchText.isEmpty
+                                ? "Bring a backend online so you can install this agent definition."
+                                : "No backends match your search."
+                        )
                     )
                 } else {
-                    ForEach(filteredProjects, id: \.id) { project in
-                        projectRow(project)
+                    ForEach(filteredBackends) { backend in
+                        backendRow(backend)
                             .listRowSeparator(.visible)
                     }
                 }
@@ -1065,8 +1000,8 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
             #else
             .listStyle(.inset)
             #endif
-            .searchable(text: $searchText, prompt: "Search projects")
-            .navigationTitle("Add to Projects")
+            .searchable(text: $searchText, prompt: "Search live backends")
+            .navigationTitle("Install to Backends")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #else
@@ -1087,11 +1022,11 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
                         if isSaving {
                             ProgressView()
                         } else {
-                            Text("Add")
+                            Text("Install")
                                 .fontWeight(.semibold)
                         }
                     }
-                    .disabled(selectedProjectIds.isEmpty || isSaving)
+                    .disabled(selectedBackendPubkeys.isEmpty || isSaving)
                 }
             }
         }
@@ -1102,32 +1037,30 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
         #endif
     }
 
-    private func projectRow(_ project: Project) -> some View {
-        let alreadyAssigned = project.agentDefinitionIds.contains(item.agent.id)
-        let isSelected = selectedProjectIds.contains(project.id)
+    private func backendRow(_ backend: BackendInstallTarget) -> some View {
+        let isSelected = selectedBackendPubkeys.contains(backend.pubkey)
 
         return Button {
-            guard !alreadyAssigned else { return }
             if isSelected {
-                selectedProjectIds.remove(project.id)
+                selectedBackendPubkeys.remove(backend.pubkey)
             } else {
-                selectedProjectIds.insert(project.id)
+                selectedBackendPubkeys.insert(backend.pubkey)
             }
         } label: {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(project.title)
+                    Text(backend.projectTitles.first ?? "TENEX Backend")
                         .font(.body.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
 
-                    Text(project.id)
+                    Text(shortPubkey(backend.pubkey))
                         .font(.caption2.monospaced())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
 
-                    if alreadyAssigned {
-                        Text("Already has this agent tag")
+                    if backend.projectTitles.count > 1 {
+                        Text("\(backend.projectTitles.count) live projects on this backend")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1135,15 +1068,9 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
 
                 Spacer(minLength: 0)
 
-                if alreadyAssigned {
-                    Label("Added", systemImage: "checkmark.seal.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                }
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
             }
             .contentShape(Rectangle())
         }
@@ -1152,64 +1079,58 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
     }
 
     private func assignToProjects() async {
-        guard !selectedProjectIds.isEmpty else { return }
+        guard !selectedBackendPubkeys.isEmpty else { return }
 
         isSaving = true
         defer { isSaving = false }
 
-        let targetProjects = sortedProjects.filter { selectedProjectIds.contains($0.id) }
+        let targetBackends = sortedBackends.filter { selectedBackendPubkeys.contains($0.pubkey) }
 
-        var updatedCount = 0
-        var failedProjects: [String] = []
+        var installedCount = 0
+        var failedBackends: [String] = []
 
-        for project in targetProjects {
-            if project.agentDefinitionIds.contains(item.agent.id) {
-                continue
-            }
-
-            var updatedAgentIds = project.agentDefinitionIds
-            updatedAgentIds.append(item.agent.id)
-
+        for backend in targetBackends {
             do {
-                try await coreManager.safeCore.updateProject(
-                    projectId: project.id,
-                    title: project.title,
-                    description: project.description ?? "",
-                    repoUrl: project.repoUrl,
-                    pictureUrl: project.pictureUrl,
-                    agentDefinitionIds: updatedAgentIds,
-                    mcpToolIds: project.mcpToolIds
+                try await coreManager.safeCore.createBackendAgent(
+                    backendPubkey: backend.pubkey,
+                    definitionEventId: item.agent.id,
+                    slugOverride: nil
                 )
-                updatedCount += 1
+                installedCount += 1
             } catch {
-                failedProjects.append(project.title)
+                failedBackends.append(backend.pubkey)
             }
         }
 
-        if updatedCount > 0 {
+        if installedCount > 0 {
             await coreManager.fetchData()
         }
 
         let result: AgentAssignmentResult
-        if failedProjects.isEmpty {
+        if failedBackends.isEmpty {
             result = AgentAssignmentResult(
-                title: "Agent Added",
-                message: "Added \(displayName) to \(updatedCount) project\(updatedCount == 1 ? "" : "s")."
+                title: "Install Requested",
+                message: "Requested install of \(displayName) on \(installedCount) backend\(installedCount == 1 ? "" : "s")."
             )
-        } else if updatedCount > 0 {
+        } else if installedCount > 0 {
             result = AgentAssignmentResult(
-                title: "Partially Added",
-                message: "Added to \(updatedCount) project\(updatedCount == 1 ? "" : "s"). Failed for \(failedProjects.count) project\(failedProjects.count == 1 ? "" : "s")."
+                title: "Partially Installed",
+                message: "Requested install on \(installedCount) backend\(installedCount == 1 ? "" : "s"). Failed for \(failedBackends.count) backend\(failedBackends.count == 1 ? "" : "s")."
             )
         } else {
             result = AgentAssignmentResult(
-                title: "Unable to Add",
-                message: "No projects were updated for \(displayName)."
+                title: "Unable to Install",
+                message: "No backend accepted the install request for \(displayName)."
             )
         }
 
         onFinished(result)
         dismiss()
+    }
+
+    private func shortPubkey(_ pubkey: String) -> String {
+        guard pubkey.count > 16 else { return pubkey }
+        return "\(pubkey.prefix(8))...\(pubkey.suffix(8))"
     }
 }
 
@@ -1329,32 +1250,15 @@ private struct AgentDefinitionTeamCreationSheet: View {
 
     @MainActor
     private func createTeam() async {
-        guard !trimmedTeamName.isEmpty else { return }
-
-        isSaving = true
-        defer { isSaving = false }
-
-        do {
-            try await coreManager.safeCore.createProject(
-                name: trimmedTeamName,
-                description: trimmedDescription,
-                agentDefinitionIds: [item.agent.id],
-                mcpToolIds: item.agent.mcpServers
+        let _ = trimmedTeamName
+        let _ = trimmedDescription
+        onFinished(
+            AgentAssignmentResult(
+                title: "Unavailable",
+                message: "Creating project-backed teams from agent definitions is disabled in this version."
             )
-
-            await coreManager.fetchData()
-
-            onFinished(
-                AgentAssignmentResult(
-                    title: "Team Created",
-                    message: "Created \(trimmedTeamName) with \(displayName)."
-                )
-            )
-            dismiss()
-        } catch {
-            errorMessage = error.localizedDescription
-            showError = true
-        }
+        )
+        dismiss()
     }
 }
 

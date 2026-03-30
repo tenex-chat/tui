@@ -697,6 +697,15 @@ pub static COMMANDS: &[Command] = &[
             }
         },
     },
+    Command {
+        key: 'i',
+        label: "Install to backend",
+        section: "Agent",
+        available: |app| app.view == View::AgentBrowser,
+        execute: |app| {
+            install_selected_agent_definition_to_backend(app);
+        },
+    },
 ];
 
 /// Get commands available for the current app state.
@@ -814,14 +823,59 @@ fn open_project_settings(app: &mut App) {
     if let Some(project) = all_projects.get(app.sidebar_project_index) {
         let a_tag = project.a_tag();
         let project_name = project.title.clone();
-        let agent_definition_ids = project.agent_definition_ids.clone();
+        let backend_pubkey = app.project_backend_pubkey(&a_tag);
+        let agent_pubkeys = project.agent_pubkeys.clone();
         let mcp_tool_ids = project.mcp_tool_ids.clone();
         app.modal_state = ModalState::ProjectSettings(modal::ProjectSettingsState::new(
             a_tag,
             project_name,
-            agent_definition_ids,
+            backend_pubkey,
+            agent_pubkeys,
             mcp_tool_ids,
         ));
+    }
+}
+
+fn install_selected_agent_definition_to_backend(app: &mut App) {
+    let selected_agent = if app.home.in_agent_detail() {
+        app.home.viewing_agent_id.as_ref().and_then(|agent_id| {
+            app.data_store
+                .borrow()
+                .content
+                .get_agent_definition(agent_id)
+                .cloned()
+        })
+    } else {
+        let agents = app.filtered_agent_definitions();
+        agents.get(app.home.agent_browser_index).cloned()
+    };
+
+    let Some(agent) = selected_agent else {
+        app.set_warning_status("No agent definition selected");
+        return;
+    };
+
+    let Some(backend_pubkey) = app.install_target_backend_pubkey() else {
+        let install_backends = app.available_install_backends();
+        if install_backends.is_empty() {
+            app.set_warning_status("No approved online backend publishing 24011");
+        } else {
+            app.set_warning_status("Multiple live backends available; install from a project-backed flow");
+        }
+        return;
+    };
+
+    if let Some(core_handle) = app.core_handle.clone() {
+        if let Err(e) = core_handle.send(NostrCommand::CreateBackendAgent {
+            backend_pubkey,
+            definition_event_id: agent.id,
+            slug_override: None,
+            client: Some("tenex-tui".to_string()),
+        }) {
+            app.set_warning_status(&format!("Failed to install agent: {}", e));
+        } else {
+            app.set_warning_status(&format!("Install request sent for {}", agent.name));
+        }
     }
 }
 

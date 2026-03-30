@@ -2,38 +2,15 @@ use super::*;
 
 #[uniffi::export]
 impl TenexCore {
-    /// Get agents for a project.
+    /// Legacy helper for definition-based project agents.
     ///
-    /// Returns agents configured for the specified project.
-    /// Returns an error if the store cannot be accessed.
+    /// Project membership is now expressed as installed agent pubkeys in the
+    /// project metadata, so there is no reliable way to map membership back to
+    /// definition events from the local cache. This method is retained for ABI
+    /// stability and currently returns an empty list.
     pub fn get_agents(&self, project_id: String) -> Result<Vec<AgentDefinition>, TenexError> {
-        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
-            message: format!("Failed to acquire store lock: {}", e),
-        })?;
-
-        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
-            message: "Store not initialized - call init() first".to_string(),
-        })?;
-
-        // Find the project by ID and get its agent IDs (event IDs of kind:4199 definitions)
-        let project = store
-            .get_projects()
-            .iter()
-            .find(|p| p.id == project_id)
-            .cloned();
-        let agent_definition_ids: Vec<String> = match project {
-            Some(p) => p.agent_definition_ids,
-            None => return Ok(Vec::new()), // Project not found = empty agents (not an error)
-        };
-
-        // Get agent definitions for these IDs
-        Ok(store
-            .content
-            .get_agent_definitions()
-            .into_iter()
-            .filter(|agent| agent_definition_ids.contains(&agent.id))
-            .cloned()
-            .collect())
+        let _ = project_id;
+        Ok(Vec::new())
     }
 
     /// Get all available agents (not filtered by project).
@@ -55,6 +32,41 @@ impl TenexCore {
             .into_iter()
             .cloned()
             .collect())
+    }
+
+    pub fn get_installed_agents(
+        &self,
+        backend_pubkey: String,
+    ) -> Result<Vec<InstalledAgent>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store.get_installed_agents(&backend_pubkey).to_vec())
+    }
+
+    pub fn create_backend_agent(
+        &self,
+        backend_pubkey: String,
+        definition_event_id: String,
+        slug_override: Option<String>,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+        core_handle
+            .send(NostrCommand::CreateBackendAgent {
+                backend_pubkey,
+                definition_event_id,
+                slug_override,
+                client: Some("tenex-ios".to_string()),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send create backend agent command: {}", e),
+            })?;
+        Ok(())
     }
 
     /// Get all available team packs (kind:34199), deduped to latest by `pubkey + d_tag`.
