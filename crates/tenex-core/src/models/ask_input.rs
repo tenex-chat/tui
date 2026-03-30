@@ -127,20 +127,16 @@ impl AskInputState {
         match self.current_question() {
             Some(AskQuestion::SingleSelect { suggestions, .. }) => {
                 if let Some(suggestion) = suggestions.get(self.selected_option_index) {
-                    self.answers.push(QuestionAnswer {
-                        question_index: self.current_question_index,
-                        answer: Answer::SingleSelect(suggestion.to_string()),
-                    });
+                    self.set_answer_for_current_question(Answer::SingleSelect(
+                        suggestion.to_string(),
+                    ));
                     self.next_question();
                 }
             }
             Some(AskQuestion::MultiSelect { .. }) => {
                 let selected: Vec<String> = self.get_selected_multi_options();
                 if !selected.is_empty() {
-                    self.answers.push(QuestionAnswer {
-                        question_index: self.current_question_index,
-                        answer: Answer::MultiSelect(selected),
-                    });
+                    self.set_answer_for_current_question(Answer::MultiSelect(selected));
                     self.next_question();
                 }
             }
@@ -170,10 +166,17 @@ impl AskInputState {
 
     pub fn submit_custom_answer(&mut self) {
         if !self.custom_input.trim().is_empty() {
-            self.answers.push(QuestionAnswer {
-                question_index: self.current_question_index,
-                answer: Answer::CustomText(self.custom_input.trim().to_string()),
-            });
+            let trimmed_input = self.custom_input.trim().to_string();
+            let answer = match self.current_question() {
+                Some(AskQuestion::MultiSelect { .. }) => {
+                    let mut selected = self.get_selected_multi_options();
+                    selected.push(trimmed_input);
+                    Answer::MultiSelect(selected)
+                }
+                _ => Answer::CustomText(trimmed_input),
+            };
+
+            self.set_answer_for_current_question(answer);
             self.custom_input.clear();
             self.custom_cursor = 0;
             self.mode = InputMode::Selection;
@@ -230,14 +233,22 @@ impl AskInputState {
     }
 
     pub fn is_complete(&self) -> bool {
-        self.answers.len() == self.questions.len()
+        self.questions.iter().enumerate().all(|(question_index, _)| {
+            self.answers
+                .iter()
+                .any(|answer| answer.question_index == question_index)
+        })
     }
 
     pub fn format_response(&self) -> String {
         let mut response = String::new();
 
-        for qa in &self.answers {
-            if let Some(question) = self.questions.get(qa.question_index) {
+        for (question_index, question) in self.questions.iter().enumerate() {
+            if let Some(qa) = self
+                .answers
+                .iter()
+                .find(|answer| answer.question_index == question_index)
+            {
                 let title = match question {
                     AskQuestion::SingleSelect { title, .. } => title,
                     AskQuestion::MultiSelect { title, .. } => title,
@@ -286,6 +297,21 @@ impl AskInputState {
     pub fn move_cursor_right(&mut self) {
         if self.custom_cursor < self.custom_input.len() {
             self.custom_cursor += 1;
+        }
+    }
+
+    fn set_answer_for_current_question(&mut self, answer: Answer) {
+        if let Some(existing_answer) = self
+            .answers
+            .iter_mut()
+            .find(|existing| existing.question_index == self.current_question_index)
+        {
+            existing_answer.answer = answer;
+        } else {
+            self.answers.push(QuestionAnswer {
+                question_index: self.current_question_index,
+                answer,
+            });
         }
     }
 }
@@ -381,6 +407,41 @@ mod tests {
     }
 
     #[test]
+    fn test_multi_select_custom_input_preserves_checked_options() {
+        let questions = vec![AskQuestion::MultiSelect {
+            title: "Q1".to_string(),
+            question: "Choose multiple".to_string(),
+            options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        }];
+
+        let mut state = AskInputState::new(questions);
+        state.toggle_multi_select();
+        state.next_option();
+        state.toggle_multi_select();
+        state.next_option();
+        state.next_option();
+        state.enter_custom_mode();
+        state.insert_char('Z');
+        state.submit_custom_answer();
+
+        assert_eq!(state.answers.len(), 1);
+        match &state.answers[0].answer {
+            Answer::MultiSelect(selected) => {
+                assert_eq!(
+                    selected,
+                    &vec!["A".to_string(), "B".to_string(), "Z".to_string()]
+                );
+            }
+            _ => panic!("Expected MultiSelect answer"),
+        }
+
+        let response = state.format_response();
+        assert!(response.contains("- A"));
+        assert!(response.contains("- B"));
+        assert!(response.contains("- Z"));
+    }
+
+    #[test]
     fn test_multiple_questions() {
         let questions = vec![
             AskQuestion::SingleSelect {
@@ -405,5 +466,40 @@ mod tests {
         state.select_current_option();
         assert!(state.is_complete());
         assert_eq!(state.answers.len(), 2);
+    }
+
+    #[test]
+    fn test_multiple_questions_custom_second_formats_both_answers() {
+        let questions = vec![
+            AskQuestion::SingleSelect {
+                title: "Q1".to_string(),
+                question: "First".to_string(),
+                suggestions: vec!["A".to_string()],
+            },
+            AskQuestion::MultiSelect {
+                title: "Q2".to_string(),
+                question: "Second".to_string(),
+                options: vec!["X".to_string(), "Y".to_string()],
+            },
+        ];
+
+        let mut state = AskInputState::new(questions);
+        state.select_current_option();
+        state.toggle_multi_select();
+        state.next_option();
+        state.next_option();
+        state.enter_custom_mode();
+        state.insert_char('Z');
+        state.submit_custom_answer();
+
+        assert!(state.is_complete());
+        assert_eq!(state.answers.len(), 2);
+
+        let response = state.format_response();
+        assert!(response.contains("## Q1"));
+        assert!(response.contains("A"));
+        assert!(response.contains("## Q2"));
+        assert!(response.contains("- X"));
+        assert!(response.contains("- Z"));
     }
 }
