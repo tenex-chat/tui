@@ -344,8 +344,79 @@ fn render_agents_list(
     }
 }
 
-/// Render the tools list
+/// Render the tools list with MCP server info
 fn render_tools_list(
+    f: &mut Frame,
+    app: &App,
+    list_area: Rect,
+    state: &ProjectSettingsState,
+    show_selection: bool,
+    visible_height: usize,
+) {
+    // Show MCP servers from project status (read-only info)
+    let mcp_servers: Vec<String> = app
+        .data_store
+        .borrow()
+        .get_project_status(&state.project_a_tag)
+        .map(|status| {
+            status
+                .all_mcp_servers()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mcp_header_lines: u16 = if mcp_servers.is_empty() {
+        0
+    } else {
+        (mcp_servers.len() as u16 + 2).min(list_area.height / 3)
+    };
+
+    // Reserve space at the bottom for MCP servers info
+    let tools_height = if mcp_header_lines > 0 {
+        visible_height.saturating_sub(mcp_header_lines as usize)
+    } else {
+        visible_height
+    };
+
+    let tools_list_area = Rect::new(list_area.x, list_area.y, list_area.width, tools_height as u16);
+
+    render_tools_items(f, app, tools_list_area, state, show_selection, tools_height);
+
+    // Render MCP servers section below tools
+    if !mcp_servers.is_empty() {
+        let mcp_y = list_area.y + tools_height as u16;
+        let mcp_remaining = list_area.height.saturating_sub(tools_height as u16);
+        if mcp_remaining >= 2 {
+            let header_area = Rect::new(list_area.x, mcp_y, list_area.width, 1);
+            f.render_widget(
+                Paragraph::new(format!("MCP Servers ({})", mcp_servers.len())).style(
+                    Style::default()
+                        .fg(theme::TEXT_DIM)
+                        .add_modifier(Modifier::ITALIC),
+                ),
+                header_area,
+            );
+
+            for (i, server) in mcp_servers.iter().enumerate() {
+                let row = i as u16 + 1;
+                if row >= mcp_remaining {
+                    break;
+                }
+                let row_area = Rect::new(list_area.x, mcp_y + row, list_area.width, 1);
+                f.render_widget(
+                    Paragraph::new(format!("  {}", server))
+                        .style(Style::default().fg(theme::TEXT_MUTED)),
+                    row_area,
+                );
+            }
+        }
+    }
+}
+
+/// Render individual tool items
+fn render_tools_items(
     f: &mut Frame,
     app: &App,
     list_area: Rect,

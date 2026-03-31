@@ -1320,6 +1320,7 @@ pub enum AgentConfigFocus {
     Model,
     Tools,
     Skills,
+    McpServers,
 }
 
 impl AgentConfigFocus {
@@ -1328,16 +1329,18 @@ impl AgentConfigFocus {
             AgentConfigFocus::Agents => AgentConfigFocus::Model,
             AgentConfigFocus::Model => AgentConfigFocus::Tools,
             AgentConfigFocus::Tools => AgentConfigFocus::Skills,
-            AgentConfigFocus::Skills => AgentConfigFocus::Agents,
+            AgentConfigFocus::Skills => AgentConfigFocus::McpServers,
+            AgentConfigFocus::McpServers => AgentConfigFocus::Agents,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            AgentConfigFocus::Agents => AgentConfigFocus::Skills,
+            AgentConfigFocus::Agents => AgentConfigFocus::McpServers,
             AgentConfigFocus::Model => AgentConfigFocus::Agents,
             AgentConfigFocus::Tools => AgentConfigFocus::Model,
             AgentConfigFocus::Skills => AgentConfigFocus::Tools,
+            AgentConfigFocus::McpServers => AgentConfigFocus::Skills,
         }
     }
 }
@@ -1390,6 +1393,14 @@ pub struct AgentSettingsState {
     pub skills_cursor: usize,
     /// Scroll offset for skills list
     pub skills_scroll: usize,
+    /// Available MCP servers from project status
+    pub available_mcp_servers: Vec<String>,
+    /// Selected MCP servers by name
+    pub selected_mcp_servers: std::collections::HashSet<String>,
+    /// Cursor position in MCP servers list
+    pub mcp_cursor: usize,
+    /// Scroll offset for MCP servers list
+    pub mcp_scroll: usize,
 }
 
 impl AgentSettingsState {
@@ -1399,10 +1410,12 @@ impl AgentSettingsState {
         current_model: Option<String>,
         current_tools: Vec<String>,
         current_skills: Vec<String>,
+        current_mcp_servers: Vec<String>,
         is_pm: bool,
         available_models: Vec<String>,
         all_available_tools: Vec<String>,
         all_available_skills: Vec<String>,
+        all_available_mcp_servers: Vec<String>,
     ) -> Self {
         // Find index of current model (default to 0 if not found)
         let model_index = current_model
@@ -1420,6 +1433,10 @@ impl AgentSettingsState {
         let selected_skills: std::collections::HashSet<String> =
             current_skills.into_iter().collect();
 
+        // Build selected MCP servers set from current MCP servers
+        let selected_mcp_servers: std::collections::HashSet<String> =
+            current_mcp_servers.into_iter().collect();
+
         Self {
             agent_name,
             agent_pubkey,
@@ -1434,6 +1451,10 @@ impl AgentSettingsState {
             selected_skills,
             skills_cursor: 0,
             skills_scroll: 0,
+            available_mcp_servers: all_available_mcp_servers,
+            selected_mcp_servers,
+            mcp_cursor: 0,
+            mcp_scroll: 0,
         }
     }
 
@@ -1703,6 +1724,72 @@ impl AgentSettingsState {
             self.skills_scroll = self.skills_cursor.saturating_sub(visible_height - 1);
         }
     }
+
+    pub fn selected_mcp_servers_vec(&self) -> Vec<String> {
+        let mut servers: Vec<String> = self.selected_mcp_servers.iter().cloned().collect();
+        servers.sort();
+        servers
+    }
+
+    pub fn toggle_mcp_at_cursor(&mut self) {
+        let Some(server) = self.available_mcp_servers.get(self.mcp_cursor).cloned() else {
+            return;
+        };
+
+        if self.selected_mcp_servers.contains(&server) {
+            self.selected_mcp_servers.remove(&server);
+        } else {
+            self.selected_mcp_servers.insert(server);
+        }
+    }
+
+    pub fn toggle_all_mcp_servers(&mut self) {
+        if self.available_mcp_servers.is_empty() {
+            return;
+        }
+
+        let all_selected = self
+            .available_mcp_servers
+            .iter()
+            .all(|s| self.selected_mcp_servers.contains(s));
+
+        if all_selected {
+            for server in &self.available_mcp_servers {
+                self.selected_mcp_servers.remove(server);
+            }
+        } else {
+            for server in &self.available_mcp_servers {
+                self.selected_mcp_servers.insert(server.clone());
+            }
+        }
+    }
+
+    pub fn move_mcp_up(&mut self) {
+        if self.mcp_cursor > 0 {
+            self.mcp_cursor -= 1;
+            if self.mcp_cursor < self.mcp_scroll {
+                self.mcp_scroll = self.mcp_cursor;
+            }
+        }
+    }
+
+    pub fn move_mcp_down(&mut self) {
+        if self.mcp_cursor + 1 < self.available_mcp_servers.len() {
+            self.mcp_cursor += 1;
+        }
+    }
+
+    pub fn adjust_mcp_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+
+        if self.mcp_cursor < self.mcp_scroll {
+            self.mcp_scroll = self.mcp_cursor;
+        } else if self.mcp_cursor >= self.mcp_scroll + visible_height {
+            self.mcp_scroll = self.mcp_cursor.saturating_sub(visible_height - 1);
+        }
+    }
 }
 
 /// State for the unified agent selection + configuration modal.
@@ -1722,6 +1809,8 @@ pub struct AgentConfigState {
     pub original_tools: std::collections::HashSet<String>,
     /// Original skills for change detection
     pub original_skills: std::collections::HashSet<String>,
+    /// Original MCP servers for change detection
+    pub original_mcp_servers: std::collections::HashSet<String>,
     /// Original PM marker for change detection
     pub original_is_pm: bool,
     /// When true, Enter saves config globally (no project a-tag).
@@ -1738,6 +1827,7 @@ impl AgentConfigState {
             original_model: None,
             original_tools: std::collections::HashSet::new(),
             original_skills: std::collections::HashSet::new(),
+            original_mcp_servers: std::collections::HashSet::new(),
             original_is_pm: false,
             save_globally: false,
         }
@@ -1751,6 +1841,7 @@ impl AgentConfigState {
         original_model: Option<String>,
         original_tools: std::collections::HashSet<String>,
         original_skills: std::collections::HashSet<String>,
+        original_mcp_servers: std::collections::HashSet<String>,
         original_is_pm: bool,
     ) {
         self.active_agent_pubkey = active_agent_pubkey;
@@ -1758,6 +1849,7 @@ impl AgentConfigState {
         self.original_model = original_model;
         self.original_tools = original_tools;
         self.original_skills = original_skills;
+        self.original_mcp_servers = original_mcp_servers;
         self.original_is_pm = original_is_pm;
     }
 
@@ -1770,6 +1862,7 @@ impl AgentConfigState {
         current_model != self.original_model
             || settings.selected_tools != self.original_tools
             || settings.selected_skills != self.original_skills
+            || settings.selected_mcp_servers != self.original_mcp_servers
             || settings.is_pm != self.original_is_pm
     }
 }
@@ -2483,12 +2576,20 @@ mod tests {
         assert_eq!(AgentConfigFocus::Agents.next(), AgentConfigFocus::Model);
         assert_eq!(AgentConfigFocus::Model.next(), AgentConfigFocus::Tools);
         assert_eq!(AgentConfigFocus::Tools.next(), AgentConfigFocus::Skills);
-        assert_eq!(AgentConfigFocus::Skills.next(), AgentConfigFocus::Agents);
+        assert_eq!(AgentConfigFocus::Skills.next(), AgentConfigFocus::McpServers);
+        assert_eq!(AgentConfigFocus::McpServers.next(), AgentConfigFocus::Agents);
 
-        assert_eq!(AgentConfigFocus::Agents.prev(), AgentConfigFocus::Skills);
+        assert_eq!(
+            AgentConfigFocus::Agents.prev(),
+            AgentConfigFocus::McpServers
+        );
         assert_eq!(AgentConfigFocus::Model.prev(), AgentConfigFocus::Agents);
         assert_eq!(AgentConfigFocus::Tools.prev(), AgentConfigFocus::Model);
         assert_eq!(AgentConfigFocus::Skills.prev(), AgentConfigFocus::Tools);
+        assert_eq!(
+            AgentConfigFocus::McpServers.prev(),
+            AgentConfigFocus::Skills
+        );
     }
 
     #[test]
@@ -2500,9 +2601,11 @@ mod tests {
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
             vec![],
+            vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
+            vec![],
             vec![],
         );
 
@@ -2511,6 +2614,7 @@ mod tests {
             Some(settings),
             Some("model-a".to_string()),
             HashSet::from(["tool_read".to_string()]),
+            HashSet::new(),
             HashSet::new(),
             false,
         );
@@ -2546,9 +2650,11 @@ mod tests {
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
             vec![],
+            vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
+            vec![],
             vec![],
         );
 
@@ -2557,6 +2663,7 @@ mod tests {
             Some(first),
             Some("model-a".to_string()),
             HashSet::from(["tool_read".to_string()]),
+            HashSet::new(),
             HashSet::new(),
             false,
         );
@@ -2573,9 +2680,11 @@ mod tests {
             Some("model-b".to_string()),
             vec!["tool_write".to_string()],
             vec![],
+            vec![],
             true,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
+            vec![],
             vec![],
         );
         state.load_agent_settings(
@@ -2583,6 +2692,7 @@ mod tests {
             Some(second),
             Some("model-b".to_string()),
             HashSet::from(["tool_write".to_string()]),
+            HashSet::new(),
             HashSet::new(),
             true,
         );

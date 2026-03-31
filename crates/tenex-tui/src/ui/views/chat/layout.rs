@@ -663,17 +663,19 @@ fn render_agent_config_modal(
     let column_gap = if inner.width >= 54 { 1 } else { 0 };
     let column_constraints = if inner.width >= 96 {
         [
-            Constraint::Percentage(30),
-            Constraint::Percentage(18),
-            Constraint::Percentage(26),
-            Constraint::Percentage(26),
+            Constraint::Percentage(24),
+            Constraint::Percentage(14),
+            Constraint::Percentage(21),
+            Constraint::Percentage(21),
+            Constraint::Percentage(20),
         ]
     } else {
         [
-            Constraint::Percentage(32),
-            Constraint::Percentage(18),
-            Constraint::Percentage(25),
-            Constraint::Percentage(25),
+            Constraint::Percentage(26),
+            Constraint::Percentage(14),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
         ]
     };
     let columns = Layout::horizontal(column_constraints)
@@ -684,6 +686,7 @@ fn render_agent_config_modal(
     let model_area = columns[1];
     let tools_area = columns[2];
     let skills_area = columns[3];
+    let mcp_area = columns[4];
 
     // Subtle column differentiation
     f.render_widget(
@@ -701,6 +704,10 @@ fn render_agent_config_modal(
     f.render_widget(
         Block::default().style(Style::default().bg(theme::BG_MODAL)),
         skills_area,
+    );
+    f.render_widget(
+        Block::default().style(Style::default().bg(theme::BG_CARD)),
+        mcp_area,
     );
 
     let agents_header_style = if state.focus == AgentConfigFocus::Agents {
@@ -757,6 +764,22 @@ fn render_agent_config_modal(
     f.render_widget(
         Paragraph::new(skills_header).style(skills_header_style),
         skills_area,
+    );
+    let mcp_header_style = if state.focus == AgentConfigFocus::McpServers {
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_DIM)
+    };
+    let mcp_header = if mcp_area.width < 24 {
+        "MCP"
+    } else {
+        "MCP Servers (space/a)"
+    };
+    f.render_widget(
+        Paragraph::new(mcp_header).style(mcp_header_style),
+        mcp_area,
     );
 
     let agents_search_area = Rect::new(agents_area.x, agents_area.y + 1, agents_area.width, 1);
@@ -928,6 +951,12 @@ fn render_agent_config_modal(
         skills_area.width,
         skills_area.height.saturating_sub(1),
     );
+    let mcp_list_area = Rect::new(
+        mcp_area.x,
+        mcp_area.y + 1,
+        mcp_area.width,
+        mcp_area.height.saturating_sub(1),
+    );
     if let Some(settings) = state.settings.as_mut() {
         let tools_visible_height = tools_list_area.height as usize;
         settings.adjust_tools_scroll(tools_visible_height.max(1));
@@ -1095,6 +1124,53 @@ fn render_agent_config_modal(
                 );
             }
         }
+
+        // MCP Servers column
+        if settings.available_mcp_servers.is_empty() {
+            f.render_widget(
+                Paragraph::new("No MCP servers").style(Style::default().fg(theme::TEXT_MUTED)),
+                mcp_list_area,
+            );
+        } else {
+            let mcp_visible_height = mcp_list_area.height as usize;
+            settings.adjust_mcp_scroll(mcp_visible_height.max(1));
+
+            for (row, server) in settings
+                .available_mcp_servers
+                .iter()
+                .skip(settings.mcp_scroll)
+                .take(mcp_visible_height.max(1))
+                .enumerate()
+            {
+                if row as u16 >= mcp_list_area.height {
+                    break;
+                }
+
+                let is_cursor_on_mcp = settings.mcp_cursor == settings.mcp_scroll + row;
+                let is_checked = settings.selected_mcp_servers.contains(server);
+                let prefix = if is_checked { "[x] " } else { "[ ] " };
+                let style = if is_cursor_on_mcp && state.focus == AgentConfigFocus::McpServers {
+                    Style::default().fg(theme::ACCENT_PRIMARY)
+                } else if is_checked {
+                    Style::default().fg(theme::TEXT_PRIMARY)
+                } else {
+                    Style::default().fg(theme::TEXT_MUTED)
+                };
+
+                let row_area = Rect::new(
+                    mcp_list_area.x,
+                    mcp_list_area.y + row as u16,
+                    mcp_list_area.width,
+                    1,
+                );
+                let content_width = mcp_list_area.width as usize;
+                let mcp_label = truncate_with_ellipsis(server, content_width.saturating_sub(4));
+                f.render_widget(
+                    Paragraph::new(format!("{}{}", prefix, mcp_label)).style(style),
+                    row_area,
+                );
+            }
+        }
     } else {
         f.render_widget(
             Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
@@ -1103,6 +1179,10 @@ fn render_agent_config_modal(
         f.render_widget(
             Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
             skills_list_area,
+        );
+        f.render_widget(
+            Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
+            mcp_list_area,
         );
     }
 

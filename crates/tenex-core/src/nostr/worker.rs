@@ -813,6 +813,7 @@ pub enum NostrCommand {
         model: Option<String>,
         tools: Vec<String>,
         skills: Vec<String>,
+        mcp_servers: Vec<String>,
         /// Additional marker tags (e.g. ["pm"])
         tags: Vec<String>,
     },
@@ -822,6 +823,7 @@ pub enum NostrCommand {
         model: Option<String>,
         tools: Vec<String>,
         skills: Vec<String>,
+        mcp_servers: Vec<String>,
         /// Additional marker tags (e.g. ["pm"])
         tags: Vec<String>,
     },
@@ -1296,6 +1298,7 @@ impl NostrWorker {
                         model,
                         tools,
                         skills,
+                        mcp_servers,
                         tags,
                     } => {
                         debug_log(&format!(
@@ -1308,6 +1311,7 @@ impl NostrWorker {
                             model,
                             tools,
                             skills,
+                            mcp_servers,
                             tags,
                         )) {
                             tlog!("ERROR", "Failed to update agent config: {}", e);
@@ -1318,6 +1322,7 @@ impl NostrWorker {
                         model,
                         tools,
                         skills,
+                        mcp_servers,
                         tags,
                     } => {
                         debug_log(&format!(
@@ -1329,6 +1334,7 @@ impl NostrWorker {
                             model,
                             tools,
                             skills,
+                            mcp_servers,
                             tags,
                         )) {
                             tlog!("ERROR", "Failed to update global agent config: {}", e);
@@ -3404,6 +3410,7 @@ impl NostrWorker {
         model: Option<String>,
         tools: Vec<String>,
         skills: Vec<String>,
+        mcp_servers: Vec<String>,
         tags: Vec<String>,
     ) -> Result<()> {
         let client = self
@@ -3422,7 +3429,15 @@ impl NostrWorker {
         // Build kind:24020 agent config update event with project a-tag
         let base =
             EventBuilder::new(Kind::Custom(24020), "").tag(Tag::coordinate(coordinate, None));
-        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &skills, &tags);
+        let event = build_agent_config_event(
+            base,
+            &agent_pubkey,
+            model,
+            &tools,
+            &skills,
+            &mcp_servers,
+            &tags,
+        );
         let signed_event = event.sign_with_keys(keys)?;
 
         // Send to relay with timeout
@@ -3451,6 +3466,7 @@ impl NostrWorker {
         model: Option<String>,
         tools: Vec<String>,
         skills: Vec<String>,
+        mcp_servers: Vec<String>,
         tags: Vec<String>,
     ) -> Result<()> {
         let client = self
@@ -3464,7 +3480,15 @@ impl NostrWorker {
 
         // Build kind:24020 global agent config event (no a-tag)
         let base = EventBuilder::new(Kind::Custom(24020), "");
-        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &skills, &tags);
+        let event = build_agent_config_event(
+            base,
+            &agent_pubkey,
+            model,
+            &tools,
+            &skills,
+            &mcp_servers,
+            &tags,
+        );
         let signed_event = event.sign_with_keys(keys)?;
 
         // Send to relay with timeout
@@ -4114,6 +4138,7 @@ fn build_agent_config_event(
     model: Option<String>,
     tools: &[String],
     skills: &[String],
+    mcp_servers: &[String],
     tags: &[String],
 ) -> EventBuilder {
     // NIP-89 client tag
@@ -4161,6 +4186,21 @@ fn build_agent_config_event(
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
                 vec![skill.clone()],
+            ));
+        }
+    }
+
+    // MCP server tags (exhaustive list — empty emits a raw `["mcp"]` tag)
+    if mcp_servers.is_empty() {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
+            Vec::<String>::new(),
+        ));
+    } else {
+        for server in mcp_servers {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
+                vec![server.clone()],
             ));
         }
     }
@@ -5230,6 +5270,7 @@ mod tests {
             &[],
             &[],
             &[],
+            &[],
         )
         .sign_with_keys(&keys)
         .unwrap();
@@ -5252,9 +5293,16 @@ mod tests {
             };
             arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("skill")
         });
+        let has_empty_mcp_tag = tags.iter().any(|tag| {
+            let Some(arr) = tag.as_array() else {
+                return false;
+            };
+            arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("mcp")
+        });
 
         assert!(has_empty_tool_tag, "expected raw empty tool tag");
         assert!(has_empty_skill_tag, "expected raw empty skill tag");
+        assert!(has_empty_mcp_tag, "expected raw empty mcp tag");
     }
 
     #[test]
@@ -5266,6 +5314,7 @@ mod tests {
             None,
             &["Read".to_string()],
             &["code-review".to_string(), "testing".to_string()],
+            &[],
             &[],
         )
         .sign_with_keys(&keys)

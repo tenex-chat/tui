@@ -13,6 +13,7 @@ pub struct ProjectAgent {
     pub model: Option<String>,
     pub tools: Vec<String>,
     pub skills: Vec<String>,
+    pub mcp_servers: Vec<String>,
 }
 
 /// Represents a TENEX project status (Nostr kind:24010)
@@ -29,6 +30,8 @@ pub struct ProjectStatus {
     pub(crate) all_tools: Vec<String>,
     /// All available skills from skill tags (including unassigned ones).
     pub(crate) all_skills: Vec<String>,
+    /// All available MCP servers from mcp tags (including unassigned ones).
+    pub(crate) all_mcp_servers: Vec<String>,
     pub created_at: u64,
     /// The pubkey of the backend that published this status event
     pub backend_pubkey: String,
@@ -104,6 +107,7 @@ impl ProjectStatus {
         let mut all_models: Vec<String> = Vec::new();
         let mut all_tools: Vec<String> = Vec::new();
         let mut all_skills: Vec<String> = Vec::new();
+        let mut all_mcp_servers: Vec<String> = Vec::new();
 
         // First pass: collect project coordinate, agents, branches, all models, all tools, and all skills
         for tag in &tags {
@@ -128,6 +132,7 @@ impl ProjectStatus {
                             model: None,
                             tools: Vec::new(),
                             skills: Vec::new(),
+                            mcp_servers: Vec::new(),
                         };
                         agent_map.insert(tag[2].clone(), agent);
                     }
@@ -155,6 +160,12 @@ impl ProjectStatus {
                         all_skills.push(tag[1].clone());
                     }
                 }
+                "mcp" => {
+                    // Collect MCP server slug (tag[1]) regardless of agent assignments
+                    if tag.len() >= 2 {
+                        all_mcp_servers.push(tag[1].clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -166,8 +177,10 @@ impl ProjectStatus {
         all_tools.dedup();
         all_skills.sort();
         all_skills.dedup();
+        all_mcp_servers.sort();
+        all_mcp_servers.dedup();
 
-        // Second pass: apply model, tool, and skill tags to agents
+        // Second pass: apply model, tool, skill, and mcp tags to agents
         for tag in &tags {
             if tag.is_empty() {
                 continue;
@@ -204,6 +217,16 @@ impl ProjectStatus {
                         }
                     }
                 }
+                "mcp" => {
+                    if tag.len() >= 3 {
+                        let server = &tag[1];
+                        for agent_name in &tag[2..] {
+                            if let Some(agent) = agent_map.get_mut(agent_name) {
+                                agent.mcp_servers.push(server.clone());
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -218,6 +241,7 @@ impl ProjectStatus {
             all_models,
             all_tools,
             all_skills,
+            all_mcp_servers,
             created_at,
             backend_pubkey,
             last_seen_at: created_at,
@@ -285,6 +309,11 @@ impl ProjectStatus {
         skills.sort();
         skills.dedup();
         skills
+    }
+
+    /// Returns all available MCP servers (including both assigned and unassigned servers).
+    pub fn all_mcp_servers(&self) -> Vec<&str> {
+        self.all_mcp_servers.iter().map(|s| s.as_str()).collect()
     }
 
     /// All available models from the project (including unassigned ones)

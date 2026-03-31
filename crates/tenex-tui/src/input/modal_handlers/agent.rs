@@ -254,6 +254,11 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     settings.move_skill_up();
                 }
             }
+            AgentConfigFocus::McpServers => {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.move_mcp_up();
+                }
+            }
         },
         KeyCode::Down => match state.focus {
             AgentConfigFocus::Agents => {
@@ -277,12 +282,18 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     settings.move_skill_down();
                 }
             }
+            AgentConfigFocus::McpServers => {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.move_mcp_down();
+                }
+            }
         },
         KeyCode::Char(' ') => {
             if let Some(settings) = state.settings.as_mut() {
                 match state.focus {
                     AgentConfigFocus::Tools => settings.toggle_at_cursor(),
                     AgentConfigFocus::Skills => settings.toggle_skill_at_cursor(),
+                    AgentConfigFocus::McpServers => settings.toggle_mcp_at_cursor(),
                     _ => {}
                 }
             }
@@ -295,6 +306,9 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     }
                     AgentConfigFocus::Skills => {
                         settings.toggle_all_skills();
+                    }
+                    AgentConfigFocus::McpServers => {
+                        settings.toggle_all_mcp_servers();
                     }
                     _ => {}
                 }
@@ -333,6 +347,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     let model = settings.selected_model().map(str::to_string);
                     let tools = settings.selected_tools_vec();
                     let skills = settings.selected_skills_vec();
+                    let mcp_servers = settings.selected_mcp_servers_vec();
                     let tags = if settings.is_pm {
                         vec!["pm".to_string()]
                     } else {
@@ -347,6 +362,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                                     model,
                                     tools,
                                     skills,
+                                    mcp_servers,
                                     tags,
                                 })
                             {
@@ -369,6 +385,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                                             model,
                                             tools,
                                             skills,
+                                            mcp_servers,
                                             tags,
                                         })
                                     {

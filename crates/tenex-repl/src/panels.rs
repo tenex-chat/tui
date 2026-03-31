@@ -214,6 +214,7 @@ impl ConfigPanel {
         // Tools: from accumulated tools_selected
         let tools: Vec<String> = self.tools_selected.iter().cloned().collect();
         let skills = agent.skills.clone();
+        let mcp_servers = agent.mcp_servers.clone();
 
         // Tags: include "pm" if is_set_pm flag is on, or agent was already PM
         let tags: Vec<String> = if self.is_set_pm || agent.is_pm {
@@ -234,6 +235,7 @@ impl ConfigPanel {
                     model,
                     tools,
                     skills,
+                    mcp_servers,
                     tags,
                 });
         } else {
@@ -243,6 +245,7 @@ impl ConfigPanel {
                 model,
                 tools,
                 skills,
+                mcp_servers,
                 tags,
             });
         }
@@ -289,6 +292,7 @@ impl ConfigPanel {
         let model = self.pending_model.clone();
         let tools = agent.tools.clone();
         let skills = agent.skills.clone();
+        let mcp_servers = agent.mcp_servers.clone();
         let tags: Vec<String> = if agent.is_pm {
             vec!["pm".to_string()]
         } else {
@@ -305,6 +309,7 @@ impl ConfigPanel {
                     model: model.clone(),
                     tools,
                     skills,
+                    mcp_servers,
                     tags,
                 });
         } else {
@@ -314,6 +319,7 @@ impl ConfigPanel {
                 model: model.clone(),
                 tools,
                 skills,
+                mcp_servers,
                 tags,
             });
         }

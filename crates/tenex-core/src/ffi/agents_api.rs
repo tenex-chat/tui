@@ -718,6 +718,7 @@ impl TenexCore {
         model: Option<String>,
         tools: Vec<String>,
         skills: Vec<String>,
+        mcp_servers: Vec<String>,
         tags: Vec<String>,
     ) -> Result<(), TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
@@ -730,6 +731,7 @@ impl TenexCore {
                 model,
                 tools,
                 skills,
+                mcp_servers,
                 tags,
             })
             .map_err(|e| TenexError::Internal {
@@ -748,6 +750,7 @@ impl TenexCore {
         model: Option<String>,
         tools: Vec<String>,
         skills: Vec<String>,
+        mcp_servers: Vec<String>,
         tags: Vec<String>,
     ) -> Result<(), TenexError> {
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -758,6 +761,7 @@ impl TenexCore {
                 model,
                 tools,
                 skills,
+                mcp_servers,
                 tags,
             })
             .map_err(|e| TenexError::Internal {
