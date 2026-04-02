@@ -1955,13 +1955,11 @@ impl App {
         agent: &crate::models::ProjectAgent,
     ) -> Option<crate::ui::modal::AgentSettingsState> {
         let project = self.selected_project.as_ref()?;
-        // Use status.all_tools()/all_skills()/all_mcp_servers() to show ALL options (including unassigned ones)
-        let (all_tools, all_skills, all_mcp_servers, all_models) = self
+        let (all_skills, all_mcp_servers, all_models) = self
             .data_store
             .borrow()
             .get_project_status(&project.a_tag())
             .map(|status| {
-                let tools = status.all_tools().iter().map(|s| s.to_string()).collect();
                 let skills = status.all_skills().iter().map(|s| s.to_string()).collect();
                 let mcp_servers = status
                     .all_mcp_servers()
@@ -1969,7 +1967,7 @@ impl App {
                     .map(|s| s.to_string())
                     .collect();
                 let models = status.all_models.clone();
-                (tools, skills, mcp_servers, models)
+                (skills, mcp_servers, models)
             })
             .unwrap_or_default();
 
@@ -1982,7 +1980,6 @@ impl App {
             agent.mcp_servers.clone(),
             false,
             all_models,
-            all_tools,
             all_skills,
             all_mcp_servers,
         ))

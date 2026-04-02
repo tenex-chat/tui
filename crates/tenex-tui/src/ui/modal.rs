@@ -1318,7 +1318,6 @@ impl ProjectActionsState {
 pub enum AgentConfigFocus {
     Agents,
     Model,
-    Tools,
     Skills,
     McpServers,
 }
@@ -1327,8 +1326,7 @@ impl AgentConfigFocus {
     pub fn next(self) -> Self {
         match self {
             AgentConfigFocus::Agents => AgentConfigFocus::Model,
-            AgentConfigFocus::Model => AgentConfigFocus::Tools,
-            AgentConfigFocus::Tools => AgentConfigFocus::Skills,
+            AgentConfigFocus::Model => AgentConfigFocus::Skills,
             AgentConfigFocus::Skills => AgentConfigFocus::McpServers,
             AgentConfigFocus::McpServers => AgentConfigFocus::Agents,
         }
@@ -1338,33 +1336,12 @@ impl AgentConfigFocus {
         match self {
             AgentConfigFocus::Agents => AgentConfigFocus::McpServers,
             AgentConfigFocus::Model => AgentConfigFocus::Agents,
-            AgentConfigFocus::Tools => AgentConfigFocus::Model,
-            AgentConfigFocus::Skills => AgentConfigFocus::Tools,
+            AgentConfigFocus::Skills => AgentConfigFocus::Model,
             AgentConfigFocus::McpServers => AgentConfigFocus::Skills,
         }
     }
 }
 
-/// A group of related tools (MCP server or common prefix)
-#[derive(Debug, Clone)]
-pub struct ToolGroup {
-    pub name: String,
-    pub tools: Vec<String>,
-    pub expanded: bool,
-}
-
-impl ToolGroup {
-    /// Check if all tools in the group are selected
-    pub fn is_fully_selected(&self, selected: &std::collections::HashSet<String>) -> bool {
-        self.tools.iter().all(|t| selected.contains(t))
-    }
-
-    /// Check if some (but not all) tools in the group are selected
-    pub fn is_partially_selected(&self, selected: &std::collections::HashSet<String>) -> bool {
-        let count = self.tools.iter().filter(|t| selected.contains(*t)).count();
-        count > 0 && count < self.tools.len()
-    }
-}
 
 /// State for the agent settings modal
 #[derive(Debug, Clone)]
@@ -1377,14 +1354,8 @@ pub struct AgentSettingsState {
     pub available_models: Vec<String>,
     /// Index of selected model in available_models
     pub model_index: usize,
-    /// Tool groups (grouped by MCP server or common prefix)
-    pub tool_groups: Vec<ToolGroup>,
-    /// Selected tools by name
+    /// Selected tools by name (preserved from agent config, not editable in UI)
     pub selected_tools: std::collections::HashSet<String>,
-    /// Current cursor position in flat list (groups + expanded tools)
-    pub tools_cursor: usize,
-    /// Scroll offset for tools list
-    pub tools_scroll: usize,
     /// Available skills from project status
     pub available_skills: Vec<String>,
     /// Selected skills by name
@@ -1413,27 +1384,17 @@ impl AgentSettingsState {
         current_mcp_servers: Vec<String>,
         is_pm: bool,
         available_models: Vec<String>,
-        all_available_tools: Vec<String>,
         all_available_skills: Vec<String>,
         all_available_mcp_servers: Vec<String>,
     ) -> Self {
-        // Find index of current model (default to 0 if not found)
         let model_index = current_model
             .as_ref()
             .and_then(|m| available_models.iter().position(|am| am == m))
             .unwrap_or(0);
 
-        // Build tool groups using intelligent grouping (like Svelte)
-        let tool_groups = Self::build_tool_groups(all_available_tools);
-
-        // Build selected tools set from current tools
         let selected_tools: std::collections::HashSet<String> = current_tools.into_iter().collect();
-
-        // Build selected skills set from current skills
         let selected_skills: std::collections::HashSet<String> =
             current_skills.into_iter().collect();
-
-        // Build selected MCP servers set from current MCP servers
         let selected_mcp_servers: std::collections::HashSet<String> =
             current_mcp_servers.into_iter().collect();
 
@@ -1443,10 +1404,7 @@ impl AgentSettingsState {
             is_pm,
             available_models,
             model_index,
-            tool_groups,
             selected_tools,
-            tools_cursor: 0,
-            tools_scroll: 0,
             available_skills: all_available_skills,
             selected_skills,
             skills_cursor: 0,
@@ -1456,72 +1414,6 @@ impl AgentSettingsState {
             mcp_cursor: 0,
             mcp_scroll: 0,
         }
-    }
-
-    /// Build tool groups from a flat list of tools
-    /// Groups by: MCP server (mcp__<server>__<method>) or common prefix
-    fn build_tool_groups(tools: Vec<String>) -> Vec<ToolGroup> {
-        use std::collections::HashMap;
-
-        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
-        let mut ungrouped: Vec<String> = Vec::new();
-
-        for tool in &tools {
-            // MCP tools: mcp__<server>__<method>
-            if tool.starts_with("mcp__") {
-                let parts: Vec<&str> = tool.split("__").collect();
-                if parts.len() >= 3 {
-                    let group_key = format!("MCP: {}", parts[1]);
-                    groups.entry(group_key).or_default().push(tool.clone());
-                    continue;
-                }
-            }
-
-            // Find common prefixes (underscore-separated)
-            if let Some(prefix_match) = tool.find('_') {
-                let prefix = &tool[..prefix_match];
-                // Only group if there are at least 2 tools with this prefix
-                let similar_count = tools
-                    .iter()
-                    .filter(|t| t.starts_with(&format!("{}_", prefix)))
-                    .count();
-                if similar_count >= 2 {
-                    let group_key = prefix.to_uppercase();
-                    groups.entry(group_key).or_default().push(tool.clone());
-                    continue;
-                }
-            }
-
-            // No group found - add to ungrouped
-            ungrouped.push(tool.clone());
-        }
-
-        // Convert to Vec<ToolGroup>
-        let mut result: Vec<ToolGroup> = Vec::new();
-
-        // Add grouped tools
-        for (name, mut tools) in groups {
-            tools.sort();
-            tools.dedup();
-            result.push(ToolGroup {
-                name,
-                tools,
-                expanded: false,
-            });
-        }
-
-        // Add ungrouped tools as single-item groups
-        for tool in ungrouped {
-            result.push(ToolGroup {
-                name: tool.clone(),
-                tools: vec![tool],
-                expanded: false,
-            });
-        }
-
-        // Sort groups by name
-        result.sort_by(|a, b| a.name.cmp(&b.name));
-        result
     }
 
     pub fn selected_model(&self) -> Option<&str> {
@@ -1540,129 +1432,6 @@ impl AgentSettingsState {
         let mut skills: Vec<String> = self.selected_skills.iter().cloned().collect();
         skills.sort();
         skills
-    }
-
-    /// Get total number of visible items (groups + expanded tools)
-    pub fn visible_item_count(&self) -> usize {
-        let mut count = 0;
-        for group in &self.tool_groups {
-            count += 1; // Group header
-            if group.expanded {
-                count += group.tools.len();
-            }
-        }
-        count
-    }
-
-    /// Get the item at a given cursor position
-    /// Returns (group_index, Some(tool_index)) if cursor is on a tool,
-    /// or (group_index, None) if cursor is on a group header
-    pub fn item_at_cursor(&self, cursor: usize) -> Option<(usize, Option<usize>)> {
-        let mut pos = 0;
-        for (group_idx, group) in self.tool_groups.iter().enumerate() {
-            if pos == cursor {
-                return Some((group_idx, None));
-            }
-            pos += 1;
-            if group.expanded {
-                for tool_idx in 0..group.tools.len() {
-                    if pos == cursor {
-                        return Some((group_idx, Some(tool_idx)));
-                    }
-                    pos += 1;
-                }
-            }
-        }
-        None
-    }
-
-    /// Toggle expansion of group at cursor, or toggle tool selection
-    pub fn toggle_at_cursor(&mut self) {
-        if let Some((group_idx, tool_idx)) = self.item_at_cursor(self.tools_cursor) {
-            match tool_idx {
-                None => {
-                    // On group header - toggle expansion if multi-tool group,
-                    // otherwise toggle the single tool
-                    let group = &self.tool_groups[group_idx];
-                    if group.tools.len() == 1 {
-                        // Single tool group - toggle the tool
-                        let tool = &group.tools[0];
-                        if self.selected_tools.contains(tool) {
-                            self.selected_tools.remove(tool);
-                        } else {
-                            self.selected_tools.insert(tool.clone());
-                        }
-                    } else {
-                        // Multi-tool group - toggle expansion
-                        self.tool_groups[group_idx].expanded =
-                            !self.tool_groups[group_idx].expanded;
-                    }
-                }
-                Some(tool_idx) => {
-                    // On a tool - toggle its selection
-                    let tool = &self.tool_groups[group_idx].tools[tool_idx];
-                    if self.selected_tools.contains(tool) {
-                        self.selected_tools.remove(tool);
-                    } else {
-                        self.selected_tools.insert(tool.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    /// Toggle all tools in the group at cursor (bulk toggle)
-    pub fn toggle_group_all(&mut self) {
-        if let Some((group_idx, _)) = self.item_at_cursor(self.tools_cursor) {
-            let group = &self.tool_groups[group_idx];
-            let is_fully_selected = group.is_fully_selected(&self.selected_tools);
-
-            if is_fully_selected {
-                // Deselect all tools in group
-                for tool in &group.tools {
-                    self.selected_tools.remove(tool);
-                }
-            } else {
-                // Select all tools in group
-                for tool in &group.tools {
-                    self.selected_tools.insert(tool.clone());
-                }
-            }
-        }
-    }
-
-    pub fn move_cursor_up(&mut self) {
-        if self.tools_cursor > 0 {
-            self.tools_cursor -= 1;
-            // Scroll up if cursor moves above visible area
-            if self.tools_cursor < self.tools_scroll {
-                self.tools_scroll = self.tools_cursor;
-            }
-        }
-    }
-
-    pub fn move_cursor_down(&mut self) {
-        let max = self.visible_item_count();
-        if self.tools_cursor + 1 < max {
-            self.tools_cursor += 1;
-        }
-        // Note: scroll adjustment for moving down is handled via adjust_tools_scroll in render
-    }
-
-    /// Adjust scroll offset to keep the cursor visible within the given visible height.
-    /// Call this during render when you know the actual visible height.
-    pub fn adjust_tools_scroll(&mut self, visible_height: usize) {
-        if visible_height == 0 {
-            return;
-        }
-        // If cursor is above the visible window, scroll up
-        if self.tools_cursor < self.tools_scroll {
-            self.tools_scroll = self.tools_cursor;
-        }
-        // If cursor is below the visible window, scroll down
-        else if self.tools_cursor >= self.tools_scroll + visible_height {
-            self.tools_scroll = self.tools_cursor.saturating_sub(visible_height - 1);
-        }
     }
 
     pub fn toggle_skill_at_cursor(&mut self) {
@@ -2574,8 +2343,7 @@ mod tests {
     #[test]
     fn agent_config_focus_cycles_both_directions() {
         assert_eq!(AgentConfigFocus::Agents.next(), AgentConfigFocus::Model);
-        assert_eq!(AgentConfigFocus::Model.next(), AgentConfigFocus::Tools);
-        assert_eq!(AgentConfigFocus::Tools.next(), AgentConfigFocus::Skills);
+        assert_eq!(AgentConfigFocus::Model.next(), AgentConfigFocus::Skills);
         assert_eq!(AgentConfigFocus::Skills.next(), AgentConfigFocus::McpServers);
         assert_eq!(AgentConfigFocus::McpServers.next(), AgentConfigFocus::Agents);
 
@@ -2584,8 +2352,7 @@ mod tests {
             AgentConfigFocus::McpServers
         );
         assert_eq!(AgentConfigFocus::Model.prev(), AgentConfigFocus::Agents);
-        assert_eq!(AgentConfigFocus::Tools.prev(), AgentConfigFocus::Model);
-        assert_eq!(AgentConfigFocus::Skills.prev(), AgentConfigFocus::Tools);
+        assert_eq!(AgentConfigFocus::Skills.prev(), AgentConfigFocus::Model);
         assert_eq!(
             AgentConfigFocus::McpServers.prev(),
             AgentConfigFocus::Skills
@@ -2604,7 +2371,6 @@ mod tests {
             vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
-            vec!["tool_read".to_string(), "tool_write".to_string()],
             vec![],
             vec![],
         );
@@ -2653,7 +2419,6 @@ mod tests {
             vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
-            vec!["tool_read".to_string(), "tool_write".to_string()],
             vec![],
             vec![],
         );
@@ -2683,7 +2448,6 @@ mod tests {
             vec![],
             true,
             vec!["model-a".to_string(), "model-b".to_string()],
-            vec!["tool_read".to_string(), "tool_write".to_string()],
             vec![],
             vec![],
         );

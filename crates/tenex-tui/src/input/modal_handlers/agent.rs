@@ -244,11 +244,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
-            AgentConfigFocus::Tools => {
-                if let Some(settings) = state.settings.as_mut() {
-                    settings.move_cursor_up();
-                }
-            }
             AgentConfigFocus::Skills => {
                 if let Some(settings) = state.settings.as_mut() {
                     settings.move_skill_up();
@@ -272,11 +267,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
-            AgentConfigFocus::Tools => {
-                if let Some(settings) = state.settings.as_mut() {
-                    settings.move_cursor_down();
-                }
-            }
             AgentConfigFocus::Skills => {
                 if let Some(settings) = state.settings.as_mut() {
                     settings.move_skill_down();
@@ -291,7 +281,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char(' ') => {
             if let Some(settings) = state.settings.as_mut() {
                 match state.focus {
-                    AgentConfigFocus::Tools => settings.toggle_at_cursor(),
                     AgentConfigFocus::Skills => settings.toggle_skill_at_cursor(),
                     AgentConfigFocus::McpServers => settings.toggle_mcp_at_cursor(),
                     _ => {}
@@ -301,9 +290,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('a') => {
             if let Some(settings) = state.settings.as_mut() {
                 match state.focus {
-                    AgentConfigFocus::Tools => {
-                        settings.toggle_group_all();
-                    }
                     AgentConfigFocus::Skills => {
                         settings.toggle_all_skills();
                     }

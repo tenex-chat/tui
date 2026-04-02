@@ -600,12 +600,7 @@ fn render_agent_config_modal(
         .as_ref()
         .map(|s| s.available_models.len())
         .unwrap_or(1);
-    let tools_count = state
-        .settings
-        .as_ref()
-        .map(|s| s.visible_item_count())
-        .unwrap_or(1);
-    let content_height = (agents.len().max(model_count).max(tools_count) as u16 + 8).min(32);
+    let content_height = (agents.len().max(model_count) as u16 + 8).min(32);
     let height_percent = (content_height as f32 / area.height as f32).min(0.86);
     let compact_modal = area.width < 96;
 
@@ -663,19 +658,17 @@ fn render_agent_config_modal(
     let column_gap = if inner.width >= 54 { 1 } else { 0 };
     let column_constraints = if inner.width >= 96 {
         [
-            Constraint::Percentage(24),
-            Constraint::Percentage(14),
-            Constraint::Percentage(21),
-            Constraint::Percentage(21),
-            Constraint::Percentage(20),
+            Constraint::Percentage(30),
+            Constraint::Percentage(18),
+            Constraint::Percentage(26),
+            Constraint::Percentage(26),
         ]
     } else {
         [
+            Constraint::Percentage(32),
+            Constraint::Percentage(16),
             Constraint::Percentage(26),
-            Constraint::Percentage(14),
-            Constraint::Percentage(20),
-            Constraint::Percentage(20),
-            Constraint::Percentage(20),
+            Constraint::Percentage(26),
         ]
     };
     let columns = Layout::horizontal(column_constraints)
@@ -684,9 +677,8 @@ fn render_agent_config_modal(
 
     let agents_area = columns[0];
     let model_area = columns[1];
-    let tools_area = columns[2];
-    let skills_area = columns[3];
-    let mcp_area = columns[4];
+    let skills_area = columns[2];
+    let mcp_area = columns[3];
 
     // Subtle column differentiation
     f.render_widget(
@@ -696,10 +688,6 @@ fn render_agent_config_modal(
     f.render_widget(
         Block::default().style(Style::default().bg(theme::BG_MODAL)),
         model_area,
-    );
-    f.render_widget(
-        Block::default().style(Style::default().bg(theme::BG_CARD)),
-        tools_area,
     );
     f.render_widget(
         Block::default().style(Style::default().bg(theme::BG_MODAL)),
@@ -724,13 +712,6 @@ fn render_agent_config_modal(
     } else {
         Style::default().fg(theme::TEXT_DIM)
     };
-    let tools_header_style = if state.focus == AgentConfigFocus::Tools {
-        Style::default()
-            .fg(theme::ACCENT_PRIMARY)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme::TEXT_DIM)
-    };
     let skills_header_style = if state.focus == AgentConfigFocus::Skills {
         Style::default()
             .fg(theme::ACCENT_PRIMARY)
@@ -746,15 +727,6 @@ fn render_agent_config_modal(
     f.render_widget(
         Paragraph::new("Model").style(model_header_style),
         model_area,
-    );
-    let tools_header = if tools_area.width < 24 {
-        "Tools"
-    } else {
-        "Tools (space/a)"
-    };
-    f.render_widget(
-        Paragraph::new(tools_header).style(tools_header_style),
-        tools_area,
     );
     let skills_header = if skills_area.width < 24 {
         "Skills"
@@ -939,12 +911,6 @@ fn render_agent_config_modal(
         );
     }
 
-    let tools_list_area = Rect::new(
-        tools_area.x,
-        tools_area.y + 1,
-        tools_area.width,
-        tools_area.height.saturating_sub(1),
-    );
     let skills_list_area = Rect::new(
         skills_area.x,
         skills_area.y + 1,
@@ -958,127 +924,6 @@ fn render_agent_config_modal(
         mcp_area.height.saturating_sub(1),
     );
     if let Some(settings) = state.settings.as_mut() {
-        let tools_visible_height = tools_list_area.height as usize;
-        settings.adjust_tools_scroll(tools_visible_height.max(1));
-
-        let mut y_offset: u16 = 0;
-        let mut cursor_pos: usize = 0;
-        let scroll_offset = settings.tools_scroll;
-
-        for group in &settings.tool_groups {
-            if y_offset as usize >= tools_visible_height {
-                break;
-            }
-
-            let is_cursor_on_group = cursor_pos == settings.tools_cursor;
-            let is_single_tool = group.tools.len() == 1;
-
-            if cursor_pos >= scroll_offset {
-                if is_single_tool {
-                    let tool = &group.tools[0];
-                    let is_checked = settings.selected_tools.contains(tool);
-                    let prefix = if is_checked { "[x] " } else { "[ ] " };
-                    let style = if is_cursor_on_group && state.focus == AgentConfigFocus::Tools {
-                        Style::default().fg(theme::ACCENT_PRIMARY)
-                    } else if is_checked {
-                        Style::default().fg(theme::TEXT_PRIMARY)
-                    } else {
-                        Style::default().fg(theme::TEXT_MUTED)
-                    };
-                    let row = Rect::new(
-                        tools_list_area.x,
-                        tools_list_area.y + y_offset,
-                        tools_list_area.width,
-                        1,
-                    );
-                    f.render_widget(
-                        Paragraph::new(format!("{}{}", prefix, tool)).style(style),
-                        row,
-                    );
-                } else {
-                    let is_fully = group.is_fully_selected(&settings.selected_tools);
-                    let is_partial = group.is_partially_selected(&settings.selected_tools);
-                    let expand_icon = if group.expanded { "▼ " } else { "▶ " };
-                    let check_icon = if is_fully {
-                        "[x] "
-                    } else if is_partial {
-                        "[-] "
-                    } else {
-                        "[ ] "
-                    };
-                    let style = if is_cursor_on_group && state.focus == AgentConfigFocus::Tools {
-                        Style::default()
-                            .fg(theme::ACCENT_PRIMARY)
-                            .add_modifier(Modifier::BOLD)
-                    } else if is_fully {
-                        Style::default()
-                            .fg(theme::TEXT_PRIMARY)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default()
-                            .fg(theme::TEXT_MUTED)
-                            .add_modifier(Modifier::BOLD)
-                    };
-                    let row = Rect::new(
-                        tools_list_area.x,
-                        tools_list_area.y + y_offset,
-                        tools_list_area.width,
-                        1,
-                    );
-                    f.render_widget(
-                        Paragraph::new(format!(
-                            "{}{}{} ({})",
-                            expand_icon,
-                            check_icon,
-                            group.name,
-                            group.tools.len()
-                        ))
-                        .style(style),
-                        row,
-                    );
-                }
-                y_offset += 1;
-            }
-            cursor_pos += 1;
-
-            if group.expanded && !is_single_tool {
-                for tool in &group.tools {
-                    if y_offset as usize >= tools_visible_height {
-                        break;
-                    }
-                    if cursor_pos >= scroll_offset {
-                        let is_cursor_on_tool = cursor_pos == settings.tools_cursor;
-                        let is_checked = settings.selected_tools.contains(tool);
-                        let prefix = if is_checked { "  [x] " } else { "  [ ] " };
-                        let style = if is_cursor_on_tool && state.focus == AgentConfigFocus::Tools {
-                            Style::default().fg(theme::ACCENT_PRIMARY)
-                        } else if is_checked {
-                            Style::default().fg(theme::TEXT_PRIMARY)
-                        } else {
-                            Style::default().fg(theme::TEXT_MUTED)
-                        };
-                        let display_name = if tool.starts_with("mcp__") {
-                            tool.split("__").last().unwrap_or(tool)
-                        } else {
-                            tool.as_str()
-                        };
-                        let row = Rect::new(
-                            tools_list_area.x,
-                            tools_list_area.y + y_offset,
-                            tools_list_area.width,
-                            1,
-                        );
-                        f.render_widget(
-                            Paragraph::new(format!("{}{}", prefix, display_name)).style(style),
-                            row,
-                        );
-                        y_offset += 1;
-                    }
-                    cursor_pos += 1;
-                }
-            }
-        }
-
         if settings.available_skills.is_empty() {
             f.render_widget(
                 Paragraph::new("No skills available").style(Style::default().fg(theme::TEXT_MUTED)),
@@ -1172,10 +1017,6 @@ fn render_agent_config_modal(
             }
         }
     } else {
-        f.render_widget(
-            Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
-            tools_list_area,
-        );
         f.render_widget(
             Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
             skills_list_area,
