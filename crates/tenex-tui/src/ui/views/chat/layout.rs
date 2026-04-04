@@ -264,6 +264,16 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_nudge_skill_selector(f, app, area, state);
     }
 
+    // Render project settings / project agent picker modal if showing
+    if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
+        let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+            ModalState::ProjectSettings(state) => state,
+            _ => unreachable!(),
+        };
+        super::super::render_project_settings(f, app, area, &mut state);
+        app.modal_state = ModalState::ProjectSettings(state);
+    }
+
     // Render chat actions modal if showing (Ctrl+T /)
     if let ModalState::ChatActions(ref state) = app.modal_state {
         render_chat_actions_modal(f, area, state);
@@ -749,10 +759,7 @@ fn render_agent_config_modal(
     } else {
         "MCP Servers (space/a)"
     };
-    f.render_widget(
-        Paragraph::new(mcp_header).style(mcp_header_style),
-        mcp_area,
-    );
+    f.render_widget(Paragraph::new(mcp_header).style(mcp_header_style), mcp_area);
 
     let agents_search_area = Rect::new(agents_area.x, agents_area.y + 1, agents_area.width, 1);
     let search_placeholder = if agents_search_area.width < 18 {
@@ -1065,10 +1072,12 @@ fn render_agent_config_modal(
         popup_area.width.saturating_sub(2),
         1,
     );
-    let hints = Paragraph::new(
-        "tab switch panes · space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc",
-    )
-    .style(Style::default().fg(theme::TEXT_MUTED));
+    let hints_text = if state.focus == AgentConfigFocus::Agents {
+        "tab switch panes · type to search · a manage project agents · enter save/select · esc"
+    } else {
+        "tab switch panes · space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc"
+    };
+    let hints = Paragraph::new(hints_text).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 

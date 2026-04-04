@@ -760,6 +760,12 @@ pub enum ProjectSettingsAddMode {
     McpTool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectSettingsPresentation {
+    Full,
+    AgentPickerOnly,
+}
+
 /// Which pane is focused in project settings (agents or tools)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProjectSettingsFocus {
@@ -774,6 +780,8 @@ pub struct ProjectSettingsState {
     pub project_a_tag: String,
     pub project_name: String,
     pub backend_pubkey: Option<String>,
+    pub presentation: ProjectSettingsPresentation,
+    pub auto_publish_on_close: bool,
     pub original_agent_pubkeys: Vec<String>,
     pub pending_agent_pubkeys: Vec<String>,
     pub original_mcp_tool_ids: Vec<String>,
@@ -1012,6 +1020,8 @@ impl ProjectSettingsState {
             project_a_tag,
             project_name,
             backend_pubkey,
+            presentation: ProjectSettingsPresentation::Full,
+            auto_publish_on_close: false,
             original_agent_pubkeys: agent_pubkeys.clone(),
             pending_agent_pubkeys: agent_pubkeys,
             original_mcp_tool_ids: mcp_tool_ids.clone(),
@@ -1026,6 +1036,30 @@ impl ProjectSettingsState {
             add_index: 0,
             cached_visible_height: DEFAULT_LIST_VISIBLE_HEIGHT,
         }
+    }
+
+    pub fn new_agent_picker(
+        project_a_tag: String,
+        project_name: String,
+        backend_pubkey: Option<String>,
+        agent_pubkeys: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+    ) -> Self {
+        let mut state = Self::new(
+            project_a_tag,
+            project_name,
+            backend_pubkey,
+            agent_pubkeys,
+            mcp_tool_ids,
+        );
+        state.presentation = ProjectSettingsPresentation::AgentPickerOnly;
+        state.auto_publish_on_close = true;
+        state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
+        state
+    }
+
+    pub fn is_agent_picker_only(&self) -> bool {
+        self.presentation == ProjectSettingsPresentation::AgentPickerOnly
     }
 
     /// Get the visible height to use for scroll calculations.
@@ -1050,6 +1084,18 @@ impl ProjectSettingsState {
 
     pub fn add_agent(&mut self, agent_pubkey: String) {
         if !self.pending_agent_pubkeys.contains(&agent_pubkey) {
+            self.pending_agent_pubkeys.push(agent_pubkey);
+        }
+    }
+
+    pub fn toggle_agent(&mut self, agent_pubkey: String) {
+        if let Some(index) = self
+            .pending_agent_pubkeys
+            .iter()
+            .position(|pubkey| pubkey == &agent_pubkey)
+        {
+            self.pending_agent_pubkeys.remove(index);
+        } else {
             self.pending_agent_pubkeys.push(agent_pubkey);
         }
     }

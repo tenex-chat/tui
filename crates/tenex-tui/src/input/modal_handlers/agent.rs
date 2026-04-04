@@ -287,6 +287,18 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
+        KeyCode::Char('a')
+            if state.focus == AgentConfigFocus::Agents
+                && state.selector.filter.is_empty()
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !has_shift =>
+        {
+            if app.open_selected_project_agent_picker() {
+                return;
+            }
+        }
         KeyCode::Char('a') => {
             if let Some(settings) = state.settings.as_mut() {
                 match state.focus {

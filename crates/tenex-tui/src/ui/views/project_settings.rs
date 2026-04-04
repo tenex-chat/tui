@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
+use std::collections::HashMap;
 use tenex_core::models::InstalledAgent;
 
 /// Render the project settings modal
@@ -18,6 +19,11 @@ pub fn render_project_settings(
     area: Rect,
     state: &mut ProjectSettingsState,
 ) {
+    if state.is_agent_picker_only() {
+        render_add_agent_mode(f, app, area, state);
+        return;
+    }
+
     match state.in_add_mode {
         Some(ProjectSettingsAddMode::Agent) => render_add_agent_mode(f, app, area, state),
         Some(ProjectSettingsAddMode::McpTool) => render_add_mcp_tool_mode(f, app, area, state),
@@ -49,6 +55,36 @@ fn installed_agent_for_pubkey(
         .iter()
         .find(|agent| agent.pubkey == agent_pubkey)
         .cloned()
+}
+
+fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<InstalledAgent> {
+    let filter = &state.add_filter;
+    let pending_positions: HashMap<&str, usize> = state
+        .pending_agent_pubkeys
+        .iter()
+        .enumerate()
+        .map(|(index, pubkey)| (pubkey.as_str(), index))
+        .collect();
+
+    let mut agents = app.installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter);
+    agents.sort_by(|left, right| {
+        let left_pending = pending_positions.get(left.pubkey.as_str()).copied();
+        let right_pending = pending_positions.get(right.pubkey.as_str()).copied();
+
+        match (left_pending, right_pending) {
+            (Some(left_index), Some(right_index)) => left_index
+                .cmp(&right_index)
+                .then_with(|| left.slug.cmp(&right.slug))
+                .then_with(|| left.pubkey.cmp(&right.pubkey)),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => left
+                .slug
+                .cmp(&right.slug)
+                .then_with(|| left.pubkey.cmp(&right.pubkey)),
+        }
+    });
+    agents
 }
 
 fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &mut ProjectSettingsState) {
@@ -380,7 +416,12 @@ fn render_tools_list(
         visible_height
     };
 
-    let tools_list_area = Rect::new(list_area.x, list_area.y, list_area.width, tools_height as u16);
+    let tools_list_area = Rect::new(
+        list_area.x,
+        list_area.y,
+        list_area.width,
+        tools_height as u16,
+    );
 
     render_tools_items(f, app, tools_list_area, state, show_selection, tools_height);
 
@@ -563,7 +604,8 @@ fn render_hints(
 }
 
 fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSettingsState) {
-    let (popup_area, content_area) = Modal::new("Add Agent")
+    let title = format!("Project Agents ({})", state.pending_agent_pubkeys.len());
+    let (popup_area, content_area) = Modal::new(&title)
         .size(ModalSize {
             max_width: 70,
             height_percent: 0.8,
@@ -579,13 +621,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         content_area.height,
     );
 
-    // Get available agents (exclude already added)
-    let filter = &state.add_filter;
-    let available_agents: Vec<_> = app
-        .installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter)
-        .into_iter()
-        .filter(|agent| !state.pending_agent_pubkeys.contains(&agent.pubkey))
-        .collect();
+    let available_agents = add_mode_agents(app, state);
 
     // List area
     let list_area = Rect::new(
@@ -629,25 +665,50 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
             .skip(scroll_offset)
             .take(visible_height)
             .map(|(i, agent)| {
-                let is_selected = i == selected_index;
-                let border_color = theme::user_color(&agent.pubkey);
+                let is_cursor = i == selected_index;
+                let is_checked = state.pending_agent_pubkeys.contains(&agent.pubkey);
+                let is_pm = state
+                    .pending_agent_pubkeys
+                    .first()
+                    .is_some_and(|pubkey| pubkey == &agent.pubkey);
 
                 let mut spans = vec![];
 
-                // Left border
-                if is_selected {
-                    spans.push(Span::styled("▌", Style::default().fg(border_color)));
+                if is_cursor {
+                    spans.push(Span::styled(
+                        "▌ ",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
-                    spans.push(Span::styled("│", Style::default().fg(border_color)));
+                    spans.push(Span::styled("  ", Style::default()));
                 }
 
-                // Agent name
-                let name_style = if is_selected {
+                let checkbox = if is_checked { "[✓]" } else { "[ ]" };
+                let checkbox_style = if is_checked {
+                    Style::default().fg(theme::ACCENT_SUCCESS)
+                } else {
+                    Style::default().fg(theme::TEXT_MUTED)
+                };
+                spans.push(Span::styled(checkbox, checkbox_style));
+                spans.push(Span::styled(" ", Style::default()));
+
+                if is_pm {
+                    spans.push(Span::styled(
+                        "[PM] ",
+                        Style::default()
+                            .fg(theme::ACCENT_WARNING)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+
+                let name_style = if is_cursor {
                     Style::default()
                         .fg(theme::ACCENT_PRIMARY)
                         .add_modifier(Modifier::BOLD)
-                } else {
+                } else if is_checked {
                     Style::default().fg(theme::TEXT_PRIMARY)
+                } else {
+                    Style::default().fg(theme::TEXT_MUTED)
                 };
                 spans.push(Span::styled(format!("@{}", agent.slug), name_style));
                 spans.push(Span::styled(
@@ -655,7 +716,13 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                     Style::default().fg(theme::TEXT_MUTED),
                 ));
 
-                ListItem::new(Line::from(spans))
+                let row_style = if is_cursor {
+                    Style::default().bg(theme::BG_SELECTED)
+                } else {
+                    Style::default()
+                };
+
+                ListItem::new(Line::from(spans)).style(row_style)
             })
             .collect();
 
@@ -670,9 +737,26 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                 remaining.width,
                 2,
             );
-            let desc = Paragraph::new(format!("Pubkey: {}", short_pubkey(&agent.pubkey)))
-                .style(Style::default().fg(theme::TEXT_DIM))
-                .block(Block::default().borders(Borders::NONE));
+            let status = if state.pending_agent_pubkeys.contains(&agent.pubkey) {
+                if state
+                    .pending_agent_pubkeys
+                    .first()
+                    .is_some_and(|pubkey| pubkey == &agent.pubkey)
+                {
+                    "Selected · PM"
+                } else {
+                    "Selected"
+                }
+            } else {
+                "Not selected"
+            };
+            let desc = Paragraph::new(format!(
+                "{} · Pubkey: {}",
+                status,
+                short_pubkey(&agent.pubkey)
+            ))
+            .style(Style::default().fg(theme::TEXT_DIM))
+            .block(Block::default().borders(Borders::NONE));
             f.render_widget(desc, desc_area);
         }
     }
@@ -689,8 +773,11 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" add", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" done", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
@@ -702,11 +789,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
 
 /// Get count of available agents for add mode (for bounds checking)
 pub fn available_agent_count(app: &App, state: &ProjectSettingsState) -> usize {
-    let filter = &state.add_filter;
-    app.installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter)
-        .into_iter()
-        .filter(|agent| !state.pending_agent_pubkeys.contains(&agent.pubkey))
-        .count()
+    add_mode_agents(app, state).len()
 }
 
 /// Get the agent ID at the given index in add mode
@@ -715,10 +798,8 @@ pub fn get_agent_id_at_index(
     state: &ProjectSettingsState,
     index: usize,
 ) -> Option<String> {
-    let filter = &state.add_filter;
-    app.installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter)
+    add_mode_agents(app, state)
         .into_iter()
-        .filter(|agent| !state.pending_agent_pubkeys.contains(&agent.pubkey))
         .nth(index)
         .map(|agent| agent.pubkey)
 }

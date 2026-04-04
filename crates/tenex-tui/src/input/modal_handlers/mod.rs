@@ -70,6 +70,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle project settings / agent picker modal when open
+    if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
+        super::view_handlers::handle_project_settings_key(app, key);
+        return Ok(true);
+    }
+
     // Handle unified agent configuration modal when open
     if matches!(app.modal_state, ModalState::AgentConfig(_)) {
         agent::handle_agent_config_modal_key(app, key);

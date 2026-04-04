@@ -3148,6 +3148,69 @@ impl App {
         }
     }
 
+    pub fn open_selected_project_agent_picker(&mut self) -> bool {
+        let Some(project) = self.selected_project.clone() else {
+            self.set_warning_status("No active project");
+            return false;
+        };
+
+        let project_a_tag = project.a_tag();
+        let backend_pubkey = self.project_settings_backend_pubkey(&project_a_tag);
+        self.modal_state =
+            ModalState::ProjectSettings(crate::ui::modal::ProjectSettingsState::new_agent_picker(
+                project_a_tag,
+                project.title,
+                backend_pubkey,
+                project.agent_pubkeys,
+                project.mcp_tool_ids,
+            ));
+        true
+    }
+
+    pub fn apply_project_assignments_locally(
+        &mut self,
+        project_a_tag: &str,
+        agent_pubkeys: &[String],
+        mcp_tool_ids: &[String],
+    ) {
+        if let Some(project) = self
+            .selected_project
+            .as_mut()
+            .filter(|project| project.a_tag() == project_a_tag)
+        {
+            project.agent_pubkeys = agent_pubkeys.to_vec();
+            project.mcp_tool_ids = mcp_tool_ids.to_vec();
+        }
+
+        {
+            let mut store = self.data_store.borrow_mut();
+            if let Some(project) = store
+                .projects
+                .iter_mut()
+                .find(|project| project.a_tag() == project_a_tag)
+            {
+                project.agent_pubkeys = agent_pubkeys.to_vec();
+                project.mcp_tool_ids = mcp_tool_ids.to_vec();
+            }
+        }
+
+        let Some(selected_agent_pubkey) = self.selected_agent().map(|agent| agent.pubkey.clone())
+        else {
+            return;
+        };
+
+        if agent_pubkeys.contains(&selected_agent_pubkey) {
+            return;
+        }
+
+        let next_agent = self
+            .available_agents()
+            .into_iter()
+            .find(|agent| agent_pubkeys.contains(&agent.pubkey));
+        self.set_selected_agent(next_agent);
+        self.user_explicitly_selected_agent = false;
+    }
+
     pub fn has_installed_agent_inventory(&self, backend_pubkey: Option<&str>) -> bool {
         let Some(backend_pubkey) = backend_pubkey else {
             return false;
