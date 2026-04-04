@@ -521,20 +521,35 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Update an agent's configuration (model and tools).
     /// Publishes a kind:24020 event to update the agent's config.
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], tags: [String]) throws {
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateAgentConfig") {
             do {
-                try core.updateAgentConfig(projectId: projectId, agentPubkey: agentPubkey, model: model, tools: tools, skills: skills, tags: tags)
+                try core.updateAgentConfig(
+                    projectId: projectId,
+                    agentPubkey: agentPubkey,
+                    model: model,
+                    tools: tools,
+                    skills: skills,
+                    mcpServers: mcpServers,
+                    tags: tags
+                )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
         }
     }
 
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], tags: [String]) throws {
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateGlobalAgentConfig") {
             do {
-                try core.updateGlobalAgentConfig(agentPubkey: agentPubkey, model: model, tools: tools, skills: skills, tags: tags)
+                try core.updateGlobalAgentConfig(
+                    agentPubkey: agentPubkey,
+                    model: model,
+                    tools: tools,
+                    skills: skills,
+                    mcpServers: mcpServers,
+                    tags: tags
+                )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

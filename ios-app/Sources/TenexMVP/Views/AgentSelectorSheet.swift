@@ -479,7 +479,8 @@ struct AgentDeletionSheet: View {
                 isPm: true,
                 model: "claude-3-opus",
                 tools: ["Read", "Write", "Bash"],
-                skills: []
+                skills: [],
+                mcpServers: []
             ),
             ProjectAgent(
                 pubkey: "def456ghi789",
@@ -487,7 +488,8 @@ struct AgentDeletionSheet: View {
                 isPm: false,
                 model: "claude-3-sonnet",
                 tools: ["Read", "Edit"],
-                skills: []
+                skills: [],
+                mcpServers: []
             ),
             ProjectAgent(
                 pubkey: "ghi789jkl012",
@@ -495,7 +497,8 @@ struct AgentDeletionSheet: View {
                 isPm: false,
                 model: nil,
                 tools: [],
-                skills: []
+                skills: [],
+                mcpServers: []
             )
         ],
         projectId: "test-project",

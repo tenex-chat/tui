@@ -536,6 +536,7 @@ struct AgentConfigSheet: View {
                     model: selectedModel,
                     tools: Array(selectedTools),
                     skills: Array(selectedSkills),
+                    mcpServers: agent.mcpServers,
                     tags: tags
                 )
             } else {
@@ -545,6 +546,7 @@ struct AgentConfigSheet: View {
                     model: selectedModel,
                     tools: Array(selectedTools),
                     skills: Array(selectedSkills),
+                    mcpServers: agent.mcpServers,
                     tags: tags
                 )
             }
@@ -567,7 +569,8 @@ struct AgentConfigSheet: View {
             isPm: true,
             model: "claude-3-opus",
             tools: ["Read", "Write", "Bash"],
-            skills: []
+            skills: [],
+            mcpServers: []
         ),
         projectId: "test-project"
     )

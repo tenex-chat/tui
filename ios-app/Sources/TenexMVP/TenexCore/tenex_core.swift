@@ -1253,14 +1253,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Publishes a kind:24020 event to update the agent's configuration.
      * The backend will process this event and update the agent's config.
      */
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], tags: [String]) throws 
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
      * Update an agent's configuration globally (all projects).
      *
      * Publishes a kind:24020 event without a project a-tag.
      */
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], tags: [String]) throws 
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
      * Update an existing project (kind:31933 replaceable event).
@@ -2592,13 +2592,14 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
      * Publishes a kind:24020 event to update the agent's configuration.
      * The backend will process this event and update the agent's config.
      */
-open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_agent_config(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
         FfiConverterString.lower(agentPubkey),
         FfiConverterOptionString.lower(model),
         FfiConverterSequenceString.lower(tools),
         FfiConverterSequenceString.lower(skills),
+        FfiConverterSequenceString.lower(mcpServers),
         FfiConverterSequenceString.lower(tags),$0
     )
 }
@@ -2609,12 +2610,13 @@ open func updateAgentConfig(projectId: String, agentPubkey: String, model: Strin
      *
      * Publishes a kind:24020 event without a project a-tag.
      */
-open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_global_agent_config(self.uniffiClonePointer(),
         FfiConverterString.lower(agentPubkey),
         FfiConverterOptionString.lower(model),
         FfiConverterSequenceString.lower(tools),
         FfiConverterSequenceString.lower(skills),
+        FfiConverterSequenceString.lower(mcpServers),
         FfiConverterSequenceString.lower(tags),$0
     )
 }
@@ -6317,16 +6319,18 @@ public struct ProjectAgent {
     public var model: String?
     public var tools: [String]
     public var skills: [String]
+    public var mcpServers: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(pubkey: String, name: String, isPm: Bool, model: String?, tools: [String], skills: [String]) {
+    public init(pubkey: String, name: String, isPm: Bool, model: String?, tools: [String], skills: [String], mcpServers: [String]) {
         self.pubkey = pubkey
         self.name = name
         self.isPm = isPm
         self.model = model
         self.tools = tools
         self.skills = skills
+        self.mcpServers = mcpServers
     }
 }
 
@@ -6355,6 +6359,9 @@ extension ProjectAgent: Equatable, Hashable {
         if lhs.skills != rhs.skills {
             return false
         }
+        if lhs.mcpServers != rhs.mcpServers {
+            return false
+        }
         return true
     }
 
@@ -6365,6 +6372,7 @@ extension ProjectAgent: Equatable, Hashable {
         hasher.combine(model)
         hasher.combine(tools)
         hasher.combine(skills)
+        hasher.combine(mcpServers)
     }
 }
 
@@ -6382,7 +6390,8 @@ public struct FfiConverterTypeProjectAgent: FfiConverterRustBuffer {
                 isPm: FfiConverterBool.read(from: &buf), 
                 model: FfiConverterOptionString.read(from: &buf), 
                 tools: FfiConverterSequenceString.read(from: &buf), 
-                skills: FfiConverterSequenceString.read(from: &buf)
+                skills: FfiConverterSequenceString.read(from: &buf), 
+                mcpServers: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -6393,6 +6402,7 @@ public struct FfiConverterTypeProjectAgent: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.model, into: &buf)
         FfiConverterSequenceString.write(value.tools, into: &buf)
         FfiConverterSequenceString.write(value.skills, into: &buf)
+        FfiConverterSequenceString.write(value.mcpServers, into: &buf)
     }
 }
 
@@ -11193,10 +11203,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 20153) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 37791) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 28472) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 46781) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 26050) {
