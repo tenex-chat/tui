@@ -28,7 +28,6 @@ struct Draft: Codable, Identifiable, Equatable {
         case title
         case content
         case agentPubkey
-        case selectedNudgeIds
         case selectedSkillIds
         case isNewConversation
         case lastEdited
@@ -53,9 +52,6 @@ struct Draft: Codable, Identifiable, Equatable {
 
     /// Pubkey of agent to p-tag in the message (single-select)
     var agentPubkey: String?
-
-    /// Selected nudge IDs for this conversation (multi-select)
-    var selectedNudgeIds: Set<String>
 
     /// Selected skill IDs for this conversation (multi-select)
     var selectedSkillIds: Set<String>
@@ -85,14 +81,13 @@ struct Draft: Codable, Identifiable, Equatable {
     // MARK: - Initialization
 
     /// Create a new draft for a new conversation
-    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], selectedSkillIds: Set<String> = [], referenceConversationId: String? = nil) {
+    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedSkillIds: Set<String> = [], referenceConversationId: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = nil
         self.projectId = projectId
         self.title = title
         self.content = content
         self.agentPubkey = agentPubkey
-        self.selectedNudgeIds = selectedNudgeIds
         self.selectedSkillIds = selectedSkillIds
         self.isNewConversation = true
         self.lastEdited = Date()
@@ -102,14 +97,13 @@ struct Draft: Codable, Identifiable, Equatable {
     }
 
     /// Create a new draft for an existing conversation
-    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], selectedSkillIds: Set<String> = [], referenceConversationId: String? = nil) {
+    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedSkillIds: Set<String> = [], referenceConversationId: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = conversationId
         self.projectId = projectId
         self.title = "" // Not used for existing conversations
         self.content = content
         self.agentPubkey = agentPubkey
-        self.selectedNudgeIds = selectedNudgeIds
         self.selectedSkillIds = selectedSkillIds
         self.isNewConversation = false
         self.lastEdited = Date()
@@ -121,7 +115,7 @@ struct Draft: Codable, Identifiable, Equatable {
     // MARK: - Migration Support
 
     /// Custom decoder for backward compatibility
-    /// Handles drafts from before projectId, selectedNudgeIds, referenceConversationId,
+    /// Handles drafts from before projectId, selectedSkillIds, referenceConversationId,
     /// imageAttachments, and textAttachments were added
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -136,8 +130,6 @@ struct Draft: Codable, Identifiable, Equatable {
         self.title = try container.decode(String.self, forKey: .title)
         self.content = try container.decode(String.self, forKey: .content)
         self.agentPubkey = try container.decodeIfPresent(String.self, forKey: .agentPubkey)
-        // Migration: selectedNudgeIds is new, default to empty set
-        self.selectedNudgeIds = try container.decodeIfPresent(Set<String>.self, forKey: .selectedNudgeIds) ?? []
         // Migration: selectedSkillIds is new, default to empty set
         self.selectedSkillIds = try container.decodeIfPresent(Set<String>.self, forKey: .selectedSkillIds) ?? []
         self.isNewConversation = try container.decode(Bool.self, forKey: .isNewConversation)
@@ -219,31 +211,12 @@ struct Draft: Codable, Identifiable, Equatable {
         title = ""
         content = ""
         agentPubkey = nil
-        selectedNudgeIds = []
         selectedSkillIds = []
         referenceConversationId = nil
         imageAttachments = []
         nextImageId = 1
         textAttachments = []
         nextTextAttachmentId = 1
-        lastEdited = Date()
-    }
-
-    /// Add a nudge to the selection
-    mutating func addNudge(_ nudgeId: String) {
-        selectedNudgeIds.insert(nudgeId)
-        lastEdited = Date()
-    }
-
-    /// Remove a nudge from the selection
-    mutating func removeNudge(_ nudgeId: String) {
-        selectedNudgeIds.remove(nudgeId)
-        lastEdited = Date()
-    }
-
-    /// Clear all selected nudges
-    mutating func clearNudges() {
-        selectedNudgeIds = []
         lastEdited = Date()
     }
 

@@ -10,7 +10,6 @@ enum AppSection: String, CaseIterable, Identifiable {
     case diagnostics
     case teams
     case agentDefinitions
-    case nudges
     case skills
     case settings
 
@@ -27,7 +26,6 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .diagnostics: return "Diagnostics"
         case .teams: return "Teams"
         case .agentDefinitions: return "Agent Definitions"
-        case .nudges: return "Nudges"
         case .skills: return "Skills"
         case .settings: return "Settings"
         }
@@ -44,7 +42,6 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .diagnostics: return "gauge.with.needle"
         case .teams: return "person.2"
         case .agentDefinitions: return "person.3.sequence"
-        case .nudges: return "forward.circle"
         case .skills: return "bolt.fill"
         case .settings: return "gearshape"
         }
@@ -236,12 +233,6 @@ struct MainTabView: View {
 
             Tab("Agent Definitions", systemImage: "person.3.sequence", value: 6) {
                 AgentDefinitionsTabView(layoutMode: .adaptive)
-                    .environment(coreManager)
-                    .nowPlayingInset(coreManager: coreManager)
-            }
-
-            Tab("Nudges", systemImage: "forward.circle", value: 7) {
-                NudgesTabView(layoutMode: .adaptive)
                     .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }

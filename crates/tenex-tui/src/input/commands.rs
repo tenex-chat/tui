@@ -261,15 +261,6 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'U',
-        label: "Nudge Manager",
-        section: "Other",
-        available: |_| true,
-        execute: |app| {
-            app.modal_state = ModalState::NudgeList(modal::NudgeListState::new());
-        },
-    },
-    Command {
         key: 'C',
         label: "Create project",
         section: "Other",
@@ -602,7 +593,7 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         key: 'K',
-        label: "Select Nudges/Skills",
+        label: "Select Skills",
         section: "Input",
         available: |app| app.view == View::Chat,
         execute: |app| {

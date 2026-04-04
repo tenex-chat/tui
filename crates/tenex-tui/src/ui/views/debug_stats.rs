@@ -17,7 +17,7 @@ fn kind_name(kind: u16) -> &'static str {
         513 => "Conv Metadata",
         4129 => "Agent Lessons",
         4199 => "Agent Defs",
-        4201 => "Nudges",
+        4201 => "Legacy 4201",
         24010 => "Project Status",
         24133 => "Operations",
         30023 => "Long-form",

@@ -69,10 +69,9 @@ struct MessageComposerView: View {
     @State var agentsLoadError: String?
     @State var showAgentSelector = false
     @State var replyTargetAgentName: String?  // Agent name for reply target (resolved from initialAgentPubkey)
-    @State var availableNudges: [Nudge] = []
     @State var availableSkills: [Skill] = []
     @State var showNudgeSkillSelector = false
-    @State var nudgeSkillSelectorInitialMode: NudgeSkillSelectorMode = .all
+    @State var nudgeSkillSelectorInitialMode: NudgeSkillSelectorMode = .skills
     @State var nudgeSkillSelectorInitialQuery: String = ""
     @State var agentSelectorInitialQuery: String = ""
     @State var isSending = false
@@ -182,10 +181,6 @@ struct MessageComposerView: View {
     var selectedAgent: ProjectAgent? {
         guard let pubkey = draft.agentPubkey else { return nil }
         return availableAgents.first { $0.pubkey == pubkey }
-    }
-
-    var selectedNudges: [Nudge] {
-        availableNudges.filter { draft.selectedNudgeIds.contains($0.id) }
     }
 
     var selectedSkills: [Skill] {
@@ -455,16 +450,13 @@ struct MessageComposerView: View {
         }
         .sheet(isPresented: $showNudgeSkillSelector) {
             NudgeSkillSelectorSheet(
-                nudges: availableNudges,
                 skills: availableSkills,
-                selectedNudgeIds: $draft.selectedNudgeIds,
                 selectedSkillIds: $draft.selectedSkillIds,
                 bookmarkedIds: coreManager.bookmarkedIds,
                 initialMode: nudgeSkillSelectorInitialMode,
                 initialSearchQuery: nudgeSkillSelectorInitialQuery,
                 onDone: {
-                    isDirty = true // Mark as dirty when user selects nudges/skills
-                    persistSelectedNudgeIds()
+                    isDirty = true // Mark as dirty when user selects skills
                     persistSelectedSkillIds()
                 },
                 onToggleBookmark: { itemId in
@@ -608,12 +600,7 @@ struct MessageComposerView: View {
                     }
                 }
 
-                // Nudge chips (shown only when nudges are selected)
-                if selectedProject != nil && !selectedNudges.isEmpty {
-                    nudgeChipsView
-                }
-
-                // Skill chips (shown only when skills are selected)
+                // Skill chips (for all conversations)
                 if selectedProject != nil && !selectedSkills.isEmpty {
                     skillChipsView
                 }

@@ -708,7 +708,7 @@ private struct BunkerSettingsSectionView: View {
         case 1111: return "Comment"
         case 4199: return "Agent Definition"
         case 4200: return "MCP Tool"
-        case 4201: return "Nudge"
+        case 4201: return "Legacy 4201"
         case 14199: return "Sealed Agent Def"
         case 24010: return "Status"
         case 24020: return "Agent Config"

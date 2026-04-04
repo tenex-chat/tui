@@ -2,7 +2,7 @@
 //!
 //! This module provides a modular system for handling special prefix characters
 //! when typed at the beginning of an empty input field. Each prefix can trigger
-//! a different action (e.g., `@` opens agent configuration, `/` opens nudges+skills, etc.)
+//! a different action (e.g., `@` opens agent configuration, `/` opens skills, etc.)
 //!
 //! ## Adding New Prefix Triggers
 //!
@@ -19,7 +19,7 @@ use crate::ui::App;
 pub enum PrefixTrigger {
     /// `@` - Open agent configuration modal
     AgentConfig,
-    /// `/` - Open unified nudges/skills selector modal
+    /// `/` - Open the skills selector modal
     NudgeSkillSelector,
     /// `#` - Open project selector modal
     ProjectSelector,

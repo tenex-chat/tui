@@ -328,34 +328,26 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         ]));
     }
 
-    // Build unified nudge/skill display string - always show "[/]" even if empty (for selection)
-    // Uses per-tab isolated nudge + skill selections
-    let selected_nudge_ids = app.selected_nudge_ids();
+    // Build skill display string - always show "[/]" even if empty (for selection)
+    // Uses per-tab isolated skill selections
     let selected_skill_ids = app.selected_skill_ids();
-    let mut selected_labels: Vec<String> = selected_nudge_ids
+    let selected_labels: Vec<String> = selected_skill_ids
         .iter()
         .filter_map(|id| {
             app.data_store
                 .borrow()
                 .content
-                .get_nudge(id)
-                .map(|n| format!("/{}", n.title))
+                .get_skill(id)
+                .map(|s| format!("skill/{}", s.title))
         })
         .collect();
-    selected_labels.extend(selected_skill_ids.iter().filter_map(|id| {
-        app.data_store
-            .borrow()
-            .content
-            .get_skill(id)
-            .map(|s| format!("skill/{}", s.title))
-    }));
     let nudge_skill_display = if selected_labels.is_empty() {
         "[/]".to_string()
     } else {
         format!("[{}]", selected_labels.join(", "))
     };
 
-    // Context line at bottom: agent (model) project [/] (nudges + skills)
+    // Context line at bottom: agent (model) project [/] (skills)
     // Add scroll indicator if we're scrolling
     let scroll_indicator = if total_content_lines > available_content_lines {
         let current_line = cursor_visual_row + 1;
@@ -414,7 +406,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     context_spans.push(Span::styled(project_display.clone(), project_style));
 
-    // Unified nudge/skill display (highlighted if focused) - always shown
+    // Skill display (highlighted if focused) - always shown
     context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
     let nudge_skill_style = if context_focus == Some(InputContextFocus::NudgeSkill) {
         focused_style(theme::ACCENT_WARNING)

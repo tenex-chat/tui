@@ -580,11 +580,10 @@ impl BookmarkFilter {
     }
 }
 
-/// State for unified nudge/skill selector modal (multi-select for messages)
+/// State for the skill selector modal (multi-select for messages)
 #[derive(Debug, Clone)]
 pub struct NudgeSkillSelectorState {
     pub selector: SelectorState,
-    pub selected_nudge_ids: Vec<String>, // Multi-select
     pub selected_skill_ids: Vec<String>, // Multi-select
     /// Whether to show only bookmarked items or all items.
     pub bookmark_filter: BookmarkFilter,
@@ -1387,7 +1386,6 @@ impl AgentConfigFocus {
         }
     }
 }
-
 
 /// State for the agent settings modal
 #[derive(Debug, Clone)]
@@ -2390,8 +2388,14 @@ mod tests {
     fn agent_config_focus_cycles_both_directions() {
         assert_eq!(AgentConfigFocus::Agents.next(), AgentConfigFocus::Model);
         assert_eq!(AgentConfigFocus::Model.next(), AgentConfigFocus::Skills);
-        assert_eq!(AgentConfigFocus::Skills.next(), AgentConfigFocus::McpServers);
-        assert_eq!(AgentConfigFocus::McpServers.next(), AgentConfigFocus::Agents);
+        assert_eq!(
+            AgentConfigFocus::Skills.next(),
+            AgentConfigFocus::McpServers
+        );
+        assert_eq!(
+            AgentConfigFocus::McpServers.next(),
+            AgentConfigFocus::Agents
+        );
 
         assert_eq!(
             AgentConfigFocus::Agents.prev(),

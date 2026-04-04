@@ -674,15 +674,14 @@ impl DelegationBar {
     }
 }
 
-// ─── Nudge/Skill Selector Panel ─────────────────────────────────────────────
+// ─── Skill Selector Panel ───────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum NudgeSkillMode {
-    Nudges,
     Skills,
 }
 
-/// Item in the nudge/skill selector: (id, title, description)
+/// Item in the skill selector: (id, title, description)
 pub(crate) struct NudgeSkillItem {
     pub(crate) id: String,
     pub(crate) title: String,
@@ -703,7 +702,7 @@ impl NudgeSkillPanel {
     pub(crate) fn new() -> Self {
         Self {
             active: false,
-            mode: NudgeSkillMode::Nudges,
+            mode: NudgeSkillMode::Skills,
             items: Vec::new(),
             cursor: 0,
             scroll_offset: 0,
@@ -712,24 +711,15 @@ impl NudgeSkillPanel {
         }
     }
 
-    pub(crate) fn activate(
-        &mut self,
-        runtime: &CoreRuntime,
-        mode: NudgeSkillMode,
-        state_nudge_ids: &[String],
-        state_skill_ids: &[String],
-    ) {
+    pub(crate) fn activate(&mut self, runtime: &CoreRuntime, state_skill_ids: &[String]) {
         self.active = true;
-        self.mode = mode;
+        self.mode = NudgeSkillMode::Skills;
         self.filter.clear();
         self.cursor = 0;
         self.scroll_offset = 0;
 
         // Pre-populate selected_ids from state
         self.selected_ids.clear();
-        for id in state_nudge_ids {
-            self.selected_ids.insert(id.clone());
-        }
         for id in state_skill_ids {
             self.selected_ids.insert(id.clone());
         }
@@ -740,28 +730,16 @@ impl NudgeSkillPanel {
     fn load_items(&mut self, runtime: &CoreRuntime) {
         let store = runtime.data_store();
         let store_ref = store.borrow();
-        self.items = match self.mode {
-            NudgeSkillMode::Nudges => store_ref
-                .content
-                .get_nudges()
-                .into_iter()
-                .map(|n| NudgeSkillItem {
-                    id: n.id.clone(),
-                    title: n.title.clone(),
-                    description: n.description.clone(),
-                })
-                .collect(),
-            NudgeSkillMode::Skills => store_ref
-                .content
-                .get_skills()
-                .into_iter()
-                .map(|s| NudgeSkillItem {
-                    id: s.id.clone(),
-                    title: s.title.clone(),
-                    description: s.description.clone(),
-                })
-                .collect(),
-        };
+        self.items = store_ref
+            .content
+            .get_skills()
+            .into_iter()
+            .map(|s| NudgeSkillItem {
+                id: s.id.clone(),
+                title: s.title.clone(),
+                description: s.description.clone(),
+            })
+            .collect();
     }
 
     pub(crate) fn deactivate(&mut self) {
@@ -820,26 +798,11 @@ impl NudgeSkillPanel {
         }
     }
 
-    pub(crate) fn switch_mode(&mut self, mode: NudgeSkillMode, runtime: &CoreRuntime) {
-        self.mode = mode;
-        self.cursor = 0;
-        self.scroll_offset = 0;
-        self.filter.clear();
-        self.load_items(runtime);
-    }
-
-    /// Commit selections back to state vectors, split by current items.
-    /// Returns (nudge_ids, skill_ids).
-    pub(crate) fn commit_selections(&self, runtime: &CoreRuntime) -> (Vec<String>, Vec<String>) {
+    /// Commit selections back to the current state vector.
+    pub(crate) fn commit_selections(&self, runtime: &CoreRuntime) -> Vec<String> {
         let store = runtime.data_store();
         let store_ref = store.borrow();
 
-        let nudge_ids: HashSet<String> = store_ref
-            .content
-            .get_nudges()
-            .iter()
-            .map(|n| n.id.clone())
-            .collect();
         let skill_ids: HashSet<String> = store_ref
             .content
             .get_skills()
@@ -847,18 +810,15 @@ impl NudgeSkillPanel {
             .map(|s| s.id.clone())
             .collect();
 
-        let mut selected_nudges = Vec::new();
         let mut selected_skills = Vec::new();
 
         for id in &self.selected_ids {
-            if nudge_ids.contains(id) {
-                selected_nudges.push(id.clone());
-            } else if skill_ids.contains(id) {
+            if skill_ids.contains(id) {
                 selected_skills.push(id.clone());
             }
         }
 
-        (selected_nudges, selected_skills)
+        selected_skills
     }
 }
 

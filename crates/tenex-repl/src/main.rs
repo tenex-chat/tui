@@ -617,23 +617,14 @@ async fn run_repl(
                     continue;
                 }
 
-                // ── Nudge/Skill panel keyboard intercept ──
+                // ── Skill panel keyboard intercept ──
                 if nudge_skill_panel.active {
                     match code {
                         KeyCode::Up => nudge_skill_panel.move_up(),
                         KeyCode::Down => nudge_skill_panel.move_down(),
                         KeyCode::Char(' ') => nudge_skill_panel.toggle_current(),
-                        KeyCode::Tab => {
-                            let next = match nudge_skill_panel.mode {
-                                NudgeSkillMode::Nudges => NudgeSkillMode::Skills,
-                                NudgeSkillMode::Skills => NudgeSkillMode::Nudges,
-                            };
-                            nudge_skill_panel.switch_mode(next, runtime);
-                        }
                         KeyCode::Enter => {
-                            let (nudge_ids, skill_ids) = nudge_skill_panel.commit_selections(runtime);
-                            state.selected_nudge_ids = nudge_ids;
-                            state.selected_skill_ids = skill_ids;
+                            state.selected_skill_ids = nudge_skill_panel.commit_selections(runtime);
                             nudge_skill_panel.deactivate();
                         }
                         KeyCode::Esc => {
@@ -1321,14 +1312,12 @@ async fn run_repl(
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                     }
 
-                    // $ → open nudge/skill selector
+                    // $ → open skill selector
                     (KeyCode::Char('$'), m) if !m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) => {
                         state.delegation_bar.unfocus();
                         editor.selected_attachment = None;
                         nudge_skill_panel.activate(
                             runtime,
-                            NudgeSkillMode::Nudges,
-                            &state.selected_nudge_ids,
                             &state.selected_skill_ids,
                         );
                         redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);

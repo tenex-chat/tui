@@ -104,7 +104,7 @@ class TenexCoreManager {
     private(set) var diagnosticsVersion: UInt64 = 0
     var streamingBuffers: [String: StreamingBuffer] = [:]
 
-    /// Bookmarked nudge/skill IDs (kind:14202). Updated reactively when BookmarkListChanged fires.
+    /// Bookmarked item IDs (kind:14202). Updated reactively when BookmarkListChanged fires.
     var bookmarkedIds: Set<String> = []
 
     /// Project online status - updated reactively via event callbacks.

@@ -3,7 +3,7 @@ import Observation
 
 enum ComposerInlineTriggerKind {
     case agent
-    case nudgeSkill
+    case skill
 }
 
 struct ComposerInlineTrigger {
@@ -187,10 +187,6 @@ final class ComposerViewModel {
         )
     }
 
-    func loadNudges() async -> [Nudge] {
-        (try? await dependencies.core.getNudges()) ?? []
-    }
-
     func loadSkills() async -> [Skill] {
         (try? await dependencies.core.getSkills()) ?? []
     }
@@ -225,7 +221,6 @@ final class ComposerViewModel {
         projectId: String,
         content: String,
         agentPubkey: String?,
-        nudgeIds: [String],
         skillIds: [String],
         referenceConversationId: String?
     ) async throws -> SendMessageResult {
@@ -235,7 +230,6 @@ final class ComposerViewModel {
                 title: "",
                 content: content,
                 agentPubkey: agentPubkey,
-                nudgeIds: nudgeIds,
                 skillIds: skillIds,
                 referenceConversationId: referenceConversationId
             )
@@ -250,7 +244,6 @@ final class ComposerViewModel {
             projectId: projectId,
             content: content,
             agentPubkey: agentPubkey,
-            nudgeIds: nudgeIds,
             skillIds: skillIds
         )
     }
@@ -272,7 +265,7 @@ final class ComposerViewModel {
         }
 
         return ComposerInlineTrigger(
-            kind: prefix == "@" ? .agent : .nudgeSkill,
+            kind: prefix == "@" ? .agent : .skill,
             query: String(queryPart),
             range: tokenStart..<text.endIndex
         )

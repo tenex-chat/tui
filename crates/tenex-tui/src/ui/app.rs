@@ -182,7 +182,7 @@ pub enum InputContextFocus {
     Agent,
     /// Project selector is selected (only available for new conversations/draft tabs)
     Project,
-    /// Unified nudge/skill selector is selected
+    /// Skill selector is selected
     NudgeSkill,
 }
 
@@ -365,7 +365,6 @@ pub struct App {
     /// Draft ID when waiting for a newly created thread (to convert draft tab)
     pub pending_new_thread_draft_id: Option<String>,
 
-    // NOTE: selected_nudge_ids is now per-tab in OpenTab.selected_nudge_ids
     // NOTE: frame_counter is now managed by notification_manager
     // NOTE: message_history is now per-tab in OpenTab.message_history
     // NOTE: chat_search is now per-tab in OpenTab.chat_search
@@ -472,7 +471,6 @@ impl App {
             collapsed_threads: HashSet::new(),
             pending_new_thread_project: None,
             pending_new_thread_draft_id: None,
-            // NOTE: selected_nudge_ids is now per-tab in OpenTab
             // NOTE: frame_counter is now managed by notification_manager
             // NOTE: message_history is now per-tab in OpenTab
             show_archived: false,
@@ -3592,19 +3590,14 @@ impl App {
             .unwrap_or(false)
     }
 
-    // ===== Unified Nudge/Skill Selector Methods =====
+    // ===== Skill Selector Methods =====
 
-    /// Open the unified nudge/skill selector modal.
+    /// Open the skill selector modal.
     /// Defaults to BookmarkedOnly filter so users see their curated list first.
     pub fn open_nudge_skill_selector(&mut self) {
         use crate::ui::modal::{BookmarkFilter, NudgeSkillSelectorState};
         use crate::ui::selector::SelectorState;
 
-        let current_nudges = self
-            .tabs
-            .active_tab()
-            .map(|t| t.selected_nudge_ids.clone())
-            .unwrap_or_default();
         let current_skills = self
             .tabs
             .active_tab()
@@ -3613,13 +3606,12 @@ impl App {
 
         self.modal_state = ModalState::NudgeSkillSelector(NudgeSkillSelectorState {
             selector: SelectorState::new(),
-            selected_nudge_ids: current_nudges,
             selected_skill_ids: current_skills,
             bookmark_filter: BookmarkFilter::BookmarkedOnly,
         });
     }
 
-    /// Get filtered items for the unified selector.
+    /// Get filtered items for the skill selector.
     ///
     /// Applies both the text search filter and the bookmark filter:
     /// - In `BookmarkedOnly` mode, only items whose IDs are in the user's bookmark list are shown.
@@ -3646,40 +3638,21 @@ impl App {
 
         let mut items: Vec<NudgeSkillSelectorItem> = store
             .content
-            .get_nudges()
+            .get_skills()
             .into_iter()
-            .filter(|n| {
+            .filter(|s| {
                 // Apply bookmark filter
                 if let Some(ref ids) = bookmarked_ids {
-                    if !ids.contains(n.id.as_str()) {
+                    if !ids.contains(s.id.as_str()) {
                         return false;
                     }
                 }
                 // Apply text search filter
-                fuzzy_matches(&n.title, filter) || fuzzy_matches(&n.description, filter)
+                fuzzy_matches(&s.title, filter) || fuzzy_matches(&s.description, filter)
             })
             .cloned()
-            .map(NudgeSkillSelectorItem::Nudge)
+            .map(NudgeSkillSelectorItem::Skill)
             .collect();
-
-        items.extend(
-            store
-                .content
-                .get_skills()
-                .into_iter()
-                .filter(|s| {
-                    // Apply bookmark filter
-                    if let Some(ref ids) = bookmarked_ids {
-                        if !ids.contains(s.id.as_str()) {
-                            return false;
-                        }
-                    }
-                    // Apply text search filter
-                    fuzzy_matches(&s.title, filter) || fuzzy_matches(&s.description, filter)
-                })
-                .cloned()
-                .map(NudgeSkillSelectorItem::Skill),
-        );
 
         items.sort_by(|a, b| {
             a.title()
@@ -4051,21 +4024,6 @@ impl App {
         }
         self.save_chat_draft();
         self.last_autosave = std::time::Instant::now();
-    }
-
-    /// Remove a nudge from selected nudges (per-tab isolated)
-    pub fn remove_selected_nudge(&mut self, nudge_id: &str) {
-        if let Some(tab) = self.tabs.active_tab_mut() {
-            tab.selected_nudge_ids.retain(|id| id != nudge_id);
-        }
-    }
-
-    /// Get selected nudge IDs for current tab (per-tab isolated)
-    pub fn selected_nudge_ids(&self) -> Vec<String> {
-        self.tabs
-            .active_tab()
-            .map(|t| t.selected_nudge_ids.clone())
-            .unwrap_or_default()
     }
 
     // ===== Unified Selector Methods (Alt+K/Ctrl+N/Ctrl+/) =====

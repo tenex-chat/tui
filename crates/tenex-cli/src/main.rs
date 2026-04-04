@@ -85,10 +85,6 @@ enum Commands {
         /// Must be 64-character hex strings (Nostr event IDs).
         #[arg(long, short = 'S')]
         skill: Vec<String>,
-        /// Nudge event IDs to attach (can be specified multiple times).
-        /// Must be 64-character hex strings (Nostr event IDs).
-        #[arg(long, short = 'N')]
-        nudge: Vec<String>,
         /// Message content (all remaining arguments are joined)
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
@@ -110,10 +106,6 @@ enum Commands {
         /// Must be 64-character hex strings (Nostr event IDs).
         #[arg(long, short = 'S')]
         skill: Vec<String>,
-        /// Nudge event IDs to attach (can be specified multiple times).
-        /// Must be 64-character hex strings (Nostr event IDs).
-        #[arg(long, short = 'N')]
-        nudge: Vec<String>,
         /// Message content (all remaining arguments are joined)
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
@@ -147,10 +139,6 @@ enum Commands {
     /// List all skills (kind:4202 events).
     /// Use `--skill <ID>` with send-message or create-thread to attach skills.
     ListSkills,
-
-    /// List all nudges (kind:4201 events).
-    /// Use `--nudge <ID>` with send-message or create-thread to attach nudges.
-    ListNudges,
 
     /// Show detailed project information (from kind:24010)
     ShowProject {
@@ -311,7 +299,6 @@ fn main() {
             wait,
             wait_for_project,
             skill,
-            nudge,
             message,
         }) => CliCommand::SendMessage {
             project_slug,
@@ -321,7 +308,6 @@ fn main() {
             wait_secs: wait,
             wait_for_project,
             skill_ids: validate_skill_ids(skill),
-            nudge_ids: validate_nudge_ids(nudge),
         },
         Some(Commands::CreateThread {
             project_slug,
@@ -329,7 +315,6 @@ fn main() {
             wait,
             wait_for_project,
             skill,
-            nudge,
             message,
         }) => CliCommand::CreateThread {
             project_slug,
@@ -338,7 +323,6 @@ fn main() {
             wait_secs: wait,
             wait_for_project,
             skill_ids: validate_skill_ids(skill),
-            nudge_ids: validate_nudge_ids(nudge),
         },
         Some(Commands::BootProject { project_slug, wait }) => {
             CliCommand::BootProject { project_slug, wait }
@@ -375,7 +359,6 @@ fn main() {
         Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
         Some(Commands::ListMCPTools) => CliCommand::ListMCPTools,
         Some(Commands::ListSkills) => CliCommand::ListSkills,
-        Some(Commands::ListNudges) => CliCommand::ListNudges,
         Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject {
             project_slug,
             wait_for_project: wait,
@@ -571,55 +554,6 @@ fn validate_skill_ids(skill_ids: Vec<String>) -> Vec<String> {
         if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
             eprintln!(
                 "Error: Skill event ID must contain only hex characters: {}",
-                trimmed
-            );
-            std::process::exit(1);
-        }
-
-        seen.insert(trimmed.clone());
-        validated.push(trimmed);
-    }
-
-    validated
-}
-
-/// Validate and normalize nudge IDs.
-/// - Trims whitespace from each ID
-/// - Filters out empty/whitespace-only IDs
-/// - Deduplicates IDs
-/// - Validates 64-character hex format
-/// Returns the validated IDs or exits with error if any ID is invalid.
-fn validate_nudge_ids(nudge_ids: Vec<String>) -> Vec<String> {
-    use std::collections::HashSet;
-
-    let mut seen = HashSet::new();
-    let mut validated = Vec::new();
-
-    for id in nudge_ids {
-        let trimmed = id.trim().to_string();
-
-        // Skip empty/whitespace-only IDs
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        // Skip duplicates
-        if seen.contains(&trimmed) {
-            continue;
-        }
-
-        // Validate 64-character hex format
-        if trimmed.len() != 64 {
-            eprintln!(
-                "Error: Nudge event ID must be 64 hex characters (got {} characters): {}",
-                trimmed.len(),
-                trimmed
-            );
-            std::process::exit(1);
-        }
-        if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-            eprintln!(
-                "Error: Nudge event ID must contain only hex characters: {}",
                 trimmed
             );
             std::process::exit(1);

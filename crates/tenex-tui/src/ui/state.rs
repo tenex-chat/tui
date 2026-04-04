@@ -298,8 +298,6 @@ pub struct OpenTab {
     pub message_history: TabMessageHistory,
     /// Per-tab chat search state (isolated from other tabs)
     pub chat_search: ChatSearchState,
-    /// Per-tab selected nudge IDs (isolated from other tabs)
-    pub selected_nudge_ids: Vec<String>,
     /// Per-tab selected skill IDs (isolated from other tabs)
     pub selected_skill_ids: Vec<String>,
     /// Per-tab text editor for chat input (ISOLATED from other tabs)
@@ -353,7 +351,6 @@ impl OpenTab {
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
             chat_search: ChatSearchState::default(),
-            selected_nudge_ids: Vec::new(),
             selected_skill_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
@@ -383,7 +380,6 @@ impl OpenTab {
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
             chat_search: ChatSearchState::default(),
-            selected_nudge_ids: Vec::new(),
             selected_skill_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
@@ -406,7 +402,6 @@ impl OpenTab {
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
             chat_search: ChatSearchState::default(),
-            selected_nudge_ids: Vec::new(),
             selected_skill_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,

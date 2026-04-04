@@ -19,7 +19,6 @@ struct MainShellView: View {
     @State private var selectedTeam: TeamInfo?
     @State private var selectedAgentInstance: AgentInstance?
     @State private var selectedAgentDefinition: AgentDefinition?
-    @State private var selectedNudge: Nudge?
     @State private var selectedSkill: Skill?
     @State private var newConversationProjectId: String?
     @State private var newConversationAgentPubkey: String?
@@ -71,14 +70,13 @@ struct MainShellView: View {
     private var appSidebar: some View {
         List {
             Section {
-                ForEach(AppSection.allCases.filter { $0 != .teams && $0 != .agentDefinitions && $0 != .nudges && $0 != .skills && $0 != .settings && $0 != .diagnostics }) { section in
+                ForEach(AppSection.allCases.filter { $0 != .teams && $0 != .agentDefinitions && $0 != .skills && $0 != .settings && $0 != .diagnostics }) { section in
                     shellSidebarRowButton(for: section)
                 }
             }
 
             Section("Browse") {
                 shellSidebarRowButton(for: .agentDefinitions)
-                shellSidebarRowButton(for: .nudges)
                 shellSidebarRowButton(for: .skills)
             }
 
@@ -339,12 +337,6 @@ struct MainShellView: View {
                 }
             )
             .accessibilityIdentifier(AppSection.agentDefinitions.accessibilityContentID)
-        case .nudges:
-            NudgesTabView(
-                layoutMode: .adaptive,
-                selectedNudge: $selectedNudge
-            )
-            .accessibilityIdentifier(AppSection.nudges.accessibilityContentID)
         case .skills:
             SkillsTabView(
                 layoutMode: .adaptive,

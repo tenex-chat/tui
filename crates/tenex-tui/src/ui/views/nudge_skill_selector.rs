@@ -11,22 +11,22 @@ use ratatui::{
     Frame,
 };
 
-/// Render the unified nudge/skill selector modal.
+/// Render the skill selector modal.
 pub fn render_nudge_skill_selector(
     f: &mut Frame,
     app: &App,
     area: Rect,
     state: &NudgeSkillSelectorState,
 ) {
-    let selected_count = state.selected_nudge_ids.len() + state.selected_skill_ids.len();
+    let selected_count = state.selected_skill_ids.len();
     let filter_label = state.bookmark_filter.label();
     let title = if selected_count > 0 {
         format!(
-            "Select Nudges/Skills [{}] ({} selected)",
+            "Select Skills [{}] ({} selected)",
             filter_label, selected_count
         )
     } else {
-        format!("Select Nudges/Skills [{}]", filter_label)
+        format!("Select Skills [{}]", filter_label)
     };
 
     let (popup_area, content_area) = Modal::new(&title)
@@ -34,7 +34,7 @@ pub fn render_nudge_skill_selector(
             max_width: 110,
             height_percent: 0.80,
         })
-        .search(&state.selector.filter, "Search nudges and skills...")
+        .search(&state.selector.filter, "Search skills...")
         .render_frame(f, area);
 
     let items = app.filtered_nudge_skill_items();
@@ -50,11 +50,11 @@ pub fn render_nudge_skill_selector(
         let msg = if state.bookmark_filter == BookmarkFilter::BookmarkedOnly
             && state.selector.filter.is_empty()
         {
-            "No bookmarked nudges or skills. Press Tab to show all, or 'b' on an item to bookmark."
+            "No bookmarked skills. Press Tab to show all, or 'b' on an item to bookmark."
         } else if state.selector.filter.is_empty() {
-            "No nudges or skills available."
+            "No skills available."
         } else {
-            "No nudges or skills match your search."
+            "No skills match your search."
         };
         let empty_msg = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(empty_msg, list_area);
@@ -144,10 +144,7 @@ pub fn render_nudge_skill_selector(
                 Style::default().fg(theme::TEXT_PRIMARY)
             };
 
-            let label = match item {
-                NudgeSkillSelectorItem::Nudge(_) => format!("/{}", item.title()),
-                NudgeSkillSelectorItem::Skill(_) => format!("skill/{}", item.title()),
-            };
+            let label = format!("skill/{}", item.title());
             line1.push(Span::styled(label, title_style));
 
             if let NudgeSkillSelectorItem::Skill(_) = item {
@@ -232,9 +229,7 @@ pub fn render_nudge_skill_selector(
 
 fn is_item_selected(state: &NudgeSkillSelectorState, item: &NudgeSkillSelectorItem) -> bool {
     match item {
-        NudgeSkillSelectorItem::Nudge(nudge) => {
-            state.selected_nudge_ids.iter().any(|id| id == &nudge.id)
-        }
+        NudgeSkillSelectorItem::Nudge(_) => false,
         NudgeSkillSelectorItem::Skill(skill) => {
             state.selected_skill_ids.iter().any(|id| id == &skill.id)
         }

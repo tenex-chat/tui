@@ -175,23 +175,6 @@ extension MessageComposerView {
         .background(.bar)
     }
 
-    var nudgeChipsView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(selectedNudges, id: \.id) { nudge in
-                    NudgeChipView(nudge: nudge) {
-                        isDirty = true
-                        draft.removeNudge(nudge.id)
-                        persistSelectedNudgeIds()
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-        }
-        .padding(.vertical, 12)
-        .background(.bar)
-    }
-
     var skillChipsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -471,14 +454,14 @@ extension MessageComposerView {
 
     var nudgeSkillToken: some View {
         Button {
-            openNudgeSkillSelector(mode: .all)
+            openNudgeSkillSelector(mode: .skills)
         } label: {
             HStack(spacing: 4) {
                 Text("/")
                     .font(workspaceTokenFont.monospaced())
                     .foregroundStyle(workspaceTokenTextColor)
-                if (selectedNudges.count + selectedSkills.count) > 0 {
-                    Text("\(selectedNudges.count + selectedSkills.count)")
+                if selectedSkills.count > 0 {
+                    Text("\(selectedSkills.count)")
                         .font(workspaceTokenFont)
                         .foregroundStyle(workspaceTokenTextColor)
                 }

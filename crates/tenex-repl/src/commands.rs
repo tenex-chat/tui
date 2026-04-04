@@ -793,7 +793,7 @@ pub(crate) fn handle_reference_command(
         title: String::new(),
         content: content.clone(),
         agent_pubkey: state.current_agent.clone(),
-        nudge_ids: state.selected_nudge_ids.clone(),
+        nudge_ids: Vec::new(),
         skill_ids: state.selected_skill_ids.clone(),
         reference_conversation_id: Some(source_thread_id.clone()),
         reference_report_a_tag: None,
@@ -813,7 +813,6 @@ pub(crate) fn handle_reference_command(
     state.last_todo_items.clear();
     state.conversation_stack.clear();
     state.delegation_bar.unfocus();
-    state.selected_nudge_ids.clear();
     state.selected_skill_ids.clear();
     state.last_displayed_pubkey = Some(state.user_pubkey.clone());
 
@@ -914,7 +913,7 @@ pub(crate) fn handle_send_message(
             title: String::new(),
             content: content.to_string(),
             agent_pubkey: state.current_agent.clone(),
-            nudge_ids: state.selected_nudge_ids.clone(),
+            nudge_ids: Vec::new(),
             skill_ids: state.selected_skill_ids.clone(),
             reference_conversation_id: None,
             reference_report_a_tag: None,
@@ -927,7 +926,6 @@ pub(crate) fn handle_send_message(
             state.last_todo_items.clear();
         }
 
-        state.selected_nudge_ids.clear();
         state.selected_skill_ids.clear();
         state.last_displayed_pubkey = Some(state.user_pubkey.clone());
         return vec![print_user_message_raw(content)];
@@ -941,13 +939,12 @@ pub(crate) fn handle_send_message(
         content: content.to_string(),
         agent_pubkey: state.current_agent.clone(),
         reply_to: None,
-        nudge_ids: state.selected_nudge_ids.clone(),
+        nudge_ids: Vec::new(),
         skill_ids: state.selected_skill_ids.clone(),
         ask_author_pubkey: None,
         response_tx: None,
     });
 
-    state.selected_nudge_ids.clear();
     state.selected_skill_ids.clear();
     state.last_displayed_pubkey = Some(state.user_pubkey.clone());
     vec![print_user_message_raw(content)]

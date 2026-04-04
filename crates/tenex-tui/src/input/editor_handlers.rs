@@ -101,7 +101,7 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // Ctrl+N or Ctrl+/ = open unified nudge/skill selector
+        // Ctrl+N or Ctrl+/ = open skill selector
         // Note: Ctrl+_ is included for terminal compatibility (some terminals send
         // ASCII 0x1F for Ctrl+/, which crossterm reports as Ctrl+_)
         // These bindings are handled directly here rather than through the hotkey
@@ -110,7 +110,7 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') | KeyCode::Char('/') | KeyCode::Char('_') if has_ctrl => {
             app.open_nudge_skill_selector();
         }
-        // Alt+K = open unified nudge/skill selector (Alt+S conflicts with global audio stop)
+        // Alt+K = open skill selector (Alt+S conflicts with global audio stop)
         KeyCode::Char('k') if has_alt => {
             app.open_nudge_skill_selector();
         }
@@ -353,8 +353,7 @@ fn handle_send_message(app: &mut App) {
         {
             let project_a_tag = project.a_tag();
             let agent_pubkey = app.selected_agent().map(|a| a.pubkey.clone());
-            // Per-tab isolated nudge and skill selection
-            let nudge_ids = app.selected_nudge_ids();
+            // Per-tab isolated skill selection
             let skill_ids = app.selected_skill_ids();
 
             if let Some(thread) = app.selected_thread() {
@@ -385,7 +384,7 @@ fn handle_send_message(app: &mut App) {
                     content,
                     agent_pubkey,
                     reply_to,
-                    nudge_ids,
+                    nudge_ids: Vec::new(),
                     skill_ids: skill_ids.clone(),
                     ask_author_pubkey: None,
                     response_tx: Some(response_tx),
@@ -459,7 +458,7 @@ fn handle_send_message(app: &mut App) {
                     title,
                     content,
                     agent_pubkey,
-                    nudge_ids,
+                    nudge_ids: Vec::new(),
                     skill_ids,
                     reference_conversation_id,
                     reference_report_a_tag: None,

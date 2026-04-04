@@ -83,9 +83,8 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
                             tab.thread_title = format!("New: {}", project_name);
 
                             // Clear project-scoped selections when switching projects
-                            // Skills and nudges may not exist in the new project
+                            // Skills may not exist in the new project
                             tab.selected_skill_ids.clear();
-                            tab.selected_nudge_ids.clear();
 
                             // Save the draft content under the new project key
                             app.save_chat_draft();
@@ -215,10 +214,8 @@ pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 // Apply to current tab (per-tab isolated)
-                let selected_nudges = state.selected_nudge_ids.clone();
                 let selected_skills = state.selected_skill_ids.clone();
                 if let Some(tab) = app.tabs.active_tab_mut() {
-                    tab.selected_nudge_ids = selected_nudges;
                     tab.selected_skill_ids = selected_skills;
                 }
                 app.modal_state = ModalState::None;
@@ -309,18 +306,6 @@ pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char(' ') => {
                 if let Some(item) = items.get(state.selector.index) {
                     match item {
-                        crate::ui::app::NudgeSkillSelectorItem::Nudge(nudge) => {
-                            let nudge_id = nudge.id.clone();
-                            if let Some(pos) = state
-                                .selected_nudge_ids
-                                .iter()
-                                .position(|id| id == &nudge_id)
-                            {
-                                state.selected_nudge_ids.remove(pos);
-                            } else {
-                                state.selected_nudge_ids.push(nudge_id);
-                            }
-                        }
                         crate::ui::app::NudgeSkillSelectorItem::Skill(skill) => {
                             let skill_id = skill.id.clone();
                             if let Some(pos) = state
@@ -333,6 +318,7 @@ pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
                                 state.selected_skill_ids.push(skill_id);
                             }
                         }
+                        crate::ui::app::NudgeSkillSelectorItem::Nudge(_) => {}
                     }
                 }
             }

@@ -97,18 +97,6 @@ protocol SafeTenexCoreProtocol: Actor {
     func bootProject(projectId: String) throws
     func getProjectBackendPubkey(projectId: String) -> String?
 
-    // MARK: - Nudges
-    func getNudges() throws -> [Nudge]
-    func createNudge(
-        title: String,
-        description: String,
-        content: String,
-        hashtags: [String],
-        allowTools: [String],
-        denyTools: [String],
-        onlyTools: [String]
-    ) throws
-    func deleteNudge(nudgeId: String) throws
     func getSkills() throws -> [Skill]
 
     // MARK: - Bookmarks (kind:14202)

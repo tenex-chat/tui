@@ -6,7 +6,6 @@ protocol CoreGateway: AnyObject {
     var conversations: [ConversationFullInfo] { get }
     var onlineAgents: [String: [ProjectAgent]] { get }
 
-    func getNudges() async throws -> [Nudge]
     func getSkills() async throws -> [Skill]
     func getProfileName(pubkey: String) async -> String
     func sendThread(
@@ -14,7 +13,6 @@ protocol CoreGateway: AnyObject {
         title: String,
         content: String,
         agentPubkey: String?,
-        nudgeIds: [String],
         skillIds: [String],
         referenceConversationId: String?
     ) async throws -> SendMessageResult
@@ -23,7 +21,6 @@ protocol CoreGateway: AnyObject {
         projectId: String,
         content: String,
         agentPubkey: String?,
-        nudgeIds: [String],
         skillIds: [String]
     ) async throws -> SendMessageResult
     func uploadImage(data: Data, mimeType: String) async throws -> String
@@ -38,7 +35,6 @@ protocol DraftPersisting: AnyObject {
     func updateContent(_ content: String, conversationId: String?, projectId: String) async
     func updateAgent(_ agentPubkey: String?, conversationId: String?, projectId: String) async
     func updateReferenceConversation(_ referenceConversationId: String?, conversationId: String?, projectId: String) async
-    func updateNudgeIds(_ nudgeIds: Set<String>, conversationId: String?, projectId: String) async
     func updateSkillIds(_ skillIds: Set<String>, conversationId: String?, projectId: String) async
     func updateImageAttachments(_ imageAttachments: [ImageAttachment], conversationId: String?, projectId: String) async
     func updateTextAttachments(_ textAttachments: [TextAttachment], conversationId: String?, projectId: String) async
@@ -96,10 +92,6 @@ struct ComposerDependencies {
 }
 
 extension TenexCoreManager: CoreGateway {
-    func getNudges() async throws -> [Nudge] {
-        try await safeCore.getNudges()
-    }
-
     func getSkills() async throws -> [Skill] {
         try await safeCore.getSkills()
     }
@@ -113,7 +105,6 @@ extension TenexCoreManager: CoreGateway {
         title: String,
         content: String,
         agentPubkey: String?,
-        nudgeIds: [String],
         skillIds: [String],
         referenceConversationId: String?
     ) async throws -> SendMessageResult {
@@ -122,7 +113,7 @@ extension TenexCoreManager: CoreGateway {
             title: title,
             content: content,
             agentPubkey: agentPubkey,
-            nudgeIds: nudgeIds,
+            nudgeIds: [],
             skillIds: skillIds,
             referenceConversationId: referenceConversationId
         )
@@ -133,7 +124,6 @@ extension TenexCoreManager: CoreGateway {
         projectId: String,
         content: String,
         agentPubkey: String?,
-        nudgeIds: [String],
         skillIds: [String]
     ) async throws -> SendMessageResult {
         try await safeCore.sendMessage(
@@ -141,7 +131,7 @@ extension TenexCoreManager: CoreGateway {
             projectId: projectId,
             content: content,
             agentPubkey: agentPubkey,
-            nudgeIds: nudgeIds,
+            nudgeIds: [],
             skillIds: skillIds
         )
     }

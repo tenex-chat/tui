@@ -838,10 +838,8 @@ pub(crate) fn redraw_input(
         aux_input_lines = aux_input_lines.saturating_add(1);
     }
 
-    // Attachment strip (below input, if attachments or selected nudges/skills exist)
-    let has_nudge_skill_chips =
-        !state.selected_nudge_ids.is_empty() || !state.selected_skill_ids.is_empty();
-    if editor.has_attachments() || has_nudge_skill_chips {
+    // Attachment strip (below input, if attachments or selected skills exist)
+    if editor.has_attachments() || !state.selected_skill_ids.is_empty() {
         write!(stdout, "\r\n{BG_INPUT}  📎 ").ok();
         let mut strip_chars: usize = 5;
         for (i, att) in editor.attachments.iter().enumerate() {
@@ -869,22 +867,10 @@ pub(crate) fn redraw_input(
             }
             strip_chars += 2 + label.len() + 1;
         }
-        // Nudge/skill chips
+        // Skill chips
         {
             let store = runtime.data_store();
             let store_ref = store.borrow();
-            for nid in &state.selected_nudge_ids {
-                let title = store_ref
-                    .content
-                    .get_nudges()
-                    .iter()
-                    .find(|n| n.id == *nid)
-                    .map(|n| n.title.as_str())
-                    .unwrap_or("nudge");
-                let chip = format!("[${}]", title);
-                write!(stdout, " {ACCENT}{chip}{RESET}{BG_INPUT}").ok();
-                strip_chars += 1 + chip.chars().count();
-            }
             for sid in &state.selected_skill_ids {
                 let title = store_ref
                     .content
@@ -1008,31 +994,15 @@ pub(crate) fn redraw_input(
 
         completion.rendered_lines = (1 + visible_count + 1) as u16;
     } else if nudge_skill_panel.active {
-        // Header with mode label + filter
-        let mode_label = match nudge_skill_panel.mode {
-            NudgeSkillMode::Nudges => "Nudges",
-            NudgeSkillMode::Skills => "Skills",
-        };
-        let other_label = match nudge_skill_panel.mode {
-            NudgeSkillMode::Nudges => "Skills",
-            NudgeSkillMode::Skills => "Nudges",
-        };
         let header = if nudge_skill_panel.filter.is_empty() {
-            format!(
-                "  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}"
-            )
+            format!("  {WHITE_BOLD}╸Skills╺{RESET}{BG_INPUT}")
         } else {
             format!(
-                "  {WHITE_BOLD}╸{mode_label}╺{RESET}{BG_INPUT}  {DIM} {other_label} {RESET}{BG_INPUT}  filter: {}",
+                "  {WHITE_BOLD}╸Skills╺{RESET}{BG_INPUT}  filter: {}",
                 nudge_skill_panel.filter
             )
         };
-        let header_plain = 2
-            + mode_label.len()
-            + 2
-            + 2
-            + other_label.len()
-            + 1
+        let header_plain = 10
             + if nudge_skill_panel.filter.is_empty() {
                 0
             } else {
@@ -1096,7 +1066,7 @@ pub(crate) fn redraw_input(
             }
         }
 
-        let footer = "  Space: toggle  Tab: switch  Enter: confirm  Esc: cancel";
+        let footer = "  Space: toggle  Enter: confirm  Esc: cancel";
         let footer_len = footer.chars().count();
         let footer_pad = width.saturating_sub(footer_len);
         write!(stdout, "\r\n").ok();

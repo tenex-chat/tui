@@ -154,7 +154,7 @@ struct EventKindRow: View {
                     KindEventCount(kind: 513, count: 89, name: "Conversations"),
                     KindEventCount(kind: 31933, count: 5, name: "Projects"),
                     KindEventCount(kind: 4199, count: 12, name: "Agent Definitions"),
-                    KindEventCount(kind: 4201, count: 156, name: "Nudges"),
+                    KindEventCount(kind: 4201, count: 156, name: "Legacy 4201"),
                     KindEventCount(kind: 24010, count: 89, name: "Project Status"),
                     KindEventCount(kind: 24133, count: 342, name: "Operations Status"),
                     KindEventCount(kind: 4129, count: 23, name: "Lessons")

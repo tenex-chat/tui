@@ -51,10 +51,6 @@ extension MessageComposerView {
         }
     }
 
-    func loadNudges() async {
-        availableNudges = await composerViewModel.loadNudges()
-    }
-
     func loadSkills() async {
         availableSkills = await composerViewModel.loadSkills()
     }
@@ -63,7 +59,6 @@ extension MessageComposerView {
         guard selectedProject != nil else { return }
         await loadDraft()
         await loadAgents()
-        await loadNudges()
         await loadSkills()
     }
 
@@ -109,7 +104,6 @@ extension MessageComposerView {
             await draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
 
             await loadAgents()
-            await loadNudges()
             await loadSkills()
             isSwitchingProject = false
         }
@@ -156,7 +150,6 @@ extension MessageComposerView {
                     projectId: project.id,
                     content: contentToSend,
                     agentPubkey: validatedAgentPubkey,
-                    nudgeIds: Array(draft.selectedNudgeIds),
                     skillIds: Array(draft.selectedSkillIds),
                     referenceConversationId: draft.referenceConversationId
                 )

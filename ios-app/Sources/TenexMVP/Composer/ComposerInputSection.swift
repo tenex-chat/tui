@@ -251,8 +251,8 @@ extension MessageComposerView {
             switch trigger.kind {
             case .agent:
                 openAgentSelector(initialQuery: trigger.query)
-            case .nudgeSkill:
-                openNudgeSkillSelector(mode: .all, initialQuery: trigger.query)
+            case .skill:
+                openNudgeSkillSelector(mode: .skills, initialQuery: trigger.query)
             }
         }
     }
@@ -334,7 +334,22 @@ extension MessageComposerView {
                     .help("Browse saved drafts")
                 }
 
-                nudgeSkillToolbarButton
+                if selectedProject != nil {
+                    Button {
+                        openNudgeSkillSelector(mode: .skills)
+                    } label: {
+                        Text("/")
+                            .font(.body.weight(.bold).monospaced())
+                            .foregroundStyle(Color.composerAction)
+                            .frame(width: 24, height: 24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .strokeBorder(Color.composerAction.opacity(0.5), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Skills")
+                }
 
                 Spacer()
 
@@ -514,13 +529,6 @@ extension MessageComposerView {
 
         Task {
             await pinnedPromptManager.markUsed(prompt.id)
-        }
-    }
-
-    func persistSelectedNudgeIds() {
-        guard let projectId = selectedProject?.id else { return }
-        Task {
-            await draftManager.updateNudgeIds(draft.selectedNudgeIds, conversationId: conversationId, projectId: projectId)
         }
     }
 
