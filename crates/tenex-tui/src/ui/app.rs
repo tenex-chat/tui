@@ -116,6 +116,18 @@ fn resolve_selected_agent_from_status(
     status.pm_agent().cloned()
 }
 
+fn clear_selected_nudge_modal(modal_state: &mut ModalState, nudge_id: &str) {
+    let should_clear = match modal_state {
+        ModalState::NudgeDetail(state) => state.nudge_id == nudge_id,
+        ModalState::NudgeDeleteConfirm(state) => state.nudge_id == nudge_id,
+        _ => false,
+    };
+
+    if should_clear {
+        *modal_state = ModalState::NudgeList(crate::ui::modal::NudgeListState::new());
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
@@ -696,6 +708,11 @@ impl App {
     #[inline]
     pub fn set_selected_message_index(&mut self, index: usize) {
         self.conversation.selected_message_index = index;
+    }
+
+    /// Clear nudge-specific modal state when a referenced nudge is deleted.
+    pub fn remove_selected_nudge(&mut self, nudge_id: &str) {
+        clear_selected_nudge_modal(&mut self.modal_state, nudge_id);
     }
 
     /// Get the LLM metadata display toggle
@@ -4850,6 +4867,52 @@ mod input_context_focus_tests {
             InputContextFocus::Project.move_left(true),
             InputContextFocus::Agent
         );
+    }
+}
+
+#[cfg(test)]
+mod selected_nudge_modal_tests {
+    use super::*;
+    use crate::ui::modal::{NudgeDeleteConfirmState, NudgeDetailState, NudgeListState};
+
+    #[test]
+    fn clears_matching_nudge_detail_modal() {
+        let mut modal_state = ModalState::NudgeDetail(NudgeDetailState::new("nudge-1".to_string()));
+
+        clear_selected_nudge_modal(&mut modal_state, "nudge-1");
+
+        assert!(matches!(modal_state, ModalState::NudgeList(_)));
+    }
+
+    #[test]
+    fn clears_matching_nudge_delete_confirm_modal() {
+        let mut modal_state =
+            ModalState::NudgeDeleteConfirm(NudgeDeleteConfirmState::new("nudge-1".to_string()));
+
+        clear_selected_nudge_modal(&mut modal_state, "nudge-1");
+
+        assert!(matches!(modal_state, ModalState::NudgeList(_)));
+    }
+
+    #[test]
+    fn leaves_other_modal_state_untouched() {
+        let mut modal_state = ModalState::NudgeDetail(NudgeDetailState::new("nudge-1".to_string()));
+
+        clear_selected_nudge_modal(&mut modal_state, "other-nudge");
+
+        match modal_state {
+            ModalState::NudgeDetail(state) => assert_eq!(state.nudge_id, "nudge-1"),
+            other => panic!("unexpected modal state after cleanup: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn leaves_nudge_list_modal_untouched() {
+        let mut modal_state = ModalState::NudgeList(NudgeListState::new());
+
+        clear_selected_nudge_modal(&mut modal_state, "nudge-1");
+
+        assert!(matches!(modal_state, ModalState::NudgeList(_)));
     }
 }
 

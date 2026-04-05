@@ -1,8 +1,8 @@
 use crate::completion::CompletionMenu;
 use crate::editor::{AttachmentKind, LineEditor};
 use crate::panels::{
-    ConfigPanel, DelegationEntry, NudgeSkillMode, NudgeSkillPanel, PanelMode, StatsPanel, StatsTab,
-    StatusBarNav, Q_TAG_DELEGATION_DENYLIST,
+    ConfigPanel, DelegationEntry, NudgeSkillPanel, PanelMode, StatsPanel, StatsTab, StatusBarNav,
+    Q_TAG_DELEGATION_DENYLIST,
 };
 use crate::state::ReplState;
 use crate::util::{
