@@ -39,7 +39,7 @@ pub(super) fn handle_project_actions_modal_key(app: &mut App, key: KeyEvent) {
                 execute_project_action(app, &state, action);
             }
         }
-        KeyCode::Char('n') if state.is_online => {
+        KeyCode::Char('n') => {
             execute_project_action(app, &state, ProjectAction::NewConversation);
         }
         KeyCode::Char('b') if !state.is_online => {
@@ -119,9 +119,10 @@ fn execute_project_action(
             if let Some(project) = project {
                 let a_tag = project.a_tag();
                 let project_name = state.project_name.clone();
+                let project_agent_pubkeys = project.agent_pubkeys.clone();
                 app.selected_project = Some(project);
 
-                // Auto-select PM agent from status
+                // Auto-select PM agent from live status, or fall back to first agent from kind:31933
                 let pm_agent = {
                     let store = app.data_store.borrow();
                     store
@@ -130,6 +131,34 @@ fn execute_project_action(
                 };
                 if let Some(pm) = pm_agent {
                     app.set_selected_agent(Some(pm));
+                } else if let Some(first_pubkey) = project_agent_pubkeys.first() {
+                    // Project is offline: construct a minimal agent from kind:31933 agent pubkeys.
+                    // Look up in installed agent inventory to get the slug/name if available.
+                    let fallback_agent = {
+                        let store = app.data_store.borrow();
+                        let backend_pubkey = store
+                            .get_project_status(&a_tag)
+                            .map(|s| s.backend_pubkey.clone());
+                        let name = backend_pubkey
+                            .and_then(|bp| {
+                                store
+                                    .get_installed_agents(&bp)
+                                    .iter()
+                                    .find(|a| a.pubkey == *first_pubkey)
+                                    .map(|a| a.slug.clone())
+                            })
+                            .unwrap_or_else(|| first_pubkey[..8].to_string());
+                        crate::models::ProjectAgent {
+                            pubkey: first_pubkey.clone(),
+                            name,
+                            is_pm: true,
+                            model: None,
+                            tools: Vec::new(),
+                            skills: Vec::new(),
+                            mcp_servers: Vec::new(),
+                        }
+                    };
+                    app.set_selected_agent(Some(fallback_agent));
                 }
 
                 app.modal_state = ModalState::None;
