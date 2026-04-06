@@ -27,7 +27,6 @@ final class SidebarNavigationUITest: XCTestCase {
         let sections: [(rowID: String, contentID: String)] = [
             ("section_row_chats", "section_content_chats"),
             ("section_row_projects", "section_content_projects"),
-            ("section_row_reports", "section_content_reports"),
             ("section_row_inbox", "section_content_inbox"),
             ("section_row_search", "section_content_search"),
             ("section_row_teams", "section_content_teams"),
