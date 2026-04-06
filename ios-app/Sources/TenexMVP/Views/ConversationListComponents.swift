@@ -228,13 +228,14 @@ struct ConversationRowFull: View, Equatable {
 
                     // Show project title badge if available
                     if let projectTitle = projectTitle {
-                        Text(projectTitle)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.messageBubbleUserBackground)
-                            .foregroundStyle(Color.agentBrand)
-                            .clipShape(Capsule())
+                        ProjectPill(
+                            projectTitle: projectTitle,
+                            projectId: TenexCoreManager.projectId(fromATag: conversation.projectATag),
+                            font: .caption2,
+                            swatchSize: 7,
+                            horizontalPadding: 6,
+                            verticalPadding: 2
+                        )
                     }
 
                     // Delegation tree button (Mac/iPad only)

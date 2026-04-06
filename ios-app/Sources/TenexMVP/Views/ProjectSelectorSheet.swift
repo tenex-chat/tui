@@ -283,7 +283,7 @@ struct ProjectRowSelectView: View {
 
     /// Deterministic color using shared utility (stable across app launches)
     private var projectColor: Color {
-        deterministicColor(for: project.id)
+        deterministicProjectColor(for: project.id)
     }
 }
 

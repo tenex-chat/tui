@@ -803,7 +803,7 @@ struct ConversationWorkspaceView: View {
                     StatusBadge(status: statusText, isActive: isActiveState)
 
                     if let project {
-                        ProjectBadge(projectTitle: project.title)
+                        ProjectBadge(projectTitle: project.title, projectId: project.id)
                     }
                 }
 

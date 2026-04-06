@@ -5,21 +5,17 @@ import SwiftUI
 /// Badge showing the project name for a conversation
 struct ProjectBadge: View {
     let projectTitle: String
+    let projectId: String
 
     var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "folder.fill")
-                .font(.caption2)
-            Text(projectTitle)
-                .font(.caption)
-                .fontWeight(.medium)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(Color.projectBrandBackground)
-        .foregroundStyle(Color.projectBrand)
-        .clipShape(Capsule())
+        ProjectPill(
+            projectTitle: projectTitle,
+            projectId: projectId,
+            font: .caption,
+            swatchSize: 8,
+            horizontalPadding: 10,
+            verticalPadding: 4
+        )
     }
 }
 

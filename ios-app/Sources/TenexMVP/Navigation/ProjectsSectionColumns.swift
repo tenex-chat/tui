@@ -336,7 +336,7 @@ struct ProjectRowView: View {
         HStack(spacing: 12) {
             // Color-coded folder icon
             RoundedRectangle(cornerRadius: 7)
-                .fill(deterministicColor(for: project.id).gradient)
+                .fill(deterministicProjectColor(for: project.id).gradient)
                 .frame(width: 28, height: 28)
                 .overlay {
                     Image(systemName: "folder.fill")

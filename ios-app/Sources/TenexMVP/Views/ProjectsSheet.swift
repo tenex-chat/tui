@@ -220,7 +220,7 @@ private struct ProjectsSheetRow: View {
     }
 
     private var projectColor: Color {
-        deterministicColor(for: project.id)
+        deterministicProjectColor(for: project.id)
     }
 }
 

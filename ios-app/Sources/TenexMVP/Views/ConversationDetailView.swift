@@ -142,7 +142,7 @@ struct ConversationDetailView: View {
 
                 // Project badge
                 if let project = project {
-                    ProjectBadge(projectTitle: project.title)
+                    ProjectBadge(projectTitle: project.title, projectId: project.id)
                 }
 
                 Spacer()
