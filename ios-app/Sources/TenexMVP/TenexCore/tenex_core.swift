@@ -6868,6 +6868,10 @@ public struct Report {
      */
     public var content: String
     /**
+     * Document group tag (from "document" tag - groups related reports like a directory)
+     */
+    public var document: String
+    /**
      * Hashtags (t-tags)
      */
     public var hashtags: [String]
@@ -6905,6 +6909,9 @@ public struct Report {
          * Full markdown content
          */content: String, 
         /**
+         * Document group tag (from "document" tag - groups related reports like a directory)
+         */document: String, 
+        /**
          * Hashtags (t-tags)
          */hashtags: [String], 
         /**
@@ -6920,6 +6927,7 @@ public struct Report {
         self.title = title
         self.summary = summary
         self.content = content
+        self.document = document
         self.hashtags = hashtags
         self.createdAt = createdAt
         self.readingTimeMins = readingTimeMins
@@ -6954,6 +6962,9 @@ extension Report: Equatable, Hashable {
         if lhs.content != rhs.content {
             return false
         }
+        if lhs.document != rhs.document {
+            return false
+        }
         if lhs.hashtags != rhs.hashtags {
             return false
         }
@@ -6974,6 +6985,7 @@ extension Report: Equatable, Hashable {
         hasher.combine(title)
         hasher.combine(summary)
         hasher.combine(content)
+        hasher.combine(document)
         hasher.combine(hashtags)
         hasher.combine(createdAt)
         hasher.combine(readingTimeMins)
@@ -6996,6 +7008,7 @@ public struct FfiConverterTypeReport: FfiConverterRustBuffer {
                 title: FfiConverterString.read(from: &buf), 
                 summary: FfiConverterString.read(from: &buf), 
                 content: FfiConverterString.read(from: &buf), 
+                document: FfiConverterString.read(from: &buf), 
                 hashtags: FfiConverterSequenceString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf), 
                 readingTimeMins: FfiConverterUInt8.read(from: &buf)
@@ -7010,6 +7023,7 @@ public struct FfiConverterTypeReport: FfiConverterRustBuffer {
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.summary, into: &buf)
         FfiConverterString.write(value.content, into: &buf)
+        FfiConverterString.write(value.document, into: &buf)
         FfiConverterSequenceString.write(value.hashtags, into: &buf)
         FfiConverterUInt64.write(value.createdAt, into: &buf)
         FfiConverterUInt8.write(value.readingTimeMins, into: &buf)

@@ -436,7 +436,59 @@ struct ConversationsTabView: View {
     }
 
     @ViewBuilder
+    private var newConversationPlaceholderRow: some View {
+        #if os(macOS)
+        if let projectId = newConversationProjectIdBinding.wrappedValue,
+           selectedConversationBinding.wrappedValue == nil {
+            let title = projectTitleById[projectId]
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(Color.secondary.opacity(0.4))
+                    .frame(width: 10, height: 10)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .top) {
+                        Text("New Conversation")
+                            .font(.headline)
+                            .lineLimit(2)
+                        Spacer()
+                        Text("now")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(alignment: .top) {
+                        Text("Draft — not yet sent")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .italic()
+                        Spacer()
+                    }
+
+                    HStack(spacing: 0) {
+                        Spacer()
+                        if let title {
+                            HStack(spacing: 6) {
+                                ProjectColorDot(projectId: projectId, size: 12)
+                                Text(title)
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(deterministicProjectColor(for: projectId))
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+            .listRowBackground(Color.accentColor.opacity(0.12))
+        }
+        #endif
+    }
+
+    @ViewBuilder
     private func conversationRows(isSplitInteraction: Bool) -> some View {
+        newConversationPlaceholderRow
         if cachedHierarchy.sortedRootConversations.isEmpty {
             ConversationsEmptyState(
                 hasFilter: !coreManager.isAppFilterDefault,

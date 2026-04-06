@@ -34,6 +34,16 @@ struct GlassPanel<Content: View>: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        #if os(macOS)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                }
+        }
+        #else
         .background {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.56))
@@ -43,5 +53,6 @@ struct GlassPanel<Content: View>: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
         }
+        #endif
     }
 }

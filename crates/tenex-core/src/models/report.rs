@@ -18,6 +18,8 @@ pub struct Report {
     pub summary: String,
     /// Full markdown content
     pub content: String,
+    /// Document group tag (from "document" tag - groups related reports like a directory)
+    pub document: String,
     /// Hashtags (t-tags)
     pub hashtags: Vec<String>,
     /// Creation timestamp
@@ -42,6 +44,7 @@ impl Report {
         let mut project_a_tag = String::new();
         let mut title = String::new();
         let mut summary = String::new();
+        let mut document = String::new();
         let mut hashtags = Vec::new();
 
         for tag in note.tags() {
@@ -65,6 +68,11 @@ impl Report {
                 Some("summary") => {
                     if let Some(val) = tag.get(1).and_then(|t| t.variant().str()) {
                         summary = val.to_string();
+                    }
+                }
+                Some("document") => {
+                    if let Some(val) = tag.get(1).and_then(|t| t.variant().str()) {
+                        document = val.to_string();
                     }
                 }
                 Some("t") => {
@@ -103,6 +111,7 @@ impl Report {
             title,
             summary,
             content,
+            document,
             hashtags,
             created_at,
             reading_time_mins,

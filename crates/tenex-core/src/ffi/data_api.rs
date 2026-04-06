@@ -252,6 +252,15 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
+        if project_id.is_empty() {
+            return store
+                .reports
+                .get_reports()
+                .into_iter()
+                .cloned()
+                .collect();
+        }
+
         // Find the project by ID and get its a_tag
         let project = store.get_projects().iter().find(|p| p.id == project_id);
         let project_a_tag = match project {

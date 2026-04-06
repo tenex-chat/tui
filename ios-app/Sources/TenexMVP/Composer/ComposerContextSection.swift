@@ -239,11 +239,19 @@ extension MessageComposerView {
             Button(action: sendMessage) {
                 Image(systemName: "arrow.up")
                     .font(.system(size: workspaceIconSize, weight: .semibold))
+                    #if os(macOS)
+                    .foregroundStyle(canSend ? Color.white : Color.secondary.opacity(0.9))
+                    #else
                     .foregroundStyle(canSend ? workspaceComposerShellColor : Color.secondary.opacity(0.9))
+                    #endif
                     .frame(width: workspaceSendButtonSize, height: workspaceSendButtonSize)
                     .background(
                         Circle()
+                            #if os(macOS)
+                            .fill(canSend ? Color.accentColor : Color.secondary.opacity(0.14))
+                            #else
                             .fill(canSend ? Color.white.opacity(0.78) : Color.white.opacity(0.14))
+                            #endif
                     )
             }
             .buttonStyle(.borderless)

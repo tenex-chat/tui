@@ -224,6 +224,16 @@ struct AgentConfigSheet: View {
                                 }
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 8)
+                                #if os(macOS)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .fill(Color(nsColor: .windowBackgroundColor))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                                        )
+                                )
+                                #else
                                 .background(
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                                         .fill(Color.systemBackground.opacity(reduceTransparency ? 1 : 0.36))
@@ -232,6 +242,7 @@ struct AgentConfigSheet: View {
                                                 .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
                                         )
                                 )
+                                #endif
                             }
                         }
                     }
@@ -347,7 +358,11 @@ struct AgentConfigSheet: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        #if os(macOS)
+        .background(Color(nsColor: .controlColor), in: Capsule())
+        #else
         .background(Color.systemBackground.opacity(reduceTransparency ? 1 : 0.55), in: Capsule())
+        #endif
     }
 
     private var selectedModelLabel: String {
@@ -371,6 +386,10 @@ struct AgentConfigSheet: View {
     }
 
     private var backgroundView: some View {
+        #if os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+            .ignoresSafeArea()
+        #else
         LinearGradient(
             colors: [
                 Color.agentBrand.opacity(reduceTransparency ? 0.03 : 0.10),
@@ -381,6 +400,7 @@ struct AgentConfigSheet: View {
             endPoint: .bottomTrailing
         )
         .ignoresSafeArea()
+        #endif
     }
 
     // MARK: - Tool Group Row
