@@ -336,6 +336,7 @@ final class LastAgentFinderTests: XCTestCase {
             messages: messages,
             currentUserPubkey: "user-1"
         )
+        )
         XCTAssertEqual(result, "agent-2")
     }
 
@@ -420,15 +421,5 @@ private func makeMessage(
         llmMetadata: [:],
         delegationTag: nil,
         branch: nil
-    )
-}
-
-private func makeAgent(pubkey: String, name: String = "Test Agent") -> ProjectAgent {
-    ProjectAgent(
-        pubkey: pubkey,
-        name: name,
-        isPm: false,
-        model: nil,
-        tools: []
     )
 }
