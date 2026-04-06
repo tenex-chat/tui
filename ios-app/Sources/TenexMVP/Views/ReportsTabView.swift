@@ -5,7 +5,6 @@ import SwiftUI
 struct ReportsTabView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     @State private var selectedReport: Report?
-    @State private var showDetail = false
 
     var body: some View {
         NavigationSplitView {
@@ -58,6 +57,7 @@ struct ReportsTabView: View {
                         }
                     }
                 }
+                .listStyle(.plain)
             }
         }
         .navigationTitle("Reports")
@@ -120,6 +120,7 @@ struct ReportRowView: View {
 struct ReportDetailView: View {
     let report: Report
     @Environment(TenexCoreManager.self) private var coreManager
+    @State private var showingMessageComposer = false
 
     private var referenceATag: String {
         "30023:\(report.author):\(report.slug)"
@@ -162,9 +163,9 @@ struct ReportDetailView: View {
 
                 Divider()
 
-                // Open Chat button
-                NavigationLink {
-                    openChatDestination
+                // Open Chat button — opens as a sheet, consistent with "New conversation"
+                Button {
+                    showingMessageComposer = true
                 } label: {
                     Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
                         .frame(maxWidth: .infinity)
@@ -180,23 +181,22 @@ struct ReportDetailView: View {
         #else
         .toolbarTitleDisplayMode(.inline)
         #endif
-    }
-
-    @ViewBuilder
-    private var openChatDestination: some View {
-        let project = coreManager.projects.first(where: { report.projectATag.contains($0.id) })
-        MessageComposerView(
-            project: project,
-            conversationId: nil,
-            conversationTitle: nil,
-            initialAgentPubkey: nil,
-            initialContent: nil,
-            initialTextAttachments: [],
-            referenceConversationId: nil,
-            referenceReportATag: referenceATag,
-            displayStyle: .modal,
-            inlineLayoutStyle: .standard
-        )
-        .environment(coreManager)
+        .sheet(isPresented: $showingMessageComposer) {
+            let project = coreManager.projects.first(where: { report.projectATag.contains($0.id) })
+            MessageComposerView(
+                project: project,
+                conversationId: nil,
+                conversationTitle: nil,
+                initialAgentPubkey: nil,
+                initialContent: nil,
+                initialTextAttachments: [],
+                referenceConversationId: nil,
+                referenceReportATag: referenceATag,
+                displayStyle: .modal,
+                inlineLayoutStyle: .standard
+            )
+            .environment(coreManager)
+            .tenexModalPresentation(detents: [.large])
+        }
     }
 }

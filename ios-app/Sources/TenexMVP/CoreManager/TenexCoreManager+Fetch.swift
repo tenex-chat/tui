@@ -36,19 +36,20 @@ extension TenexCoreManager {
             async let fetchedConversations = try fetchConversations(for: filterSnapshot)
             async let fetchedInbox = safeCore.getInbox()
             async let fetchedBookmarkedIds = try? safeCore.getBookmarkedIds()
+            async let fetchedReports = safeCore.getReports(projectId: "")
 
             let (p, c, i) = try await (fetchedProjects, fetchedConversations, fetchedInbox)
             let bIds = await fetchedBookmarkedIds
+            let r = await fetchedReports
             let loadMs = (CFAbsoluteTimeGetCurrent() - loadStartedAt) * 1000
             profiler.logEvent(
-                "fetchData concurrent loads projects=\(p.count) conversations=\(c.count) inbox=\(i.count) elapsedMs=\(String(format: "%.2f", loadMs))",
+                "fetchData concurrent loads projects=\(p.count) conversations=\(c.count) inbox=\(i.count) reports=\(r.count) elapsedMs=\(String(format: "%.2f", loadMs))",
                 category: .general,
                 level: loadMs >= 300 ? .error : .info
             )
 
             projects = p
-            let fetchedReports = await safeCore.getReports(projectId: "")
-            reports = fetchedReports
+            reports = r
             reportsVersion &+= 1
             appFilterConversationScope = sortedConversations(c)
             let now = UInt64(Date().timeIntervalSince1970)
