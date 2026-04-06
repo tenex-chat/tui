@@ -151,7 +151,8 @@ extension MessageComposerView {
                     content: contentToSend,
                     agentPubkey: validatedAgentPubkey,
                     skillIds: Array(draft.selectedSkillIds),
-                    referenceConversationId: draft.referenceConversationId
+                    referenceConversationId: draft.referenceConversationId,
+                    referenceReportATag: referenceReportATag
                 )
 
                 isSending = false

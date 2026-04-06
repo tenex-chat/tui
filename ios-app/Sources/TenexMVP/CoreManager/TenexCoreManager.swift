@@ -79,6 +79,18 @@ class TenexCoreManager {
     // With @Observable, SwiftUI tracks reads at the property level.
     // Views only re-render when the specific properties they read change.
     var projects: [Project] = []
+    var reports: [Report] = []
+    var reportsVersion: UInt64 = 0
+
+    func applyReportUpsert(report: Report) {
+        if let index = reports.firstIndex(where: { $0.id == report.id }) {
+            reports[index] = report
+        } else {
+            reports.append(report)
+        }
+        reportsVersion &+= 1
+    }
+
     var conversations: [ConversationFullInfo] = [] {
         didSet { rebuildConversationById() }
     }

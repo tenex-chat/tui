@@ -14,7 +14,8 @@ protocol CoreGateway: AnyObject {
         content: String,
         agentPubkey: String?,
         skillIds: [String],
-        referenceConversationId: String?
+        referenceConversationId: String?,
+        referenceReportATag: String?
     ) async throws -> SendMessageResult
     func sendMessage(
         conversationId: String,
@@ -106,7 +107,8 @@ extension TenexCoreManager: CoreGateway {
         content: String,
         agentPubkey: String?,
         skillIds: [String],
-        referenceConversationId: String?
+        referenceConversationId: String?,
+        referenceReportATag: String?
     ) async throws -> SendMessageResult {
         try await safeCore.sendThread(
             projectId: projectId,
@@ -115,7 +117,8 @@ extension TenexCoreManager: CoreGateway {
             agentPubkey: agentPubkey,
             nudgeIds: [],
             skillIds: skillIds,
-            referenceConversationId: referenceConversationId
+            referenceConversationId: referenceConversationId,
+            referenceReportATag: referenceReportATag
         )
     }
 

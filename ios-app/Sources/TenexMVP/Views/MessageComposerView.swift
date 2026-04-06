@@ -40,6 +40,9 @@ struct MessageComposerView: View {
     /// Reference conversation ID for context tagging (adds ["context", "<id>"] tag when sent)
     let referenceConversationId: String?
 
+    /// Reference report a-tag for linking a new thread to a report
+    var referenceReportATag: String? = nil
+
     /// Callback when message is sent successfully
     var onSend: ((SendMessageResult) -> Void)?
 
@@ -237,6 +240,7 @@ struct MessageComposerView: View {
         initialContent: String? = nil,
         initialTextAttachments: [TextAttachment] = [],
         referenceConversationId: String? = nil,
+        referenceReportATag: String? = nil,
         displayStyle: DisplayStyle = .modal,
         inlineLayoutStyle: InlineLayoutStyle = .standard,
         onSend: ((SendMessageResult) -> Void)? = nil,
@@ -250,6 +254,7 @@ struct MessageComposerView: View {
         self.initialContent = initialContent
         self.initialTextAttachments = initialTextAttachments
         self.referenceConversationId = referenceConversationId
+        self.referenceReportATag = referenceReportATag
         self.displayStyle = displayStyle
         self.inlineLayoutStyle = inlineLayoutStyle
         self.onSend = onSend

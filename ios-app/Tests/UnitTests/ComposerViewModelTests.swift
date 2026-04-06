@@ -312,7 +312,8 @@ private final class MockCoreGateway: CoreGateway {
         agentPubkey: String?,
         nudgeIds: [String],
         skillIds: [String],
-        referenceConversationId: String?
+        referenceConversationId: String?,
+        referenceReportATag: String?
     ) async throws -> SendMessageResult {
         sendThreadCalls.append(
             SendInvocation(

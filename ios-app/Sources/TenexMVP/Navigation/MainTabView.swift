@@ -3,6 +3,7 @@ import SwiftUI
 enum AppSection: String, CaseIterable, Identifiable {
     case chats
     case projects
+    case reports
     case agents
     case inbox
     case search
@@ -19,6 +20,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         switch self {
         case .chats: return "Chats"
         case .projects: return "Projects"
+        case .reports: return "Reports"
         case .agents: return "Agents"
         case .inbox: return "Inbox"
         case .search: return "Search"
@@ -35,6 +37,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         switch self {
         case .chats: return "bubble.left.and.bubble.right"
         case .projects: return "folder"
+        case .reports: return "doc.richtext"
         case .agents: return "cpu"
         case .inbox: return "tray"
         case .search: return "magnifyingglass"
@@ -176,6 +179,12 @@ struct MainTabView: View {
                     .nowPlayingInset(coreManager: coreManager)
             }
 
+            Tab("Reports", systemImage: "doc.richtext", value: 4) {
+                ReportsTabView()
+                    .environment(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
+            }
+
             Tab("Inbox", systemImage: "tray", value: 3) {
                 InboxView()
                     .environment(coreManager)
@@ -208,6 +217,12 @@ struct MainTabView: View {
 
             Tab("Projects", systemImage: "folder", value: 1) {
                 ProjectsTabView(layoutMode: .adaptive)
+                    .environment(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
+            }
+
+            Tab("Reports", systemImage: "doc.richtext", value: 4) {
+                ReportsTabView()
                     .environment(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }

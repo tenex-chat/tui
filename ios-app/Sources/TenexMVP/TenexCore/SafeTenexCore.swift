@@ -159,6 +159,14 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Get reports for a project (pass "" for all projects).
+    /// Note: Internal `try!` in FFI - can crash on error.
+    func getReports(projectId: String) -> [Report] {
+        profiler.measureFFI("getReports") {
+            core.getReports(projectId: projectId)
+        }
+    }
+
     /// Get project filters with visibility and counts.
     func getProjectFilters() throws -> [ProjectFilterInfo] {
         try profiler.measureFFI("getProjectFilters") {
@@ -288,7 +296,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a new conversation thread.
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?) throws -> SendMessageResult {
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?, referenceReportATag: String?) throws -> SendMessageResult {
         try profiler.measureFFI("sendThread") {
             do {
                 return try core.sendThread(
@@ -299,7 +307,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     nudgeIds: nudgeIds,
                     skillIds: skillIds,
                     referenceConversationId: referenceConversationId,
-                    referenceReportATag: nil
+                    referenceReportATag: referenceReportATag
                 )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)

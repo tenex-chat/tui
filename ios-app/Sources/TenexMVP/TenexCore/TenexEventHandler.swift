@@ -91,8 +91,8 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
                     }
                 }
 
-            case .reportUpsert:
-                break
+            case .reportUpsert(let report):
+                coreManager.applyReportUpsert(report: report)
 
             case .projectStatusChanged(let projectId, let projectATag, let isOnline, let onlineAgents):
                 coreManager.applyProjectStatusChanged(

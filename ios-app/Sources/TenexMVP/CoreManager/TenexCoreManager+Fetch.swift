@@ -47,6 +47,9 @@ extension TenexCoreManager {
             )
 
             projects = p
+            let fetchedReports = await safeCore.getReports(projectId: "")
+            reports = fetchedReports
+            reportsVersion &+= 1
             appFilterConversationScope = sortedConversations(c)
             let now = UInt64(Date().timeIntervalSince1970)
             conversations = sortedConversations(

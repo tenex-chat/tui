@@ -292,6 +292,9 @@ struct MainShellView: View {
                 showNewProject: $showNewProject
             )
             .accessibilityIdentifier(AppSection.projects.accessibilityContentID)
+        case .reports:
+            ReportsTabView()
+                .accessibilityIdentifier(AppSection.reports.accessibilityContentID)
         case .agents:
             AgentsTabView(
                 layoutMode: .adaptive,
