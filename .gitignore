@@ -14,6 +14,7 @@ addresses.txt
 *.swo
 *~
 ios-app/build/
+build/
 ios-app/.xcodebuild/
 ios-app/DerivedData/
 ios-app/DerivedDevice/
