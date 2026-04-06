@@ -371,13 +371,14 @@ struct AgentRowView: View {
                 }
 
                 HStack(spacing: 6) {
-                    Text(agent.projectTitle)
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.projectBrandBackground)
-                        .foregroundStyle(Color.projectBrand)
-                        .clipShape(Capsule())
+                    ProjectPill(
+                        projectTitle: agent.projectTitle,
+                        projectId: agent.projectId,
+                        font: .caption2,
+                        swatchSize: 7,
+                        horizontalPadding: 6,
+                        verticalPadding: 2
+                    )
 
                     if agent.projectCount > 1 {
                         Text("+\(agent.projectCount - 1) more")
@@ -551,7 +552,11 @@ struct AgentDetailView: View {
         HStack(spacing: 12) {
             Image(systemName: "folder.fill")
                 .font(.title3)
-                .foregroundStyle(agentInstance.isProjectOnline ? Color.projectBrand : .secondary)
+                .foregroundStyle(
+                    agentInstance.isProjectOnline
+                        ? deterministicProjectColor(for: agentInstance.projectId)
+                        : .secondary
+                )
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {

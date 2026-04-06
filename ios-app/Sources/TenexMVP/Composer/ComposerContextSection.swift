@@ -14,7 +14,7 @@ extension MessageComposerView {
     func projectMenuChipLabel(_ project: Project) -> some View {
         HStack(spacing: 6) {
             RoundedRectangle(cornerRadius: 4)
-                .fill(deterministicColor(for: project.id).gradient)
+                .fill(deterministicProjectColor(for: project.id).gradient)
                 .frame(width: 24, height: 24)
                 .overlay {
                     Image(systemName: "folder.fill")
@@ -208,24 +208,10 @@ extension MessageComposerView {
                     }
                 )
             } else {
+                workspaceProjectControl
+
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        if let project = selectedProject {
-                            if isNewConversation {
-                                projectSelectionInlineToken(text: workspaceProjectLabel(project.title))
-                            } else {
-                                Text(workspaceProjectLabel(project.title))
-                                    .font(workspaceTokenFont)
-                                    .lineLimit(1)
-                                    .foregroundStyle(workspaceTokenTextColor)
-                                    .padding(.horizontal, 2)
-                                    .padding(.vertical, 2)
-                                    .frame(height: workspaceContextRowHeight)
-                            }
-                        } else if isNewConversation {
-                            projectSelectionInlineToken(text: "Select project")
-                        }
-
                         if selectedProject != nil {
                             agentPopoverToken
                         }
@@ -266,6 +252,19 @@ extension MessageComposerView {
         }
         .frame(height: max(workspaceContextRowHeight, workspaceBottomRowHeight))
         .padding(.horizontal, 18)
+    }
+
+    @ViewBuilder
+    var workspaceProjectControl: some View {
+        if let project = selectedProject {
+            if isNewConversation {
+                projectSelectionInlineIndicator(project)
+            } else {
+                ProjectInlineIndicator(project: project)
+            }
+        } else if isNewConversation {
+            projectSelectionInlineToken(text: "Select project")
+        }
     }
 
     var workspaceAccessoryButton: some View {
@@ -513,6 +512,17 @@ extension MessageComposerView {
         .menuStyle(.borderlessButton)
     }
 
+    func projectSelectionInlineIndicator(_ project: Project) -> some View {
+        Menu {
+            projectSelectionMenuContent()
+        } label: {
+            ProjectInlineIndicator(project: project, showsChevron: true)
+                .contentShape(Rectangle())
+        }
+        .menuIndicator(.hidden)
+        .menuStyle(.borderlessButton)
+    }
+
     @ViewBuilder
     private func projectSelectionMenuContent() -> some View {
         if projectMenuState.booted.isEmpty && projectMenuState.unbooted.isEmpty {
@@ -567,10 +577,6 @@ extension MessageComposerView {
         projectChanged()
     }
 
-    func workspaceProjectLabel(_ name: String) -> String {
-        truncatedWorkspaceToken(name)
-    }
-
     func workspaceAgentLabel(_ name: String) -> String {
         truncatedWorkspaceToken(name)
     }
@@ -622,7 +628,7 @@ struct ProjectChipView: View {
     }
 
     private var projectColor: Color {
-        deterministicColor(for: project.id)
+        deterministicProjectColor(for: project.id)
     }
 }
 
