@@ -418,14 +418,14 @@ extension MessageComposerView {
     /// Shows a [/] glyph with a count badge when items are selected.
     var nudgeSkillToolbarButton: some View {
         Button {
-            openNudgeSkillSelector(mode: .all)
+            openNudgeSkillSelector(mode: .skills)
         } label: {
             HStack(spacing: 3) {
                 Text("/")
                     .font(.body.monospaced().weight(.semibold))
                     .foregroundStyle(Color.composerAction)
-                if (selectedNudges.count + selectedSkills.count) > 0 {
-                    Text("\(selectedNudges.count + selectedSkills.count)")
+                if draft.selectedSkillIds.count > 0 {
+                    Text("\(draft.selectedSkillIds.count)")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)

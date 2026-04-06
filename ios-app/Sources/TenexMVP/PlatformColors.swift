@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - Adaptive Button Style
 
@@ -68,17 +71,11 @@ extension View {
         #endif
     }
 
-    /// Applies a unified list surface in macOS so list columns use the grouped
-    /// list tone instead of inheriting the full content background.
-    @ViewBuilder
+    /// Compatibility hook for list surfaces.
+    /// We intentionally keep macOS native list materials because forcing a custom
+    /// background breaks light/dark appearance transitions and split-view contrast.
     func tenexListSurfaceBackground() -> some View {
-        #if os(macOS)
         self
-            .scrollContentBackground(.hidden)
-            .background(Color.systemGroupedBackground)
-        #else
-        self
-        #endif
     }
 }
 
@@ -109,51 +106,19 @@ extension Color {
     static let systemGray5 = Color(.systemGray5)
     static let systemGray6 = Color(.systemGray6)
     #elseif os(macOS)
-    static let systemBackground = Color(
-        red: 17.0 / 255.0,
-        green: 17.0 / 255.0,
-        blue: 17.0 / 255.0
-    )
-    static let systemGroupedBackground = Color(
-        red: 30.0 / 255.0,
-        green: 31.0 / 255.0,
-        blue: 31.0 / 255.0
-    )
-    static let systemGray4 = Color(.separatorColor)
-    static let systemGray5 = Color(.quaternaryLabelColor)
-    static let systemGray6 = Color(.controlBackgroundColor)
+    static let systemBackground = Color(nsColor: .windowBackgroundColor)
+    static let systemGroupedBackground = Color(nsColor: .underPageBackgroundColor)
+    static let systemGray4 = Color(nsColor: .separatorColor)
+    static let systemGray5 = Color(nsColor: .quaternaryLabelColor)
+    static let systemGray6 = Color(nsColor: .controlBackgroundColor)
 
     // MARK: - macOS Conversation Workspace Surfaces
-    static let conversationWorkspaceBackdropMac = Color(
-        red: 17.0 / 255.0,
-        green: 17.0 / 255.0,
-        blue: 17.0 / 255.0
-    )
-    static let conversationWorkspaceSurfaceMac = Color(
-        red: 22.0 / 255.0,
-        green: 22.0 / 255.0,
-        blue: 22.0 / 255.0
-    )
-    static let conversationWorkspaceBorderMac = Color(
-        red: 47.0 / 255.0,
-        green: 47.0 / 255.0,
-        blue: 47.0 / 255.0
-    )
-    static let conversationComposerShellMac = Color(
-        red: 20.0 / 255.0,
-        green: 20.0 / 255.0,
-        blue: 20.0 / 255.0
-    )
-    static let conversationComposerFooterMac = Color(
-        red: 24.0 / 255.0,
-        green: 24.0 / 255.0,
-        blue: 24.0 / 255.0
-    )
-    static let conversationComposerStrokeMac = Color(
-        red: 52.0 / 255.0,
-        green: 52.0 / 255.0,
-        blue: 52.0 / 255.0
-    )
+    static let conversationWorkspaceBackdropMac = Color(nsColor: .windowBackgroundColor)
+    static let conversationWorkspaceSurfaceMac = Color(nsColor: .controlBackgroundColor)
+    static let conversationWorkspaceBorderMac = Color(nsColor: .separatorColor)
+    static let conversationComposerShellMac = Color(nsColor: .textBackgroundColor)
+    static let conversationComposerFooterMac = Color(nsColor: .controlBackgroundColor)
+    static let conversationComposerStrokeMac = Color(nsColor: .separatorColor)
     #endif
 
     // MARK: - Conversation Status

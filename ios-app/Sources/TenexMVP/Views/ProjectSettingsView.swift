@@ -515,6 +515,9 @@ struct ProjectSettingsView: View {
             }
         }
         .tenexModalPresentation(detents: [.medium, .large])
+        #if os(macOS)
+        .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
+        #endif
     }
 
     private var addToolSheet: some View {
@@ -709,7 +712,11 @@ struct ProjectSettingsView: View {
     }
 
     private func agentName(for pubkey: String) -> String {
-        installedAgents.first(where: { $0.pubkey == pubkey })?.slug ?? shortPubkey(pubkey)
+        if let slug = installedAgents.first(where: { $0.pubkey == pubkey })?.slug {
+            return slug
+        }
+        let name = coreManager.displayName(for: pubkey)
+        return name.isEmpty ? shortPubkey(pubkey) : name
     }
 
     private func shortPubkey(_ pubkey: String) -> String {

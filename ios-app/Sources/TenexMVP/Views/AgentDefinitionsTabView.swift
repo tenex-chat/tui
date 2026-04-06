@@ -480,11 +480,7 @@ private struct AgentDefinitionDetailView: View {
     @State private var selectedTab: DetailTab = .overview
     @State private var ownedTeams: [Project] = []
 
-    private static let modalSurface = Color(
-        red: 17.0 / 255.0,
-        green: 17.0 / 255.0,
-        blue: 17.0 / 255.0
-    )
+    private static let modalSurface = Color.systemBackground
     private let contentColumnMaxWidth: CGFloat = 800
 
     private var displayName: String {
@@ -620,7 +616,6 @@ private struct AgentDefinitionDetailView: View {
             }
         }
         .background(Self.modalSurface.ignoresSafeArea())
-        .preferredColorScheme(.dark)
         .overlay(alignment: .topTrailing) {
             HStack(spacing: 12) {
                 if canDelete {
@@ -631,8 +626,9 @@ private struct AgentDefinitionDetailView: View {
                             ProgressView().controlSize(.small)
                         } else {
                             Image(systemName: "trash")
-                                .foregroundStyle(.white)
-                                .shadow(radius: 2)
+                                .foregroundStyle(Color.composerDestructive)
+                                .padding(10)
+                                .background(.regularMaterial, in: Circle())
                         }
                     }
                     .buttonStyle(.plain)
@@ -643,8 +639,9 @@ private struct AgentDefinitionDetailView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(.white.opacity(0.8))
-                        .shadow(radius: 2)
+                        .foregroundStyle(.secondary)
+                        .padding(6)
+                        .background(.regularMaterial, in: Circle())
                 }
                 .buttonStyle(.plain)
             }
@@ -695,7 +692,7 @@ private struct AgentDefinitionDetailView: View {
             heroImageBackground
 
             LinearGradient(
-                colors: [.clear, Self.modalSurface.opacity(0.56), Self.modalSurface],
+                colors: [.clear, Color.black.opacity(0.34), Color.black.opacity(0.78)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -704,20 +701,20 @@ private struct AgentDefinitionDetailView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 8) {
                     if !item.agent.role.isEmpty {
-                        chip(text: item.agent.role, foreground: .primary, background: Color.white.opacity(0.15))
+                        chip(text: item.agent.role, foreground: .white, background: Color.white.opacity(0.14))
                     }
                     if let model = item.agent.model, !model.isEmpty {
-                        chip(text: model, foreground: Color.agentBrand, background: Color.agentBrand.opacity(0.15))
+                        chip(text: model, foreground: .white, background: Color.agentBrand.opacity(0.5))
                     }
                     if let version = item.agent.version, !version.isEmpty {
-                        chip(text: "v\(version)", foreground: .secondary, background: Color.white.opacity(0.1))
+                        chip(text: "v\(version)", foreground: .white.opacity(0.82), background: Color.white.opacity(0.1))
                     }
                 }
 
                 if !item.agent.description.isEmpty {
                     Text(item.agent.description)
                         .font(.title3)
-                        .foregroundStyle(.white.opacity(0.78))
+                        .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(2)
                 }
 
@@ -777,7 +774,7 @@ private struct AgentDefinitionDetailView: View {
             }
         } else {
             LinearGradient(
-                colors: [Color.systemGray6, Self.modalSurface],
+                colors: [Color.systemGray6, Color.systemBackground],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )

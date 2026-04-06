@@ -1,5 +1,8 @@
 import XCTest
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 @testable import TenexMVP
 
 final class PlatformColorsTests: XCTestCase {
@@ -401,33 +404,33 @@ final class PlatformColorsTests: XCTestCase {
     // MARK: - macOS-specific workspace surface colors
 
     #if os(macOS)
-    func testConversationWorkspaceBackdropMacRGBValues() {
-        let expected = Color(red: 17.0 / 255.0, green: 20.0 / 255.0, blue: 24.0 / 255.0)
+    func testConversationWorkspaceBackdropMacUsesWindowBackground() {
+        let expected = Color(nsColor: .windowBackgroundColor)
         XCTAssertEqual(Color.conversationWorkspaceBackdropMac, expected)
     }
 
-    func testConversationWorkspaceSurfaceMacRGBValues() {
-        let expected = Color(red: 27.0 / 255.0, green: 32.0 / 255.0, blue: 38.0 / 255.0)
+    func testConversationWorkspaceSurfaceMacUsesControlBackground() {
+        let expected = Color(nsColor: .controlBackgroundColor)
         XCTAssertEqual(Color.conversationWorkspaceSurfaceMac, expected)
     }
 
-    func testConversationWorkspaceBorderMacRGBValues() {
-        let expected = Color(red: 56.0 / 255.0, green: 63.0 / 255.0, blue: 72.0 / 255.0)
+    func testConversationWorkspaceBorderMacUsesSeparatorColor() {
+        let expected = Color(nsColor: .separatorColor)
         XCTAssertEqual(Color.conversationWorkspaceBorderMac, expected)
     }
 
-    func testConversationComposerShellMacRGBValues() {
-        let expected = Color(red: 20.0 / 255.0, green: 24.0 / 255.0, blue: 29.0 / 255.0)
+    func testConversationComposerShellMacUsesTextBackground() {
+        let expected = Color(nsColor: .textBackgroundColor)
         XCTAssertEqual(Color.conversationComposerShellMac, expected)
     }
 
-    func testConversationComposerFooterMacRGBValues() {
-        let expected = Color(red: 26.0 / 255.0, green: 31.0 / 255.0, blue: 37.0 / 255.0)
+    func testConversationComposerFooterMacUsesControlBackground() {
+        let expected = Color(nsColor: .controlBackgroundColor)
         XCTAssertEqual(Color.conversationComposerFooterMac, expected)
     }
 
-    func testConversationComposerStrokeMacRGBValues() {
-        let expected = Color(red: 46.0 / 255.0, green: 54.0 / 255.0, blue: 64.0 / 255.0)
+    func testConversationComposerStrokeMacUsesSeparatorColor() {
+        let expected = Color(nsColor: .separatorColor)
         XCTAssertEqual(Color.conversationComposerStrokeMac, expected)
     }
     #endif
