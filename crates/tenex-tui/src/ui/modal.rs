@@ -1298,11 +1298,11 @@ impl ProjectActionsState {
     }
 
     pub fn available_actions(&self) -> Vec<ProjectAction> {
-        let mut actions = if self.is_online {
-            vec![ProjectAction::NewConversation, ProjectAction::Settings]
-        } else {
-            vec![ProjectAction::Boot, ProjectAction::Settings]
-        };
+        let mut actions = vec![ProjectAction::NewConversation];
+        if !self.is_online {
+            actions.push(ProjectAction::Boot);
+        }
+        actions.push(ProjectAction::Settings);
         actions.push(ProjectAction::ToggleArchive);
         actions.push(ProjectAction::Delete);
         actions
