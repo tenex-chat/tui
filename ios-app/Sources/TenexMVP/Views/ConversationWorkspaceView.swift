@@ -280,6 +280,10 @@ struct ConversationWorkspaceView: View {
     @State private var localReferenceLaunchPayload: ReferenceConversationLaunchPayload?
     /// Shared minute-level transcript clock used by all rows to avoid per-row TimelineView schedulers.
     @State private var transcriptRelativeTimeNow = Date()
+    /// When false (default), only directed messages (with p-tags) are shown; undirected runs are folded.
+    @State private var expandAllUntagged = false
+    /// Which fold groups (identified by their start index) have been individually expanded.
+    @State private var expandedFoldGroups: Set<Int> = []
     private let profiler = PerformanceProfiler.shared
 
     private let bottomAnchorId = "workspace-bottom-anchor"
@@ -385,6 +389,43 @@ struct ConversationWorkspaceView: View {
         transcriptMessages.indices
     }
 
+    /// Display items for the transcript, folding undirected message runs when `expandAllUntagged` is false.
+    private var transcriptDisplayItems: [TranscriptDisplayItem] {
+        var items: [TranscriptDisplayItem] = []
+        var foldBuffer: [Int] = []
+        var lastPubkey: String? = nil
+
+        func flushBuffer() {
+            guard !foldBuffer.isEmpty else { return }
+            let startIdx = foldBuffer[0]
+            if expandedFoldGroups.contains(startIdx) {
+                for i in foldBuffer {
+                    let msg = transcriptMessages[i]
+                    items.append(.message(index: i, isConsecutive: lastPubkey == msg.pubkey))
+                    lastPubkey = msg.pubkey
+                }
+            } else {
+                items.append(.foldedGroup(startIndex: startIdx, count: foldBuffer.count))
+                lastPubkey = nil
+            }
+            foldBuffer = []
+        }
+
+        for index in messageIndices {
+            let message = transcriptMessages[index]
+            if message.pTags.isEmpty && !expandAllUntagged {
+                foldBuffer.append(index)
+            } else {
+                flushBuffer()
+                items.append(.message(index: index, isConsecutive: lastPubkey == message.pubkey))
+                lastPubkey = message.pubkey
+            }
+        }
+        flushBuffer()
+
+        return items
+    }
+
     private var statusText: String {
         isNewThreadMode ? "draft" : viewModel.currentStatus
     }
@@ -451,6 +492,22 @@ struct ConversationWorkspaceView: View {
         .toolbarTitleDisplayMode(.inline)
         #endif
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        expandAllUntagged.toggle()
+                        if !expandAllUntagged {
+                            expandedFoldGroups.removeAll()
+                        }
+                    }
+                } label: {
+                    Label(
+                        expandAllUntagged ? "Directed only" : "Show all",
+                        systemImage: expandAllUntagged ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+                    )
+                }
+                .help(expandAllUntagged ? "Show only directed messages" : "Show all messages")
+            }
             if showsMetadataInspector {
                 ToolbarItem(placement: .automatic) {
                     inspectorToggleButton
@@ -576,29 +633,44 @@ struct ConversationWorkspaceView: View {
                         }
                     }
 
-                    ForEach(messageIndices, id: \.self) { index in
-                        let message = transcriptMessages[index]
-                        SlackMessageRow(
-                            message: message,
-                            isConsecutive: index > transcriptMessages.startIndex && transcriptMessages[index - 1].pubkey == message.pubkey,
-                            conversationId: currentConversation.thread.id,
-                            projectId: currentConversation.extractedProjectId,
-                            relativeTimeNow: transcriptRelativeTimeNow,
-                            authorDisplayName: coreManager.displayName(for: message.pubkey),
-                            directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
-                                .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
-                                .map { "@\($0)" }
-                                .joined(separator: ", "),
-                            onDelegationTap: { delegationId in
-                                openDelegation(byId: delegationId)
-                            },
-                            onViewRawEvent: { messageId in
-                                viewRawEvent(for: messageId)
-                            }
-                        )
-                        .equatable()
-                        .environment(coreManager)
-                        .id(message.id)
+                    ForEach(transcriptDisplayItems) { item in
+                        switch item {
+                        case .message(let index, let isConsecutive):
+                            let message = transcriptMessages[index]
+                            SlackMessageRow(
+                                message: message,
+                                isConsecutive: isConsecutive,
+                                conversationId: currentConversation.thread.id,
+                                projectId: currentConversation.extractedProjectId,
+                                relativeTimeNow: transcriptRelativeTimeNow,
+                                authorDisplayName: coreManager.displayName(for: message.pubkey),
+                                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                                    .map { "@\($0)" }
+                                    .joined(separator: ", "),
+                                onDelegationTap: { delegationId in
+                                    openDelegation(byId: delegationId)
+                                },
+                                onViewRawEvent: { messageId in
+                                    viewRawEvent(for: messageId)
+                                }
+                            )
+                            .equatable()
+                            .environment(coreManager)
+                            .id(message.id)
+                        case .foldedGroup(let startIndex, let count):
+                            FoldedMessagesRow(
+                                count: count,
+                                isExpanded: expandedFoldGroups.contains(startIndex),
+                                onToggle: {
+                                    if expandedFoldGroups.contains(startIndex) {
+                                        expandedFoldGroups.remove(startIndex)
+                                    } else {
+                                        expandedFoldGroups.insert(startIndex)
+                                    }
+                                }
+                            )
+                        }
                     }
 
                     // Streaming buffer lives in a separate view struct so that
