@@ -1,5 +1,50 @@
 import SwiftUI
 
+// MARK: - Transcript Filtering
+
+/// A display item in a filtered transcript — either a single message or a fold placeholder.
+enum TranscriptDisplayItem: Identifiable {
+    /// A message to show, with pre-computed consecutive-author flag.
+    case message(index: Int, isConsecutive: Bool)
+    /// A run of non-directed (no p-tags) messages folded into a single row.
+    case foldedGroup(startIndex: Int, count: Int)
+
+    var id: String {
+        switch self {
+        case .message(let idx, _): return "msg-\(idx)"
+        case .foldedGroup(let start, _): return "fold-\(start)"
+        }
+    }
+}
+
+/// Compact fold placeholder row — tappable to expand a hidden run of messages.
+struct FoldedMessagesRow: View {
+    let count: Int
+    let isExpanded: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: 5) {
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.right")
+                    .font(.caption2)
+                Text(isExpanded
+                     ? "Collapse \(count) internal message\(count == 1 ? "" : "s")"
+                     : "\(count) internal message\(count == 1 ? "" : "s")")
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 3)
+            .padding(.horizontal, 10)
+            .background(Color.secondary.opacity(0.08), in: Capsule())
+        }
+        .buttonStyle(.borderless)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 16)
+        .padding(.vertical, 4)
+    }
+}
+
 // MARK: - Todo Row View
 
 /// Compact todo item row
@@ -294,6 +339,10 @@ struct FullConversationSheet: View {
     @State private var rawEventErrorMessage: String?
     /// Shared minute-level transcript clock used by all rows to avoid per-row TimelineView schedulers.
     @State private var transcriptRelativeTimeNow = Date()
+    /// When false (default), only directed messages (with p-tags) are shown; undirected runs are folded.
+    @State private var expandAllUntagged = false
+    /// Which fold groups (identified by their start index) have been individually expanded.
+    @State private var expandedFoldGroups: Set<Int> = []
 
     private let bottomAnchorId = "full-conversation-bottom"
     private let initialMessageWindowSize = 240
@@ -352,6 +401,43 @@ struct FullConversationSheet: View {
         )
     }
 
+    /// Display items for the transcript, folding undirected message runs when `expandAllUntagged` is false.
+    private var fullConvDisplayItems: [TranscriptDisplayItem] {
+        var items: [TranscriptDisplayItem] = []
+        var foldBuffer: [Int] = []
+        var lastPubkey: String? = nil
+
+        func flushBuffer() {
+            guard !foldBuffer.isEmpty else { return }
+            let startIdx = foldBuffer[0]
+            if expandedFoldGroups.contains(startIdx) {
+                for i in foldBuffer {
+                    let msg = messages[i]
+                    items.append(.message(index: i, isConsecutive: lastPubkey == msg.pubkey))
+                    lastPubkey = msg.pubkey
+                }
+            } else {
+                items.append(.foldedGroup(startIndex: startIdx, count: foldBuffer.count))
+                lastPubkey = nil
+            }
+            foldBuffer = []
+        }
+
+        for index in messageIndices {
+            let message = messages[index]
+            if message.pTags.isEmpty && !expandAllUntagged {
+                foldBuffer.append(index)
+            } else {
+                flushBuffer()
+                items.append(.message(index: index, isConsecutive: lastPubkey == message.pubkey))
+                lastPubkey = message.pubkey
+            }
+        }
+        flushBuffer()
+
+        return items
+    }
+
     private var transcriptBackdropColor: Color {
         #if os(macOS)
         return .conversationWorkspaceBackdropMac
@@ -364,10 +450,18 @@ struct FullConversationSheet: View {
         Group {
             if isEmbedded {
                 conversationContent
+                    .toolbar {
+                        ToolbarItem(placement: .automatic) {
+                            filterToggleButton
+                        }
+                    }
             } else {
                 NavigationStack {
                     conversationContent
                         .toolbar {
+                            ToolbarItem(placement: .automatic) {
+                                filterToggleButton
+                            }
                             ToolbarItem(placement: .confirmationAction) {
                                 Button("Done") { dismiss() }
                             }
@@ -424,6 +518,23 @@ struct FullConversationSheet: View {
         #endif
     }
 
+    private var filterToggleButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                expandAllUntagged.toggle()
+                if !expandAllUntagged {
+                    expandedFoldGroups.removeAll()
+                }
+            }
+        } label: {
+            Label(
+                expandAllUntagged ? "Directed only" : "Show all",
+                systemImage: expandAllUntagged ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+            )
+        }
+        .help(expandAllUntagged ? "Show only directed messages" : "Show all messages")
+    }
+
     private var conversationContent: some View {
         ZStack(alignment: .bottom) {
             ScrollViewReader { proxy in
@@ -446,29 +557,44 @@ struct FullConversationSheet: View {
                             .padding(.bottom, 12)
                         }
 
-                        ForEach(messageIndices, id: \.self) { index in
-                            let message = messages[index]
-                            SlackMessageRow(
-                                message: message,
-                                isConsecutive: index > 0 && messages[index - 1].pubkey == message.pubkey,
-                                conversationId: conversation.thread.id,
-                                projectId: conversation.extractedProjectId,
-                                relativeTimeNow: transcriptRelativeTimeNow,
-                                authorDisplayName: coreManager.displayName(for: message.pubkey),
-                                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
-                                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
-                                    .map { "@\($0)" }
-                                    .joined(separator: ", "),
-                                onDelegationTap: { delegationId in
-                                    selectedDelegation = delegationId
-                                },
-                                onViewRawEvent: { messageId in
-                                    viewRawEvent(for: messageId)
-                                }
-                            )
-                            .equatable()
-                            .environment(coreManager)
-                            .id(message.id)
+                        ForEach(fullConvDisplayItems) { item in
+                            switch item {
+                            case .message(let index, let isConsecutive):
+                                let message = messages[index]
+                                SlackMessageRow(
+                                    message: message,
+                                    isConsecutive: isConsecutive,
+                                    conversationId: conversation.thread.id,
+                                    projectId: conversation.extractedProjectId,
+                                    relativeTimeNow: transcriptRelativeTimeNow,
+                                    authorDisplayName: coreManager.displayName(for: message.pubkey),
+                                    directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                                        .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                                        .map { "@\($0)" }
+                                        .joined(separator: ", "),
+                                    onDelegationTap: { delegationId in
+                                        selectedDelegation = delegationId
+                                    },
+                                    onViewRawEvent: { messageId in
+                                        viewRawEvent(for: messageId)
+                                    }
+                                )
+                                .equatable()
+                                .environment(coreManager)
+                                .id(message.id)
+                            case .foldedGroup(let startIndex, let count):
+                                FoldedMessagesRow(
+                                    count: count,
+                                    isExpanded: expandedFoldGroups.contains(startIndex),
+                                    onToggle: {
+                                        if expandedFoldGroups.contains(startIndex) {
+                                            expandedFoldGroups.remove(startIndex)
+                                        } else {
+                                            expandedFoldGroups.insert(startIndex)
+                                        }
+                                    }
+                                )
+                            }
                         }
 
                         FullConversationStreamingSection(
