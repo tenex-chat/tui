@@ -182,7 +182,8 @@ struct ReportDetailView: View {
         .toolbarTitleDisplayMode(.inline)
         #endif
         .sheet(isPresented: $showingMessageComposer) {
-            let project = coreManager.projects.first(where: { report.projectATag.contains($0.id) })
+            let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
+            let project = coreManager.projects.first(where: { $0.id == projectId })
             MessageComposerView(
                 project: project,
                 conversationId: nil,
