@@ -10,8 +10,15 @@ import SwiftUI
 struct CollapsibleAttachmentView: View {
     let label: String
     let content: String
+    let allowsTextSelection: Bool
 
     @State private var isExpanded = false
+
+    init(label: String, content: String, allowsTextSelection: Bool = true) {
+        self.label = label
+        self.content = content
+        self.allowsTextSelection = allowsTextSelection
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -41,7 +48,7 @@ struct CollapsibleAttachmentView: View {
 
             // Expanded attachment content
             if isExpanded {
-                MarkdownView(content: content)
+                MarkdownView(content: content, allowsTextSelection: allowsTextSelection)
                     .font(.callout)
                     .foregroundStyle(.primary.opacity(0.85))
                     .padding(12)
@@ -70,9 +77,16 @@ struct CollapsibleAttachmentView: View {
 /// For messages without attachments, this view transparently delegates to `MarkdownView`.
 struct MessageContentView: View, Equatable {
     let content: String
+    let allowsTextSelection: Bool
+
+    init(content: String, allowsTextSelection: Bool = true) {
+        self.content = content
+        self.allowsTextSelection = allowsTextSelection
+    }
 
     static func == (lhs: MessageContentView, rhs: MessageContentView) -> Bool {
-        lhs.content == rhs.content
+        lhs.content == rhs.content &&
+        lhs.allowsTextSelection == rhs.allowsTextSelection
     }
 
     /// Cached parse result to avoid re-parsing on every body evaluation.
@@ -90,7 +104,7 @@ struct MessageContentView: View, Equatable {
                 }
             }
         } else {
-            MarkdownView(content: content)
+            MarkdownView(content: content, allowsTextSelection: allowsTextSelection)
         }
     }
 
@@ -98,10 +112,14 @@ struct MessageContentView: View, Equatable {
     private func segmentView(_ segment: MessageSegment, attachments: [String: String]) -> some View {
         switch segment {
         case .text(let text):
-            MarkdownView(content: text)
+            MarkdownView(content: text, allowsTextSelection: allowsTextSelection)
         case .attachmentReference(let label):
             if let attachmentContent = attachments[label] {
-                CollapsibleAttachmentView(label: label, content: attachmentContent)
+                CollapsibleAttachmentView(
+                    label: label,
+                    content: attachmentContent,
+                    allowsTextSelection: allowsTextSelection
+                )
             }
         }
     }

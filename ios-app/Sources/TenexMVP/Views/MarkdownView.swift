@@ -48,6 +48,7 @@ enum MarkdownURLUtilities {
 /// - Markdown formatting (headers, code blocks, tables, lists, bold, inline code)
 struct MarkdownView: View, Equatable {
     let content: String
+    let allowsTextSelection: Bool
 
     /// Cache for parsed markdown elements, keyed by content hash
     /// This prevents re-parsing the same content multiple times
@@ -55,19 +56,36 @@ struct MarkdownView: View, Equatable {
     private static let cacheLock = NSLock()
     private static let maxCacheSize = 100
 
-    static func == (lhs: MarkdownView, rhs: MarkdownView) -> Bool {
-        lhs.content == rhs.content
+    init(content: String, allowsTextSelection: Bool = true) {
+        self.content = content
+        self.allowsTextSelection = allowsTextSelection
     }
 
+    static func == (lhs: MarkdownView, rhs: MarkdownView) -> Bool {
+        lhs.content == rhs.content &&
+        lhs.allowsTextSelection == rhs.allowsTextSelection
+    }
+
+    @ViewBuilder
     var body: some View {
         let elements = cachedParse()
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(elements) { element in
-                element.view
+        if allowsTextSelection {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(elements) { element in
+                    element.view
+                }
             }
+            .lineSpacing(6)
+            .textSelection(.enabled)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(elements) { element in
+                    element.view
+                }
+            }
+            .lineSpacing(6)
+            .textSelection(.disabled)
         }
-        .lineSpacing(6)
-        .textSelection(.enabled)
     }
 
     /// Returns cached parsed elements or parses and caches if needed

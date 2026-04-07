@@ -190,11 +190,9 @@ struct SlackMessageRow: View, Equatable {
         // Most rows are short; rendering directly keeps large transcripts responsive.
         // MessageContentView handles attachment detection and renders collapsible buttons
         // for [Text Attachment X] references, falling through to MarkdownView otherwise.
-        MessageContentView(content: message.content)
+        MessageContentView(content: message.content, allowsTextSelection: false)
             .font(.system(size: 14))
             .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
-            // Avoid per-row SelectionOverlay NSViewRepresentable churn on large macOS transcripts.
-            .textSelection(.disabled)
         #else
         VStack(alignment: .leading, spacing: 0) {
             // Content with height measurement
@@ -203,7 +201,6 @@ struct SlackMessageRow: View, Equatable {
             MessageContentView(content: message.content)
                 .font(hasPTags ? .body : .callout)
                 .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
-                .textSelection(.enabled)
                 .background(
                     GeometryReader { geometry in
                         Color.clear

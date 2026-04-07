@@ -116,19 +116,12 @@ struct TodoProgressView: View {
         } else {
             // Progress bar with fraction
             HStack(spacing: 8) {
-                // Progress bar
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        // Background
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.secondary.opacity(0.2))
-
-                        // Progress
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.accentColor)
-                            .frame(width: geometry.size.width * CGFloat(stats.completedCount) / CGFloat(max(1, stats.totalCount)))
-                    }
-                }
+                ProgressView(
+                    value: Double(stats.completedCount),
+                    total: Double(max(1, stats.totalCount))
+                )
+                .progressViewStyle(.linear)
+                .tint(.accentColor)
                 .frame(width: 60, height: 8)
 
                 // Fraction label
@@ -538,8 +531,9 @@ struct FullConversationSheet: View {
     private var conversationContent: some View {
         ZStack(alignment: .bottom) {
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                Group {
+                    #if os(macOS)
+                    List {
                         if hiddenMessageCount > 0 {
                             Button {
                                 loadOlderMessages()
@@ -555,46 +549,12 @@ struct FullConversationSheet: View {
                             }
                             .adaptiveProminentGlassButtonStyle()
                             .padding(.bottom, 12)
+                            .fullConversationListRow()
                         }
 
                         ForEach(fullConvDisplayItems) { item in
-                            switch item {
-                            case .message(let index, let isConsecutive):
-                                let message = messages[index]
-                                SlackMessageRow(
-                                    message: message,
-                                    isConsecutive: isConsecutive,
-                                    conversationId: conversation.thread.id,
-                                    projectId: conversation.extractedProjectId,
-                                    relativeTimeNow: transcriptRelativeTimeNow,
-                                    authorDisplayName: coreManager.displayName(for: message.pubkey),
-                                    directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
-                                        .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
-                                        .map { "@\($0)" }
-                                        .joined(separator: ", "),
-                                    onDelegationTap: { delegationId in
-                                        selectedDelegation = delegationId
-                                    },
-                                    onViewRawEvent: { messageId in
-                                        viewRawEvent(for: messageId)
-                                    }
-                                )
-                                .equatable()
-                                .environment(coreManager)
-                                .id(message.id)
-                            case .foldedGroup(let startIndex, let count):
-                                FoldedMessagesRow(
-                                    count: count,
-                                    isExpanded: expandedFoldGroups.contains(startIndex),
-                                    onToggle: {
-                                        if expandedFoldGroups.contains(startIndex) {
-                                            expandedFoldGroups.remove(startIndex)
-                                        } else {
-                                            expandedFoldGroups.insert(startIndex)
-                                        }
-                                    }
-                                )
-                            }
+                            fullConversationRowView(for: item)
+                                .fullConversationListRow()
                         }
 
                         FullConversationStreamingSection(
@@ -602,13 +562,53 @@ struct FullConversationSheet: View {
                             lastMessagePubkey: messages.last?.pubkey,
                             scrollProxy: proxy
                         )
-                    }
-                    .padding()
-                    .padding(.bottom, isEmbedded ? 12 : 80)
+                        .fullConversationListRow()
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id(bottomAnchorId)
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorId)
+                            .fullConversationListRow()
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    #else
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            if hiddenMessageCount > 0 {
+                                Button {
+                                    loadOlderMessages()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "clock.arrow.circlepath")
+                                        Text("Load \(hiddenMessageCount) earlier message\(hiddenMessageCount == 1 ? "" : "s")")
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 12)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                }
+                                .adaptiveProminentGlassButtonStyle()
+                                .padding(.bottom, 12)
+                            }
+
+                            ForEach(fullConvDisplayItems) { item in
+                                fullConversationRowView(for: item)
+                            }
+
+                            FullConversationStreamingSection(
+                                conversationId: conversation.thread.id,
+                                lastMessagePubkey: messages.last?.pubkey,
+                                scrollProxy: proxy
+                            )
+                        }
+                        .padding()
+                        .padding(.bottom, isEmbedded ? 12 : 80)
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorId)
+                    }
+                    #endif
                 }
                 .onAppear {
                     if usesMessageWindowing {
@@ -697,6 +697,53 @@ struct FullConversationSheet: View {
         }
     }
 
+    @ViewBuilder
+    private func fullConversationRowView(for item: TranscriptDisplayItem) -> some View {
+        switch item {
+        case .message(let index, let isConsecutive):
+            let message = messages[index]
+            SlackMessageRow(
+                message: message,
+                isConsecutive: isConsecutive,
+                conversationId: conversation.thread.id,
+                projectId: conversation.extractedProjectId,
+                relativeTimeNow: transcriptRelativeTimeNow,
+                authorDisplayName: coreManager.displayName(for: message.pubkey),
+                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                    .map { "@\($0)" }
+                    .joined(separator: ", "),
+                onDelegationTap: { delegationId in
+                    selectedDelegation = delegationId
+                },
+                onViewRawEvent: { messageId in
+                    viewRawEvent(for: messageId)
+                }
+            )
+            .equatable()
+            .environment(coreManager)
+            .id(message.id)
+            #if os(macOS)
+            .frame(maxWidth: 800, alignment: .leading)
+            #endif
+        case .foldedGroup(let startIndex, let count):
+            FoldedMessagesRow(
+                count: count,
+                isExpanded: expandedFoldGroups.contains(startIndex),
+                onToggle: {
+                    if expandedFoldGroups.contains(startIndex) {
+                        expandedFoldGroups.remove(startIndex)
+                    } else {
+                        expandedFoldGroups.insert(startIndex)
+                    }
+                }
+            )
+            #if os(macOS)
+            .frame(maxWidth: 800, alignment: .leading)
+            #endif
+        }
+    }
+
     private static func nextMinuteBoundary(after date: Date) -> Date {
         if let interval = Calendar.current.dateInterval(of: .minute, for: date) {
             return interval.end
@@ -757,6 +804,15 @@ struct FullConversationSheet: View {
         .background(transcriptBackdropColor)
     }
     #endif
+}
+
+private extension View {
+    func fullConversationListRow() -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+    }
 }
 
 private struct FullConversationRawEventDestination: Identifiable, Hashable {

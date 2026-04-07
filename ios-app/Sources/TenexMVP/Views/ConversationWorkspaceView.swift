@@ -615,8 +615,9 @@ struct ConversationWorkspaceView: View {
 
     private var transcriptColumn: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
+            Group {
+                #if os(macOS)
+                List {
                     if hasOlderMessages {
                         Button {
                             visibleMessageWindow += 30
@@ -631,67 +632,71 @@ struct ConversationWorkspaceView: View {
                         .onAppear {
                             visibleMessageWindow += 30
                         }
+                        .transcriptListRow()
                     }
 
                     ForEach(transcriptDisplayItems) { item in
-                        switch item {
-                        case .message(let index, let isConsecutive):
-                            let message = transcriptMessages[index]
-                            SlackMessageRow(
-                                message: message,
-                                isConsecutive: isConsecutive,
-                                conversationId: currentConversation.thread.id,
-                                projectId: currentConversation.extractedProjectId,
-                                relativeTimeNow: transcriptRelativeTimeNow,
-                                authorDisplayName: coreManager.displayName(for: message.pubkey),
-                                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
-                                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
-                                    .map { "@\($0)" }
-                                    .joined(separator: ", "),
-                                onDelegationTap: { delegationId in
-                                    openDelegation(byId: delegationId)
-                                },
-                                onViewRawEvent: { messageId in
-                                    viewRawEvent(for: messageId)
-                                }
-                            )
-                            .equatable()
-                            .environment(coreManager)
-                            .id(message.id)
-                        case .foldedGroup(let startIndex, let count):
-                            FoldedMessagesRow(
-                                count: count,
-                                isExpanded: expandedFoldGroups.contains(startIndex),
-                                onToggle: {
-                                    if expandedFoldGroups.contains(startIndex) {
-                                        expandedFoldGroups.remove(startIndex)
-                                    } else {
-                                        expandedFoldGroups.insert(startIndex)
-                                    }
-                                }
-                            )
-                        }
+                        transcriptRowView(for: item)
+                            .transcriptListRow()
                     }
 
-                    // Streaming buffer lives in a separate view struct so that
-                    // coreManager.streamingBuffers observation is isolated here.
-                    // The parent transcript body does NOT observe streaming changes.
                     if !isNewThreadMode {
                         TranscriptStreamingSection(
                             conversationId: currentConversation.thread.id,
                             lastMessagePubkey: allMessages.last?.pubkey,
                             scrollProxy: proxy
                         )
+                        .transcriptListRow()
                     }
 
                     Color.clear
                         .frame(height: 1)
                         .id(bottomAnchorId)
+                        .transcriptListRow()
                 }
-                .padding()
-                .padding(.bottom, 12)
-                #if os(macOS)
-                .frame(maxWidth: 800, alignment: .leading)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                #else
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if hasOlderMessages {
+                            Button {
+                                visibleMessageWindow += 30
+                            } label: {
+                                Text("Load earlier messages")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                            }
+                            .buttonStyle(.borderless)
+                            .onAppear {
+                                visibleMessageWindow += 30
+                            }
+                        }
+
+                        ForEach(transcriptDisplayItems) { item in
+                            transcriptRowView(for: item)
+                        }
+
+                        // Streaming buffer lives in a separate view struct so that
+                        // coreManager.streamingBuffers observation is isolated here.
+                        // The parent transcript body does NOT observe streaming changes.
+                        if !isNewThreadMode {
+                            TranscriptStreamingSection(
+                                conversationId: currentConversation.thread.id,
+                                lastMessagePubkey: allMessages.last?.pubkey,
+                                scrollProxy: proxy
+                            )
+                        }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorId)
+                    }
+                    .padding()
+                    .padding(.bottom, 12)
+                }
                 #endif
             }
             .background(workspaceBackdropColor)
@@ -715,6 +720,53 @@ struct ConversationWorkspaceView: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inlineComposer
+        }
+    }
+
+    @ViewBuilder
+    private func transcriptRowView(for item: TranscriptDisplayItem) -> some View {
+        switch item {
+        case .message(let index, let isConsecutive):
+            let message = transcriptMessages[index]
+            SlackMessageRow(
+                message: message,
+                isConsecutive: isConsecutive,
+                conversationId: currentConversation.thread.id,
+                projectId: currentConversation.extractedProjectId,
+                relativeTimeNow: transcriptRelativeTimeNow,
+                authorDisplayName: coreManager.displayName(for: message.pubkey),
+                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                    .map { "@\($0)" }
+                    .joined(separator: ", "),
+                onDelegationTap: { delegationId in
+                    openDelegation(byId: delegationId)
+                },
+                onViewRawEvent: { messageId in
+                    viewRawEvent(for: messageId)
+                }
+            )
+            .equatable()
+            .environment(coreManager)
+            .id(message.id)
+            #if os(macOS)
+            .frame(maxWidth: 800, alignment: .leading)
+            #endif
+        case .foldedGroup(let startIndex, let count):
+            FoldedMessagesRow(
+                count: count,
+                isExpanded: expandedFoldGroups.contains(startIndex),
+                onToggle: {
+                    if expandedFoldGroups.contains(startIndex) {
+                        expandedFoldGroups.remove(startIndex)
+                    } else {
+                        expandedFoldGroups.insert(startIndex)
+                    }
+                }
+            )
+            #if os(macOS)
+            .frame(maxWidth: 800, alignment: .leading)
+            #endif
         }
     }
 
@@ -1062,6 +1114,15 @@ struct ConversationWorkspaceView: View {
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+}
+
+private extension View {
+    func transcriptListRow() -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
     }
 }
 

@@ -65,7 +65,11 @@ struct StreamingMessageRow: View {
 
             (fadedStreamingText(visibleText) + cursorText)
                 .font(messageBodyFont)
+                #if os(macOS)
+                .textSelection(.disabled)
+                #else
                 .textSelection(.enabled)
+                #endif
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, isConsecutive ? 3 : 8)
