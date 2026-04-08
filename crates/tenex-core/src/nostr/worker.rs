@@ -2571,11 +2571,14 @@ impl NostrWorker {
             ));
 
         // NIP-10: e-tag with "reply" marker (optional, for threaded replies)
+        // Skip if reply_id == thread_id: the ask event IS the root, so the root tag already covers it.
         if let Some(reply_id) = reply_to {
-            event = event.tag(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-                vec![reply_id, "".to_string(), "reply".to_string()],
-            ));
+            if reply_id != thread_id {
+                event = event.tag(Tag::custom(
+                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                    vec![reply_id, "".to_string(), "reply".to_string()],
+                ));
+            }
         }
 
         // Agent p-tag for routing
