@@ -281,7 +281,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
-                    HomeTab::Reports => 0, // Will be refined in Task 4
+                    HomeTab::Reports => {
+                        let entries = crate::ui::views::reports::build_report_entries(app);
+                        let visible = crate::ui::views::reports::build_visible_items(
+                            &entries,
+                            &app.reports_expanded_groups,
+                        );
+                        visible.len().saturating_sub(1)
+                    }
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 // If Shift is held, add current item to multi-selection before moving
@@ -323,7 +330,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
-                    HomeTab::Reports => 0,
+                    HomeTab::Reports => {
+                        let entries = crate::ui::views::reports::build_report_entries(app);
+                        let visible = crate::ui::views::reports::build_visible_items(
+                            &entries,
+                            &app.reports_expanded_groups,
+                        );
+                        visible.len().saturating_sub(1)
+                    }
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 if current > max {
@@ -506,7 +520,52 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                     }
                     HomeTab::Reports => {
-                        // Will be refined in Task 4
+                        let entries = crate::ui::views::reports::build_report_entries(app);
+                        let visible = crate::ui::views::reports::build_visible_items(
+                            &entries,
+                            &app.reports_expanded_groups,
+                        );
+
+                        if let Some(&(entry_idx, sub_idx)) = visible.get(idx) {
+                            let entry = &entries[entry_idx];
+                            let report_to_open = match (entry, sub_idx) {
+                                (
+                                    crate::ui::views::reports::ReportEntry::Single(report),
+                                    None,
+                                ) => Some(report.clone()),
+                                (
+                                    crate::ui::views::reports::ReportEntry::Group {
+                                        reports,
+                                        ..
+                                    },
+                                    Some(j),
+                                ) => reports.get(j).cloned(),
+                                _ => None,
+                            };
+
+                            if let Some(report) = report_to_open {
+                                app.tabs.open_report(
+                                    report.slug.clone(),
+                                    report.title.clone(),
+                                    report.project_a_tag.clone(),
+                                );
+                                app.scroll_offset = 0;
+                                app.view = View::Chat;
+                                app.input_mode = InputMode::Normal;
+                            } else if let (
+                                crate::ui::views::reports::ReportEntry::Group { .. },
+                                None,
+                            ) = (entry, sub_idx)
+                            {
+                                if let Some(key) = entry.group_key() {
+                                    if app.reports_expanded_groups.contains(&key) {
+                                        app.reports_expanded_groups.remove(&key);
+                                    } else {
+                                        app.reports_expanded_groups.insert(key);
+                                    }
+                                }
+                            }
+                        }
                     }
                     HomeTab::Stats => {
                         // Stats tab has no selectable items to open
@@ -569,7 +628,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::ActiveWork => active_work_cache
                     .as_ref()
                     .map_or(0, |c| c.len().saturating_sub(1)),
-                HomeTab::Reports => 0,
+                HomeTab::Reports => {
+                    let entries = crate::ui::views::reports::build_report_entries(app);
+                    let visible = crate::ui::views::reports::build_visible_items(
+                        &entries,
+                        &app.reports_expanded_groups,
+                    );
+                    visible.len().saturating_sub(1)
+                }
                 HomeTab::Stats => 0, // Stats tab has no list selection
             };
             if has_shift {
