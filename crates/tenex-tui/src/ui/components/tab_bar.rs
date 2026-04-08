@@ -300,6 +300,19 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 
                 (ind, ind_fg, title, project)
             }
+            TabContentType::Report => {
+                // Report tab indicator
+                let ind = "≡".to_string();
+                let ind_fg = Some(theme::ACCENT_PRIMARY);
+
+                let (title, title_width) = truncate_to_width(&tab.thread_title, max_title_width);
+
+                // Project name
+                let project_name = data_store.get_project_name(&tab.project_a_tag);
+                let (project, _) = truncate_plain_to_width(&project_name, title_width);
+
+                (ind, ind_fg, title, project)
+            }
         };
 
         let (_, title_width) = truncate_to_width(&title, max_title_width);

@@ -105,6 +105,7 @@ fn get_thread_id_at_index(
             }
             None
         }
+        HomeTab::Reports => None, // Reports are not threads
         HomeTab::Stats => None, // Stats are not threads
     }
 }
@@ -187,7 +188,8 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.home_panel_focus = match app.home_panel_focus {
                     HomeTab::Conversations => HomeTab::Inbox,
                     HomeTab::Inbox => HomeTab::ActiveWork,
-                    HomeTab::ActiveWork => HomeTab::Stats,
+                    HomeTab::ActiveWork => HomeTab::Reports,
+                    HomeTab::Reports => HomeTab::Stats,
                     HomeTab::Stats => HomeTab::Conversations,
                 };
                 return Ok(());
@@ -197,7 +199,8 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Conversations => HomeTab::Stats,
                     HomeTab::Inbox => HomeTab::Conversations,
                     HomeTab::ActiveWork => HomeTab::Inbox,
-                    HomeTab::Stats => HomeTab::ActiveWork,
+                    HomeTab::Reports => HomeTab::ActiveWork,
+                    HomeTab::Stats => HomeTab::Reports,
                 };
                 return Ok(());
             }
@@ -278,6 +281,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
+                    HomeTab::Reports => 0, // Will be refined in Task 4
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 // If Shift is held, add current item to multi-selection before moving
@@ -319,6 +323,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
+                    HomeTab::Reports => 0,
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 if current > max {
@@ -500,6 +505,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.set_warning_status("No conversation linked to this operation");
                         }
                     }
+                    HomeTab::Reports => {
+                        // Will be refined in Task 4
+                    }
                     HomeTab::Stats => {
                         // Stats tab has no selectable items to open
                     }
@@ -561,6 +569,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::ActiveWork => active_work_cache
                     .as_ref()
                     .map_or(0, |c| c.len().saturating_sub(1)),
+                HomeTab::Reports => 0,
                 HomeTab::Stats => 0, // Stats tab has no list selection
             };
             if has_shift {
@@ -1077,6 +1086,9 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
     match content_type {
         TabContentType::TTSControl => {
             return handle_tts_control_key(app, key);
+        }
+        TabContentType::Report => {
+            return handle_report_tab_key(app, key);
         }
         TabContentType::Conversation => {
             // Continue with normal conversation handling below
@@ -1818,4 +1830,22 @@ fn handle_tts_control_key(app: &mut App, key: KeyEvent) -> Result<bool> {
     }
 
     Ok(false)
+}
+
+/// Handle keyboard input for a Report detail tab.
+/// Stub — will be fleshed out in Task 6
+fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.close_current_tab();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.scroll_offset = app.scroll_offset.saturating_sub(1);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.scroll_offset = app.scroll_offset.saturating_add(1);
+        }
+        _ => {}
+    }
+    Ok(true)
 }

@@ -148,6 +148,7 @@ pub enum HomeTab {
     Conversations,
     Inbox,
     ActiveWork,
+    Reports,
     Stats,
 }
 

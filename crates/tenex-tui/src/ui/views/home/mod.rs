@@ -70,6 +70,7 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
             }
             HomeTab::Inbox => content::render_inbox_cards(f, app, padded_content),
             HomeTab::ActiveWork => content::render_active_work(f, app, padded_content),
+            HomeTab::Reports => {}
             HomeTab::Stats => super::render_stats(f, app, padded_content),
         }
     }
@@ -258,6 +259,7 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         (HomeTab::Conversations, "Conversations"),
         (HomeTab::Inbox, "Inbox"),
         (HomeTab::ActiveWork, "Active"),
+        (HomeTab::Reports, "Reports"),
         (HomeTab::Stats, "Stats"),
     ];
 

@@ -39,6 +39,10 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             render_tts_tab_layout(f, app, area);
             return;
         }
+        TabContentType::Report => {
+            render_report_tab_layout(f, app, area);
+            return;
+        }
         TabContentType::Conversation => {
             // Continue with normal conversation rendering below
         }
@@ -1162,6 +1166,45 @@ fn render_tts_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Render TTS control content
     render_tts_control(f, app, chunks[0]);
+
+    // Render tab bar
+    render_tab_bar(f, app, chunks[1]);
+
+    // Render statusbar
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
+        app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let audio_playing = app.audio_player.is_playing();
+    render_statusbar(
+        f,
+        chunks[2],
+        app.current_notification(),
+        cumulative_runtime_ms,
+        has_active_agents,
+        active_agent_count,
+        app.wave_offset(),
+        audio_playing,
+    );
+}
+
+// =============================================================================
+// REPORT TAB LAYOUT
+// =============================================================================
+
+/// Render the report detail tab with shared chrome (tab bar, statusbar)
+/// Stub — will be fleshed out in Task 5
+fn render_report_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
+    // Layout: Content | Tab bar | Statusbar
+    let chunks = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(layout::TAB_BAR_HEIGHT),
+        Constraint::Length(layout::STATUSBAR_HEIGHT),
+    ])
+    .split(area);
+
+    // Placeholder content
+    let placeholder =
+        Paragraph::new("Report view (TODO)").style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(placeholder, chunks[0]);
 
     // Render tab bar
     render_tab_bar(f, app, chunks[1]);

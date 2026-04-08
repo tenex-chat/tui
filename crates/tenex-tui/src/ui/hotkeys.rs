@@ -212,6 +212,7 @@ impl HotkeyContext {
                         HomeTab::Conversations => HotkeyContext::HomeConversations,
                         HomeTab::Inbox => HotkeyContext::HomeInbox,
                         HomeTab::ActiveWork => HotkeyContext::HomeActiveWork,
+                        HomeTab::Reports => HotkeyContext::HomeConversations, // Reuse conversations context for now
                         HomeTab::Stats => HotkeyContext::HomeStats,
                     }
                 }

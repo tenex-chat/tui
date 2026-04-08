@@ -132,6 +132,8 @@ pub enum TabContentType {
     Conversation,
     /// TTS Control tab for managing audio playback queue
     TTSControl,
+    /// Report detail view
+    Report,
 }
 
 // =============================================================================
@@ -312,6 +314,8 @@ pub struct OpenTab {
     pub fork_message_id: Option<String>,
     /// TTS control state (only used when content_type is TTSControl)
     pub tts_state: Option<TTSControlState>,
+    /// Report slug (only used when content_type is Report)
+    pub report_slug: Option<String>,
 }
 
 impl OpenTab {
@@ -356,6 +360,7 @@ impl OpenTab {
             reference_conversation_id: None,
             fork_message_id: None,
             tts_state: None,
+            report_slug: None,
         }
     }
 
@@ -385,6 +390,7 @@ impl OpenTab {
             reference_conversation_id: None,
             fork_message_id: None,
             tts_state: None,
+            report_slug: None,
         }
     }
 
@@ -407,6 +413,30 @@ impl OpenTab {
             reference_conversation_id: None,
             fork_message_id: None,
             tts_state: Some(TTSControlState::new()),
+            report_slug: None,
+        }
+    }
+
+    /// Create a tab for viewing a report
+    pub fn for_report(slug: String, title: String, project_a_tag: String) -> Self {
+        Self {
+            content_type: TabContentType::Report,
+            thread_id: String::new(),
+            thread_title: title,
+            project_a_tag,
+            has_unread: false,
+            waiting_for_user: false,
+            is_agent_working: false,
+            draft_id: None,
+            navigation_stack: Vec::new(),
+            message_history: TabMessageHistory::default(),
+            chat_search: ChatSearchState::default(),
+            selected_skill_ids: Vec::new(),
+            editor: TextEditor::new(),
+            reference_conversation_id: None,
+            fork_message_id: None,
+            tts_state: None,
+            report_slug: Some(slug),
         }
     }
 }
@@ -577,6 +607,42 @@ impl TabManager {
 
         // Create new TTS control tab
         let tab = OpenTab::tts_control();
+
+        // Evict if at capacity
+        self.evict_if_needed(false);
+
+        self.tabs.push(tab);
+        let new_idx = self.tabs.len() - 1;
+
+        // Update history for the new tab (same as switch_to)
+        self.push_history(new_idx);
+        self.push_view_history(ViewLocation::Tab(new_idx));
+        self.active_index = new_idx;
+        new_idx
+    }
+
+    /// Open a report tab (or switch to it if already open).
+    /// Returns the tab index.
+    /// Note: This method updates view history so closing the tab returns to the correct previous view.
+    pub fn open_report(
+        &mut self,
+        slug: String,
+        title: String,
+        project_a_tag: String,
+    ) -> usize {
+        // Check if this report is already open
+        if let Some(idx) = self.tabs.iter().position(|t| {
+            t.content_type == TabContentType::Report && t.report_slug.as_deref() == Some(&slug)
+        }) {
+            self.push_history(idx);
+            self.push_view_history(ViewLocation::Tab(idx));
+            self.active_index = idx;
+            self.tabs[idx].clear_attention_flags();
+            return idx;
+        }
+
+        // Create new report tab
+        let tab = OpenTab::for_report(slug, title, project_a_tag);
 
         // Evict if at capacity
         self.evict_if_needed(false);
