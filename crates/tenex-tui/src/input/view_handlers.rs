@@ -1899,7 +1899,6 @@ fn handle_tts_control_key(app: &mut App, key: KeyEvent) -> Result<bool> {
 }
 
 /// Handle keyboard input for a Report detail tab.
-/// Stub — will be fleshed out in Task 6
 fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
@@ -1909,7 +1908,49 @@ fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.scroll_offset = app.scroll_offset.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            app.scroll_offset = app.scroll_offset.saturating_add(1);
+            if app.scroll_offset < app.max_scroll_offset {
+                app.scroll_offset = app.scroll_offset.saturating_add(1);
+            }
+        }
+        KeyCode::PageUp => {
+            app.scroll_offset = app.scroll_offset.saturating_sub(20);
+        }
+        KeyCode::PageDown => {
+            app.scroll_offset = app
+                .scroll_offset
+                .saturating_add(20)
+                .min(app.max_scroll_offset);
+        }
+        KeyCode::Home => {
+            app.scroll_offset = 0;
+        }
+        KeyCode::End => {
+            app.scroll_offset = app.max_scroll_offset;
+        }
+        KeyCode::Char('c') => {
+            // Open a draft chat referencing this report via reference_conversation_id
+            let report_info: Option<(String, String)> = {
+                let slug_opt = app.tabs.active_tab().and_then(|t| t.report_slug.clone());
+                slug_opt.and_then(|slug| {
+                    let store = app.data_store.borrow();
+                    store
+                        .reports
+                        .get_report(&slug)
+                        .map(|r| (r.project_a_tag.clone(), r.a_tag()))
+                })
+            };
+
+            if let Some((project_a_tag, report_a_tag)) = report_info {
+                let project_name = app.data_store.borrow().get_project_name(&project_a_tag);
+                app.save_chat_draft();
+                let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
+                app.switch_to_tab(tab_idx);
+                if let Some(tab) = app.tabs.active_tab_mut() {
+                    tab.reference_conversation_id = Some(report_a_tag);
+                }
+                app.view = View::Chat;
+                app.input_mode = InputMode::Editing;
+            }
         }
         _ => {}
     }
