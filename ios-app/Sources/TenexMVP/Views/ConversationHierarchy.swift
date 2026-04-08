@@ -612,4 +612,24 @@ enum ConversationFormatters {
         """
     }
 
+    /// Generate a context message for referencing a report (kind:30023).
+    /// This message instructs the agent to inspect the referenced report for context.
+    ///
+    /// - Parameter report: The report to reference
+    /// - Returns: A formatted context message string
+    static func generateContextMessage(report: Report) -> String {
+        let reportATag = "30023:\(report.author):\(report.slug)"
+        let titleDisplay = report.title.isEmpty ? "Untitled" : report.title
+
+        if report.document.isEmpty {
+            return """
+            This message is in the context of report "\(titleDisplay)" (\(reportATag)). Your first task is to inspect that report to understand the context we're working from.
+            """
+        } else {
+            return """
+            This message is in the context of report "\(titleDisplay)" (document: \(report.document), \(reportATag)). Your first task is to inspect that report to understand the context we're working from.
+            """
+        }
+    }
+
 }

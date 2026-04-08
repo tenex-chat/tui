@@ -339,13 +339,14 @@ struct ReportDetailView: View {
         .sheet(isPresented: $showingMessageComposer) {
             let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
             let project = coreManager.projects.first(where: { $0.id == projectId })
+            let contextMessage = ConversationFormatters.generateContextMessage(report: report)
             MessageComposerView(
                 project: project,
                 conversationId: nil,
                 conversationTitle: nil,
                 initialAgentPubkey: nil,
-                initialContent: nil,
-                initialTextAttachments: [],
+                initialContent: "[Text Attachment 1]",
+                initialTextAttachments: [TextAttachment(id: 1, content: contextMessage)],
                 referenceConversationId: nil,
                 referenceReportATag: referenceATag,
                 displayStyle: .modal,
