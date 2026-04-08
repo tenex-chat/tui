@@ -1,4 +1,5 @@
 use crate::ui::format::{format_relative_time, truncate_with_ellipsis};
+use crate::ui::markdown::render_markdown;
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -331,4 +332,91 @@ fn render_group_row(
     } else {
         f.render_widget(para, area);
     }
+}
+
+/// Render report detail content (used inside a tab).
+pub fn render_report_detail(f: &mut Frame, app: &App, area: Rect) {
+    let slug = app
+        .tabs
+        .active_tab()
+        .and_then(|t| t.report_slug.as_deref())
+        .unwrap_or("");
+
+    let report = app.data_store.borrow().reports.get_report(slug).cloned();
+
+    let Some(report) = report else {
+        let msg =
+            Paragraph::new("Report not found").style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(msg, area);
+        return;
+    };
+
+    // Build author/project display strings from store, then drop the borrow.
+    let (author_name, project_name, project_color) = {
+        let store = app.data_store.borrow();
+        (
+            store.get_profile_name(&report.author),
+            store.get_project_name(&report.project_a_tag),
+            theme::project_color(&report.project_a_tag),
+        )
+    };
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Title
+    let title = if report.title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        report.title.clone()
+    };
+    lines.push(Line::from(Span::styled(
+        title,
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    // Summary
+    if !report.summary.is_empty() {
+        lines.push(Line::from(Span::styled(
+            report.summary.clone(),
+            Style::default().fg(theme::TEXT_MUTED),
+        )));
+    }
+
+    // Meta line: reading time + author + date + project
+    let reading_time = if report.reading_time_mins == 1 {
+        "1 min read".to_string()
+    } else {
+        format!("{} min read", report.reading_time_mins)
+    };
+    let time_ago = format_relative_time(report.created_at);
+    lines.push(Line::from(vec![
+        Span::styled(reading_time, Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" · by ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(author_name, Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(time_ago, Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(project_name, Style::default().fg(project_color)),
+    ]));
+
+    // Divider
+    let divider = "─".repeat(area.width as usize);
+    lines.push(Line::from(Span::styled(
+        divider,
+        Style::default().fg(theme::BORDER_INACTIVE),
+    )));
+    lines.push(Line::from(""));
+
+    // Markdown content
+    let md_lines = render_markdown(&report.content);
+    lines.extend(md_lines);
+
+    // Apply scroll offset
+    let scroll = app.scroll_offset;
+    let visible_lines: Vec<Line<'static>> = lines.into_iter().skip(scroll).collect();
+
+    let para = Paragraph::new(visible_lines).style(Style::default().bg(theme::BG_APP));
+    f.render_widget(para, area);
 }

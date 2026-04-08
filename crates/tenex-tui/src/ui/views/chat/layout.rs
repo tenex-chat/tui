@@ -1190,32 +1190,59 @@ fn render_tts_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
 // REPORT TAB LAYOUT
 // =============================================================================
 
-/// Render the report detail tab with shared chrome (tab bar, statusbar)
-/// Stub — will be fleshed out in Task 5
+/// Render the report detail tab with shared chrome (header, tab bar, statusbar)
 fn render_report_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
-    // Layout: Content | Tab bar | Statusbar
+    use crate::ui::views::reports::render_report_detail;
+
+    // Layout: Header | Content | Help bar | Tab bar | Statusbar
     let chunks = Layout::vertical([
+        Constraint::Length(layout::HEADER_HEIGHT_CHAT),
         Constraint::Min(0),
+        Constraint::Length(1),
         Constraint::Length(layout::TAB_BAR_HEIGHT),
         Constraint::Length(layout::STATUSBAR_HEIGHT),
     ])
     .split(area);
 
-    // Placeholder content
-    let placeholder =
-        Paragraph::new("Report view (TODO)").style(Style::default().fg(theme::TEXT_MUTED));
-    f.render_widget(placeholder, chunks[0]);
+    // Header
+    let title = app
+        .tabs
+        .active_tab()
+        .map(|t| t.thread_title.clone())
+        .unwrap_or_else(|| "Report".to_string());
+    let padding = " ".repeat(layout::CONTENT_PADDING_H as usize);
+    let header = Paragraph::new(format!("\n{}{}", padding, title)).style(
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    );
+    f.render_widget(header, chunks[0]);
 
-    // Render tab bar
-    render_tab_bar(f, app, chunks[1]);
+    // Content with padding
+    let padded = layout::with_content_padding(chunks[1]);
+    render_report_detail(f, app, padded);
 
-    // Render statusbar
+    // Help bar
+    let help = Paragraph::new(Line::from(vec![
+        Span::styled(" j/k ", Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled("scroll  ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" c ", Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled("open chat  ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" q/Esc ", Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled("close", Style::default().fg(theme::TEXT_MUTED)),
+    ]));
+    f.render_widget(help, chunks[2]);
+
+    // Tab bar
+    render_tab_bar(f, app, chunks[3]);
+
+    // Statusbar
     let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
         app.data_store.borrow_mut().get_statusbar_runtime_ms();
     let audio_playing = app.audio_player.is_playing();
     render_statusbar(
         f,
-        chunks[2],
+        chunks[4],
         app.current_notification(),
         cumulative_runtime_ms,
         has_active_agents,
