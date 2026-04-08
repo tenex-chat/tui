@@ -438,17 +438,18 @@ fn handle_send_message(app: &mut App) {
                     }
                 };
 
-                // Get reference_conversation_id and fork_message_id from current tab
-                let (reference_conversation_id, fork_message_id) = app
+                // Get reference_conversation_id, reference_report_a_tag, and fork_message_id from current tab
+                let (reference_conversation_id, reference_report_a_tag, fork_message_id) = app
                     .tabs
                     .active_tab()
                     .map(|tab| {
                         (
                             tab.reference_conversation_id.clone(),
+                            tab.reference_report_a_tag.clone(),
                             tab.fork_message_id.clone(),
                         )
                     })
-                    .unwrap_or((None, None));
+                    .unwrap_or((None, None, None));
 
                 // Create response channel for publish confirmation
                 let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
@@ -461,7 +462,7 @@ fn handle_send_message(app: &mut App) {
                     nudge_ids: Vec::new(),
                     skill_ids,
                     reference_conversation_id,
-                    reference_report_a_tag: None,
+                    reference_report_a_tag,
                     fork_message_id,
                     response_tx: Some(response_tx),
                 }) {
@@ -473,9 +474,10 @@ fn handle_send_message(app: &mut App) {
                 } else {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
                     app.pending_new_thread_draft_id = draft_id;
-                    // Clear the reference_conversation_id and fork_message_id after sending
+                    // Clear the reference metadata after sending
                     if let Some(tab) = app.tabs.active_tab_mut() {
                         tab.reference_conversation_id = None;
+                        tab.reference_report_a_tag = None;
                         tab.fork_message_id = None;
                     }
 

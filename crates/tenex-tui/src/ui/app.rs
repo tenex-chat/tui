@@ -909,14 +909,17 @@ impl App {
     /// - `editor`: The text editor with current content
     /// - `agent_pubkey`: The agent pubkey to save (or None if not explicitly selected)
     /// - `reference_conversation_id`: Reference conversation for context tags
+    /// - `reference_report_a_tag`: Reference report a-tag for coordinate tags
     /// - `fork_message_id`: Fork message ID for fork tags
     /// - `project_a_tag_fallback`: Fallback project if no existing draft
     /// - `existing_draft`: Optional existing draft to preserve session_id, message_sequence, etc.
+    #[allow(clippy::too_many_arguments)]
     fn build_chat_draft(
         conversation_id: String,
         editor: &crate::ui::text_editor::TextEditor,
         agent_pubkey: Option<String>,
         reference_conversation_id: Option<String>,
+        reference_report_a_tag: Option<String>,
         fork_message_id: Option<String>,
         project_a_tag_fallback: Option<String>,
         existing_draft: Option<&ChatDraft>,
@@ -951,6 +954,7 @@ impl App {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             reference_conversation_id,
+            reference_report_a_tag,
             fork_message_id,
             // BULLETPROOF: New/updated drafts are unpublished - they stay until relay confirms
             published_at: None,
@@ -995,16 +999,17 @@ impl App {
             );
 
             let editor = self.chat_editor();
-            let (reference_conversation_id, fork_message_id) = self
+            let (reference_conversation_id, reference_report_a_tag, fork_message_id) = self
                 .tabs
                 .active_tab()
                 .map(|t| {
                     (
                         t.reference_conversation_id.clone(),
+                        t.reference_report_a_tag.clone(),
                         t.fork_message_id.clone(),
                     )
                 })
-                .unwrap_or((None, None));
+                .unwrap_or((None, None, None));
             let project_a_tag_fallback = self.tabs.active_tab().map(|t| t.project_a_tag.clone());
 
             let draft = Self::build_chat_draft(
@@ -1012,6 +1017,7 @@ impl App {
                 editor,
                 agent_pubkey,
                 reference_conversation_id,
+                reference_report_a_tag,
                 fork_message_id,
                 project_a_tag_fallback,
                 existing_draft.as_ref(),
@@ -1058,6 +1064,7 @@ impl App {
                 &tab.editor,
                 agent_pubkey,
                 tab.reference_conversation_id.clone(),
+                tab.reference_report_a_tag.clone(),
                 tab.fork_message_id.clone(),
                 Some(tab.project_a_tag.clone()),
                 existing_draft.as_ref(),
@@ -1180,9 +1187,10 @@ impl App {
                             &agent_pubkey[..8.min(agent_pubkey.len())]);
                     }
                 }
-                // Restore reference_conversation_id and fork_message_id from draft into the active tab
+                // Restore reference metadata from draft into the active tab
                 if let Some(tab) = self.tabs.active_tab_mut() {
                     tab.reference_conversation_id = draft.reference_conversation_id.clone();
+                    tab.reference_report_a_tag = draft.reference_report_a_tag.clone();
                     tab.fork_message_id = draft.fork_message_id.clone();
                 }
             } else {
@@ -2109,6 +2117,7 @@ impl App {
             // These metadata fields are only relevant for the initial thread creation message
             // and should not persist after the thread is created
             draft.reference_conversation_id = None;
+            draft.reference_report_a_tag = None;
             draft.fork_message_id = None;
 
             // Delete the old draft keyed by project:new

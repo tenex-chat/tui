@@ -309,6 +309,9 @@ pub struct OpenTab {
     /// This is set when using "Reference conversation" command and consumed when sending
     /// NOTE: Uses "context" instead of "q" because "q" is reserved for delegation/child links
     pub reference_conversation_id: Option<String>,
+    /// Reference report a-tag (kind:30023 coordinate) for an "a" tag when creating a new thread
+    /// This is set when using "Open Chat" on a report and consumed when sending
+    pub reference_report_a_tag: Option<String>,
     /// Fork message ID for the "fork" tag when creating a forked conversation
     /// This is set when using "Fork conversation" command along with reference_conversation_id
     pub fork_message_id: Option<String>,
@@ -358,6 +361,7 @@ impl OpenTab {
             selected_skill_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
+            reference_report_a_tag: None,
             fork_message_id: None,
             tts_state: None,
             report_slug: None,
@@ -388,6 +392,7 @@ impl OpenTab {
             selected_skill_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
+            reference_report_a_tag: None,
             fork_message_id: None,
             tts_state: None,
             report_slug: None,
@@ -411,6 +416,7 @@ impl OpenTab {
             selected_skill_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
+            reference_report_a_tag: None,
             fork_message_id: None,
             tts_state: Some(TTSControlState::new()),
             report_slug: None,
@@ -434,6 +440,7 @@ impl OpenTab {
             selected_skill_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
+            reference_report_a_tag: None,
             fork_message_id: None,
             tts_state: None,
             report_slug: Some(slug),
@@ -693,6 +700,7 @@ impl TabManager {
             // These fields were used to tag the initial thread creation message
             // and should not persist after the thread is created
             tab.reference_conversation_id = None;
+            tab.reference_report_a_tag = None;
             tab.fork_message_id = None;
         }
     }

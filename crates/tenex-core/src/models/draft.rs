@@ -144,6 +144,11 @@ pub struct ChatDraft {
     #[serde(default)]
     pub reference_conversation_id: Option<String>,
 
+    /// Reference to a source report (kind:30023 a-tag) that this draft is created from
+    /// (for "Open Chat" from a report, results in a coordinate "a" tag when sent)
+    #[serde(default)]
+    pub reference_report_a_tag: Option<String>,
+
     /// Fork message ID for forked conversations
     /// (used with reference_conversation_id to create a "fork" tag)
     #[serde(default)]
@@ -415,6 +420,7 @@ impl ChatDraft {
             && self.image_attachments.is_empty()
             && self.selected_agent_pubkey.is_none()
             && self.reference_conversation_id.is_none()
+            && self.reference_report_a_tag.is_none()
             && self.fork_message_id.is_none()
     }
 
@@ -444,6 +450,7 @@ impl ChatDraft {
             selected_agent_pubkey: None,
             last_modified: now_secs(),
             reference_conversation_id: None,
+            reference_report_a_tag: None,
             fork_message_id: None,
             published_at: None,
             published_event_id: None,
@@ -954,6 +961,7 @@ impl DraftStorage {
             draft.attachments.clear();
             draft.image_attachments.clear();
             draft.reference_conversation_id = None;
+            draft.reference_report_a_tag = None;
             draft.fork_message_id = None;
             draft.send_state = SendState::Typing;
             draft.last_modified = now_secs();
@@ -1338,6 +1346,7 @@ mod tests {
             selected_agent_pubkey: agent_pubkey.map(|s| s.to_string()),
             last_modified: 1234567890,
             reference_conversation_id: None,
+            reference_report_a_tag: None,
             fork_message_id: None,
             published_at: None,
             published_event_id: None,

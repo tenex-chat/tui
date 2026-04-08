@@ -1929,25 +1929,54 @@ fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.scroll_offset = app.max_scroll_offset;
         }
         KeyCode::Char('c') => {
-            // Open a draft chat referencing this report via reference_conversation_id
-            let report_info: Option<(String, String)> = {
+            // Open a draft chat referencing this report with an "a" coordinate tag
+            // and pre-fill the editor with a text attachment explaining the context.
+            let report_info: Option<(String, String, String, String)> = {
                 let slug_opt = app.tabs.active_tab().and_then(|t| t.report_slug.clone());
                 slug_opt.and_then(|slug| {
                     let store = app.data_store.borrow();
-                    store
-                        .reports
-                        .get_report(&slug)
-                        .map(|r| (r.project_a_tag.clone(), r.a_tag()))
+                    store.reports.get_report(&slug).map(|r| {
+                        (
+                            r.project_a_tag.clone(),
+                            r.a_tag(),
+                            r.title.clone(),
+                            r.document.clone(),
+                        )
+                    })
                 })
             };
 
-            if let Some((project_a_tag, report_a_tag)) = report_info {
+            if let Some((project_a_tag, report_a_tag, report_title, report_document)) = report_info
+            {
                 let project_name = app.data_store.borrow().get_project_name(&project_a_tag);
+
+                // Build the context message that explains the report reference to the agent.
+                let title_display = if report_title.is_empty() {
+                    "Untitled".to_string()
+                } else {
+                    report_title.clone()
+                };
+                let context_message = if report_document.is_empty() {
+                    format!(
+                        "This message is in the context of report \"{}\" ({}). Your first task is to inspect that report to understand the context we're working from.",
+                        title_display, report_a_tag
+                    )
+                } else {
+                    format!(
+                        "This message is in the context of report \"{}\" (document: {}, {}). Your first task is to inspect that report to understand the context we're working from.",
+                        title_display, report_document, report_a_tag
+                    )
+                };
+
                 app.save_chat_draft();
                 let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
                 app.switch_to_tab(tab_idx);
+
+                // Add the context as a text attachment in the new draft's editor.
+                app.chat_editor_mut().add_text_attachment(&context_message);
+
                 if let Some(tab) = app.tabs.active_tab_mut() {
-                    tab.reference_conversation_id = Some(report_a_tag);
+                    tab.reference_report_a_tag = Some(report_a_tag);
                 }
                 app.view = View::Chat;
                 app.input_mode = InputMode::Editing;
