@@ -17,6 +17,7 @@ pub mod login;
 pub mod nudge_crud;
 pub mod nudge_skill_selector;
 pub mod project_settings;
+pub mod reports;
 pub mod stats;
 pub mod tts_control;
 pub mod workspace_modal;

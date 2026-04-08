@@ -671,6 +671,11 @@ fn render_inbox_card(
     }
 }
 
+/// Render the Reports tab showing a list of reports grouped by document.
+pub(super) fn render_reports(f: &mut Frame, app: &App, area: Rect) {
+    super::super::reports::render_reports_list(f, app, area);
+}
+
 /// Render the Active Work tab showing currently active operations
 pub(super) fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
     let data_store = app.data_store.borrow();

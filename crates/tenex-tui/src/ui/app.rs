@@ -373,6 +373,9 @@ pub struct App {
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
 
+    /// Expanded document groups in Reports tab (keys: "project_a_tag|document")
+    pub reports_expanded_groups: HashSet<String>,
+
     /// Project a_tag when waiting for a newly created thread to appear
     pub pending_new_thread_project: Option<String>,
     /// Draft ID when waiting for a newly created thread (to convert draft tab)
@@ -482,6 +485,7 @@ impl App {
             todo_sidebar_visible: true,
             sidebar_state: SidebarState::new(),
             collapsed_threads: HashSet::new(),
+            reports_expanded_groups: HashSet::new(),
             pending_new_thread_project: None,
             pending_new_thread_draft_id: None,
             // NOTE: frame_counter is now managed by notification_manager
