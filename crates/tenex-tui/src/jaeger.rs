@@ -57,8 +57,8 @@ pub fn build_trace_url(
 ) -> Result<String, String> {
     let normalized_endpoint = validate_and_normalize_endpoint(endpoint)?;
 
-    // Jaeger uses the first 18 hex chars of the trace ID, zero-padded to 32
-    let short_id = &trace_id[..18.min(trace_id.len())];
+    // Jaeger uses the first 10 hex chars of the trace ID, zero-padded to 32
+    let short_id = &trace_id[..10.min(trace_id.len())];
     let padded_trace_id = format!("{:0<32}", short_id);
 
     let url = if let Some(span) = span_id {
@@ -136,7 +136,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "http://localhost:16686/trace/abc12300000000000000000000000000"
+            "http://localhost:16686/trace/abc123000000000000000000000000000"
         );
     }
 
@@ -146,7 +146,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "http://localhost:16686/trace/abc12300000000000000000000000000?uiFind=def456"
+            "http://localhost:16686/trace/abc123000000000000000000000000000?uiFind=def456"
         );
     }
 
@@ -170,7 +170,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "http://localhost:16686/trace/4ed6aca791f4e1070d00000000000000"
+            "http://localhost:16686/trace/4ed6aca7910000000000000000000000"
         );
     }
 
