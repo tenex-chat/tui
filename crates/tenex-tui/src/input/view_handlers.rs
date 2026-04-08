@@ -550,6 +550,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                                     report.project_a_tag.clone(),
                                 );
                                 app.scroll_offset = 0;
+                                app.max_scroll_offset = 0;
                                 app.view = View::Chat;
                                 app.input_mode = InputMode::Normal;
                             } else if let (

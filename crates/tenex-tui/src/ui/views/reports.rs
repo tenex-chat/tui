@@ -5,7 +5,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Paragraph, Wrap},
     Frame,
 };
 use std::cell::Ref;
@@ -128,6 +128,17 @@ pub fn build_visible_items(
     items
 }
 
+/// Height in rows for a visible item at the given index.
+fn item_height(entries: &[ReportEntry], item: (usize, Option<usize>)) -> u16 {
+    let (entry_idx, sub_idx) = item;
+    match (&entries[entry_idx], sub_idx) {
+        (ReportEntry::Single(_), None) => 3,
+        (ReportEntry::Group { .. }, None) => 2,
+        (ReportEntry::Group { .. }, Some(_)) => 3,
+        _ => 0,
+    }
+}
+
 /// Render the reports list in the home content area.
 pub fn render_reports_list(f: &mut Frame, app: &App, area: Rect) {
     let entries = build_report_entries(app);
@@ -149,24 +160,59 @@ pub fn render_reports_list(f: &mut Frame, app: &App, area: Rect) {
     let selected = app.current_selection();
     let store = app.data_store.borrow();
 
-    let mut y = 0u16;
+    // Compute y-based viewport offset so the selected item stays visible.
+    // Pattern mirrors render_conversations_cards in home/content.rs.
+    let mut height_before_selected: u16 = 0;
+    let mut selected_height: u16 = 0;
+    for (i, &item) in visible.iter().enumerate() {
+        let h = item_height(&entries, item);
+        if i < selected {
+            height_before_selected = height_before_selected.saturating_add(h);
+        } else if i == selected {
+            selected_height = h;
+            break;
+        }
+    }
+
+    let selected_bottom = height_before_selected.saturating_add(selected_height);
+    let scroll_offset: u16 = if selected_bottom > area.height {
+        selected_bottom - area.height
+    } else {
+        0
+    };
+
+    let mut y_offset: i32 = -(scroll_offset as i32);
+
     for (vi, &(entry_idx, sub_idx)) in visible.iter().enumerate() {
-        if y >= area.height {
+        let is_selected = vi == selected;
+        let entry = &entries[entry_idx];
+        let h = item_height(&entries, (entry_idx, sub_idx));
+
+        // Skip items completely above the visible area.
+        if y_offset + (h as i32) <= 0 {
+            y_offset += h as i32;
+            continue;
+        }
+
+        // Stop when we go past the visible area.
+        if y_offset >= area.height as i32 {
             break;
         }
 
-        let is_selected = vi == selected;
-        let entry = &entries[entry_idx];
+        let render_y = y_offset.max(0) as u16;
+        let visible_height = (h as i32 - (-y_offset).max(0))
+            .min((area.height as i32) - render_y as i32)
+            .max(0) as u16;
+
+        if visible_height == 0 {
+            y_offset += h as i32;
+            continue;
+        }
 
         match (entry, sub_idx) {
             (ReportEntry::Single(report), None) => {
-                let lines_needed = 3u16;
-                if y + lines_needed > area.height {
-                    break;
-                }
-                let item_area = Rect::new(area.x, area.y + y, area.width, lines_needed);
+                let item_area = Rect::new(area.x, area.y + render_y, area.width, visible_height);
                 render_single_report_row(f, report, &store, is_selected, item_area);
-                y += lines_needed;
             }
             (
                 ReportEntry::Group {
@@ -180,11 +226,7 @@ pub fn render_reports_list(f: &mut Frame, app: &App, area: Rect) {
                     .group_key()
                     .map(|k| app.reports_expanded_groups.contains(&k))
                     .unwrap_or(false);
-                let lines_needed = 2u16;
-                if y + lines_needed > area.height {
-                    break;
-                }
-                let item_area = Rect::new(area.x, area.y + y, area.width, lines_needed);
+                let item_area = Rect::new(area.x, area.y + render_y, area.width, visible_height);
                 render_group_row(
                     f,
                     document,
@@ -195,26 +237,22 @@ pub fn render_reports_list(f: &mut Frame, app: &App, area: Rect) {
                     is_selected,
                     item_area,
                 );
-                y += lines_needed;
             }
             (ReportEntry::Group { reports, .. }, Some(j)) => {
                 if let Some(report) = reports.get(j) {
-                    let lines_needed = 3u16;
-                    if y + lines_needed > area.height {
-                        break;
-                    }
                     let item_area = Rect::new(
                         area.x + 2,
-                        area.y + y,
+                        area.y + render_y,
                         area.width.saturating_sub(2),
-                        lines_needed,
+                        visible_height,
                     );
                     render_single_report_row(f, report, &store, is_selected, item_area);
-                    y += lines_needed;
                 }
             }
             _ => {}
         }
+
+        y_offset += h as i32;
     }
 }
 
@@ -335,7 +373,7 @@ fn render_group_row(
 }
 
 /// Render report detail content (used inside a tab).
-pub fn render_report_detail(f: &mut Frame, app: &App, area: Rect) {
+pub fn render_report_detail(f: &mut Frame, app: &mut App, area: Rect) {
     let slug = app
         .tabs
         .active_tab()
@@ -413,10 +451,19 @@ pub fn render_report_detail(f: &mut Frame, app: &App, area: Rect) {
     let md_lines = render_markdown(&report.content);
     lines.extend(md_lines);
 
-    // Apply scroll offset
-    let scroll = app.scroll_offset;
-    let visible_lines: Vec<Line<'static>> = lines.into_iter().skip(scroll).collect();
+    // Build the paragraph with wrap so long lines don't get clipped at the right edge.
+    let para = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .style(Style::default().bg(theme::BG_APP));
 
-    let para = Paragraph::new(visible_lines).style(Style::default().bg(theme::BG_APP));
-    f.render_widget(para, area);
+    // Compute wrapped line count for the current width and update max_scroll_offset.
+    let total_wrapped = para.line_count(area.width);
+    app.max_scroll_offset = total_wrapped.saturating_sub(area.height as usize);
+
+    // Clamp scroll_offset so navigating into the tab with a stale value doesn't overshoot.
+    if app.scroll_offset > app.max_scroll_offset {
+        app.scroll_offset = app.max_scroll_offset;
+    }
+
+    f.render_widget(para.scroll((app.scroll_offset as u16, 0)), area);
 }
