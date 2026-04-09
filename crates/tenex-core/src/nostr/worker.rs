@@ -213,6 +213,36 @@ fn debug_log(msg: &str) {
     }
 }
 
+/// Extract the root conversation e-tag id per NIP-10.
+///
+/// Prefers an e-tag with marker "root" at position 3. Falls back to the
+/// first e-tag for messages that predate marker adoption (NIP-10 treats
+/// unmarked e-tags positionally).
+fn extract_root_e_tag(event: &Event) -> Option<String> {
+    let e_kind = TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E));
+    let e_tags: Vec<&Tag> = event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() == e_kind)
+        .collect();
+
+    for tag in &e_tags {
+        let slice = tag.as_slice();
+        if slice.get(3).map(String::as_str) == Some("root") {
+            if let Some(id) = slice.get(1) {
+                if !id.is_empty() {
+                    return Some(id.clone());
+                }
+            }
+        }
+    }
+
+    e_tags
+        .first()
+        .and_then(|tag| tag.content())
+        .map(str::to_string)
+}
+
 fn custom_tag_content(event: &Event, tag_name: &str) -> Option<String> {
     event.tags.iter().find_map(|tag| match tag.kind() {
         TagKind::Custom(name) if name.as_ref() == tag_name => {
@@ -223,13 +253,7 @@ fn custom_tag_content(event: &Event, tag_name: &str) -> Option<String> {
 }
 
 fn parse_stream_text_delta_event(event: &Event) -> Result<ParsedStreamTextDelta, &'static str> {
-    let conversation_id = event
-        .tags
-        .iter()
-        .find(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
-        .and_then(|tag| tag.content())
-        .map(|value| value.to_string())
-        .ok_or("missing e tag")?;
+    let conversation_id = extract_root_e_tag(event).ok_or("missing e tag")?;
 
     let delta = event.content.clone();
     if delta.is_empty() {
@@ -254,13 +278,7 @@ fn parse_stream_text_delta_event(event: &Event) -> Result<ParsedStreamTextDelta,
 }
 
 fn extract_kind1_conversation_id(event: &Event) -> String {
-    event
-        .tags
-        .iter()
-        .find(|tag| tag.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)))
-        .and_then(|tag| tag.content())
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| event.id.to_hex())
+    extract_root_e_tag(event).unwrap_or_else(|| event.id.to_hex())
 }
 
 fn record_latest_kind1_created_at(

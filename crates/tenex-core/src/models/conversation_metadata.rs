@@ -19,7 +19,8 @@ impl ConversationMetadata {
 
         let created_at = note.created_at();
 
-        let mut thread_id: Option<String> = None;
+        let mut thread_id_root: Option<String> = None;
+        let mut thread_id_first: Option<String> = None;
         let mut title: Option<String> = None;
         let mut status_label: Option<String> = None;
         let mut status_current_activity: Option<String> = None;
@@ -30,10 +31,19 @@ impl ConversationMetadata {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
             match tag_name {
                 Some("e") => {
-                    if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
-                        thread_id = Some(s.to_string());
-                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
-                        thread_id = Some(hex::encode(id_bytes));
+                    let event_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
+                        Some(s.to_string())
+                    } else {
+                        tag.get(1).and_then(|t| t.variant().id()).map(hex::encode)
+                    };
+
+                    if let Some(eid) = event_id {
+                        let marker = tag.get(3).and_then(|t| t.variant().str());
+                        if marker == Some("root") {
+                            thread_id_root = Some(eid);
+                        } else if thread_id_first.is_none() {
+                            thread_id_first = Some(eid);
+                        }
                     }
                 }
                 Some("title") => {
@@ -69,7 +79,7 @@ impl ConversationMetadata {
             }
         }
 
-        let thread_id = thread_id?;
+        let thread_id = thread_id_root.or(thread_id_first)?;
 
         Some(ConversationMetadata {
             thread_id,
