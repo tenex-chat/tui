@@ -4,7 +4,7 @@
 //! that are used across multiple modules.
 
 /// Default Nostr relay URL
-pub const RELAY_URL: &str = "wss://tenex.chat";
+pub const RELAY_URL: &str = "wss://relay.tenex.chat";
 
 /// Default Blossom server for blob uploads
 pub const BLOSSOM_SERVER: &str = "https://blossom.primal.net";
