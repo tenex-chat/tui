@@ -235,6 +235,14 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 state.stop_editing();
                 match state.current_tab {
                     ui::modal::SettingsTab::General => match state.selected_general_setting() {
+                        Some(GeneralSetting::RelayUrl) => {
+                            state.relay_url_input = app
+                                .preferences
+                                .borrow()
+                                .configured_relay_url()
+                                .unwrap_or("")
+                                .to_string();
+                        }
                         Some(GeneralSetting::JaegerEndpoint) => {
                             state.jaeger_endpoint_input =
                                 app.preferences.borrow().jaeger_endpoint().to_string();
@@ -274,6 +282,19 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 match state.current_tab {
                     ui::modal::SettingsTab::General => {
                         match state.selected_general_setting() {
+                            Some(GeneralSetting::RelayUrl) => {
+                                let new_url = state.relay_url_input.trim().to_string();
+                                let url_opt = if new_url.is_empty() {
+                                    None
+                                } else {
+                                    Some(new_url)
+                                };
+                                app.preferences
+                                    .borrow_mut()
+                                    .set_configured_relay_url(url_opt);
+                                app.set_warning_status("Relay URL saved (restart to apply)");
+                                state.stop_editing();
+                            }
                             Some(GeneralSetting::JaegerEndpoint) => {
                                 let new_endpoint = state.jaeger_endpoint_input.clone();
 
@@ -593,6 +614,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
             // Handle character input based on which tab and setting are being edited
             match state.current_tab {
                 ui::modal::SettingsTab::General => match state.selected_general_setting() {
+                    Some(GeneralSetting::RelayUrl) => {
+                        state.relay_url_input.push(c);
+                    }
                     Some(GeneralSetting::JaegerEndpoint) => {
                         state.jaeger_endpoint_input.push(c);
                     }
@@ -631,6 +655,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
             // Handle backspace based on which tab and setting are being edited
             match state.current_tab {
                 ui::modal::SettingsTab::General => match state.selected_general_setting() {
+                    Some(GeneralSetting::RelayUrl) => {
+                        state.relay_url_input.pop();
+                    }
                     Some(GeneralSetting::JaegerEndpoint) => {
                         state.jaeger_endpoint_input.pop();
                     }

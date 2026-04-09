@@ -5,6 +5,7 @@ use crate::ui::modal::{
     AiSetting, AppSettingsState, AppearanceSetting, BunkerSetting, GeneralSetting,
     ModelBrowserState, SettingsTab, VoiceBrowserState,
 };
+use tenex_core::constants::RELAY_URL;
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -44,7 +45,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
     );
 
     match state.current_tab {
-        SettingsTab::General => render_general_tab(f, app, content_area, state),
+        SettingsTab::General => render_general_tab(f, content_area, state),
         SettingsTab::AI => render_ai_tab(f, content_area, state),
         SettingsTab::Appearance => render_appearance_tab(f, app, content_area, state),
         SettingsTab::Bunker => render_bunker_tab(f, app, content_area, state),
@@ -82,70 +83,47 @@ fn render_tab_bar(f: &mut Frame, area: Rect, state: &AppSettingsState) {
 }
 
 /// Render General tab content
-fn render_general_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {
+fn render_general_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
+    let mut y = area.y;
+
+    // Section header: Connection
+    render_section_header(f, area.x, y, area.width, "Connection");
+    y += 2;
+
+    // Relay URL row
+    let relay_selected = state.current_tab == SettingsTab::General
+        && state.selected_general_setting() == Some(GeneralSetting::RelayUrl);
+    render_text_setting_row(
+        f,
+        area.x,
+        y,
+        area.width,
+        "Relay URL:",
+        &format!("Nostr relay to connect to (default: {RELAY_URL})"),
+        &state.relay_url_input,
+        relay_selected,
+        state.editing_relay_url(),
+    );
+    y += 3;
+
     // Section header: Trace Viewer
-    let header_area = Rect::new(area.x, area.y, area.width, 1);
-    let header = Paragraph::new(Line::from(vec![Span::styled(
-        "Trace Viewer",
-        Style::default()
-            .fg(theme::ACCENT_WARNING)
-            .add_modifier(Modifier::ITALIC),
-    )]));
-    f.render_widget(header, header_area);
+    render_section_header(f, area.x, y, area.width, "Trace Viewer");
+    y += 2;
 
-    // Jaeger endpoint setting row
-    let row_y = area.y + 2;
-    let row_area = Rect::new(area.x, row_y, area.width, 3);
-
-    let is_selected = state.current_tab == SettingsTab::General
+    // Jaeger endpoint row
+    let jaeger_selected = state.current_tab == SettingsTab::General
         && state.selected_general_setting() == Some(GeneralSetting::JaegerEndpoint);
-
-    // Left border indicator
-    let border_char = if is_selected { "▌" } else { "│" };
-    let border_color = if is_selected {
-        theme::ACCENT_PRIMARY
-    } else {
-        theme::TEXT_MUTED
-    };
-
-    let mut spans = vec![Span::styled(border_char, Style::default().fg(border_color))];
-
-    // Label
-    let label_style = if is_selected {
-        Style::default()
-            .fg(theme::TEXT_PRIMARY)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    spans.push(Span::styled(" Jaeger Endpoint: ", label_style));
-
-    // Value (editable)
-    if state.editing_jaeger_endpoint() {
-        // Show input with cursor
-        let input = &state.jaeger_endpoint_input;
-        spans.push(Span::styled(
-            format!("{}_", input),
-            Style::default()
-                .fg(theme::ACCENT_PRIMARY)
-                .add_modifier(Modifier::UNDERLINED),
-        ));
-    } else {
-        let current_value = app.preferences.borrow().jaeger_endpoint().to_string();
-        spans.push(Span::styled(
-            current_value,
-            Style::default().fg(theme::ACCENT_SPECIAL),
-        ));
-    }
-
-    let row = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE));
-    f.render_widget(row, row_area);
-
-    // Description below
-    let desc_area = Rect::new(area.x + 2, row_y + 1, area.width.saturating_sub(2), 1);
-    let desc = Paragraph::new("URL for opening trace links (e.g., http://localhost:16686)")
-        .style(Style::default().fg(theme::TEXT_DIM));
-    f.render_widget(desc, desc_area);
+    render_text_setting_row(
+        f,
+        area.x,
+        y,
+        area.width,
+        "Jaeger Endpoint:",
+        "URL for opening trace links (e.g., http://localhost:16686)",
+        &state.jaeger_endpoint_input,
+        jaeger_selected,
+        state.editing_jaeger_endpoint(),
+    );
 }
 
 /// Render AI tab content

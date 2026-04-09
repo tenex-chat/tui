@@ -34,11 +34,13 @@ impl SettingsTab {
 /// Settings in the General tab
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneralSetting {
+    RelayUrl,
     JaegerEndpoint,
 }
 
 impl GeneralSetting {
-    pub const ALL: &'static [GeneralSetting] = &[GeneralSetting::JaegerEndpoint];
+    pub const ALL: &'static [GeneralSetting] =
+        &[GeneralSetting::RelayUrl, GeneralSetting::JaegerEndpoint];
 
     pub const fn count() -> usize {
         Self::ALL.len()
@@ -359,6 +361,8 @@ pub struct AppSettingsState {
     pub bunker_index: usize,
     /// Whether a field is currently being edited
     pub editing: bool,
+    /// The current value being edited for relay URL
+    pub relay_url_input: String,
     /// The current value being edited for jaeger endpoint
     pub jaeger_endpoint_input: String,
     /// AI settings state
@@ -382,6 +386,10 @@ impl AppSettingsState {
             appearance_index: 0,
             bunker_index: 0,
             editing: false,
+            relay_url_input: preferences
+                .configured_relay_url()
+                .unwrap_or("")
+                .to_string(),
             jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
             ai: AiSettingsState::new(
                 ai_settings.enabled,
@@ -432,6 +440,13 @@ impl AppSettingsState {
     /// Get selected setting in Bunker tab
     pub fn selected_bunker_setting(&self) -> Option<BunkerSetting> {
         BunkerSetting::from_index(self.bunker_index)
+    }
+
+    /// Check if relay URL is being edited
+    pub fn editing_relay_url(&self) -> bool {
+        self.editing
+            && self.current_tab == SettingsTab::General
+            && self.selected_general_setting() == Some(GeneralSetting::RelayUrl)
     }
 
     /// Check if jaeger endpoint is being edited
