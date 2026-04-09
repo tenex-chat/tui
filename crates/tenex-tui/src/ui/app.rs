@@ -4565,6 +4565,9 @@ impl App {
         use crate::ui::views::chat::grouping::should_render_q_tags;
         use std::collections::HashSet;
 
+        // Get the current thread ID from messages before borrowing the store
+        let current_thread_id = messages.first().map(|m| m.thread_id.clone());
+
         let store = self.data_store.borrow();
 
         // Extract delegations from q-tags, but filter out tools that use q_tags for internal
@@ -4620,6 +4623,52 @@ impl App {
                     thread_id: thread_id.clone(),
                     target,
                 });
+            }
+        }
+
+        // Also include children tracked via delegation tags (e.g. self_delegate which creates
+        // child threads with a "delegation" back-pointer instead of emitting q-tags).
+        if let Some(ref parent_id) = current_thread_id {
+            if let Some(children) = store.runtime_hierarchy.get_children(parent_id) {
+                let child_ids: Vec<String> = children.iter().cloned().collect();
+                for child_thread_id in child_ids {
+                    if seen_thread_ids.contains(&child_thread_id) {
+                        continue;
+                    }
+                    seen_thread_ids.insert(child_thread_id.clone());
+
+                    let target = if let Some(thread) = store.get_thread_by_id(&child_thread_id) {
+                        thread
+                            .p_tags
+                            .first()
+                            .map(|pk| {
+                                let profile_name = store.get_profile_name(pk);
+                                if profile_name.ends_with("...") {
+                                    store
+                                        .find_project_for_thread(&child_thread_id)
+                                        .and_then(|a_tag| store.get_project_status(&a_tag))
+                                        .and_then(|status| {
+                                            status
+                                                .agents
+                                                .iter()
+                                                .find(|a| a.pubkey == *pk)
+                                                .map(|a| a.name.clone())
+                                        })
+                                        .unwrap_or(profile_name)
+                                } else {
+                                    profile_name
+                                }
+                            })
+                            .unwrap_or_else(|| "Unknown".to_string())
+                    } else {
+                        "Unknown".to_string()
+                    };
+
+                    delegations.push(SidebarDelegation {
+                        thread_id: child_thread_id,
+                        target,
+                    });
+                }
             }
         }
 

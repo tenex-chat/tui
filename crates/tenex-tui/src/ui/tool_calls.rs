@@ -269,6 +269,16 @@ pub fn render_tool_line(
                 format!("▶ {}", truncate_with_ellipsis(desc, 40))
             }
 
+            // Self-delegation: show prompt
+            "self_delegate" => {
+                let prompt = tool_call
+                    .parameters
+                    .get("prompt")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                format!("↺ {}", truncate_with_ellipsis(prompt, 60))
+            }
+
             // Model change: show variant being switched to
             "change_model" => {
                 let variant = tool_call
