@@ -3513,6 +3513,10 @@ public struct ConversationFilter {
      */
     public var hideScheduled: Bool
     /**
+     * Whether to hide intervention review conversations
+     */
+    public var hideInterventionReview: Bool
+    /**
      * Time filter
      */
     public var timeFilter: TimeFilterOption
@@ -3530,11 +3534,15 @@ public struct ConversationFilter {
          * Whether to hide scheduled events
          */hideScheduled: Bool, 
         /**
+         * Whether to hide intervention review conversations
+         */hideInterventionReview: Bool, 
+        /**
          * Time filter
          */timeFilter: TimeFilterOption) {
         self.projectIds = projectIds
         self.showArchived = showArchived
         self.hideScheduled = hideScheduled
+        self.hideInterventionReview = hideInterventionReview
         self.timeFilter = timeFilter
     }
 }
@@ -3555,6 +3563,9 @@ extension ConversationFilter: Equatable, Hashable {
         if lhs.hideScheduled != rhs.hideScheduled {
             return false
         }
+        if lhs.hideInterventionReview != rhs.hideInterventionReview {
+            return false
+        }
         if lhs.timeFilter != rhs.timeFilter {
             return false
         }
@@ -3565,6 +3576,7 @@ extension ConversationFilter: Equatable, Hashable {
         hasher.combine(projectIds)
         hasher.combine(showArchived)
         hasher.combine(hideScheduled)
+        hasher.combine(hideInterventionReview)
         hasher.combine(timeFilter)
     }
 }
@@ -3581,6 +3593,7 @@ public struct FfiConverterTypeConversationFilter: FfiConverterRustBuffer {
                 projectIds: FfiConverterSequenceString.read(from: &buf), 
                 showArchived: FfiConverterBool.read(from: &buf), 
                 hideScheduled: FfiConverterBool.read(from: &buf), 
+                hideInterventionReview: FfiConverterBool.read(from: &buf), 
                 timeFilter: FfiConverterTypeTimeFilterOption.read(from: &buf)
         )
     }
@@ -3589,6 +3602,7 @@ public struct FfiConverterTypeConversationFilter: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.projectIds, into: &buf)
         FfiConverterBool.write(value.showArchived, into: &buf)
         FfiConverterBool.write(value.hideScheduled, into: &buf)
+        FfiConverterBool.write(value.hideInterventionReview, into: &buf)
         FfiConverterTypeTimeFilterOption.write(value.timeFilter, into: &buf)
     }
 }
@@ -8462,6 +8476,10 @@ public struct Thread {
      * Whether this thread is a scheduled event (has scheduled-task-id tag)
      */
     public var isScheduled: Bool
+    /**
+     * Whether this thread is an intervention review conversation (has context=intervention-review tag)
+     */
+    public var isInterventionReview: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -8497,7 +8515,10 @@ public struct Thread {
          */askEvent: AskEvent?, 
         /**
          * Whether this thread is a scheduled event (has scheduled-task-id tag)
-         */isScheduled: Bool) {
+         */isScheduled: Bool, 
+        /**
+         * Whether this thread is an intervention review conversation (has context=intervention-review tag)
+         */isInterventionReview: Bool) {
         self.id = id
         self.title = title
         self.content = content
@@ -8512,6 +8533,7 @@ public struct Thread {
         self.pTags = pTags
         self.askEvent = askEvent
         self.isScheduled = isScheduled
+        self.isInterventionReview = isInterventionReview
     }
 }
 
@@ -8564,6 +8586,9 @@ extension Thread: Equatable, Hashable {
         if lhs.isScheduled != rhs.isScheduled {
             return false
         }
+        if lhs.isInterventionReview != rhs.isInterventionReview {
+            return false
+        }
         return true
     }
 
@@ -8582,6 +8607,7 @@ extension Thread: Equatable, Hashable {
         hasher.combine(pTags)
         hasher.combine(askEvent)
         hasher.combine(isScheduled)
+        hasher.combine(isInterventionReview)
     }
 }
 
@@ -8607,7 +8633,8 @@ public struct FfiConverterTypeThread: FfiConverterRustBuffer {
                 parentConversationId: FfiConverterOptionString.read(from: &buf), 
                 pTags: FfiConverterSequenceString.read(from: &buf), 
                 askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf), 
-                isScheduled: FfiConverterBool.read(from: &buf)
+                isScheduled: FfiConverterBool.read(from: &buf), 
+                isInterventionReview: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -8626,6 +8653,7 @@ public struct FfiConverterTypeThread: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.pTags, into: &buf)
         FfiConverterOptionTypeAskEvent.write(value.askEvent, into: &buf)
         FfiConverterBool.write(value.isScheduled, into: &buf)
+        FfiConverterBool.write(value.isInterventionReview, into: &buf)
     }
 }
 

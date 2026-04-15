@@ -121,6 +121,48 @@ impl ScheduledFilter {
     }
 }
 
+/// Three-state filter for intervention review conversations in conversation lists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InterventionFilter {
+    /// Hide intervention review conversations from the list (default)
+    #[default]
+    Hide,
+    /// Show intervention review conversations from the list
+    ShowAll,
+    /// Show only intervention review conversations
+    ShowOnly,
+}
+
+impl InterventionFilter {
+    /// Cycle to the next state: Hide → ShowAll → ShowOnly → Hide
+    pub fn next(self) -> Self {
+        match self {
+            Self::Hide => Self::ShowAll,
+            Self::ShowAll => Self::ShowOnly,
+            Self::ShowOnly => Self::Hide,
+        }
+    }
+
+    /// Human-readable label for display
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Hide => "Hide",
+            Self::ShowAll => "Show All",
+            Self::ShowOnly => "Show Only",
+        }
+    }
+
+    /// Returns true if an item with the given intervention-review status passes this filter
+    pub fn allows(self, is_intervention_review: bool) -> bool {
+        match self {
+            Self::Hide => !is_intervention_review,
+            Self::ShowAll => true,
+            Self::ShowOnly => is_intervention_review,
+        }
+    }
+}
+
 /// App preferences (persisted to JSON file)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preferences {
@@ -156,6 +198,9 @@ pub struct Preferences {
     /// Three-state filter for scheduled events (default: ShowAll)
     #[serde(default)]
     pub scheduled_filter: ScheduledFilter,
+    /// Three-state filter for intervention review conversations (default: Hide)
+    #[serde(default)]
+    pub intervention_filter: InterventionFilter,
     /// Saved workspaces (project groups)
     #[serde(default)]
     pub workspaces: Vec<Workspace>,
@@ -252,6 +297,7 @@ impl Default for Preferences {
             configured_relay_url: None,
             hide_scheduled: false,
             scheduled_filter: ScheduledFilter::ShowAll,
+            intervention_filter: InterventionFilter::Hide,
             workspaces: Vec::new(),
             active_workspace_id: None,
             jaeger_endpoint: default_jaeger_endpoint(),
@@ -564,6 +610,21 @@ impl PreferencesStorage {
         self.prefs.scheduled_filter = self.prefs.scheduled_filter.next();
         self.save_to_file();
         self.prefs.scheduled_filter
+    }
+
+    pub fn intervention_filter(&self) -> InterventionFilter {
+        self.prefs.intervention_filter
+    }
+
+    pub fn set_intervention_filter(&mut self, filter: InterventionFilter) {
+        self.prefs.intervention_filter = filter;
+        self.save_to_file();
+    }
+
+    pub fn cycle_intervention_filter(&mut self) -> InterventionFilter {
+        self.prefs.intervention_filter = self.prefs.intervention_filter.next();
+        self.save_to_file();
+        self.prefs.intervention_filter
     }
 
     // ===== Workspace Methods =====

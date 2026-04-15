@@ -46,6 +46,7 @@ final class DelegationTreeViewModel: ObservableObject {
                     projectIds: [],
                     showArchived: true,
                     hideScheduled: false,
+                    hideInterventionReview: false,
                     timeFilter: .all
                 )
             )

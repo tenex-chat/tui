@@ -364,7 +364,7 @@ extension TenexCoreManager {
 
         conversationRefreshTask?.cancel()
         profiler.logEvent(
-            "refreshConversationsForActiveFilter start projectIds=\(snapshot.projectIds.count) timeWindow=\(snapshot.timeWindow.rawValue) scheduled=\(snapshot.scheduledEventFilter.rawValue)",
+            "refreshConversationsForActiveFilter start projectIds=\(snapshot.projectIds.count) timeWindow=\(snapshot.timeWindow.rawValue) scheduled=\(snapshot.scheduledEventFilter.rawValue) intervention=\(snapshot.interventionReviewFilter.rawValue)",
             category: .general,
             level: .debug
         )
@@ -402,6 +402,7 @@ extension TenexCoreManager {
             projectIds: Array(snapshot.projectIds),
             showArchived: true,
             hideScheduled: false,
+            hideInterventionReview: snapshot.interventionReviewFilter == .hide,
             timeFilter: snapshot.timeWindow.coreTimeFilter
         )
         let fetched = try await safeCore.getAllConversations(filter: filter)

@@ -318,6 +318,10 @@ fn render_card_content(
             " ⏰".width()
         } else {
             0
+        } + if thread.is_intervention_review {
+            " 🧭".width()
+        } else {
+            0
         } + if is_archived { " [arc]".width() } else { 0 }
             + if has_draft { " ✎".width() } else { 0 }
             + if spinner_char.is_some() { 2 } else { 0 };
@@ -336,6 +340,9 @@ fn render_card_content(
         line1.push(Span::styled(title_truncated, title_style));
         if thread.is_scheduled {
             line1.push(Span::styled(" ⏰", Style::default().fg(agent_color)));
+        }
+        if thread.is_intervention_review {
+            line1.push(Span::styled(" 🧭", Style::default().fg(theme::ACCENT_WARNING)));
         }
         if is_archived {
             line1.push(Span::styled(
@@ -436,6 +443,11 @@ fn render_card_content(
         let mut extras_width = 0usize;
         if thread.is_scheduled {
             let s = " SCHED";
+            extras_width += s.width();
+            line1.push(Span::styled(s, Style::default().fg(theme::TEXT_MUTED)));
+        }
+        if thread.is_intervention_review {
+            let s = " INTV";
             extras_width += s.width();
             line1.push(Span::styled(s, Style::default().fg(theme::TEXT_MUTED)));
         }

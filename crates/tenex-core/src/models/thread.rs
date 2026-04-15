@@ -31,6 +31,9 @@ pub struct Thread {
     pub ask_event: Option<AskEvent>,
     /// Whether this thread is a scheduled event (has scheduled-task-id tag)
     pub is_scheduled: bool,
+    /// Whether this thread is an intervention review conversation (has context=intervention-review tag)
+    #[serde(default)]
+    pub is_intervention_review: bool,
 }
 
 impl Thread {
@@ -58,6 +61,7 @@ impl Thread {
         let mut parent_conversation_id: Option<String> = None;
         let mut p_tags = Vec::new();
         let mut is_scheduled = false;
+        let mut is_intervention_review = false;
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -106,6 +110,11 @@ impl Thread {
                 Some("scheduled-task-id") => {
                     is_scheduled = true;
                 }
+                Some("context") => {
+                    if tag.get(1).and_then(|t| t.variant().str()) == Some("intervention-review") {
+                        is_intervention_review = true;
+                    }
+                }
                 _ => {}
             }
         }
@@ -140,6 +149,7 @@ impl Thread {
             p_tags,
             ask_event,
             is_scheduled,
+            is_intervention_review,
         })
     }
 }
@@ -404,5 +414,39 @@ mod tests {
             Some(parent_id.to_string()),
             "Delegation tag should be parsed into parent_conversation_id"
         );
+    }
+
+    #[test]
+    fn test_thread_flags_intervention_review_from_context_tag() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = EventBuilder::new(Kind::from(1), "Intervention review")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec!["31933:pubkey:proj1".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("context")),
+                vec!["intervention-review".to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
+
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 1);
+
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+        let thread = Thread::from_note(&note).unwrap();
+
+        assert!(thread.is_intervention_review);
+        assert!(!thread.is_scheduled);
     }
 }

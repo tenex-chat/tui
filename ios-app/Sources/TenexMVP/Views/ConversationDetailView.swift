@@ -135,10 +135,24 @@ struct ConversationDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Status badge, project badge, avatars, and runtime row
+            // Status badge, intervention badge, project badge, avatars, and runtime row
             HStack(alignment: .center, spacing: 12) {
                 // Status badge
                 StatusBadge(status: viewModel.currentStatus, isActive: viewModel.currentIsActive)
+
+                if conversation.thread.isInterventionReview {
+                    HStack(spacing: 2) {
+                        Image(systemName: "eye.trianglebadge.exclamationmark")
+                            .font(.caption2)
+                        Text("Intervention")
+                    }
+                    .font(.caption2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.orange.opacity(0.16))
+                    .foregroundStyle(Color.orange)
+                    .clipShape(Capsule())
+                }
 
                 // Project badge
                 if let project = project {

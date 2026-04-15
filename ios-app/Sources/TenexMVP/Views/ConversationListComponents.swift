@@ -195,6 +195,20 @@ struct ConversationRowFull: View, Equatable {
                         .clipShape(Capsule())
                     }
 
+                    if conversation.thread.isInterventionReview {
+                        HStack(spacing: 2) {
+                            Image(systemName: "eye.trianglebadge.exclamationmark")
+                                .font(.caption2)
+                            Text("Intervention")
+                        }
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.16))
+                        .foregroundStyle(Color.orange)
+                        .clipShape(Capsule())
+                    }
+
                     if conversation.isActive {
                         HStack(spacing: 3) {
                             ZStack {

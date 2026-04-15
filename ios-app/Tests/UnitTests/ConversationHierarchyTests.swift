@@ -299,7 +299,8 @@ final class ConversationHierarchyTests: XCTestCase {
             parentConversationId: parentId,
             pTags: [],
             askEvent: nil,
-            isScheduled: false
+            isScheduled: false,
+            isInterventionReview: false
         )
         return ConversationFullInfo(
             thread: thread,

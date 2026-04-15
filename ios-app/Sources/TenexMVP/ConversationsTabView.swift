@@ -118,7 +118,7 @@ struct ConversationsTabView: View {
     }
 
     /// Filtered conversations based on archived status.
-    /// Global app filtering (project/time/scheduled/status/hashtags) is applied centrally in TenexCoreManager.
+    /// Global app filtering (project/time/scheduled/intervention/status/hashtags) is applied centrally in TenexCoreManager.
     private var filteredConversations: [ConversationFullInfo] {
         var conversations = coreManager.conversations
 

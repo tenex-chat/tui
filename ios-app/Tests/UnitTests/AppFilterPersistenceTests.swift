@@ -24,6 +24,7 @@ final class AppFilterPersistenceTests: XCTestCase {
         XCTAssertTrue(result.projectIds.isEmpty)
         XCTAssertEqual(result.timeWindow, .defaultValue)
         XCTAssertEqual(result.scheduledEvent, .defaultValue)
+        XCTAssertEqual(result.interventionReview, .defaultValue)
         XCTAssertEqual(result.status, .defaultValue)
         XCTAssertTrue(result.hashtags.isEmpty)
     }
@@ -33,6 +34,7 @@ final class AppFilterPersistenceTests: XCTestCase {
             projectIds: ["project-b", "project-a"],
             timeWindow: .days7,
             scheduledEvent: .hide,
+            interventionReview: .showOnly,
             status: .label("In Progress"),
             hashtags: ["feature", "frontend"],
             defaults: defaults
@@ -43,6 +45,7 @@ final class AppFilterPersistenceTests: XCTestCase {
         XCTAssertEqual(loaded.projectIds, Set(["project-a", "project-b"]))
         XCTAssertEqual(loaded.timeWindow, .days7)
         XCTAssertEqual(loaded.scheduledEvent, .hide)
+        XCTAssertEqual(loaded.interventionReview, .showOnly)
         XCTAssertEqual(loaded.status, .label("In Progress"))
         XCTAssertEqual(loaded.hashtags, Set(["feature", "frontend"]))
         XCTAssertEqual(

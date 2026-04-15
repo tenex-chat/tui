@@ -8,6 +8,7 @@ struct AppGlobalFilterToolbarButton: View {
             timeMenu
             projectsMenu
             scheduledEventsMenu
+            interventionReviewMenu
             hashtagsMenu
             statusMenu
 
@@ -83,6 +84,20 @@ struct AppGlobalFilterToolbarButton: View {
             }
         }
         .accessibilityIdentifier("global_filter_menu_scheduled_events")
+    }
+
+    private var interventionReviewMenu: some View {
+        Menu("Intervention Reviews") {
+            ForEach(InterventionReviewFilter.allCases, id: \.self) { filter in
+                Button {
+                    applyFilter(interventionReview: filter)
+                } label: {
+                    selectableLabel(filter.label, isSelected: coreManager.appFilterInterventionReview == filter)
+                }
+                .accessibilityIdentifier("global_filter_intervention_review_\(filter.rawValue)")
+            }
+        }
+        .accessibilityIdentifier("global_filter_menu_intervention_reviews")
     }
 
     private var statusMenu: some View {
@@ -229,6 +244,7 @@ struct AppGlobalFilterToolbarButton: View {
         projectIds: Set<String>? = nil,
         timeWindow: AppTimeWindow? = nil,
         scheduledEvent: ScheduledEventFilter? = nil,
+        interventionReview: InterventionReviewFilter? = nil,
         status: ConversationStatusFilter? = nil,
         hashtags: Set<String>? = nil,
         showArchived: Bool? = nil
@@ -237,6 +253,7 @@ struct AppGlobalFilterToolbarButton: View {
             projectIds: projectIds ?? coreManager.appFilterProjectIds,
             timeWindow: timeWindow ?? coreManager.appFilterTimeWindow,
             scheduledEvent: scheduledEvent ?? coreManager.appFilterScheduledEvent,
+            interventionReview: interventionReview ?? coreManager.appFilterInterventionReview,
             status: status ?? coreManager.appFilterStatus,
             hashtags: hashtags ?? coreManager.appFilterHashtags,
             showArchived: showArchived ?? coreManager.appFilterShowArchived

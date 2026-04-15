@@ -277,6 +277,7 @@ final class AppGlobalFilterTests: XCTestCase {
                 timestamp: 1_000,
                 now: 2_000,
                 isScheduled: false,
+                isInterventionReview: false,
                 statusLabel: "In Progress",
                 hashtags: []
             )
@@ -287,6 +288,7 @@ final class AppGlobalFilterTests: XCTestCase {
                 timestamp: 1_000,
                 now: 2_000,
                 isScheduled: false,
+                isInterventionReview: false,
                 statusLabel: "Completed",
                 hashtags: []
             )
@@ -306,6 +308,7 @@ final class AppGlobalFilterTests: XCTestCase {
                 timestamp: 1_000,
                 now: 2_000,
                 isScheduled: false,
+                isInterventionReview: false,
                 statusLabel: nil,
                 hashtags: ["#feature"]
             )
@@ -316,6 +319,7 @@ final class AppGlobalFilterTests: XCTestCase {
                 timestamp: 1_000,
                 now: 2_000,
                 isScheduled: false,
+                isInterventionReview: false,
                 statusLabel: nil,
                 hashtags: ["maintenance"]
             )

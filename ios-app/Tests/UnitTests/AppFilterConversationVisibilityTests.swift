@@ -33,6 +33,40 @@ final class AppFilterConversationVisibilityTests: XCTestCase {
         XCTAssertTrue(filtered.isEmpty)
     }
 
+    func testInterventionHiddenRootHidesDelegatedConversation() {
+        let root = makeConversation(
+            id: "root",
+            parentId: nil,
+            isScheduled: false,
+            isInterventionReview: true,
+            isArchived: false
+        )
+        let child = makeConversation(
+            id: "child",
+            parentId: "root",
+            isScheduled: false,
+            isInterventionReview: false,
+            isArchived: false
+        )
+        let snapshot = AppGlobalFilterSnapshot(
+            projectIds: [],
+            timeWindow: .all,
+            scheduledEventFilter: .showAll,
+            interventionReviewFilter: .hide,
+            statusFilter: .all,
+            hashtagFilter: [],
+            showArchived: true
+        )
+
+        let filtered = TenexCoreManager.filterConversationsByRootVisibility(
+            [root, child],
+            now: 1_000,
+            snapshot: snapshot
+        )
+
+        XCTAssertTrue(filtered.isEmpty)
+    }
+
     func testArchivedHiddenRootHidesDelegatedConversation() {
         let root = makeConversation(
             id: "root",
@@ -100,6 +134,7 @@ final class AppFilterConversationVisibilityTests: XCTestCase {
         id: String,
         parentId: String?,
         isScheduled: Bool,
+        isInterventionReview: Bool = false,
         isArchived: Bool
     ) -> ConversationFullInfo {
         let thread = Thread(
@@ -116,7 +151,8 @@ final class AppFilterConversationVisibilityTests: XCTestCase {
             parentConversationId: parentId,
             pTags: [],
             askEvent: nil,
-            isScheduled: isScheduled
+            isScheduled: isScheduled,
+            isInterventionReview: isInterventionReview
         )
 
         return ConversationFullInfo(

@@ -151,6 +151,7 @@ class TenexCoreManager {
     var appFilterProjectIds: Set<String>
     var appFilterTimeWindow: AppTimeWindow
     var appFilterScheduledEvent: ScheduledEventFilter
+    var appFilterInterventionReview: InterventionReviewFilter
     var appFilterStatus: ConversationStatusFilter
     var appFilterHashtags: Set<String>
     var appFilterShowArchived: Bool
@@ -158,6 +159,7 @@ class TenexCoreManager {
     static let appFilterProjectsDefaultsKey = "app.global.filter.projectIds"
     static let appFilterTimeWindowDefaultsKey = "app.global.filter.timeWindow"
     static let appFilterScheduledEventDefaultsKey = "app.global.filter.scheduledEvent"
+    static let appFilterInterventionReviewDefaultsKey = "app.global.filter.interventionReview"
     static let appFilterStatusDefaultsKey = "app.global.filter.statusLabel"
     static let appFilterHashtagsDefaultsKey = "app.global.filter.hashtags"
     static let appFilterShowArchivedDefaultsKey = "app.global.filter.showArchived"
@@ -255,6 +257,7 @@ class TenexCoreManager {
         appFilterProjectIds = persistedFilter.projectIds
         appFilterTimeWindow = persistedFilter.timeWindow
         appFilterScheduledEvent = persistedFilter.scheduledEvent
+        appFilterInterventionReview = persistedFilter.interventionReview
         appFilterStatus = persistedFilter.status
         appFilterHashtags = persistedFilter.hashtags
         appFilterShowArchived = persistedFilter.showArchived

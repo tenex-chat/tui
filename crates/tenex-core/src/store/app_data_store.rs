@@ -2123,6 +2123,25 @@ impl AppDataStore {
             .filter(|name| !name.is_empty())
     }
 
+    /// Returns the resolved display name for a pubkey only if a real name is known
+    /// (from kind:0 profile or kind:24010 agent slug). Returns None if only the
+    /// pubkey-truncation fallback would be used.
+    pub fn get_profile_name_if_known(&self, pubkey: &str) -> Option<String> {
+        if let Some(name) = self.profiles.get(pubkey) {
+            return Some(name.clone());
+        }
+        if let Some(slug) = self.get_agent_slug_from_status(pubkey) {
+            return Some(slug);
+        }
+        let fallback = format!("{}...", &pubkey[..8.min(pubkey.len())]);
+        let name = crate::store::get_profile_name(&self.ndb, pubkey);
+        if name == fallback {
+            None
+        } else {
+            Some(name)
+        }
+    }
+
     pub fn get_profile_name(&self, pubkey: &str) -> String {
         if let Some(name) = self.profiles.get(pubkey) {
             return name.clone();
@@ -4921,6 +4940,7 @@ mod tests {
             p_tags: vec![],
             ask_event: None,
             is_scheduled: false,
+            is_intervention_review: false,
         }
     }
 

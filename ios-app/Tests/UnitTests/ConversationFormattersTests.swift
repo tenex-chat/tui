@@ -245,7 +245,8 @@ final class ConversationFormattersTests: XCTestCase {
             parentConversationId: nil,
             pTags: [],
             askEvent: nil,
-            isScheduled: false
+            isScheduled: false,
+            isInterventionReview: false
         )
         return ConversationFullInfo(
             thread: thread,

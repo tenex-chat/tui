@@ -494,6 +494,10 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                             // cycle_scheduled_filter() sends its own notification
                             app.cycle_scheduled_filter();
                         }
+                        Some(AppearanceSetting::HideInterventionReview) => {
+                            // cycle_intervention_filter() sends its own notification
+                            app.cycle_intervention_filter();
+                        }
                         None => {}
                     }
                 } else if state.current_tab == ui::modal::SettingsTab::AI

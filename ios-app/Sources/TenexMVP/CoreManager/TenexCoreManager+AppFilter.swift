@@ -6,6 +6,7 @@ extension TenexCoreManager {
             projectIds: appFilterProjectIds,
             timeWindow: appFilterTimeWindow,
             scheduledEventFilter: appFilterScheduledEvent,
+            interventionReviewFilter: appFilterInterventionReview,
             statusFilter: appFilterStatus,
             hashtagFilter: appFilterHashtags,
             showArchived: appFilterShowArchived
@@ -33,6 +34,9 @@ extension TenexCoreManager {
         if appFilterScheduledEvent != .showAll {
             parts.append("Sched: \(appFilterScheduledEvent.label)")
         }
+        if appFilterInterventionReview != .defaultValue {
+            parts.append("Intv: \(appFilterInterventionReview.label)")
+        }
         if case .label(let statusLabel) = appFilterStatus {
             parts.append("Status: \(statusLabel)")
         }
@@ -49,13 +53,14 @@ extension TenexCoreManager {
         return parts.joined(separator: " · ")
     }
 
-    /// Status options available in the current project/time/scheduled/hashtag scope.
+    /// Status options available in the current project/time/scheduled/intervention/hashtag scope.
     /// Excludes the status facet itself so users can switch status values without dead-ends.
     var appFilterAvailableStatusLabels: [String] {
         let snapshot = appFilterSnapshot
         let scope = appFilterConversationScope.filter { conversation in
             snapshot.includesConversationFacets(
                 isScheduled: conversation.thread.isScheduled,
+                isInterventionReview: conversation.thread.isInterventionReview,
                 statusLabel: conversation.thread.statusLabel,
                 hashtags: conversation.thread.hashtags,
                 includeStatus: false,
@@ -84,13 +89,14 @@ extension TenexCoreManager {
         }
     }
 
-    /// Hashtag options available in the current project/time/scheduled/status scope.
+    /// Hashtag options available in the current project/time/scheduled/intervention/status scope.
     /// Excludes the hashtag facet itself so multi-tag selection remains discoverable.
     var appFilterAvailableHashtags: [String] {
         let snapshot = appFilterSnapshot
         let scope = appFilterConversationScope.filter { conversation in
             snapshot.includesConversationFacets(
                 isScheduled: conversation.thread.isScheduled,
+                isInterventionReview: conversation.thread.isInterventionReview,
                 statusLabel: conversation.thread.statusLabel,
                 hashtags: conversation.thread.hashtags,
                 includeStatus: true,
@@ -116,11 +122,13 @@ extension TenexCoreManager {
         projectIds: Set<String>,
         timeWindow: AppTimeWindow,
         scheduledEvent: ScheduledEventFilter? = nil,
+        interventionReview: InterventionReviewFilter? = nil,
         status: ConversationStatusFilter? = nil,
         hashtags: Set<String>? = nil,
         showArchived: Bool? = nil
     ) {
         let newScheduledEvent = scheduledEvent ?? appFilterScheduledEvent
+        let newInterventionReview = interventionReview ?? appFilterInterventionReview
         let newStatus = status ?? appFilterStatus
         let newHashtags = AppFilterMetadataNormalizer.normalizedHashtags(hashtags ?? appFilterHashtags)
         let newShowArchived = showArchived ?? appFilterShowArchived
@@ -128,6 +136,7 @@ extension TenexCoreManager {
         guard projectIds != appFilterProjectIds
             || timeWindow != appFilterTimeWindow
             || newScheduledEvent != appFilterScheduledEvent
+            || newInterventionReview != appFilterInterventionReview
             || newStatus != appFilterStatus
             || newHashtags != appFilterHashtags
             || newShowArchived != appFilterShowArchived
@@ -136,6 +145,7 @@ extension TenexCoreManager {
         appFilterProjectIds = projectIds
         appFilterTimeWindow = timeWindow
         appFilterScheduledEvent = newScheduledEvent
+        appFilterInterventionReview = newInterventionReview
         appFilterStatus = newStatus
         appFilterHashtags = newHashtags
         appFilterShowArchived = newShowArchived
@@ -161,6 +171,7 @@ extension TenexCoreManager {
             projectIds: [],
             timeWindow: .defaultValue,
             scheduledEvent: .defaultValue,
+            interventionReview: .defaultValue,
             status: .defaultValue,
             hashtags: Set<String>(),
             showArchived: false
@@ -218,6 +229,7 @@ extension TenexCoreManager {
 
         guard snapshot.includesConversationFacets(
             isScheduled: conversation.thread.isScheduled,
+            isInterventionReview: conversation.thread.isInterventionReview,
             statusLabel: conversation.thread.statusLabel,
             hashtags: conversation.thread.hashtags
         ) else {
@@ -322,6 +334,7 @@ extension TenexCoreManager {
         projectIds: Set<String>,
         timeWindow: AppTimeWindow,
         scheduledEvent: ScheduledEventFilter,
+        interventionReview: InterventionReviewFilter,
         status: ConversationStatusFilter,
         hashtags: Set<String>,
         showArchived: Bool
@@ -342,6 +355,11 @@ extension TenexCoreManager {
             persistedScheduledEvent = legacyHideScheduled ? .hide : .showAll
         }
 
+        let persistedInterventionReview = defaults
+            .string(forKey: Self.appFilterInterventionReviewDefaultsKey)
+            .flatMap(InterventionReviewFilter.init(rawValue:))
+            ?? .defaultValue
+
         let persistedStatus = ConversationStatusFilter(
             persistedRawValue: defaults.string(forKey: Self.appFilterStatusDefaultsKey)
         )
@@ -354,6 +372,7 @@ extension TenexCoreManager {
             persistedProjectIds,
             persistedTimeWindow,
             persistedScheduledEvent,
+            persistedInterventionReview,
             persistedStatus,
             persistedHashtags,
             persistedShowArchived
@@ -364,6 +383,7 @@ extension TenexCoreManager {
         projectIds: Set<String>,
         timeWindow: AppTimeWindow,
         scheduledEvent: ScheduledEventFilter = .defaultValue,
+        interventionReview: InterventionReviewFilter = .defaultValue,
         status: ConversationStatusFilter = .defaultValue,
         hashtags: Set<String> = [],
         showArchived: Bool = false,
@@ -372,6 +392,7 @@ extension TenexCoreManager {
         defaults.set(Array(projectIds).sorted(), forKey: Self.appFilterProjectsDefaultsKey)
         defaults.set(timeWindow.rawValue, forKey: Self.appFilterTimeWindowDefaultsKey)
         defaults.set(scheduledEvent.rawValue, forKey: Self.appFilterScheduledEventDefaultsKey)
+        defaults.set(interventionReview.rawValue, forKey: Self.appFilterInterventionReviewDefaultsKey)
 
         if let persistedStatus = status.persistedRawValue {
             defaults.set(persistedStatus, forKey: Self.appFilterStatusDefaultsKey)
@@ -394,6 +415,7 @@ extension TenexCoreManager {
             projectIds: appFilterProjectIds,
             timeWindow: appFilterTimeWindow,
             scheduledEvent: appFilterScheduledEvent,
+            interventionReview: appFilterInterventionReview,
             status: appFilterStatus,
             hashtags: appFilterHashtags,
             showArchived: appFilterShowArchived,

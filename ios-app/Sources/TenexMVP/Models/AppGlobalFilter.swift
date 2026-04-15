@@ -31,6 +31,37 @@ extension ScheduledEventFilter {
     static let defaultValue: ScheduledEventFilter = .showAll
 }
 
+/// Three-state filter for intervention review conversations in conversation lists.
+enum InterventionReviewFilter: String, CaseIterable, Codable {
+    /// Hide intervention review conversations from the list (default)
+    case hide
+    /// Show all conversations regardless of intervention review status
+    case showAll
+    /// Show only intervention review conversations
+    case showOnly
+
+    var label: String {
+        switch self {
+        case .hide: return "Hide"
+        case .showAll: return "Show All"
+        case .showOnly: return "Show Only"
+        }
+    }
+
+    /// Returns true if an item with the given intervention-review status passes this filter
+    func allows(isInterventionReview: Bool) -> Bool {
+        switch self {
+        case .hide: return !isInterventionReview
+        case .showAll: return true
+        case .showOnly: return isInterventionReview
+        }
+    }
+}
+
+extension InterventionReviewFilter {
+    static let defaultValue: InterventionReviewFilter = .hide
+}
+
 enum AppFilterMetadataNormalizer {
     static func normalizedStatusLabel(_ value: String?) -> String? {
         guard let value else { return nil }
@@ -173,6 +204,7 @@ struct AppGlobalFilterSnapshot: Equatable {
     let projectIds: Set<String>
     let timeWindow: AppTimeWindow
     let scheduledEventFilter: ScheduledEventFilter
+    let interventionReviewFilter: InterventionReviewFilter
     let statusFilter: ConversationStatusFilter
     let hashtagFilter: Set<String>
     let showArchived: Bool
@@ -181,6 +213,7 @@ struct AppGlobalFilterSnapshot: Equatable {
         projectIds: Set<String>,
         timeWindow: AppTimeWindow,
         scheduledEventFilter: ScheduledEventFilter = .defaultValue,
+        interventionReviewFilter: InterventionReviewFilter = .defaultValue,
         statusFilter: ConversationStatusFilter = .defaultValue,
         hashtagFilter: Set<String> = [],
         showArchived: Bool = false
@@ -188,6 +221,7 @@ struct AppGlobalFilterSnapshot: Equatable {
         self.projectIds = projectIds
         self.timeWindow = timeWindow
         self.scheduledEventFilter = scheduledEventFilter
+        self.interventionReviewFilter = interventionReviewFilter
         self.statusFilter = statusFilter
         self.hashtagFilter = AppFilterMetadataNormalizer.normalizedHashtags(hashtagFilter)
         self.showArchived = showArchived
@@ -197,39 +231,46 @@ struct AppGlobalFilterSnapshot: Equatable {
         projectIds.isEmpty
             && timeWindow == .defaultValue
             && scheduledEventFilter == .defaultValue
+            && interventionReviewFilter == .defaultValue
             && statusFilter.isDefault
             && hashtagFilter.isEmpty
             && !showArchived
     }
 
-    /// Include check for conversations (applies scheduled/status/hashtag filter).
+    /// Include check for conversations (applies scheduled/intervention/status/hashtag filters).
     func includesConversation(
         projectId: String?,
         timestamp: UInt64,
         now: UInt64,
         isScheduled: Bool,
+        isInterventionReview: Bool,
         statusLabel: String?,
         hashtags: [String]
     ) -> Bool {
         includes(projectId: projectId, timestamp: timestamp, now: now)
             && includesConversationFacets(
                 isScheduled: isScheduled,
+                isInterventionReview: isInterventionReview,
                 statusLabel: statusLabel,
                 hashtags: hashtags
             )
     }
 
-    /// Include check for conversation facets only (scheduled/status/hashtags).
+    /// Include check for conversation facets only (scheduled/intervention/status/hashtags).
     /// `includeStatus` and `includeHashtags` allow facet option lists to
     /// derive choices while excluding the facet currently being edited.
     func includesConversationFacets(
         isScheduled: Bool,
+        isInterventionReview: Bool,
         statusLabel: String?,
         hashtags: [String],
         includeStatus: Bool = true,
         includeHashtags: Bool = true
     ) -> Bool {
         guard scheduledEventFilter.allows(isScheduled: isScheduled) else { return false }
+        guard interventionReviewFilter.allows(isInterventionReview: isInterventionReview) else {
+            return false
+        }
         if includeStatus, !statusFilter.allows(statusLabel: statusLabel) {
             return false
         }

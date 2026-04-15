@@ -24,6 +24,33 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.projectWithMostRecentActivity(scheduledFilter: .showOnly)?.id, "project-b")
     }
 
+    func testProjectWithMostRecentActivityRespectsInterventionFilter() async {
+        let core = MockCoreGateway()
+        core.projects = [
+            makeProject(id: "project-a"),
+            makeProject(id: "project-b")
+        ]
+        core.conversations = [
+            makeConversation(id: "conv-a", projectId: "project-a", lastActivity: 100, isScheduled: false, isInterventionReview: false),
+            makeConversation(id: "conv-b", projectId: "project-b", lastActivity: 200, isScheduled: false, isInterventionReview: true)
+        ]
+
+        let viewModel = makeViewModel(core: core, drafts: MockDraftStore())
+
+        XCTAssertEqual(
+            viewModel.projectWithMostRecentActivity(interventionReviewFilter: .hide)?.id,
+            "project-a"
+        )
+        XCTAssertEqual(
+            viewModel.projectWithMostRecentActivity(interventionReviewFilter: .showAll)?.id,
+            "project-b"
+        )
+        XCTAssertEqual(
+            viewModel.projectWithMostRecentActivity(interventionReviewFilter: .showOnly)?.id,
+            "project-b"
+        )
+    }
+
     func testDetectInlineTriggerParsesAgentAndNudgeTokens() async {
         let viewModel = makeViewModel(core: MockCoreGateway(), drafts: MockDraftStore())
 
@@ -238,7 +265,8 @@ final class ComposerViewModelTests: XCTestCase {
         id: String,
         projectId: String,
         lastActivity: UInt64,
-        isScheduled: Bool
+        isScheduled: Bool,
+        isInterventionReview: Bool = false
     ) -> ConversationFullInfo {
         let thread = Thread(
             id: id,
@@ -254,7 +282,8 @@ final class ComposerViewModelTests: XCTestCase {
             parentConversationId: nil,
             pTags: [],
             askEvent: nil,
-            isScheduled: isScheduled
+            isScheduled: isScheduled,
+            isInterventionReview: isInterventionReview
         )
         return ConversationFullInfo(
             thread: thread,

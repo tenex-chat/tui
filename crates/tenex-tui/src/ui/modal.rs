@@ -88,12 +88,14 @@ impl AiSetting {
 pub enum AppearanceSetting {
     TimeFilter,
     HideScheduled,
+    HideInterventionReview,
 }
 
 impl AppearanceSetting {
     pub const ALL: &'static [AppearanceSetting] = &[
         AppearanceSetting::TimeFilter,
         AppearanceSetting::HideScheduled,
+        AppearanceSetting::HideInterventionReview,
     ];
 
     pub const fn count() -> usize {

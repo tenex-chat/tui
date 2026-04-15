@@ -35,10 +35,18 @@ final class ComposerViewModel {
         self.dependencies = dependencies
     }
 
-    func projectWithMostRecentActivity(scheduledFilter: ScheduledEventFilter = .showAll) -> Project? {
+    func projectWithMostRecentActivity(
+        scheduledFilter: ScheduledEventFilter = .showAll,
+        interventionReviewFilter: InterventionReviewFilter = .defaultValue
+    ) -> Project? {
         var candidates = dependencies.core.conversations
         if scheduledFilter != .showAll {
             candidates = candidates.filter { scheduledFilter.allows(isScheduled: $0.thread.isScheduled) }
+        }
+        if interventionReviewFilter != .defaultValue {
+            candidates = candidates.filter {
+                interventionReviewFilter.allows(isInterventionReview: $0.thread.isInterventionReview)
+            }
         }
 
         guard let mostRecent = candidates.max(by: { $0.thread.effectiveLastActivity < $1.thread.effectiveLastActivity }) else {
@@ -157,7 +165,14 @@ final class ComposerViewModel {
         initialAgentPubkey: String?,
         currentAgentPubkey: String?
     ) async -> ComposerAgentLoadResult {
-        let agents = dependencies.core.onlineAgents[projectId] ?? []
+        let onlineAgents = dependencies.core.onlineAgents[projectId] ?? []
+        let agents: [ProjectAgent]
+        if onlineAgents.isEmpty {
+            let project = dependencies.core.projects.first { $0.id == projectId }
+            agents = await agentsFromProjectPubkeys(project?.agentPubkeys ?? [])
+        } else {
+            agents = onlineAgents
+        }
         var selectedAgentPubkey = currentAgentPubkey
         var replyTargetName: String?
 
@@ -275,6 +290,24 @@ final class ComposerViewModel {
 
     private func isValidTriggerQueryCharacter(_ character: Character) -> Bool {
         character.isLetter || character.isNumber || character == "-" || character == "_"
+    }
+
+    private func agentsFromProjectPubkeys(_ pubkeys: [String]) async -> [ProjectAgent] {
+        var result: [ProjectAgent] = []
+        for pubkey in pubkeys {
+            let name = await dependencies.core.getProfileName(pubkey: pubkey)
+            guard !name.isEmpty else { continue }
+            result.append(ProjectAgent(
+                pubkey: pubkey,
+                name: name,
+                isPm: false,
+                model: nil,
+                tools: [],
+                skills: [],
+                mcpServers: []
+            ))
+        }
+        return result
     }
 }
 

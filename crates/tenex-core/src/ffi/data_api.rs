@@ -523,6 +523,7 @@ impl TenexCore {
         let collect_started_at = Instant::now();
         let mut conversations: Vec<ConversationFullInfo> = Vec::new();
         let mut skipped_scheduled = 0usize;
+        let mut skipped_intervention = 0usize;
         let mut skipped_archived = 0usize;
         let mut skipped_time = 0usize;
 
@@ -533,6 +534,12 @@ impl TenexCore {
                 // Filter: scheduled events
                 if filter.hide_scheduled && thread.is_scheduled {
                     skipped_scheduled += 1;
+                    continue;
+                }
+
+                // Filter: intervention review conversations
+                if filter.hide_intervention_review && thread.is_intervention_review {
+                    skipped_intervention += 1;
                     continue;
                 }
 
@@ -594,12 +601,13 @@ impl TenexCore {
 
         tlog!(
             "PERF",
-            "ffi.get_all_conversations projects={} requestedProjectIds={} scannedThreads={} returned={} skippedScheduled={} skippedArchived={} skippedTime={} precomputeMs={} collectMs={} sortMs={} totalMs={}",
+            "ffi.get_all_conversations projects={} requestedProjectIds={} scannedThreads={} returned={} skippedScheduled={} skippedIntervention={} skippedArchived={} skippedTime={} precomputeMs={} collectMs={} sortMs={} totalMs={}",
             project_a_tags.len(),
             filter.project_ids.len(),
             total_threads_scanned,
             conversations.len(),
             skipped_scheduled,
+            skipped_intervention,
             skipped_archived,
             skipped_time,
             precompute_elapsed_ms,

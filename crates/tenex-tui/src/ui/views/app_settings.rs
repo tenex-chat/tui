@@ -294,6 +294,21 @@ fn render_appearance_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettin
         app.scheduled_filter.label(),
         is_hide_scheduled_selected,
     );
+    y_offset += 3;
+
+    // 3. Intervention Review filter (three-state cycle)
+    let is_hide_intervention_selected =
+        state.selected_appearance_setting() == Some(AppearanceSetting::HideInterventionReview);
+    render_select_field(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Intervention Reviews:",
+        "Filter intervention review conversations from lists (Enter to cycle: Hide → Show All → Show Only)",
+        app.intervention_filter.label(),
+        is_hide_intervention_selected,
+    );
 }
 
 /// Render Bunker tab content
@@ -672,6 +687,12 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
                     ));
                 }
                 Some(AppearanceSetting::HideScheduled) => {
+                    hints.push(Span::styled(
+                        " cycle",
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ));
+                }
+                Some(AppearanceSetting::HideInterventionReview) => {
                     hints.push(Span::styled(
                         " cycle",
                         Style::default().fg(theme::TEXT_MUTED),

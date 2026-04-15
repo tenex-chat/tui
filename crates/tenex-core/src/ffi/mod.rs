@@ -953,6 +953,8 @@ pub struct ConversationFilter {
     pub show_archived: bool,
     /// Whether to hide scheduled events
     pub hide_scheduled: bool,
+    /// Whether to hide intervention review conversations
+    pub hide_intervention_review: bool,
     /// Time filter
     pub time_filter: TimeFilterOption,
 }

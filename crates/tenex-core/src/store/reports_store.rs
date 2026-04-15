@@ -192,6 +192,7 @@ mod tests {
             p_tags: vec![],
             ask_event: None,
             is_scheduled: false,
+            is_intervention_review: false,
         }
     }
 

@@ -1009,7 +1009,8 @@ private struct FullConversationStreamingSection: View {
             parentConversationId: nil,
             pTags: [],
             askEvent: nil,
-            isScheduled: false
+            isScheduled: false,
+            isInterventionReview: false
         ),
         author: "architect-orchestrator",
         messageCount: 15,

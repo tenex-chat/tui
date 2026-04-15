@@ -223,10 +223,11 @@ struct MessageComposerView: View {
     }
 
     /// Find the project with the most recent conversation activity.
-    /// Respects the global scheduled event filter.
+    /// Respects the global scheduled and intervention review filters.
     func projectWithMostRecentActivity() -> Project? {
         composerViewModel.projectWithMostRecentActivity(
-            scheduledFilter: coreManager.appFilterScheduledEvent
+            scheduledFilter: coreManager.appFilterScheduledEvent,
+            interventionReviewFilter: coreManager.appFilterInterventionReview
         )
     }
 
@@ -555,7 +556,15 @@ struct MessageComposerView: View {
             // This eliminates the need for manual refresh() calls
             if let projectId = selectedProject?.id {
                 let agents = newAgents[projectId] ?? []
-                availableAgents = agents
+                if agents.isEmpty, let project = coreManager.projects.first(where: { $0.id == projectId }) {
+                    availableAgents = project.agentPubkeys.compactMap { pubkey in
+                        let name = coreManager.displayName(for: pubkey)
+                        guard !name.isEmpty else { return nil }
+                        return ProjectAgent(pubkey: pubkey, name: name, isPm: false, model: nil, tools: [], skills: [], mcpServers: [])
+                    }
+                } else {
+                    availableAgents = agents
+                }
             }
         }
     }

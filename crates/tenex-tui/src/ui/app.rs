@@ -388,6 +388,8 @@ pub struct App {
     pub show_archived: bool,
     /// Three-state filter for scheduled events in conversation list
     pub scheduled_filter: tenex_core::models::project_draft::ScheduledFilter,
+    /// Three-state filter for intervention review conversations in conversation list
+    pub intervention_filter: tenex_core::models::project_draft::InterventionFilter,
     /// Whether user explicitly selected an agent in the current conversation
     /// When true, don't auto-sync agent from conversation messages
     pub user_explicitly_selected_agent: bool,
@@ -492,6 +494,7 @@ impl App {
             // NOTE: message_history is now per-tab in OpenTab
             show_archived: false,
             scheduled_filter: tenex_core::models::project_draft::ScheduledFilter::ShowAll,
+            intervention_filter: tenex_core::models::project_draft::InterventionFilter::Hide,
             user_explicitly_selected_agent: false,
             last_undo_action: None,
             input_context_focus: None,
@@ -1855,17 +1858,39 @@ impl App {
         self.cursor_position = 0;
     }
 
-    /// Get available agents from project status (from data store)
+    /// Get available agents for the selected project.
+    /// Prefers kind:24010 online agents; falls back to kind:31933 agent pubkeys
+    /// resolved via kind:0 profile names when no status is available yet.
     pub fn available_agents(&self) -> Vec<crate::models::ProjectAgent> {
-        self.selected_project
-            .as_ref()
-            .and_then(|p| {
-                self.data_store
-                    .borrow()
-                    .get_project_status(&p.a_tag())
-                    .map(|s| s.agents.clone())
+        let Some(project) = self.selected_project.as_ref() else {
+            return vec![];
+        };
+        let store = self.data_store.borrow();
+
+        // Prefer kind:24010 agents (have model/tools/skills)
+        if let Some(status) = store.get_project_status(&project.a_tag()) {
+            if !status.agents.is_empty() {
+                return status.agents.clone();
+            }
+        }
+
+        // Fall back to kind:31933 agent pubkeys with kind:0 names
+        project
+            .agent_pubkeys
+            .iter()
+            .filter_map(|pubkey| {
+                let name = store.get_profile_name_if_known(pubkey)?;
+                Some(crate::models::ProjectAgent {
+                    pubkey: pubkey.clone(),
+                    name,
+                    is_pm: false,
+                    model: None,
+                    tools: vec![],
+                    skills: vec![],
+                    mcp_servers: vec![],
+                })
             })
-            .unwrap_or_default()
+            .collect()
     }
 
     /// Get the most recent agent that published a message in the current conversation.
@@ -2578,7 +2603,7 @@ impl App {
 
         let prefs = self.preferences.borrow();
 
-        // Remaining filters: archive status and scheduled events (user preferences)
+        // Remaining filters: archive status and conversation-type preferences
         threads
             .into_iter()
             .filter(|(thread, _)| {
@@ -2586,7 +2611,11 @@ impl App {
                 let archive_ok = self.show_archived || !prefs.is_thread_archived(&thread.id);
                 // Scheduled filter - apply three-state filter
                 let scheduled_ok = self.scheduled_filter.allows(thread.is_scheduled);
-                archive_ok && scheduled_ok
+                // Intervention review filter - hidden by default
+                let intervention_ok = self
+                    .intervention_filter
+                    .allows(thread.is_intervention_review);
+                archive_ok && scheduled_ok && intervention_ok
             })
             .collect()
     }
@@ -3036,6 +3065,7 @@ impl App {
         self.home.time_filter = prefs.time_filter();
         self.conversation.show_llm_metadata = prefs.show_llm_metadata();
         self.scheduled_filter = prefs.scheduled_filter();
+        self.intervention_filter = prefs.intervention_filter();
     }
 
     /// Save selected projects to preferences
@@ -4241,6 +4271,18 @@ impl App {
         self.scheduled_filter = new_filter;
         self.notify(Notification::info(&format!(
             "Scheduled events: {}",
+            new_filter.label()
+        )));
+    }
+
+    // ===== Intervention Review Filter Methods =====
+
+    /// Cycle through intervention review filter states: Hide → Show All → Show Only → Hide
+    pub fn cycle_intervention_filter(&mut self) {
+        let new_filter = self.preferences.borrow_mut().cycle_intervention_filter();
+        self.intervention_filter = new_filter;
+        self.notify(Notification::info(&format!(
+            "Intervention reviews: {}",
             new_filter.label()
         )));
     }
