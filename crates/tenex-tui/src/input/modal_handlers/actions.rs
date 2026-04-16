@@ -140,6 +140,7 @@ fn execute_project_action(
                             .get_project_status(&a_tag)
                             .map(|s| s.backend_pubkey.clone());
                         let name = backend_pubkey
+                            .as_deref()
                             .and_then(|bp| {
                                 store
                                     .get_installed_agents(&bp)
@@ -151,6 +152,7 @@ fn execute_project_action(
                         crate::models::ProjectAgent {
                             pubkey: first_pubkey.clone(),
                             name,
+                            backend_pubkey: backend_pubkey.unwrap_or_default(),
                             is_pm: true,
                             model: None,
                             tools: Vec::new(),

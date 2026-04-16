@@ -1875,6 +1875,10 @@ impl App {
         }
 
         // Fall back to kind:31933 agent pubkeys with kind:0 names
+        let fallback_backend_pubkey = store
+            .get_project_status(&project.a_tag())
+            .map(|status| status.backend_pubkey.clone())
+            .unwrap_or_default();
         project
             .agent_pubkeys
             .iter()
@@ -1883,6 +1887,7 @@ impl App {
                 Some(crate::models::ProjectAgent {
                     pubkey: pubkey.clone(),
                     name,
+                    backend_pubkey: fallback_backend_pubkey.clone(),
                     is_pm: false,
                     model: None,
                     tools: vec![],
