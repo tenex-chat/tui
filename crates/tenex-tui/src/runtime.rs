@@ -484,6 +484,10 @@ fn handle_core_events(
                     app.show_backend_approval_modal(pending.backend_pubkey, pending.project_a_tag);
                 }
             }
+            CoreEvent::ReportUpsert(_report) => {
+                // Reports are handled by the data store and made available via queries
+                // No special UI handling needed at this level
+            }
         }
     }
 }
