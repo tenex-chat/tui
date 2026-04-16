@@ -777,6 +777,13 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getBackendTrustSnapshot() throws  -> BackendTrustSnapshot
     
     /**
+     * Get all bookmarked nudge/skill IDs for the current user.
+     *
+     * Returns an empty list if not logged in or no bookmarks exist.
+     */
+    func getBookmarkedIds() throws  -> [String]
+    
+    /**
      * Get the NIP-46 bunker audit log.
      */
     func getBunkerAuditLog() throws  -> [FfiBunkerAuditEntry]
@@ -916,6 +923,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getProjects()  -> [Project]
     
     /**
+     * Get raw Nostr event JSON by event ID.
+     * Returns a pretty-printed JSON payload matching the TUI raw event inspector.
+     */
+    func getRawEventJson(eventId: String)  -> String?
+    
+    /**
      * Get reports for a project.
      */
     func getReports(projectId: String)  -> [Report]
@@ -959,6 +972,13 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Heavy initialization (relay connection) happens during login.
      */
     func `init`()  -> Bool
+    
+    /**
+     * Check if a nudge or skill is bookmarked by the current user.
+     *
+     * Returns `false` if not logged in or the item is not bookmarked.
+     */
+    func isBookmarked(itemId: String)  -> Bool
     
     /**
      * Check if a conversation is archived.
@@ -1178,6 +1198,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Stop the NIP-46 bunker.
      */
     func stopBunker() throws 
+    
+    /**
+     * Toggle bookmark status for a nudge or skill.
+     *
+     * Performs an optimistic local update, publishes a kind:14202 event, and returns
+     * the updated list of bookmarked IDs.
+     */
+    func toggleBookmark(itemId: String) throws  -> [String]
     
     /**
      * Toggle archive status for a conversation.
@@ -1638,6 +1666,18 @@ open func getBackendTrustSnapshot()throws  -> BackendTrustSnapshot  {
 }
     
     /**
+     * Get all bookmarked nudge/skill IDs for the current user.
+     *
+     * Returns an empty list if not logged in or no bookmarks exist.
+     */
+open func getBookmarkedIds()throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_bookmarked_ids(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
      * Get the NIP-46 bunker audit log.
      */
 open func getBunkerAuditLog()throws  -> [FfiBunkerAuditEntry]  {
@@ -1887,6 +1927,18 @@ open func getProjects() -> [Project]  {
 }
     
     /**
+     * Get raw Nostr event JSON by event ID.
+     * Returns a pretty-printed JSON payload matching the TUI raw event inspector.
+     */
+open func getRawEventJson(eventId: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_raw_event_json(self.uniffiClonePointer(),
+        FfiConverterString.lower(eventId),$0
+    )
+})
+}
+    
+    /**
      * Get reports for a project.
      */
 open func getReports(projectId: String) -> [Report]  {
@@ -1960,6 +2012,19 @@ open func getTodayRuntimeMs() -> UInt64  {
 open func `init`() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_init(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Check if a nudge or skill is bookmarked by the current user.
+     *
+     * Returns `false` if not logged in or the item is not bookmarked.
+     */
+open func isBookmarked(itemId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_is_bookmarked(self.uniffiClonePointer(),
+        FfiConverterString.lower(itemId),$0
     )
 })
 }
@@ -2370,6 +2435,20 @@ open func stopBunker()throws   {try rustCallWithError(FfiConverterTypeTenexError
     uniffi_tenex_core_fn_method_tenexcore_stop_bunker(self.uniffiClonePointer(),$0
     )
 }
+}
+    
+    /**
+     * Toggle bookmark status for a nudge or skill.
+     *
+     * Performs an optimistic local update, publishes a kind:14202 event, and returns
+     * the updated list of bookmarked IDs.
+     */
+open func toggleBookmark(itemId: String)throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_toggle_bookmark(self.uniffiClonePointer(),
+        FfiConverterString.lower(itemId),$0
+    )
+})
 }
     
     /**
@@ -7873,6 +7952,10 @@ public struct Thread {
      */
     public var summary: String?
     /**
+     * Hashtags from kind:513 metadata (repeated t-tags)
+     */
+    public var hashtags: [String]
+    /**
      * Parent conversation ID from "delegation" tag (for hierarchical nesting)
      */
     public var parentConversationId: String?
@@ -7910,6 +7993,9 @@ public struct Thread {
          * Summary from kind:513 metadata (brief description of the conversation)
          */summary: String?, 
         /**
+         * Hashtags from kind:513 metadata (repeated t-tags)
+         */hashtags: [String], 
+        /**
          * Parent conversation ID from "delegation" tag (for hierarchical nesting)
          */parentConversationId: String?, 
         /**
@@ -7930,6 +8016,7 @@ public struct Thread {
         self.statusLabel = statusLabel
         self.statusCurrentActivity = statusCurrentActivity
         self.summary = summary
+        self.hashtags = hashtags
         self.parentConversationId = parentConversationId
         self.pTags = pTags
         self.askEvent = askEvent
@@ -7971,6 +8058,9 @@ extension Thread: Equatable, Hashable {
         if lhs.summary != rhs.summary {
             return false
         }
+        if lhs.hashtags != rhs.hashtags {
+            return false
+        }
         if lhs.parentConversationId != rhs.parentConversationId {
             return false
         }
@@ -7996,6 +8086,7 @@ extension Thread: Equatable, Hashable {
         hasher.combine(statusLabel)
         hasher.combine(statusCurrentActivity)
         hasher.combine(summary)
+        hasher.combine(hashtags)
         hasher.combine(parentConversationId)
         hasher.combine(pTags)
         hasher.combine(askEvent)
@@ -8021,6 +8112,7 @@ public struct FfiConverterTypeThread: FfiConverterRustBuffer {
                 statusLabel: FfiConverterOptionString.read(from: &buf), 
                 statusCurrentActivity: FfiConverterOptionString.read(from: &buf), 
                 summary: FfiConverterOptionString.read(from: &buf), 
+                hashtags: FfiConverterSequenceString.read(from: &buf), 
                 parentConversationId: FfiConverterOptionString.read(from: &buf), 
                 pTags: FfiConverterSequenceString.read(from: &buf), 
                 askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf), 
@@ -8038,6 +8130,7 @@ public struct FfiConverterTypeThread: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.statusLabel, into: &buf)
         FfiConverterOptionString.write(value.statusCurrentActivity, into: &buf)
         FfiConverterOptionString.write(value.summary, into: &buf)
+        FfiConverterSequenceString.write(value.hashtags, into: &buf)
         FfiConverterOptionString.write(value.parentConversationId, into: &buf)
         FfiConverterSequenceString.write(value.pTags, into: &buf)
         FfiConverterOptionTypeAskEvent.write(value.askEvent, into: &buf)
@@ -8513,6 +8606,11 @@ public enum DataChangeType {
      */
     case bunkerSignRequest(request: FfiBunkerSignRequest
     )
+    /**
+     * Bookmark list changed (user bookmarked/unbookmarked a nudge or skill, kind:14202)
+     */
+    case bookmarkListChanged(bookmarkedIds: [String]
+    )
 }
 
 
@@ -8568,6 +8666,9 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case 14: return .general
         
         case 15: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
+        )
+        
+        case 16: return .bookmarkListChanged(bookmarkedIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -8655,6 +8756,11 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case let .bunkerSignRequest(request):
             writeInt(&buf, Int32(15))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
+            
+        
+        case let .bookmarkListChanged(bookmarkedIds):
+            writeInt(&buf, Int32(16))
+            FfiConverterSequenceString.write(bookmarkedIds, into: &buf)
             
         }
     }
@@ -10283,6 +10389,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_backend_trust_snapshot() != 11709) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_bookmarked_ids() != 56291) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_bunker_audit_log() != 42223) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -10343,6 +10452,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 30921) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_raw_event_json() != 42462) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_reports() != 65463) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -10359,6 +10471,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_bookmarked() != 54784) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_conversation_archived() != 25908) {
@@ -10452,6 +10567,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_stop_bunker() != 36083) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_toggle_bookmark() != 64019) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_toggle_conversation_archived() != 43672) {
