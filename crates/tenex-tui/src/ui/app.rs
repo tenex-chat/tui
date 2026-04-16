@@ -1710,27 +1710,27 @@ impl App {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
                 }
                 DataChange::BackendHeartbeat { backend_pubkey } => {
-                    let ds = self.data_store.borrow();
-                    let is_blocked = ds.trust.is_blocked(&backend_pubkey);
-                    let is_approved = ds.trust.is_approved(&backend_pubkey);
-                    drop(ds);
+                    let is_blocked = self.data_store.borrow().trust.is_blocked(&backend_pubkey);
                     if is_blocked {
-                        // Blocked — ignore heartbeat
-                    } else if is_approved {
-                        // Already approved locally but still heartbeating — the
-                        // backend isn't in the relay's 14199 whitelist yet.
-                        // Publish the 14199 once so the relay grants full access.
-                        if !self.whitelisted_backends.contains(&backend_pubkey) {
-                            if let Some(ref handle) = self.core_handle {
-                                let _ = handle.send(NostrCommand::WhitelistBackend {
-                                    backend_pubkey: backend_pubkey.clone(),
-                                });
-                            }
-                            self.whitelisted_backends.insert(backend_pubkey);
+                        continue;
+                    }
+
+                    // A heartbeat means the backend is NOT in the owner's
+                    // 14199 on the relay.  The 14199 is the authoritative
+                    // whitelist — local approval state is secondary.
+                    // Publish a 14199 once per session to fix the relay side.
+                    if !self.whitelisted_backends.contains(&backend_pubkey) {
+                        if let Some(ref handle) = self.core_handle {
+                            let _ = handle.send(NostrCommand::WhitelistBackend {
+                                backend_pubkey: backend_pubkey.clone(),
+                            });
                         }
-                    } else if !self.modal_state.is_none() {
-                        // Another modal is open — will catch next heartbeat
-                    } else {
+                        self.whitelisted_backends.insert(backend_pubkey.clone());
+                    }
+
+                    // If not locally approved yet, show the approval modal
+                    let is_approved = self.data_store.borrow().trust.is_approved(&backend_pubkey);
+                    if !is_approved && self.modal_state.is_none() {
                         self.show_backend_approval_modal(backend_pubkey);
                     }
                 }
