@@ -36,6 +36,7 @@ pub struct AppDataStore {
     // events from reviving deleted projects when events arrive out of order.
     project_tombstones: HashMap<String, u64>,
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
+    pub project_statuses_by_backend: HashMap<String, HashMap<String, ProjectStatus>>, // project a_tag -> backend pubkey -> status
     pub installed_agents_by_backend: HashMap<String, Vec<InstalledAgent>>,
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
@@ -88,6 +89,7 @@ impl AppDataStore {
             projects: Vec::new(),
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
+            project_statuses_by_backend: HashMap::new(),
             installed_agents_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
@@ -125,6 +127,7 @@ impl AppDataStore {
             projects: Vec::new(),
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
+            project_statuses_by_backend: HashMap::new(),
             installed_agents_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
@@ -211,6 +214,7 @@ impl AppDataStore {
         self.projects.clear();
         self.project_tombstones.clear();
         self.project_statuses.clear();
+        self.project_statuses_by_backend.clear();
         self.installed_agents_by_backend.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
@@ -1535,31 +1539,93 @@ impl AppDataStore {
         }
     }
 
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    fn recompute_project_status(&mut self, project_coordinate: &str) -> Option<ProjectStatus> {
+        let (aggregate, remove_project_entry) = if let Some(statuses_by_backend) =
+            self.project_statuses_by_backend.get_mut(project_coordinate)
+        {
+            statuses_by_backend.retain(|_, status| status.is_online());
+            let aggregate = ProjectStatus::aggregate(
+                project_coordinate.to_string(),
+                statuses_by_backend.values(),
+            );
+            (aggregate, statuses_by_backend.is_empty())
+        } else {
+            (None, false)
+        };
+
+        if remove_project_entry {
+            self.project_statuses_by_backend.remove(project_coordinate);
+        }
+
+        if let Some(aggregate) = aggregate {
+            self.project_statuses
+                .insert(project_coordinate.to_string(), aggregate.clone());
+            Some(aggregate)
+        } else {
+            self.project_statuses.remove(project_coordinate);
+            None
+        }
+    }
+
+    fn upsert_project_status(&mut self, mut status: ProjectStatus) -> Option<ProjectStatus> {
+        let project_coordinate = status.project_coordinate.clone();
+        let backend_pubkey = status.backend_pubkey.clone();
+        status.last_seen_at = Self::now_secs();
+
+        let statuses_by_backend = self
+            .project_statuses_by_backend
+            .entry(project_coordinate.clone())
+            .or_default();
+
+        if statuses_by_backend
+            .get(&backend_pubkey)
+            .map(|existing| status.created_at < existing.created_at)
+            .unwrap_or(false)
+        {
+            return None;
+        }
+
+        statuses_by_backend.insert(backend_pubkey, status);
+        self.recompute_project_status(&project_coordinate)
+    }
+
+    fn remove_project_statuses_for_backend(
+        &mut self,
+        backend_pubkey: &str,
+    ) -> Vec<(String, Option<ProjectStatus>)> {
+        let mut affected_projects: Vec<String> = Vec::new();
+        for (project_coordinate, statuses_by_backend) in &mut self.project_statuses_by_backend {
+            if statuses_by_backend.remove(backend_pubkey).is_some() {
+                affected_projects.push(project_coordinate.clone());
+            }
+        }
+
+        let mut updates = Vec::new();
+        for project_coordinate in affected_projects {
+            let aggregate = self.recompute_project_status(&project_coordinate);
+            updates.push((project_coordinate, aggregate));
+        }
+        updates
+    }
+
     /// Handle a project status event from pre-parsed Value (kind:24010)
     fn handle_project_status_event_value(&mut self, event: &serde_json::Value) {
         if let Some(status) = ProjectStatus::from_value(event) {
             let backend_pubkey = status.backend_pubkey.clone();
-            let should_update = self
-                .project_statuses
-                .get(&status.project_coordinate)
-                .map(|existing| status.created_at >= existing.created_at)
-                .unwrap_or(true);
-            let mut status = status;
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            status.last_seen_at = now;
 
             if self.trust.is_blocked(&backend_pubkey) {
                 return;
             }
 
             if self.trust.is_approved(&backend_pubkey) {
-                if should_update {
-                    self.project_statuses
-                        .insert(status.project_coordinate.clone(), status);
-                }
+                self.upsert_project_status(status);
                 return;
             }
 
@@ -1591,7 +1657,7 @@ impl AppDataStore {
     }
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
-        let mut status = ProjectStatus::from_note(note)?;
+        let status = ProjectStatus::from_note(note)?;
         let backend_pubkey = status.backend_pubkey.clone();
 
         if self.trust.is_blocked(&backend_pubkey) {
@@ -1599,23 +1665,9 @@ impl AppDataStore {
         }
 
         if self.trust.is_approved(&backend_pubkey) {
-            let should_update = self
-                .project_statuses
-                .get(&status.project_coordinate)
-                .map(|existing| status.created_at >= existing.created_at)
-                .unwrap_or(true);
-            if should_update {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                status.last_seen_at = now;
-                let event = crate::events::CoreEvent::ProjectStatus(status.clone());
-                self.project_statuses
-                    .insert(status.project_coordinate.clone(), status);
-                return Some(event);
-            }
-            return None;
+            return self
+                .upsert_project_status(status)
+                .map(crate::events::CoreEvent::ProjectStatus);
         }
 
         // Unknown backend - check if already pending
@@ -1631,14 +1683,10 @@ impl AppDataStore {
         if already_pending {
             None
         } else {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
             let pending = PendingBackendApproval {
                 backend_pubkey,
                 project_a_tag: status.project_coordinate.clone(),
-                first_seen: now,
+                first_seen: Self::now_secs(),
                 status,
             };
             Some(crate::events::CoreEvent::PendingBackendApproval(pending))
@@ -2961,19 +3009,14 @@ impl AppDataStore {
     pub fn add_approved_backend(&mut self, pubkey: &str) {
         let pending_statuses = self.trust.add_approved(pubkey);
         // Cross-cutting: apply pending statuses to project_statuses
-        for mut status in pending_statuses {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            status.last_seen_at = now;
-            self.project_statuses
-                .insert(status.project_coordinate.clone(), status);
+        for status in pending_statuses {
+            self.upsert_project_status(status);
         }
     }
 
-    pub fn add_blocked_backend(&mut self, pubkey: &str) {
+    pub fn add_blocked_backend(&mut self, pubkey: &str) -> Vec<(String, Option<ProjectStatus>)> {
         self.trust.add_blocked(pubkey);
+        self.remove_project_statuses_for_backend(pubkey)
     }
 
     pub fn drain_pending_backend_approvals(&mut self) -> Vec<PendingBackendApproval> {
@@ -2984,14 +3027,7 @@ impl AppDataStore {
         let mut approved_pubkeys: HashSet<String> = HashSet::new();
 
         for approval in pending {
-            let mut status = approval.status;
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            status.last_seen_at = now;
-            self.project_statuses
-                .insert(status.project_coordinate.clone(), status);
+            self.upsert_project_status(approval.status);
             approved_pubkeys.insert(approval.backend_pubkey);
         }
 
@@ -3394,6 +3430,7 @@ mod tests {
             agents: vec![ProjectAgent {
                 pubkey: pubkey.to_string(),
                 name: slug.to_string(),
+                backend_pubkey: "backend".to_string(),
                 is_pm: true,
                 model: None,
                 tools: vec![],
@@ -3483,6 +3520,104 @@ mod tests {
 
         // Should not affect any state
         assert!(!store.operations.has_active_agents());
+    }
+
+    /// Test handle_status_event_json aggregates 24010 status across approved backends
+    #[test]
+    fn test_handle_status_event_json_aggregates_project_status_by_backend() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_approved_backend("backend1");
+        store.add_approved_backend("backend2");
+
+        let json1 = r#"{
+            "kind": 24010,
+            "id": "status1",
+            "pubkey": "backend1",
+            "created_at": 1000,
+            "tags": [
+                ["a", "31933:user:project"],
+                ["agent", "agentpk1", "agent1", "pm"],
+                ["model", "model-a", "agent1"],
+                ["tool", "tool-a", "agent1"],
+                ["skill", "skill-a", "agent1"],
+                ["branch", "main"]
+            ]
+        }"#;
+        let json2 = r#"{
+            "kind": 24010,
+            "id": "status2",
+            "pubkey": "backend2",
+            "created_at": 1001,
+            "tags": [
+                ["a", "31933:user:project"],
+                ["agent", "agentpk2", "agent2"],
+                ["model", "model-b", "agent2"],
+                ["tool", "tool-b", "agent2"],
+                ["skill", "skill-b", "agent2"],
+                ["mcp", "mcp-b", "agent2"],
+                ["branch", "feature"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json1);
+        store.handle_status_event_json(json2);
+
+        let status = store
+            .project_statuses
+            .get("31933:user:project")
+            .expect("expected aggregated status");
+        assert_eq!(status.agents.len(), 2);
+        assert_eq!(
+            status
+                .agents
+                .iter()
+                .find(|agent| agent.name == "agent1")
+                .unwrap()
+                .backend_pubkey,
+            "backend1"
+        );
+        assert_eq!(
+            status
+                .agents
+                .iter()
+                .find(|agent| agent.name == "agent2")
+                .unwrap()
+                .backend_pubkey,
+            "backend2"
+        );
+        assert!(status.models().contains(&"model-a"));
+        assert!(status.models().contains(&"model-b"));
+        assert!(status.all_tools().contains(&"tool-a"));
+        assert!(status.all_tools().contains(&"tool-b"));
+        assert!(status.all_skills().contains(&"skill-a"));
+        assert!(status.all_skills().contains(&"skill-b"));
+        assert!(status.all_mcp_servers().contains(&"mcp-b"));
+        assert_eq!(
+            store
+                .project_statuses_by_backend
+                .get("31933:user:project")
+                .map(|statuses| statuses.len()),
+            Some(2)
+        );
+
+        let updates = store.add_blocked_backend("backend1");
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].1.is_some());
+
+        let status = store
+            .project_statuses
+            .get("31933:user:project")
+            .expect("expected backend2 status to remain");
+        assert_eq!(status.agents.len(), 1);
+        assert_eq!(status.agents[0].name, "agent2");
+
+        let updates = store.add_blocked_backend("backend2");
+        assert_eq!(updates.len(), 1);
+        assert!(updates[0].1.is_none());
+        assert!(!store.project_statuses.contains_key("31933:user:project"));
     }
 
     /// Test upsert_operations_status updates agent tracking with deduplication

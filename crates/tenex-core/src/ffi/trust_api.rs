@@ -69,9 +69,33 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        store.add_blocked_backend(&pubkey);
+        let updates = store.add_blocked_backend(&pubkey);
+        let deltas: Vec<DataChangeType> = updates
+            .into_iter()
+            .map(|(project_a_tag, status)| {
+                let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
+                let (is_online, online_agents) = status
+                    .filter(|status| status.is_online())
+                    .map(|status| (true, status.agents))
+                    .unwrap_or((false, Vec::new()));
+
+                DataChangeType::ProjectStatusChanged {
+                    project_id,
+                    project_a_tag,
+                    is_online,
+                    online_agents,
+                }
+            })
+            .collect();
         drop(store_guard);
         self.persist_current_trusted_backends()?;
+        if let Ok(callback_guard) = self.event_callback.read() {
+            if let Some(callback) = callback_guard.as_ref() {
+                for delta in &deltas {
+                    callback.on_data_changed(delta.clone());
+                }
+            }
+        }
         Ok(())
     }
 

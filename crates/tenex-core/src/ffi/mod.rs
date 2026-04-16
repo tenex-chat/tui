@@ -753,7 +753,9 @@ fn process_data_changes_with_deltas(
                             if let Some(status) = ProjectStatus::from_value(&event) {
                                 let project_a_tag = status.project_coordinate.clone();
 
-                                if store.project_statuses.contains_key(&project_a_tag) {
+                                if store.trust.is_approved(&status.backend_pubkey)
+                                    && store.project_statuses.contains_key(&project_a_tag)
+                                {
                                     let project_id = project_id_from_a_tag(store, &project_a_tag)
                                         .unwrap_or_default();
                                     let is_online = store.is_project_online(&project_a_tag);
@@ -768,7 +770,9 @@ fn process_data_changes_with_deltas(
                                         is_online,
                                         online_agents,
                                     });
-                                } else if !pending_before {
+                                } else if !store.trust.is_blocked(&status.backend_pubkey)
+                                    && !pending_before
+                                {
                                     deltas.push(DataChangeType::PendingBackendApproval {
                                         backend_pubkey: status.backend_pubkey.clone(),
                                         project_a_tag,

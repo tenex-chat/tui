@@ -9,6 +9,7 @@ use crate::constants::STALENESS_THRESHOLD_SECS;
 pub struct ProjectAgent {
     pub pubkey: String,
     pub name: String,
+    pub backend_pubkey: String,
     pub is_pm: bool,
     pub model: Option<String>,
     pub tools: Vec<String>,
@@ -40,6 +41,13 @@ pub struct ProjectStatus {
 }
 
 impl ProjectStatus {
+    fn agent_aggregation_key(agent: &ProjectAgent) -> String {
+        if !agent.name.is_empty() {
+            return agent.name.clone();
+        }
+        agent.pubkey.clone()
+    }
+
     /// Create from JSON string (for ephemeral events received via DataChange channel)
     pub fn from_json(json: &str) -> Option<Self> {
         let event: serde_json::Value = serde_json::from_str(json).ok()?;
@@ -128,6 +136,7 @@ impl ProjectStatus {
                         let agent = ProjectAgent {
                             pubkey: tag[1].clone(),
                             name: tag[2].clone(),
+                            backend_pubkey: backend_pubkey.clone(),
                             is_pm,
                             model: None,
                             tools: Vec::new(),
@@ -325,6 +334,91 @@ impl ProjectStatus {
     pub fn pm_agent(&self) -> Option<&ProjectAgent> {
         self.agents.iter().find(|a| a.is_pm)
     }
+
+    /// Aggregate per-backend project statuses into one project-level view.
+    pub fn aggregate<'a, I>(project_coordinate: String, statuses: I) -> Option<Self>
+    where
+        I: IntoIterator<Item = &'a ProjectStatus>,
+    {
+        let mut agent_map: HashMap<String, (u64, u64, ProjectAgent)> = HashMap::new();
+        let mut branches: Vec<String> = Vec::new();
+        let mut all_models: Vec<String> = Vec::new();
+        let mut all_tools: Vec<String> = Vec::new();
+        let mut all_skills: Vec<String> = Vec::new();
+        let mut all_mcp_servers: Vec<String> = Vec::new();
+        let mut newest_backend_pubkey = String::new();
+        let mut newest_created_at = 0;
+        let mut newest_last_seen_at = 0;
+        let mut saw_status = false;
+
+        for status in statuses {
+            if !status.is_online() {
+                continue;
+            }
+
+            saw_status = true;
+            if status.created_at >= newest_created_at {
+                newest_created_at = status.created_at;
+                newest_backend_pubkey = status.backend_pubkey.clone();
+            }
+            newest_last_seen_at = newest_last_seen_at.max(status.last_seen_at);
+
+            branches.extend(status.branches.iter().cloned());
+            all_models.extend(status.all_models.iter().cloned());
+            all_tools.extend(status.all_tools.iter().cloned());
+            all_skills.extend(status.all_skills.iter().cloned());
+            all_mcp_servers.extend(status.all_mcp_servers.iter().cloned());
+
+            for agent in &status.agents {
+                let key = Self::agent_aggregation_key(agent);
+                let should_replace =
+                    agent_map
+                        .get(&key)
+                        .map_or(true, |(last_seen_at, created_at, _)| {
+                            status.last_seen_at > *last_seen_at
+                                || (status.last_seen_at == *last_seen_at
+                                    && status.created_at >= *created_at)
+                        });
+                if should_replace {
+                    let mut agent = agent.clone();
+                    agent.backend_pubkey = status.backend_pubkey.clone();
+                    agent_map.insert(key, (status.last_seen_at, status.created_at, agent));
+                }
+            }
+        }
+
+        if !saw_status {
+            return None;
+        }
+
+        branches.sort();
+        branches.dedup();
+        all_models.sort();
+        all_models.dedup();
+        all_tools.sort();
+        all_tools.dedup();
+        all_skills.sort();
+        all_skills.dedup();
+        all_mcp_servers.sort();
+        all_mcp_servers.dedup();
+
+        let mut agents: Vec<ProjectAgent> =
+            agent_map.into_values().map(|(_, _, agent)| agent).collect();
+        agents.sort_by(|a, b| a.name.cmp(&b.name));
+
+        Some(Self {
+            project_coordinate,
+            agents,
+            branches,
+            all_models,
+            all_tools,
+            all_skills,
+            all_mcp_servers,
+            created_at: newest_created_at,
+            backend_pubkey: newest_backend_pubkey,
+            last_seen_at: newest_last_seen_at,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -420,6 +514,66 @@ mod tests {
         assert!(all_tools.contains(&"Read".to_string()), "Missing Read");
         assert!(all_tools.contains(&"Write".to_string()), "Missing Write");
         assert!(all_tools.contains(&"Bash".to_string()), "Missing Bash");
+    }
+
+    #[test]
+    fn test_aggregate_deduplicates_agents_by_slug_and_prefers_fresher_backend() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let older_status = ProjectStatus {
+            project_coordinate: "31933:user:project".to_string(),
+            agents: vec![ProjectAgent {
+                pubkey: "".to_string(),
+                name: "agent1".to_string(),
+                backend_pubkey: "backend-old".to_string(),
+                is_pm: false,
+                model: None,
+                tools: Vec::new(),
+                skills: Vec::new(),
+                mcp_servers: Vec::new(),
+            }],
+            branches: Vec::new(),
+            all_models: Vec::new(),
+            all_tools: Vec::new(),
+            all_skills: Vec::new(),
+            all_mcp_servers: Vec::new(),
+            created_at: now,
+            backend_pubkey: "backend-old".to_string(),
+            last_seen_at: now.saturating_sub(5),
+        };
+        let fresher_status = ProjectStatus {
+            project_coordinate: "31933:user:project".to_string(),
+            agents: vec![ProjectAgent {
+                pubkey: "agent1-pubkey".to_string(),
+                name: "agent1".to_string(),
+                backend_pubkey: "backend-fresh".to_string(),
+                is_pm: false,
+                model: None,
+                tools: Vec::new(),
+                skills: Vec::new(),
+                mcp_servers: Vec::new(),
+            }],
+            branches: Vec::new(),
+            all_models: Vec::new(),
+            all_tools: Vec::new(),
+            all_skills: Vec::new(),
+            all_mcp_servers: Vec::new(),
+            created_at: now.saturating_sub(10),
+            backend_pubkey: "backend-fresh".to_string(),
+            last_seen_at: now,
+        };
+
+        let aggregate = ProjectStatus::aggregate(
+            "31933:user:project".to_string(),
+            [&older_status, &fresher_status],
+        )
+        .expect("expected aggregate status");
+
+        assert_eq!(aggregate.agents.len(), 1);
+        assert_eq!(aggregate.agents[0].pubkey, "agent1-pubkey");
+        assert_eq!(aggregate.agents[0].backend_pubkey, "backend-fresh");
     }
 
     #[test]
