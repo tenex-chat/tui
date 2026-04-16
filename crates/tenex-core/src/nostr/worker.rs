@@ -2252,7 +2252,7 @@ impl NostrWorker {
 
                                     // Backend heartbeat (24012) — extract pubkey and forward
                                     if kind == KIND_BACKEND_HEARTBEAT {
-                                        let backend_pubkey = event.author().to_hex();
+                                        let backend_pubkey = event.pubkey.to_hex();
                                         if let Err(e) = data_tx.send(DataChange::BackendHeartbeat { backend_pubkey }) {
                                             debug_log(&format!(
                                                 "Failed to send backend heartbeat data change: {}",

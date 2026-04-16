@@ -845,11 +845,11 @@ fn process_data_changes_with_deltas(
                 });
             }
             DataChange::BackendHeartbeat { backend_pubkey } => {
-                if !store.trust.is_blocked(&backend_pubkey)
-                    && !store.trust.is_approved(&backend_pubkey)
+                if !store.trust.is_blocked(backend_pubkey)
+                    && !store.trust.is_approved(backend_pubkey)
                 {
                     deltas.push(DataChangeType::PendingBackendApproval {
-                        backend_pubkey,
+                        backend_pubkey: backend_pubkey.clone(),
                         project_a_tag: String::new(),
                     });
                 }
