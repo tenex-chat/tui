@@ -1,0 +1,6 @@
+[     165ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ http://localhost:7682/:0
+[   46693ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://localhost:7682/token:0
+[   46693ms] [ERROR] [ttyd] fetch http://localhost:7682/token:  TypeError: Failed to fetch
+    at p.refreshToken (http://localhost:7682/:2:580167)
+    at p.onSocketClose (http://localhost:7682/:2:583243) @ http://localhost:7682/:1
+[   46695ms] [ERROR] WebSocket connection to 'ws://localhost:7682/ws' failed: Error in connection establishment: net::ERR_CONNECTION_REFUSED @ http://localhost:7682/:1

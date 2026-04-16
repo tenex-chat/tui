@@ -26,8 +26,7 @@ let project = Project(
                 "UIBackgroundModes": ["audio", "fetch", "remote-notification"]
             ]),
             sources: [
-                .glob("Sources/TenexMVP/**/*.swift", excluding: ["Sources/TenexMVP/TenexCoreFFI/tenex_core.swift"]),
-                "../swift-bindings/tenex_core.swift"
+                .glob("Sources/TenexMVP/**/*.swift")
             ],
             resources: ["Sources/TenexMVP/Resources/**"],
             scripts: [
@@ -88,6 +87,24 @@ let project = Project(
                         "-Xfrontend", "-disable-autolink-framework", "-Xfrontend", "UIUtilities",
                         "-Xfrontend", "-disable-autolink-framework", "-Xfrontend", "SwiftUICore"
                     ]
+                ]
+            )
+        ),
+        .target(
+            name: "TenexMVPUITests",
+            destinations: [.iPhone, .iPad],
+            product: .uiTests,
+            bundleId: "com.tenex.mvp.uitests",
+            deploymentTargets: .iOS("26.0"),
+            infoPlist: .default,
+            sources: ["Tests/UITests/**/*.swift"],
+            dependencies: [
+                .target(name: "TenexMVP")
+            ],
+            settings: .settings(
+                base: [
+                    "DEVELOPMENT_TEAM": "456SHKPP26",
+                    "CODE_SIGN_STYLE": "Automatic"
                 ]
             )
         )
