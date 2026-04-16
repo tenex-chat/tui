@@ -1895,35 +1895,44 @@ impl App {
         };
         let store = self.data_store.borrow();
 
-        // Prefer kind:24010 agents (have model/tools/skills)
+        // Collect online agents from kind:24010 status, keyed by pubkey
+        let mut agents: std::collections::HashMap<String, crate::models::ProjectAgent> =
+            std::collections::HashMap::new();
         if let Some(status) = store.get_project_status(&project.a_tag()) {
-            if !status.agents.is_empty() {
-                return status.agents.clone();
+            for agent in &status.agents {
+                agents.insert(agent.pubkey.clone(), agent.clone());
             }
         }
 
-        // Fall back to kind:31933 agent pubkeys with kind:0 names
+        // Merge in agents from kind:31933 definition that aren't online
         let fallback_backend_pubkey = store
             .get_project_status(&project.a_tag())
             .map(|status| status.backend_pubkey.clone())
             .unwrap_or_default();
-        project
-            .agent_pubkeys
-            .iter()
-            .filter_map(|pubkey| {
-                let name = store.get_profile_name_if_known(pubkey)?;
-                Some(crate::models::ProjectAgent {
+        for pubkey in &project.agent_pubkeys {
+            if agents.contains_key(pubkey) {
+                continue;
+            }
+            let name = store
+                .get_profile_name_if_known(pubkey)
+                .unwrap_or_else(|| pubkey[..8.min(pubkey.len())].to_string());
+            agents.insert(
+                pubkey.clone(),
+                crate::models::ProjectAgent {
                     pubkey: pubkey.clone(),
                     name,
                     backend_pubkey: fallback_backend_pubkey.clone(),
                     is_pm: false,
+                    is_online: false,
                     model: None,
                     tools: vec![],
                     skills: vec![],
                     mcp_servers: vec![],
-                })
-            })
-            .collect()
+                },
+            );
+        }
+
+        agents.into_values().collect()
     }
 
     /// Get the most recent agent that published a message in the current conversation.
@@ -2017,10 +2026,11 @@ impl App {
             .into_iter()
             .filter_map(|a| fuzzy_score(&a.name, filter).map(|score| (a, score)))
             .collect();
-        // Sort by PM first, then score (lower = better match), then alphabetically for ties.
+        // Sort: online before offline, PM first, then score, then alphabetically.
         agents_with_scores.sort_by(|(a, score_a), (b, score_b)| {
-            b.is_pm
-                .cmp(&a.is_pm)
+            b.is_online
+                .cmp(&a.is_online)
+                .then_with(|| b.is_pm.cmp(&a.is_pm))
                 .then_with(|| score_a.cmp(score_b))
                 .then_with(|| a.name.cmp(&b.name))
         });

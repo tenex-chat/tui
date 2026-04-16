@@ -154,6 +154,7 @@ fn execute_project_action(
                             name,
                             backend_pubkey: backend_pubkey.unwrap_or_default(),
                             is_pm: true,
+                            is_online: true,
                             model: None,
                             tools: Vec::new(),
                             skills: Vec::new(),

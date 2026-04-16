@@ -852,11 +852,16 @@ fn render_agent_config_modal(
                     .fg(Color::Black)
                     .bg(theme::ACCENT_WARNING)
                     .add_modifier(Modifier::BOLD)
-            } else {
+            } else if agent.is_online {
                 Style::default().fg(theme::TEXT_PRIMARY)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED)
             };
             let pm_prefix = if agent.is_pm { "[PM] " } else { "" };
-            let available_name_width = content_width.saturating_sub(pm_prefix.chars().count());
+            let offline_suffix = if !agent.is_online { " (offline)" } else { "" };
+            let available_name_width = content_width
+                .saturating_sub(pm_prefix.chars().count())
+                .saturating_sub(offline_suffix.chars().count());
             let name_text = truncate_with_ellipsis(&agent.name, available_name_width.max(1));
             let pm_style = if is_selected {
                 Style::default()
@@ -868,10 +873,18 @@ fn render_agent_config_modal(
                     .fg(theme::ACCENT_WARNING)
                     .add_modifier(Modifier::BOLD)
             };
+            let offline_style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(theme::ACCENT_WARNING)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED)
+            };
 
             let line = Line::from(vec![
                 Span::styled(pm_prefix.to_string(), pm_style),
                 Span::styled(name_text, name_style),
+                Span::styled(offline_suffix.to_string(), offline_style),
             ]);
             f.render_widget(Paragraph::new(line), row_area);
         }
