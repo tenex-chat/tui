@@ -1708,10 +1708,18 @@ impl App {
                 }
                 DataChange::BackendHeartbeat { backend_pubkey } => {
                     let ds = self.data_store.borrow();
-                    let dominated = ds.trust.is_blocked(&backend_pubkey)
-                        || ds.trust.is_approved(&backend_pubkey);
+                    let is_blocked = ds.trust.is_blocked(&backend_pubkey);
+                    let is_approved = ds.trust.is_approved(&backend_pubkey);
                     drop(ds);
-                    if !dominated && self.modal_state.is_none() {
+                    let short_pk = &backend_pubkey[..8.min(backend_pubkey.len())];
+                    if is_blocked {
+                        eprintln!("[TENEX] Heartbeat from blocked backend {}", short_pk);
+                    } else if is_approved {
+                        eprintln!("[TENEX] Heartbeat from already-approved backend {}", short_pk);
+                    } else if !self.modal_state.is_none() {
+                        eprintln!("[TENEX] Heartbeat from {} but modal already open", short_pk);
+                    } else {
+                        eprintln!("[TENEX] Showing approval modal for backend {}", short_pk);
                         self.show_backend_approval_modal(backend_pubkey);
                     }
                 }
