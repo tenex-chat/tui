@@ -1,90 +1,105 @@
 import SwiftUI
 
-// MARK: - Project Detail Sheet
+// MARK: - Project Detail Content (Shared)
 
+/// Shared content view used by both ProjectDetailSheet and ProjectDetailView
+private struct ProjectDetailContent: View {
+    let project: ProjectInfo
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                // Header
+                VStack(alignment: .leading, spacing: 12) {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(deterministicColor(for: project.id).gradient)
+                        .frame(width: 80, height: 80)
+                        .overlay {
+                            Image(systemName: "folder.fill")
+                                .foregroundStyle(.white)
+                                .font(.system(.title))
+                        }
+
+                    Text(project.title)
+                        .font(.largeTitle)
+                        .fontWeight(.bold)
+
+                    Text(project.id)
+                        .font(.system(.subheadline, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                // Description
+                if let description = project.description {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Description")
+                            .font(.headline)
+
+                        Text(description)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer()
+            }
+            .padding()
+        }
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Project Detail Sheet (Modal)
+
+/// Modal sheet presentation with its own NavigationStack and Done button
 struct ProjectDetailSheet: View {
     let project: ProjectInfo
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Header
-                    VStack(alignment: .leading, spacing: 12) {
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(Color.blue.gradient)
-                            .frame(width: 80, height: 80)
-                            .overlay {
-                                Image(systemName: "folder.fill")
-                                    .foregroundStyle(.white)
-                                    .font(.system(.title))
-                            }
-
-                        Text(project.title)
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-
-                        Text(project.id)
-                            .font(.system(.subheadline, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Divider()
-
-                    // Description
-                    if let description = project.description {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Description")
-                                .font(.headline)
-
-                            Text(description)
-                                .font(.body)
-                                .foregroundStyle(.secondary)
+            ProjectDetailContent(project: project)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") {
+                            dismiss()
                         }
                     }
-
-                    Divider()
-
-                    // Coming Soon
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Conversations")
-                            .font(.headline)
-
-                        HStack {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .font(.title2)
-                                .foregroundStyle(.secondary)
-
-                            Text("Conversations coming soon...")
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.systemGray6)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-
-                    Spacer()
                 }
-                .padding()
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
         }
     }
 }
 
-#Preview {
+// MARK: - Project Detail View (Navigation Push)
+
+/// Navigation destination view that inherits parent NavigationStack
+struct ProjectDetailView: View {
+    let project: ProjectInfo
+
+    var body: some View {
+        ProjectDetailContent(project: project)
+            .navigationTitle(project.title)
+    }
+}
+
+// MARK: - Previews
+
+#Preview("Sheet") {
     ProjectDetailSheet(project: ProjectInfo(
         id: "test-project-id",
         title: "Test Project",
         description: "A test project for preview"
     ))
+}
+
+#Preview("Navigation Push") {
+    NavigationStack {
+        ProjectDetailView(project: ProjectInfo(
+            id: "test-project-id",
+            title: "Test Project",
+            description: "A test project for preview"
+        ))
+    }
 }

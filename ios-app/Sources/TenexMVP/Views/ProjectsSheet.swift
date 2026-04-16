@@ -124,7 +124,7 @@ private struct ProjectsSheetRow: View {
     @State private var isBooting = false
     @State private var showBootError = false
     @State private var bootError: String?
-    @State private var showProjectDetail = false
+    @State private var navigateToDetail = false
 
     /// Reactive online status from TenexCoreManager
     private var isOnline: Bool {
@@ -156,8 +156,8 @@ private struct ProjectsSheetRow: View {
                 Text(error)
             }
         }
-        .sheet(isPresented: $showProjectDetail) {
-            ProjectDetailSheet(project: project)
+        .navigationDestination(isPresented: $navigateToDetail) {
+            ProjectDetailView(project: project)
         }
     }
 
@@ -165,18 +165,12 @@ private struct ProjectsSheetRow: View {
 
     private var filterToggleZone: some View {
         Button(action: onToggleFilter) {
-            HStack(spacing: 8) {
-                Image(systemName: isFiltered ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(isFiltered ? .blue : .secondary)
-
-                Text("Filter")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Image(systemName: isFiltered ? "checkmark.circle.fill" : "circle")
+                .font(.title2)
+                .foregroundStyle(isFiltered ? .blue : .secondary)
+                .frame(minWidth: 44, minHeight: 44) // Ensure minimum touch target
         }
         .buttonStyle(.plain)
-        .frame(width: 70)
         .accessibilityLabel("Filter by \(project.title)")
         .accessibilityValue(isFiltered ? "On" : "Off")
         .accessibilityHint("Double tap to \(isFiltered ? "remove from" : "add to") conversation filter")
@@ -223,6 +217,28 @@ private struct ProjectsSheetRow: View {
         }
         .buttonStyle(.plain)
         .disabled(isBooting)
+        .accessibilityLabel(mainActionAccessibilityLabel)
+        .accessibilityHint(mainActionAccessibilityHint)
+    }
+
+    private var mainActionAccessibilityLabel: String {
+        if isBooting {
+            return "\(project.title), booting"
+        } else if isOnline {
+            return "\(project.title), online with \(onlineAgentCount) agent\(onlineAgentCount == 1 ? "" : "s")"
+        } else {
+            return "\(project.title), offline"
+        }
+    }
+
+    private var mainActionAccessibilityHint: String {
+        if isBooting {
+            return "Please wait while the project boots"
+        } else if isOnline {
+            return "Double tap to view project details"
+        } else {
+            return "Double tap to boot project"
+        }
     }
 
     private var projectIconView: some View {
@@ -283,7 +299,7 @@ private struct ProjectsSheetRow: View {
 
     private func performMainAction() {
         if isOnline {
-            showProjectDetail = true
+            navigateToDetail = true
         } else {
             bootProject()
         }
