@@ -844,6 +844,16 @@ fn process_data_changes_with_deltas(
                     bookmarked_ids: bookmarked_ids.iter().cloned().collect(),
                 });
             }
+            DataChange::BackendHeartbeat { backend_pubkey } => {
+                if !store.trust.is_blocked(&backend_pubkey)
+                    && !store.trust.is_approved(&backend_pubkey)
+                {
+                    deltas.push(DataChangeType::PendingBackendApproval {
+                        backend_pubkey,
+                        project_a_tag: String::new(),
+                    });
+                }
+            }
         }
     }
 

@@ -1706,6 +1706,15 @@ impl App {
                 DataChange::InstalledAgentList { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
                 }
+                DataChange::BackendHeartbeat { backend_pubkey } => {
+                    let ds = self.data_store.borrow();
+                    let dominated = ds.trust.is_blocked(&backend_pubkey)
+                        || ds.trust.is_approved(&backend_pubkey);
+                    drop(ds);
+                    if !dominated && self.modal_state.is_none() {
+                        self.show_backend_approval_modal(backend_pubkey);
+                    }
+                }
                 DataChange::MCPToolsChanged => {
                     // MCP tools are already updated in the store by the worker
                 }
@@ -4522,10 +4531,18 @@ impl App {
 
     // ===== Backend Trust Methods =====
 
-    /// Approve a backend pubkey (persist to preferences and update data store)
+    /// Approve a backend pubkey (persist to preferences, update data store,
+    /// and publish a kind:14199 event to whitelist the backend on the relay).
     pub fn approve_backend(&mut self, pubkey: &str) {
         self.preferences.borrow_mut().approve_backend(pubkey);
         self.data_store.borrow_mut().add_approved_backend(pubkey);
+
+        // Publish 14199 so the relay whitelists this backend
+        if let Some(ref handle) = self.core_handle {
+            let _ = handle.send(NostrCommand::WhitelistBackend {
+                backend_pubkey: pubkey.to_string(),
+            });
+        }
     }
 
     /// Block a backend pubkey (persist to preferences and update data store)

@@ -37,6 +37,8 @@ const KIND_BOOKMARK_LIST: u16 = 14202;
 const KIND_AGENT_CREATE: u16 = 24001;
 const KIND_PROJECT_STATUS: u16 = 24010;
 const KIND_INSTALLED_AGENT_LIST: u16 = 24011;
+const KIND_BACKEND_HEARTBEAT: u16 = 24012;
+const KIND_AGENT_SNAPSHOT: u16 = 14199;
 const KIND_PROJECT_DRAFT: u16 = 31933;
 const KIND_TEAM_PACK: u16 = 34199;
 const KIND_AGENT_STATUS: u16 = 24133;
@@ -983,6 +985,11 @@ pub enum NostrCommand {
         /// Client identifier for the client tag
         client: Option<String>,
     },
+    /// Publish or update the owner's agent snapshot (kind:14199) to whitelist
+    /// a backend pubkey on the relay. Merges the new pubkey with existing p-tags.
+    WhitelistBackend {
+        backend_pubkey: String,
+    },
     Shutdown,
 }
 
@@ -1001,6 +1008,8 @@ pub enum DataChange {
     ProjectStatus { json: String },
     /// Ephemeral installed agent inventory (kind:24011) - not cached in nostrdb
     InstalledAgentList { json: String },
+    /// Ephemeral backend heartbeat (kind:24012) - backend requesting whitelist
+    BackendHeartbeat { backend_pubkey: String },
     /// MCP tools changed (kind:4200 events)
     MCPToolsChanged,
     /// NIP-46 bunker signing request requiring user approval
@@ -1673,6 +1682,17 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to register APNs token: {}", e);
                         }
                     }
+                    NostrCommand::WhitelistBackend { backend_pubkey } => {
+                        debug_log(&format!(
+                            "Worker: Whitelisting backend {}",
+                            &backend_pubkey[..8.min(backend_pubkey.len())]
+                        ));
+                        if let Err(e) = rt.block_on(
+                            self.handle_whitelist_backend(backend_pubkey),
+                        ) {
+                            tlog!("ERROR", "Failed to whitelist backend: {}", e);
+                        }
+                    }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
                         // Stop bunker if running
@@ -1926,12 +1946,35 @@ impl NostrWorker {
             .with_raw_filter(agent_status_json.unwrap_or_default()),
         );
 
+        // Backend heartbeat (kind:24012) — backend requesting whitelist approval
+        let heartbeat_filter = Filter::new()
+            .kind(Kind::Custom(KIND_BACKEND_HEARTBEAT))
+            .custom_tag(
+                SingleLetterTag::lowercase(Alphabet::P),
+                user_pubkey.to_string(),
+            )
+            .since(since_time);
+        let heartbeat_json = serde_json::to_string(&heartbeat_filter).ok();
+        let heartbeat_output = client
+            .subscribe(heartbeat_filter.clone(), None)
+            .await?;
+        self.subscription_stats.register(
+            heartbeat_output.val.to_string(),
+            SubscriptionInfo::new(
+                "Backend heartbeat".to_string(),
+                vec![KIND_BACKEND_HEARTBEAT],
+                None,
+            )
+            .with_raw_filter(heartbeat_json.unwrap_or_default()),
+        );
+
         tlog!(
             "CONN",
-            "Subscribed to status events (kind:{}, kind:{}, kind:{})",
+            "Subscribed to status events (kind:{}, kind:{}, kind:{}, kind:{})",
             KIND_PROJECT_STATUS,
             KIND_INSTALLED_AGENT_LIST,
-            KIND_AGENT_STATUS
+            KIND_AGENT_STATUS,
+            KIND_BACKEND_HEARTBEAT
         );
 
         // 2c. User's bookmark list (kind:14202) - authored by current user
@@ -2203,6 +2246,18 @@ impl NostrWorker {
                                                 stream_reassembly_states.len(),
                                                 latest_kind1_by_author.len()
                                             );
+                                        }
+                                        continue;
+                                    }
+
+                                    // Backend heartbeat (24012) — extract pubkey and forward
+                                    if kind == KIND_BACKEND_HEARTBEAT {
+                                        let backend_pubkey = event.author().to_hex();
+                                        if let Err(e) = data_tx.send(DataChange::BackendHeartbeat { backend_pubkey }) {
+                                            debug_log(&format!(
+                                                "Failed to send backend heartbeat data change: {}",
+                                                e
+                                            ));
                                         }
                                         continue;
                                     }
@@ -3626,6 +3681,47 @@ impl NostrWorker {
             Ok(Ok(output)) => debug_log(&format!("Published profile: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to publish profile to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout publishing profile to relay"),
+        }
+
+        Ok(())
+    }
+
+    /// Publish a kind:14199 (ProjectAgentSnapshot) event that p-tags the given
+    /// backend pubkey.  The relay's ACL unions p-tags across all 14199 events
+    /// from the same author, so this additive publish won't clobber existing
+    /// agent snapshots.
+    async fn handle_whitelist_backend(&self, backend_pubkey: String) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let pk = PublicKey::parse(&backend_pubkey)
+            .map_err(|e| anyhow::anyhow!("Invalid backend pubkey: {}", e))?;
+
+        let event = EventBuilder::new(Kind::Custom(KIND_AGENT_SNAPSHOT), "")
+            .tag(Tag::public_key(pk))
+            .sign_with_keys(keys)?;
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => {
+                debug_log(&format!(
+                    "Published 14199 whitelisting backend {}: {}",
+                    &backend_pubkey[..8.min(backend_pubkey.len())],
+                    output.id()
+                ));
+            }
+            Ok(Err(e)) => tlog!("ERROR", "Failed to publish 14199 to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout publishing 14199 to relay"),
         }
 
         Ok(())
