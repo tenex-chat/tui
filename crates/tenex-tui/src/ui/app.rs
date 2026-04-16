@@ -280,6 +280,8 @@ pub struct App {
 
     pub core_handle: Option<CoreHandle>,
     pub data_rx: Option<Receiver<DataChange>>,
+    /// Backend pubkeys for which we already published a 14199 whitelist event
+    whitelisted_backends: std::collections::HashSet<String>,
 
     /// Whether user pressed Ctrl+C once (pending quit confirmation)
     pub pending_quit: bool,
@@ -450,6 +452,7 @@ impl App {
 
             core_handle: None,
             data_rx: None,
+            whitelisted_backends: std::collections::HashSet::new(),
 
             pending_quit: false,
             draft_service: DraftService::new(data_dir),
@@ -1711,15 +1714,23 @@ impl App {
                     let is_blocked = ds.trust.is_blocked(&backend_pubkey);
                     let is_approved = ds.trust.is_approved(&backend_pubkey);
                     drop(ds);
-                    let short_pk = &backend_pubkey[..8.min(backend_pubkey.len())];
                     if is_blocked {
-                        eprintln!("[TENEX] Heartbeat from blocked backend {}", short_pk);
+                        // Blocked — ignore heartbeat
                     } else if is_approved {
-                        eprintln!("[TENEX] Heartbeat from already-approved backend {}", short_pk);
+                        // Already approved locally but still heartbeating — the
+                        // backend isn't in the relay's 14199 whitelist yet.
+                        // Publish the 14199 once so the relay grants full access.
+                        if !self.whitelisted_backends.contains(&backend_pubkey) {
+                            if let Some(ref handle) = self.core_handle {
+                                let _ = handle.send(NostrCommand::WhitelistBackend {
+                                    backend_pubkey: backend_pubkey.clone(),
+                                });
+                            }
+                            self.whitelisted_backends.insert(backend_pubkey);
+                        }
                     } else if !self.modal_state.is_none() {
-                        eprintln!("[TENEX] Heartbeat from {} but modal already open", short_pk);
+                        // Another modal is open — will catch next heartbeat
                     } else {
-                        eprintln!("[TENEX] Showing approval modal for backend {}", short_pk);
                         self.show_backend_approval_modal(backend_pubkey);
                     }
                 }
@@ -4546,10 +4557,13 @@ impl App {
         self.data_store.borrow_mut().add_approved_backend(pubkey);
 
         // Publish 14199 so the relay whitelists this backend
-        if let Some(ref handle) = self.core_handle {
-            let _ = handle.send(NostrCommand::WhitelistBackend {
-                backend_pubkey: pubkey.to_string(),
-            });
+        if !self.whitelisted_backends.contains(pubkey) {
+            if let Some(ref handle) = self.core_handle {
+                let _ = handle.send(NostrCommand::WhitelistBackend {
+                    backend_pubkey: pubkey.to_string(),
+                });
+            }
+            self.whitelisted_backends.insert(pubkey.to_string());
         }
     }
 
