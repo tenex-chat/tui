@@ -110,6 +110,7 @@ pub enum HotkeyContext {
     HomeInbox,
     HomeActiveWork,
     HomeStats,
+    HomeReports,
     HomeSidebar,
 
     /// Chat view contexts
@@ -213,6 +214,7 @@ impl HotkeyContext {
                         HomeTab::Inbox => HotkeyContext::HomeInbox,
                         HomeTab::ActiveWork => HotkeyContext::HomeActiveWork,
                         HomeTab::Stats => HotkeyContext::HomeStats,
+                        HomeTab::Reports => HotkeyContext::HomeReports,
                     }
                 }
             }

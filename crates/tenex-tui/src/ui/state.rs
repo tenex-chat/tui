@@ -1434,6 +1434,12 @@ pub struct HomeViewState {
     pub agent_browser_filter: String,
     /// ID of agent being viewed in detail (None = list view, Some = detail view)
     pub viewing_agent_id: Option<String>,
+    /// Selected index in reports list
+    pub reports_index: usize,
+    /// Slug of report being viewed in detail (None = list view, Some = detail view)
+    pub viewing_report_slug: Option<String>,
+    /// Scroll offset for report detail view
+    pub report_detail_scroll: usize,
 }
 
 impl HomeViewState {
@@ -1454,6 +1460,23 @@ impl HomeViewState {
     /// Exit agent detail view and return to list
     pub fn exit_agent_detail(&mut self) {
         self.viewing_agent_id = None;
+    }
+
+    /// Check if currently viewing a report detail
+    pub fn in_report_detail(&self) -> bool {
+        self.viewing_report_slug.is_some()
+    }
+
+    /// Enter report detail view for the specified report slug
+    pub fn enter_report_detail(&mut self, slug: String) {
+        self.viewing_report_slug = Some(slug);
+        self.report_detail_scroll = 0;
+    }
+
+    /// Exit report detail view and return to list
+    pub fn exit_report_detail(&mut self) {
+        self.viewing_report_slug = None;
+        self.report_detail_scroll = 0;
     }
 
     /// Reset agent browser state completely (index, filter, exit detail view)

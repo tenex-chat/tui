@@ -149,6 +149,7 @@ pub enum HomeTab {
     Inbox,
     ActiveWork,
     Stats,
+    Reports,
 }
 
 /// Subtabs within the Stats view

@@ -105,7 +105,8 @@ fn get_thread_id_at_index(
             }
             None
         }
-        HomeTab::Stats => None, // Stats are not threads
+        HomeTab::Stats => None,   // Stats are not threads
+        HomeTab::Reports => None, // Reports are not threads
     }
 }
 
@@ -188,16 +189,18 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Conversations => HomeTab::Inbox,
                     HomeTab::Inbox => HomeTab::ActiveWork,
                     HomeTab::ActiveWork => HomeTab::Stats,
-                    HomeTab::Stats => HomeTab::Conversations,
+                    HomeTab::Stats => HomeTab::Reports,
+                    HomeTab::Reports => HomeTab::Conversations,
                 };
                 return Ok(());
             }
             HotkeyId::PrevHomeTab => {
                 app.home_panel_focus = match app.home_panel_focus {
-                    HomeTab::Conversations => HomeTab::Stats,
+                    HomeTab::Conversations => HomeTab::Reports,
                     HomeTab::Inbox => HomeTab::Conversations,
                     HomeTab::ActiveWork => HomeTab::Inbox,
                     HomeTab::Stats => HomeTab::ActiveWork,
+                    HomeTab::Reports => HomeTab::Stats,
                 };
                 return Ok(());
             }
@@ -278,7 +281,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
-                    HomeTab::Stats => 0, // Stats tab has no list selection
+                    HomeTab::Stats => 0,
+                    HomeTab::Reports => {
+                        if app.home.in_report_detail() {
+                            0
+                        } else {
+                            crate::ui::views::reports_list_len(app).saturating_sub(1)
+                        }
+                    }
                 };
                 // If Shift is held, add current item to multi-selection before moving
                 if has_shift {
@@ -319,7 +329,8 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::ActiveWork => active_work_cache
                         .as_ref()
                         .map_or(0, |c| c.len().saturating_sub(1)),
-                    HomeTab::Stats => 0, // Stats tab has no list selection
+                    HomeTab::Stats => 0,
+                    HomeTab::Reports => crate::ui::views::reports_list_len(app).saturating_sub(1),
                 };
                 if current > max {
                     app.set_current_selection(max);
@@ -503,6 +514,18 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Stats => {
                         // Stats tab has no selectable items to open
                     }
+                    HomeTab::Reports => {
+                        if app.home.in_report_detail() {
+                            // Already in detail, Enter does nothing
+                        } else {
+                            let idx = app.home.reports_index;
+                            if let Some(slug) =
+                                crate::ui::views::report_slug_at_index(app, idx)
+                            {
+                                app.home.enter_report_detail(slug);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -561,7 +584,8 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::ActiveWork => active_work_cache
                     .as_ref()
                     .map_or(0, |c| c.len().saturating_sub(1)),
-                HomeTab::Stats => 0, // Stats tab has no list selection
+                HomeTab::Stats => 0,   // Stats tab has no list selection
+                HomeTab::Reports => crate::ui::views::reports_list_len(app).saturating_sub(1),
             };
             if has_shift {
                 if let Some(thread_id) =

@@ -17,6 +17,7 @@ pub mod login;
 pub mod nudge_crud;
 pub mod nudge_skill_selector;
 pub mod project_settings;
+pub mod reports;
 pub mod stats;
 pub mod tts_control;
 pub mod workspace_modal;
@@ -44,6 +45,7 @@ pub use project_settings::{
     available_agent_count, available_mcp_tool_count, get_agent_id_at_index,
     get_mcp_tool_id_at_index, render_agent_deletion_confirm, render_project_settings,
 };
+pub use reports::{render_reports, report_slug_at_index, reports_list_len};
 pub use stats::render_stats;
 pub use tts_control::render_tts_control;
 pub use workspace_modal::render_workspace_manager;
