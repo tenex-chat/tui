@@ -555,16 +555,20 @@ struct MessageComposerView: View {
             // Reactively update availableAgents when centralized state changes
             // This eliminates the need for manual refresh() calls
             if let projectId = selectedProject?.id {
-                let agents = newAgents[projectId] ?? []
-                if agents.isEmpty, let project = coreManager.projects.first(where: { $0.id == projectId }) {
-                    availableAgents = project.agentPubkeys.compactMap { pubkey in
-                        let name = coreManager.displayName(for: pubkey)
-                        guard !name.isEmpty else { return nil }
-                        return ProjectAgent(pubkey: pubkey, name: name, isPm: false, model: nil, tools: [], skills: [], mcpServers: [])
-                    }
-                } else {
-                    availableAgents = agents
-                }
+                let onlineAgents = newAgents[projectId] ?? []
+                let onlinePubkeys = Set(onlineAgents.map(\.pubkey))
+                let offlineAgents = coreManager.projects
+                    .first(where: { $0.id == projectId })?
+                    .agentPubkeys
+                    .compactMap { pubkey -> ProjectAgent? in
+                        guard !onlinePubkeys.contains(pubkey) else { return nil }
+                        let name = ComposerViewModel.agentDisplayName(
+                            coreManager.displayName(for: pubkey),
+                            fallbackPubkey: pubkey
+                        )
+                        return ProjectAgent(pubkey: pubkey, name: name, backendPubkey: "", isPm: false, isOnline: false, model: nil, tools: [], skills: [], mcpServers: [])
+                    } ?? []
+                availableAgents = ComposerViewModel.mergeProjectAgents(onlineAgents: onlineAgents, offlineAgents: offlineAgents)
             }
         }
     }

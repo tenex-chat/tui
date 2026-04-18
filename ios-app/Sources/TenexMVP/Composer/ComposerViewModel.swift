@@ -166,13 +166,9 @@ final class ComposerViewModel {
         currentAgentPubkey: String?
     ) async -> ComposerAgentLoadResult {
         let onlineAgents = dependencies.core.onlineAgents[projectId] ?? []
-        let agents: [ProjectAgent]
-        if onlineAgents.isEmpty {
-            let project = dependencies.core.projects.first { $0.id == projectId }
-            agents = await agentsFromProjectPubkeys(project?.agentPubkeys ?? [])
-        } else {
-            agents = onlineAgents
-        }
+        let project = dependencies.core.projects.first { $0.id == projectId }
+        let offlineAgents = await agentsFromProjectPubkeys(project?.agentPubkeys ?? [], excluding: Set(onlineAgents.map(\.pubkey)))
+        let agents = Self.mergeProjectAgents(onlineAgents: onlineAgents, offlineAgents: offlineAgents)
         var selectedAgentPubkey = currentAgentPubkey
         var replyTargetName: String?
 
@@ -292,15 +288,40 @@ final class ComposerViewModel {
         character.isLetter || character.isNumber || character == "-" || character == "_"
     }
 
-    private func agentsFromProjectPubkeys(_ pubkeys: [String]) async -> [ProjectAgent] {
+    nonisolated static func mergeProjectAgents(onlineAgents: [ProjectAgent], offlineAgents: [ProjectAgent]) -> [ProjectAgent] {
+        var seen = Set(onlineAgents.map(\.pubkey))
+        var merged = onlineAgents
+        merged.append(contentsOf: offlineAgents.filter { seen.insert($0.pubkey).inserted })
+        return merged.sorted { lhs, rhs in
+            if lhs.isPm != rhs.isPm { return lhs.isPm && !rhs.isPm }
+            if lhs.isOnline != rhs.isOnline { return lhs.isOnline && !rhs.isOnline }
+            let nameComparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if nameComparison != .orderedSame { return nameComparison == .orderedAscending }
+            return lhs.pubkey < rhs.pubkey
+        }
+    }
+
+    nonisolated static func agentDisplayName(_ name: String, fallbackPubkey pubkey: String) -> String {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            return trimmedName
+        }
+        guard pubkey.count > 16 else { return pubkey }
+        return "\(pubkey.prefix(8))...\(pubkey.suffix(8))"
+    }
+
+    private func agentsFromProjectPubkeys(_ pubkeys: [String], excluding excludedPubkeys: Set<String> = []) async -> [ProjectAgent] {
         var result: [ProjectAgent] = []
         for pubkey in pubkeys {
-            let name = await dependencies.core.getProfileName(pubkey: pubkey)
-            guard !name.isEmpty else { continue }
+            guard !excludedPubkeys.contains(pubkey) else { continue }
+            let profileName = await dependencies.core.getProfileName(pubkey: pubkey)
+            let name = Self.agentDisplayName(profileName, fallbackPubkey: pubkey)
             result.append(ProjectAgent(
                 pubkey: pubkey,
                 name: name,
+                backendPubkey: "",
                 isPm: false,
+                isOnline: false,
                 model: nil,
                 tools: [],
                 skills: [],

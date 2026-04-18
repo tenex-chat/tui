@@ -690,6 +690,7 @@ struct WorkspaceAgentPopoverContent: View {
             : agents.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
         return list.sorted { a, b in
             if a.isPm != b.isPm { return a.isPm }
+            if a.isOnline != b.isOnline { return a.isOnline && !b.isOnline }
             return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
         }
     }
@@ -711,7 +712,7 @@ struct WorkspaceAgentPopoverContent: View {
             Divider()
 
             if filteredAgents.isEmpty {
-                Text(searchText.isEmpty ? "No agents online" : "No results")
+                Text(searchText.isEmpty ? "No agents" : "No results")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
@@ -779,8 +780,9 @@ struct WorkspaceAgentPopoverContent: View {
                                 .background(Capsule().fill(Color.agentBrand))
                         }
                     }
-                    if let model = agent.model, !model.isEmpty {
-                        Text(model)
+                    let statusText = agent.isOnline ? agent.model : "Offline"
+                    if let statusText, !statusText.isEmpty {
+                        Text(statusText)
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }

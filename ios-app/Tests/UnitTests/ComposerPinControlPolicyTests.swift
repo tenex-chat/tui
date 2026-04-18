@@ -64,7 +64,7 @@ final class ComposerPinControlPolicyTests: XCTestCase {
             isDeleted: false,
             pubkey: "",
             participants: [],
-            agentDefinitionIds: [],
+            agentPubkeys: [],
             mcpToolIds: [],
             createdAt: 0
         )

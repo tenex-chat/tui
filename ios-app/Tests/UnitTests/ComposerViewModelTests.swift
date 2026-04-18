@@ -132,6 +132,41 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertEqual(drafts.updatedAgentPubkeys.last ?? nil, "pubkey-author")
     }
 
+    func testLoadAgentContextIncludesOfflineProjectAgents() async {
+        let core = MockCoreGateway()
+        let namelessPubkey = "1234567890abcdef1234"
+        core.projects = [makeProject(id: "project-a", agentPubkeys: ["online", "offline", namelessPubkey])]
+        core.onlineAgents = [
+            "project-a": [
+                ProjectAgent(
+                    pubkey: "online",
+                    name: "Online",
+                    backendPubkey: "backend",
+                    isPm: false,
+                    isOnline: true,
+                    model: "model",
+                    tools: [],
+                    skills: [],
+                    mcpServers: []
+                )
+            ]
+        ]
+        core.profileNamesByPubkey["offline"] = "Offline"
+
+        let viewModel = makeViewModel(core: core, drafts: MockDraftStore())
+        let result = await viewModel.loadAgentContext(
+            projectId: "project-a",
+            conversationId: nil,
+            initialAgentPubkey: nil,
+            currentAgentPubkey: nil
+        )
+
+        XCTAssertEqual(result.availableAgents.first?.pubkey, "online")
+        XCTAssertEqual(Set(result.availableAgents.map(\.pubkey)), Set(["online", "offline", namelessPubkey]))
+        XCTAssertEqual(result.availableAgents.first { $0.pubkey == "offline" }?.isOnline, false)
+        XCTAssertEqual(result.availableAgents.first { $0.pubkey == namelessPubkey }?.name, "12345678...cdef1234")
+    }
+
     func testSendMessageUsesThreadEndpointForNewConversation() async throws {
         let core = MockCoreGateway()
         core.threadSendResult = SendMessageResult(eventId: "evt-thread", success: true)
@@ -214,7 +249,19 @@ final class ComposerViewModelTests: XCTestCase {
     func testValidatedAgentPubkeyClearsInvalidSelectionWhenAgentListIsLoaded() async {
         let drafts = MockDraftStore()
         let viewModel = makeViewModel(core: MockCoreGateway(), drafts: drafts)
-        let agents = [ProjectAgent(pubkey: "other", name: "Other", isPm: false, model: nil, tools: [])]
+        let agents = [
+            ProjectAgent(
+                pubkey: "other",
+                name: "Other",
+                backendPubkey: "backend",
+                isPm: false,
+                isOnline: true,
+                model: nil,
+                tools: [],
+                skills: [],
+                mcpServers: []
+            )
+        ]
 
         let validated = await viewModel.validatedAgentPubkey(
             candidate: "missing",
@@ -245,7 +292,7 @@ final class ComposerViewModelTests: XCTestCase {
         )
     }
 
-    private func makeProject(id: String) -> Project {
+    private func makeProject(id: String, agentPubkeys: [String] = []) -> Project {
         Project(
             id: id,
             title: id,
@@ -255,7 +302,7 @@ final class ComposerViewModelTests: XCTestCase {
             isDeleted: false,
             pubkey: "",
             participants: [],
-            agentDefinitionIds: [],
+            agentPubkeys: agentPubkeys,
             mcpToolIds: [],
             createdAt: 0
         )

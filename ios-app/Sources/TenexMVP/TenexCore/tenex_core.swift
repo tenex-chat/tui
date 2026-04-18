@@ -6329,7 +6329,9 @@ public func FfiConverterTypeProject_lower(_ value: Project) -> RustBuffer {
 public struct ProjectAgent {
     public var pubkey: String
     public var name: String
+    public var backendPubkey: String
     public var isPm: Bool
+    public var isOnline: Bool
     public var model: String?
     public var tools: [String]
     public var skills: [String]
@@ -6337,10 +6339,12 @@ public struct ProjectAgent {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(pubkey: String, name: String, isPm: Bool, model: String?, tools: [String], skills: [String], mcpServers: [String]) {
+    public init(pubkey: String, name: String, backendPubkey: String, isPm: Bool, isOnline: Bool, model: String?, tools: [String], skills: [String], mcpServers: [String]) {
         self.pubkey = pubkey
         self.name = name
+        self.backendPubkey = backendPubkey
         self.isPm = isPm
+        self.isOnline = isOnline
         self.model = model
         self.tools = tools
         self.skills = skills
@@ -6361,7 +6365,13 @@ extension ProjectAgent: Equatable, Hashable {
         if lhs.name != rhs.name {
             return false
         }
+        if lhs.backendPubkey != rhs.backendPubkey {
+            return false
+        }
         if lhs.isPm != rhs.isPm {
+            return false
+        }
+        if lhs.isOnline != rhs.isOnline {
             return false
         }
         if lhs.model != rhs.model {
@@ -6382,7 +6392,9 @@ extension ProjectAgent: Equatable, Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(pubkey)
         hasher.combine(name)
+        hasher.combine(backendPubkey)
         hasher.combine(isPm)
+        hasher.combine(isOnline)
         hasher.combine(model)
         hasher.combine(tools)
         hasher.combine(skills)
@@ -6399,20 +6411,24 @@ public struct FfiConverterTypeProjectAgent: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectAgent {
         return
             try ProjectAgent(
-                pubkey: FfiConverterString.read(from: &buf), 
-                name: FfiConverterString.read(from: &buf), 
-                isPm: FfiConverterBool.read(from: &buf), 
-                model: FfiConverterOptionString.read(from: &buf), 
-                tools: FfiConverterSequenceString.read(from: &buf), 
-                skills: FfiConverterSequenceString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf),
+                name: FfiConverterString.read(from: &buf),
+                backendPubkey: FfiConverterString.read(from: &buf),
+                isPm: FfiConverterBool.read(from: &buf),
+                isOnline: FfiConverterBool.read(from: &buf),
+                model: FfiConverterOptionString.read(from: &buf),
+                tools: FfiConverterSequenceString.read(from: &buf),
+                skills: FfiConverterSequenceString.read(from: &buf),
                 mcpServers: FfiConverterSequenceString.read(from: &buf)
-        )
+            )
     }
 
     public static func write(_ value: ProjectAgent, into buf: inout [UInt8]) {
         FfiConverterString.write(value.pubkey, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.backendPubkey, into: &buf)
         FfiConverterBool.write(value.isPm, into: &buf)
+        FfiConverterBool.write(value.isOnline, into: &buf)
         FfiConverterOptionString.write(value.model, into: &buf)
         FfiConverterSequenceString.write(value.tools, into: &buf)
         FfiConverterSequenceString.write(value.skills, into: &buf)

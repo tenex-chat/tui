@@ -586,7 +586,9 @@ struct AgentConfigSheet: View {
         agent: ProjectAgent(
             pubkey: "abc123",
             name: "claude-code",
+            backendPubkey: "backend",
             isPm: true,
+            isOnline: true,
             model: "claude-3-opus",
             tools: ["Read", "Write", "Bash"],
             skills: [],

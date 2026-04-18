@@ -1,12 +1,11 @@
 import SwiftUI
 
 /// A sheet for selecting an agent to p-tag in a message.
-/// Uses ProjectAgent from project status (kind:24010) which contains
-/// actual agent instance pubkeys for proper profile picture lookup.
+/// Uses ProjectAgent rows from live project status plus p-tagged project agents.
 struct AgentSelectorSheet: View {
     // MARK: - Properties
 
-    /// Available agents to choose from (from project status)
+    /// Available agents to choose from, including offline p-tagged agents.
     let agents: [ProjectAgent]
 
     /// Project ID for agent configuration
@@ -45,10 +44,13 @@ struct AgentSelectorSheet: View {
             }
         }
 
-        // Sort: PM agents first, then alphabetically by name, with pubkey tie-breaker for stability
+        // Sort PM agents first, then online agents, then alphabetically by name.
         return filtered.sorted { a, b in
             if a.isPm != b.isPm {
                 return a.isPm  // PM agents come first
+            }
+            if a.isOnline != b.isOnline {
+                return a.isOnline && !b.isOnline
             }
             let nameComparison = a.name.localizedCaseInsensitiveCompare(b.name)
             if nameComparison != .orderedSame {
@@ -152,9 +154,9 @@ struct AgentSelectorSheet: View {
                 .foregroundStyle(.secondary)
 
             if searchText.isEmpty {
-                Text("No Agents Online")
+                Text("No Agents")
                     .font(.headline)
-                Text("This project has no online agents.")
+                Text("This project has no selectable agents.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
@@ -228,8 +230,9 @@ struct OnlineAgentRowView: View {
                     }
                 }
 
-                if let model = agent.model, !model.isEmpty {
-                    Text(model)
+                let statusText = agent.isOnline ? agent.model : "Offline"
+                if let statusText, !statusText.isEmpty {
+                    Text(statusText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -476,7 +479,9 @@ struct AgentDeletionSheet: View {
             ProjectAgent(
                 pubkey: "abc123def456",
                 name: "claude-code",
+                backendPubkey: "backend",
                 isPm: true,
+                isOnline: true,
                 model: "claude-3-opus",
                 tools: ["Read", "Write", "Bash"],
                 skills: [],
@@ -485,7 +490,9 @@ struct AgentDeletionSheet: View {
             ProjectAgent(
                 pubkey: "def456ghi789",
                 name: "architect",
+                backendPubkey: "backend",
                 isPm: false,
+                isOnline: true,
                 model: "claude-3-sonnet",
                 tools: ["Read", "Edit"],
                 skills: [],
@@ -494,7 +501,9 @@ struct AgentDeletionSheet: View {
             ProjectAgent(
                 pubkey: "ghi789jkl012",
                 name: "test-writer",
+                backendPubkey: "",
                 isPm: false,
+                isOnline: false,
                 model: nil,
                 tools: [],
                 skills: [],
