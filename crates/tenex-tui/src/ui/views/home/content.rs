@@ -342,7 +342,10 @@ fn render_card_content(
             line1.push(Span::styled(" ⏰", Style::default().fg(agent_color)));
         }
         if thread.is_intervention_review {
-            line1.push(Span::styled(" 🧭", Style::default().fg(theme::ACCENT_WARNING)));
+            line1.push(Span::styled(
+                " 🧭",
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
         }
         if is_archived {
             line1.push(Span::styled(

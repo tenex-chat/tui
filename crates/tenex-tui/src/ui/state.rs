@@ -631,12 +631,7 @@ impl TabManager {
     /// Open a report tab (or switch to it if already open).
     /// Returns the tab index.
     /// Note: This method updates view history so closing the tab returns to the correct previous view.
-    pub fn open_report(
-        &mut self,
-        slug: String,
-        title: String,
-        project_a_tag: String,
-    ) -> usize {
+    pub fn open_report(&mut self, slug: String, title: String, project_a_tag: String) -> usize {
         // Check if this report is already open
         if let Some(idx) = self.tabs.iter().position(|t| {
             t.content_type == TabContentType::Report && t.report_slug.as_deref() == Some(&slug)

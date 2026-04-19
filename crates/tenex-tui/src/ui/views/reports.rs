@@ -383,8 +383,7 @@ pub fn render_report_detail(f: &mut Frame, app: &mut App, area: Rect) {
     let report = app.data_store.borrow().reports.get_report(slug).cloned();
 
     let Some(report) = report else {
-        let msg =
-            Paragraph::new("Report not found").style(Style::default().fg(theme::TEXT_MUTED));
+        let msg = Paragraph::new("Report not found").style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(msg, area);
         return;
     };

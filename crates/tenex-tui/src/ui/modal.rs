@@ -388,10 +388,7 @@ impl AppSettingsState {
             appearance_index: 0,
             bunker_index: 0,
             editing: false,
-            relay_url_input: preferences
-                .configured_relay_url()
-                .unwrap_or("")
-                .to_string(),
+            relay_url_input: preferences.configured_relay_url().unwrap_or("").to_string(),
             jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
             ai: AiSettingsState::new(
                 ai_settings.enabled,

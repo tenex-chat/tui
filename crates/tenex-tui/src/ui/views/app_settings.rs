@@ -5,7 +5,6 @@ use crate::ui::modal::{
     AiSetting, AppSettingsState, AppearanceSetting, BunkerSetting, GeneralSetting,
     ModelBrowserState, SettingsTab, VoiceBrowserState,
 };
-use tenex_core::constants::RELAY_URL;
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -14,6 +13,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
+use tenex_core::constants::RELAY_URL;
 
 /// Render the app settings modal
 pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {

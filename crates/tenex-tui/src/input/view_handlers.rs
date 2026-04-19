@@ -106,7 +106,7 @@ fn get_thread_id_at_index(
             None
         }
         HomeTab::Reports => None, // Reports are not threads
-        HomeTab::Stats => None, // Stats are not threads
+        HomeTab::Stats => None,   // Stats are not threads
     }
 }
 
@@ -529,14 +529,12 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         if let Some(&(entry_idx, sub_idx)) = visible.get(idx) {
                             let entry = &entries[entry_idx];
                             let report_to_open = match (entry, sub_idx) {
-                                (
-                                    crate::ui::views::reports::ReportEntry::Single(report),
-                                    None,
-                                ) => Some(report.clone()),
+                                (crate::ui::views::reports::ReportEntry::Single(report), None) => {
+                                    Some(report.clone())
+                                }
                                 (
                                     crate::ui::views::reports::ReportEntry::Group {
-                                        reports,
-                                        ..
+                                        reports, ..
                                     },
                                     Some(j),
                                 ) => reports.get(j).cloned(),

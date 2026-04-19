@@ -1687,9 +1687,7 @@ impl NostrWorker {
                             "Worker: Whitelisting backend {}",
                             &backend_pubkey[..8.min(backend_pubkey.len())]
                         ));
-                        if let Err(e) = rt.block_on(
-                            self.handle_whitelist_backend(backend_pubkey),
-                        ) {
+                        if let Err(e) = rt.block_on(self.handle_whitelist_backend(backend_pubkey)) {
                             tlog!("ERROR", "Failed to whitelist backend: {}", e);
                         }
                     }
@@ -1955,9 +1953,7 @@ impl NostrWorker {
             )
             .since(since_time);
         let heartbeat_json = serde_json::to_string(&heartbeat_filter).ok();
-        let heartbeat_output = client
-            .subscribe(heartbeat_filter.clone(), None)
-            .await?;
+        let heartbeat_output = client.subscribe(heartbeat_filter.clone(), None).await?;
         self.subscription_stats.register(
             heartbeat_output.val.to_string(),
             SubscriptionInfo::new(
@@ -3708,11 +3704,8 @@ impl NostrWorker {
             .tag(Tag::public_key(pk))
             .sign_with_keys(keys)?;
 
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.send_event(&event),
-        )
-        .await
+        match tokio::time::timeout(std::time::Duration::from_secs(5), client.send_event(&event))
+            .await
         {
             Ok(Ok(output)) => {
                 debug_log(&format!(

@@ -66,9 +66,7 @@ use commands::{
 use completion::CompletionMenu;
 use editor::LineEditor;
 use format::{print_error_raw, print_help_raw, print_separator_raw, print_system_raw};
-use panels::{
-    ConfigPanel, NudgeSkillPanel, PanelMode, StatsPanel, StatusBarAction, StatusBarNav,
-};
+use panels::{ConfigPanel, NudgeSkillPanel, PanelMode, StatsPanel, StatusBarAction, StatusBarNav};
 use render::{
     apply_clear_screen, clear_input_area, print_above_input, redraw_input, update_delegation_bar,
 };

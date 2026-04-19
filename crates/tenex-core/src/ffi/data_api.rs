@@ -253,12 +253,7 @@ impl TenexCore {
         };
 
         if project_id.is_empty() {
-            return store
-                .reports
-                .get_reports()
-                .into_iter()
-                .cloned()
-                .collect();
+            return store.reports.get_reports().into_iter().cloned().collect();
         }
 
         // Find the project by ID and get its a_tag
