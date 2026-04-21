@@ -3,6 +3,19 @@ use anyhow::Result;
 use nostrdb::{Filter, Ndb, Transaction};
 use std::collections::{HashMap, HashSet};
 
+fn sort_messages_for_chat(messages: &mut [Message]) {
+    messages.sort_by(|a, b| {
+        let a_is_root = a.id == a.thread_id;
+        let b_is_root = b.id == b.thread_id;
+
+        match (a_is_root, b_is_root) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.created_at.cmp(&b.created_at),
+        }
+    });
+}
+
 fn should_replace_project(existing: &Project, candidate: &Project) -> bool {
     candidate.created_at > existing.created_at
         || (candidate.created_at == existing.created_at
@@ -264,8 +277,10 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
 
     messages.extend(replies);
 
-    // Sort by created_at ascending (oldest first for chat)
-    messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    // Sort oldest first for chat, while keeping the conversation root first.
+    // Nostr timestamps have second precision, so equal timestamps preserve the
+    // existing order instead of inventing a fake event-id chronology.
+    sort_messages_for_chat(&mut messages);
 
     Ok(messages)
 }

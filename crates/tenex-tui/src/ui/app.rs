@@ -3070,11 +3070,6 @@ impl App {
         );
     }
 
-    /// Clear the local stream buffer for a conversation
-    pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
-        self.conversation.clear_local_stream_buffer(conversation_id);
-    }
-
     /// Convert live stream buffer into authoritative kind:1 content and animate
     /// any missing tail before removing the stream row.
     pub fn handoff_local_stream_to_kind1(
@@ -5119,7 +5114,9 @@ mod selected_agent_refresh_tests {
         let current = ProjectAgent {
             pubkey: "agent-a".to_string(),
             name: "Agent A".to_string(),
+            backend_pubkey: "backend".to_string(),
             is_pm: false,
+            is_online: true,
             model: Some("old-model".to_string()),
             tools: vec!["shell".to_string()],
             skills: vec![],
@@ -5128,7 +5125,9 @@ mod selected_agent_refresh_tests {
         let status = make_status(vec![ProjectAgent {
             pubkey: "agent-a".to_string(),
             name: "Agent A".to_string(),
+            backend_pubkey: "backend".to_string(),
             is_pm: false,
+            is_online: true,
             model: Some("new-model".to_string()),
             tools: vec!["shell".to_string()],
             skills: vec![],
@@ -5146,7 +5145,9 @@ mod selected_agent_refresh_tests {
         let current = ProjectAgent {
             pubkey: "agent-a".to_string(),
             name: "Agent A".to_string(),
+            backend_pubkey: "backend".to_string(),
             is_pm: false,
+            is_online: true,
             model: Some("old-model".to_string()),
             tools: vec!["shell".to_string()],
             skills: vec![],
@@ -5155,7 +5156,9 @@ mod selected_agent_refresh_tests {
         let status = make_status(vec![ProjectAgent {
             pubkey: "agent-b".to_string(),
             name: "Agent B".to_string(),
+            backend_pubkey: "backend".to_string(),
             is_pm: true,
+            is_online: true,
             model: Some("pm-model".to_string()),
             tools: vec![],
             skills: vec![],
@@ -5175,7 +5178,9 @@ mod selected_agent_refresh_tests {
             ProjectAgent {
                 pubkey: "agent-a".to_string(),
                 name: "Agent A".to_string(),
+                backend_pubkey: "backend".to_string(),
                 is_pm: false,
+                is_online: true,
                 model: Some("model-a".to_string()),
                 tools: vec![],
                 skills: vec![],
@@ -5184,7 +5189,9 @@ mod selected_agent_refresh_tests {
             ProjectAgent {
                 pubkey: "agent-pm".to_string(),
                 name: "PM".to_string(),
+                backend_pubkey: "backend".to_string(),
                 is_pm: true,
+                is_online: true,
                 model: Some("model-pm".to_string()),
                 tools: vec![],
                 skills: vec![],

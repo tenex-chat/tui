@@ -1861,8 +1861,12 @@ impl AppDataStore {
                 // Check if this message has llm-runtime tag (confirms runtime, resets unconfirmed timer)
                 let has_llm_runtime = message.llm_metadata.contains_key("runtime");
 
-                // Insert in sorted position (oldest first)
-                let insert_pos = messages.partition_point(|m| m.created_at < message_created_at);
+                // Insert in sorted position (oldest first). Nostr timestamps
+                // are only second-granular, so keep existing same-second
+                // messages before the new arrival. Always keep the thread root
+                // before replies, even if clocks are skewed.
+                let insert_pos = messages
+                    .partition_point(|m| m.id == m.thread_id || m.created_at <= message_created_at);
                 messages.insert(insert_pos, message);
 
                 // If this message has llm-runtime tag, reset the unconfirmed timer for this agent on this conversation
@@ -3075,6 +3079,74 @@ mod tests {
     }
 
     #[test]
+    fn test_incremental_same_second_reply_stays_after_thread_root() {
+        use crate::store::events::ingest_events;
+        use nostr_sdk::prelude::*;
+        use nostrdb::Transaction;
+
+        fn handle_ingested_kind1(store: &mut AppDataStore, db: &Database, event: &Event) {
+            for _ in 0..50 {
+                let txn = Transaction::new(&db.ndb).unwrap();
+                if let Ok(note_key) = db.ndb.get_notekey_by_id(&txn, event.id.as_bytes()) {
+                    let note = db.ndb.get_note_by_key(&txn, note_key).unwrap();
+                    store.handle_event(1, &note);
+                    return;
+                }
+                drop(txn);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            panic!("event {} was not persisted to nostrdb", event.id.to_hex());
+        }
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        let user_keys = Keys::generate();
+        let agent_keys = Keys::generate();
+        let project_a_tag = format!("31933:{}:proj", user_keys.public_key().to_hex());
+
+        let thread_event = EventBuilder::new(Kind::from(1), "say hello")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec![project_a_tag.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["say hello".to_string()],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_000))
+            .sign_with_keys(&user_keys)
+            .unwrap();
+        let thread_id = thread_event.id.to_hex();
+
+        let reply_event = EventBuilder::new(Kind::from(1), "Hello!")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![thread_id.clone(), "".to_string(), "root".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec![project_a_tag],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_000))
+            .sign_with_keys(&agent_keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&thread_event), None).unwrap();
+        handle_ingested_kind1(&mut store, &db, &thread_event);
+
+        ingest_events(&db.ndb, std::slice::from_ref(&reply_event), None).unwrap();
+        handle_ingested_kind1(&mut store, &db, &reply_event);
+
+        let messages = store.get_messages(&thread_id);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].id, thread_id);
+        assert_eq!(messages[0].content, "say hello");
+        assert_eq!(messages[1].id, reply_event.id.to_hex());
+        assert_eq!(messages[1].content, "Hello!");
+    }
+
+    #[test]
     fn test_handle_project_event_removes_tombstoned_project() {
         use crate::store::events::ingest_events;
         use nostr_sdk::prelude::*;
@@ -3432,6 +3504,7 @@ mod tests {
                 name: slug.to_string(),
                 backend_pubkey: "backend".to_string(),
                 is_pm: true,
+                is_online: true,
                 model: None,
                 tools: vec![],
                 skills: vec![],

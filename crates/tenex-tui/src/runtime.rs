@@ -593,15 +593,12 @@ fn handle_core_events(
 
                 // If this message supersedes an active stream row, animate the
                 // remaining tail quickly instead of snapping directly to kind:1.
-                let handoff_active = app.handoff_local_stream_to_kind1(
+                app.handoff_local_stream_to_kind1(
                     &thread_id,
                     &message_id,
                     &message_pubkey,
                     &message_content,
                 );
-                if !handoff_active {
-                    app.clear_local_stream_buffer(&thread_id);
-                }
 
                 // If this message is in the current thread...
                 if app.selected_thread().map(|t| t.id.as_str()) == Some(thread_id.as_str()) {

@@ -136,7 +136,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "http://localhost:16686/trace/abc123000000000000000000000000000"
+            "http://localhost:16686/trace/abc12300000000000000000000000000"
         );
     }
 
@@ -146,7 +146,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             result.unwrap(),
-            "http://localhost:16686/trace/abc123000000000000000000000000000?uiFind=def456"
+            "http://localhost:16686/trace/abc12300000000000000000000000000?uiFind=def456"
         );
     }
 

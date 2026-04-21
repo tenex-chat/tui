@@ -1215,9 +1215,10 @@ impl ConversationState {
             return false;
         };
 
-        // Guard against stale buffer from a different author.
+        // A message from another author is unrelated to this stream. This can
+        // happen when the user sends a follow-up while an agent is still
+        // streaming; the stream row must remain visible.
         if !buffer.agent_pubkey.is_empty() && buffer.agent_pubkey != message_pubkey {
-            self.local_stream_buffers.remove(conversation_id);
             return false;
         }
 
@@ -1453,6 +1454,33 @@ mod conversation_state_tests {
         // Fast handoff cadence should complete and remove the temporary stream row.
         assert!(state.tick_stream_animation(3, 20));
         assert!(state.local_stream_buffers.get("conv-123").is_none());
+    }
+
+    #[test]
+    fn test_unrelated_message_does_not_clear_active_stream() {
+        let mut state = ConversationState::new();
+        state.handle_local_stream_chunk(
+            "agent-pubkey".to_string(),
+            "conv-123".to_string(),
+            Some("partial response".to_string()),
+            None,
+            false,
+        );
+        assert!(state.tick_stream_animation(7, 20));
+
+        let handoff = state.handoff_local_stream_to_kind1(
+            "conv-123",
+            "user-msg-1",
+            "user-pubkey",
+            "follow-up from user",
+        );
+        assert!(!handoff);
+
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.agent_pubkey, "agent-pubkey");
+        assert_eq!(buffer.text_content, "partial response");
+        assert_eq!(buffer.visible_text_chars, 7);
+        assert!(buffer.superseded_message_id.is_none());
     }
 
     #[test]
