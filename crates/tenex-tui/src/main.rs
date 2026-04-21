@@ -172,18 +172,8 @@ async fn main() -> Result<()> {
     // Set up panic hook to restore terminal on panic
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        // Restore terminal before showing panic
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::event::PopKeyboardEnhancementFlags
-        );
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture,
-            crossterm::event::DisableBracketedPaste
-        );
+        // Restore terminal before showing panic.
+        let _ = ui::restore_terminal();
         // Print panic info to stderr
         eprintln!("\n\n=== PANIC ===");
         eprintln!("{}", panic_info);
@@ -240,9 +230,10 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    core_runtime.shutdown();
+    let restore_result = terminal.restore();
 
-    ui::restore_terminal()?;
+    core_runtime.shutdown();
+    restore_result?;
 
     if let Err(err) = result {
         eprintln!("Error: {err}");
