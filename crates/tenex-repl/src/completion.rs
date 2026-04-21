@@ -725,7 +725,6 @@ impl CompletionMenu {
                                 let flags = [
                                     ("--model", "change model"),
                                     ("--set-pm", "set as project manager"),
-                                    ("--global", "apply globally"),
                                 ];
                                 for (flag, desc) in &flags {
                                     if flag_filter.is_empty() || flag.starts_with(flag_filter) {

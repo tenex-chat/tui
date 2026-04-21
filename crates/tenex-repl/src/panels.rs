@@ -18,7 +18,6 @@ pub(crate) struct ConfigPanel {
     pub(crate) agent_pubkey: String,
     pub(crate) agent_name: String,
     pub(crate) project_a_tag: String,
-    pub(crate) is_global: bool,
     pub(crate) items: Vec<String>,
     pub(crate) cursor: usize,
     pub(crate) scroll_offset: usize,
@@ -41,7 +40,6 @@ impl ConfigPanel {
             agent_pubkey: String::new(),
             agent_name: String::new(),
             project_a_tag: String::new(),
-            is_global: false,
             items: Vec::new(),
             cursor: 0,
             scroll_offset: 0,
@@ -91,13 +89,8 @@ impl ConfigPanel {
     }
 
     pub(crate) fn rebuild_flag_items(&mut self) {
-        let global_marker = if self.is_global { "[x]" } else { "[ ]" };
         let pm_marker = if self.is_set_pm { "[x]" } else { "[ ]" };
-        self.items = vec![
-            format!("→  --model"),
-            format!("{pm_marker} --set-pm"),
-            format!("{global_marker} --global"),
-        ];
+        self.items = vec![format!("→  --model"), format!("{pm_marker} --set-pm")];
     }
 
     pub(crate) fn switch_to_model_select(&mut self, runtime: &CoreRuntime) {
@@ -132,9 +125,6 @@ impl ConfigPanel {
         if !self.agent_name.is_empty() {
             // Check if agent differs from default — always include for clarity
             parts.push(format!("@{}", self.agent_name));
-        }
-        if self.is_global {
-            parts.push("--global".to_string());
         }
         if self.is_set_pm {
             parts.push("--set-pm".to_string());
@@ -225,30 +215,14 @@ impl ConfigPanel {
 
         drop(store_ref);
 
-        let save_type = if self.is_global { "global" } else { "project" };
-
-        if self.is_global {
-            let _ = runtime
-                .handle()
-                .send(NostrCommand::UpdateGlobalAgentConfig {
-                    agent_pubkey: self.agent_pubkey.clone(),
-                    model,
-                    tools,
-                    skills,
-                    mcp_servers,
-                    tags,
-                });
-        } else {
-            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
-                project_a_tag: self.project_a_tag.clone(),
-                agent_pubkey: self.agent_pubkey.clone(),
-                model,
-                tools,
-                skills,
-                mcp_servers,
-                tags,
-            });
-        }
+        let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
+            agent_pubkey: self.agent_pubkey.clone(),
+            model,
+            tools,
+            skills,
+            mcp_servers,
+            tags,
+        });
 
         // Build descriptive message
         let mut changes = Vec::new();
@@ -264,9 +238,8 @@ impl ConfigPanel {
         changes.push(format!("{} tools", self.tools_selected.len()));
 
         format!(
-            "Updated {} ({}) [{}]",
+            "Updated {} (shared) [{}]",
             self.agent_name,
-            save_type,
             changes.join(", ")
         )
     }
@@ -301,31 +274,17 @@ impl ConfigPanel {
 
         drop(store_ref);
 
-        if self.is_global {
-            let _ = runtime
-                .handle()
-                .send(NostrCommand::UpdateGlobalAgentConfig {
-                    agent_pubkey: self.agent_pubkey.clone(),
-                    model: model.clone(),
-                    tools,
-                    skills,
-                    mcp_servers,
-                    tags,
-                });
-        } else {
-            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
-                project_a_tag: self.project_a_tag.clone(),
-                agent_pubkey: self.agent_pubkey.clone(),
-                model: model.clone(),
-                tools,
-                skills,
-                mcp_servers,
-                tags,
-            });
-        }
+        let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
+            agent_pubkey: self.agent_pubkey.clone(),
+            model: model.clone(),
+            tools,
+            skills,
+            mcp_servers,
+            tags,
+        });
 
         let model_name = model.as_deref().unwrap_or("none");
-        format!("Set model for {} → {}", self.agent_name, model_name)
+        format!("Set shared model for {} → {}", self.agent_name, model_name)
     }
 
     /// Resolve the selected agent from AgentSelect mode and reload tools for that agent.

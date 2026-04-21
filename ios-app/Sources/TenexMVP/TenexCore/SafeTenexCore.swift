@@ -477,8 +477,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Update an agent's configuration (model and tools).
-    /// Publishes a kind:24020 event to update the agent's config.
+    /// Update an agent's shared configuration (model, tools, skills, and MCP servers).
+    /// Publishes a kind:24020 event without a project a-tag.
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateAgentConfig") {
             do {
@@ -497,6 +497,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Update an agent's shared configuration.
+    /// Publishes a kind:24020 event without a project a-tag.
     func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateGlobalAgentConfig") {
             do {

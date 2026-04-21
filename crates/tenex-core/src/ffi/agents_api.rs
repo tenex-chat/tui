@@ -707,10 +707,10 @@ impl TenexCore {
         }
     }
 
-    /// Update an agent's configuration (model and tools).
+    /// Update an agent's shared configuration (model, tools, skills, and MCP servers).
     ///
-    /// Publishes a kind:24020 event to update the agent's configuration.
-    /// The backend will process this event and update the agent's config.
+    /// Publishes a kind:24020 event without a project a-tag. `project_id` is kept
+    /// for API compatibility with clients that open the editor from a project view.
     pub fn update_agent_config(
         &self,
         project_id: String,
@@ -721,12 +721,11 @@ impl TenexCore {
         mcp_servers: Vec<String>,
         tags: Vec<String>,
     ) -> Result<(), TenexError> {
-        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let _ = project_id;
         let core_handle = get_core_handle(&self.core_handle)?;
 
         core_handle
             .send(NostrCommand::UpdateAgentConfig {
-                project_a_tag,
                 agent_pubkey,
                 model,
                 tools,
@@ -741,7 +740,7 @@ impl TenexCore {
         Ok(())
     }
 
-    /// Update an agent's configuration globally (all projects).
+    /// Update an agent's shared configuration.
     ///
     /// Publishes a kind:24020 event without a project a-tag.
     pub fn update_global_agent_config(
@@ -756,7 +755,7 @@ impl TenexCore {
         let core_handle = get_core_handle(&self.core_handle)?;
 
         core_handle
-            .send(NostrCommand::UpdateGlobalAgentConfig {
+            .send(NostrCommand::UpdateAgentConfig {
                 agent_pubkey,
                 model,
                 tools,
@@ -765,7 +764,7 @@ impl TenexCore {
                 tags,
             })
             .map_err(|e| TenexError::Internal {
-                message: format!("Failed to send update global agent config command: {}", e),
+                message: format!("Failed to send shared agent config command: {}", e),
             })?;
 
         Ok(())

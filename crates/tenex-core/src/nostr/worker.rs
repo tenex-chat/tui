@@ -826,19 +826,8 @@ pub enum NostrCommand {
         /// Human-readable reason for debugging (included as "reason" tag in the event)
         reason: String,
     },
-    /// Update agent configuration (kind:24020)
+    /// Update shared agent configuration (kind:24020, no project a-tag)
     UpdateAgentConfig {
-        project_a_tag: String,
-        agent_pubkey: String,
-        model: Option<String>,
-        tools: Vec<String>,
-        skills: Vec<String>,
-        mcp_servers: Vec<String>,
-        /// Additional marker tags (e.g. ["pm"])
-        tags: Vec<String>,
-    },
-    /// Update global agent configuration (kind:24020) without a project a-tag
-    UpdateGlobalAgentConfig {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
@@ -1320,7 +1309,6 @@ impl NostrWorker {
                         }
                     }
                     NostrCommand::UpdateAgentConfig {
-                        project_a_tag,
                         agent_pubkey,
                         model,
                         tools,
@@ -1333,7 +1321,6 @@ impl NostrWorker {
                             &agent_pubkey[..8]
                         ));
                         if let Err(e) = rt.block_on(self.handle_update_agent_config(
-                            project_a_tag,
                             agent_pubkey,
                             model,
                             tools,
@@ -1342,29 +1329,6 @@ impl NostrWorker {
                             tags,
                         )) {
                             tlog!("ERROR", "Failed to update agent config: {}", e);
-                        }
-                    }
-                    NostrCommand::UpdateGlobalAgentConfig {
-                        agent_pubkey,
-                        model,
-                        tools,
-                        skills,
-                        mcp_servers,
-                        tags,
-                    } => {
-                        debug_log(&format!(
-                            "Worker: Updating global agent config for {}",
-                            &agent_pubkey[..8]
-                        ));
-                        if let Err(e) = rt.block_on(self.handle_update_global_agent_config(
-                            agent_pubkey,
-                            model,
-                            tools,
-                            skills,
-                            mcp_servers,
-                            tags,
-                        )) {
-                            tlog!("ERROR", "Failed to update global agent config: {}", e);
                         }
                     }
                     NostrCommand::SubscribeToProjectMessages { project_a_tag } => {
@@ -3478,7 +3442,6 @@ impl NostrWorker {
 
     async fn handle_update_agent_config(
         &self,
-        project_a_tag: String,
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
@@ -3495,15 +3458,7 @@ impl NostrWorker {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
-        // Parse project coordinate for a-tag
-        let coordinate = Coordinate::parse(&project_a_tag)
-            .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
-
-        // Build kind:24020 agent config update event with project a-tag
-        let base =
-            EventBuilder::new(Kind::Custom(24020), "").tag(Tag::coordinate(coordinate, None));
-        let event = build_agent_config_event(
-            base,
+        let event = build_agent_config_update_event(
             &agent_pubkey,
             model,
             &tools,
@@ -3527,62 +3482,6 @@ impl NostrWorker {
                 e
             ),
             Err(_) => tlog!("ERROR", "Timeout sending agent config update to relay"),
-        }
-
-        Ok(())
-    }
-
-    /// Send a global kind:24020 agent config event (no a-tag, agent-scoped only).
-    async fn handle_update_global_agent_config(
-        &self,
-        agent_pubkey: String,
-        model: Option<String>,
-        tools: Vec<String>,
-        skills: Vec<String>,
-        mcp_servers: Vec<String>,
-        tags: Vec<String>,
-    ) -> Result<()> {
-        let client = self
-            .client
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self
-            .keys
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
-
-        // Build kind:24020 global agent config event (no a-tag)
-        let base = EventBuilder::new(Kind::Custom(24020), "");
-        let event = build_agent_config_event(
-            base,
-            &agent_pubkey,
-            model,
-            &tools,
-            &skills,
-            &mcp_servers,
-            &tags,
-        );
-        let signed_event = event.sign_with_keys(keys)?;
-
-        // Send to relay with timeout
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.send_event(&signed_event),
-        )
-        .await
-        {
-            Ok(Ok(output)) => {
-                debug_log(&format!("Sent global agent config update: {}", output.id()))
-            }
-            Ok(Err(e)) => tlog!(
-                "ERROR",
-                "Failed to send global agent config update to relay: {}",
-                e
-            ),
-            Err(_) => tlog!(
-                "ERROR",
-                "Timeout sending global agent config update to relay"
-            ),
         }
 
         Ok(())
@@ -4235,6 +4134,29 @@ impl NostrWorker {
     }
 }
 
+/// Build a shared kind:24020 agent config update.
+///
+/// Agent config is keyed by the agent `p` tag only. It intentionally has no
+/// project `a` tag so the same configuration applies across project boundaries.
+fn build_agent_config_update_event(
+    agent_pubkey: &str,
+    model: Option<String>,
+    tools: &[String],
+    skills: &[String],
+    mcp_servers: &[String],
+    tags: &[String],
+) -> EventBuilder {
+    build_agent_config_event(
+        EventBuilder::new(Kind::Custom(24020), ""),
+        agent_pubkey,
+        model,
+        tools,
+        skills,
+        mcp_servers,
+        tags,
+    )
+}
+
 /// Attach the common tags to a kind:24020 agent config `EventBuilder`.
 ///
 /// Adds (in order):
@@ -4242,6 +4164,8 @@ impl NostrWorker {
 /// - `p` tag for `agent_pubkey` (skipped if the pubkey cannot be parsed)
 /// - `model` tag when `model` is `Some`
 /// - one `tool` tag per entry in `tools`
+/// - one `skill` tag per entry in `skills`
+/// - one `mcp` tag per entry in `mcp_servers`
 /// - one bare marker tag per entry in `tags` (e.g. `"pm"`)
 fn build_agent_config_event(
     mut event: EventBuilder,
@@ -5374,17 +5298,10 @@ mod tests {
     #[test]
     fn test_build_agent_config_event_emits_empty_snapshot_tags() {
         let keys = Keys::generate();
-        let event = build_agent_config_event(
-            EventBuilder::new(Kind::Custom(24020), ""),
-            &keys.public_key().to_hex(),
-            None,
-            &[],
-            &[],
-            &[],
-            &[],
-        )
-        .sign_with_keys(&keys)
-        .unwrap();
+        let event =
+            build_agent_config_update_event(&keys.public_key().to_hex(), None, &[], &[], &[], &[])
+                .sign_with_keys(&keys)
+                .unwrap();
 
         let event_json = serde_json::to_value(event).unwrap();
         let tags = event_json
@@ -5417,10 +5334,42 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_update_event_has_no_project_a_tag() {
+        let keys = Keys::generate();
+        let event = build_agent_config_update_event(
+            &keys.public_key().to_hex(),
+            Some("gpt-5.4".to_string()),
+            &["Read".to_string()],
+            &["testing".to_string()],
+            &["local-mcp".to_string()],
+            &["pm".to_string()],
+        )
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let event_json = serde_json::to_value(event).unwrap();
+        let tags = event_json
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .expect("event tags should be an array");
+
+        let has_a_tag = tags.iter().any(|tag| {
+            tag.as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                == Some("a")
+        });
+
+        assert!(
+            !has_a_tag,
+            "kind:24020 agent config updates must not include project a-tags"
+        );
+    }
+
+    #[test]
     fn test_build_agent_config_event_emits_skill_values_when_present() {
         let keys = Keys::generate();
-        let event = build_agent_config_event(
-            EventBuilder::new(Kind::Custom(24020), ""),
+        let event = build_agent_config_update_event(
             &keys.public_key().to_hex(),
             None,
             &["Read".to_string()],

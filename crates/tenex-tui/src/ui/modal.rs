@@ -1640,8 +1640,6 @@ pub struct AgentConfigState {
     pub original_mcp_servers: std::collections::HashSet<String>,
     /// Original PM marker for change detection
     pub original_is_pm: bool,
-    /// When true, Enter saves config globally (no project a-tag).
-    pub save_globally: bool,
 }
 
 impl AgentConfigState {
@@ -1656,7 +1654,6 @@ impl AgentConfigState {
             original_skills: std::collections::HashSet::new(),
             original_mcp_servers: std::collections::HashSet::new(),
             original_is_pm: false,
-            save_globally: false,
         }
     }
 

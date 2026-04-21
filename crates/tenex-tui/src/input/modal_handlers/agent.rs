@@ -312,10 +312,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // Ctrl+G: toggle save scope (project vs global)
-        KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.save_globally = !state.save_globally;
-        }
         // Ctrl+M: toggle PM marker
         KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(settings) = state.settings.as_mut() {
@@ -352,53 +348,18 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                         Vec::new()
                     };
 
-                    if state.save_globally {
-                        if let Some(ref core_handle) = app.core_handle {
-                            if let Err(e) =
-                                core_handle.send(NostrCommand::UpdateGlobalAgentConfig {
-                                    agent_pubkey,
-                                    model,
-                                    tools,
-                                    skills,
-                                    mcp_servers,
-                                    tags,
-                                })
-                            {
-                                app.set_warning_status(&format!(
-                                    "Failed to save global config: {}",
-                                    e
-                                ));
-                            } else {
-                                app.set_warning_status("Agent config saved globally");
-                            }
-                        }
-                    } else {
-                        match app.selected_project.as_ref().map(|p| p.a_tag()) {
-                            Some(project_a_tag) => {
-                                if let Some(ref core_handle) = app.core_handle {
-                                    if let Err(e) =
-                                        core_handle.send(NostrCommand::UpdateAgentConfig {
-                                            project_a_tag,
-                                            agent_pubkey,
-                                            model,
-                                            tools,
-                                            skills,
-                                            mcp_servers,
-                                            tags,
-                                        })
-                                    {
-                                        app.set_warning_status(&format!(
-                                            "Failed to save config: {}",
-                                            e
-                                        ));
-                                    } else {
-                                        app.set_warning_status("Agent config saved for project");
-                                    }
-                                }
-                            }
-                            None => {
-                                app.set_warning_status("No active project — toggle 'g' for global");
-                            }
+                    if let Some(ref core_handle) = app.core_handle {
+                        if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
+                            agent_pubkey,
+                            model,
+                            tools,
+                            skills,
+                            mcp_servers,
+                            tags,
+                        }) {
+                            app.set_warning_status(&format!("Failed to save config: {}", e));
+                        } else {
+                            app.set_warning_status("Agent config saved");
                         }
                     }
                 }

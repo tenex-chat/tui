@@ -544,12 +544,6 @@ async fn run_repl(
                                         panel.rebuild_origin_command();
                                         panel.switch_to_tools();
                                     }
-                                    2 => {
-                                        // --global
-                                        panel.is_global = !panel.is_global;
-                                        panel.rebuild_origin_command();
-                                        panel.switch_to_tools();
-                                    }
                                     _ => {}
                                 }
                             }

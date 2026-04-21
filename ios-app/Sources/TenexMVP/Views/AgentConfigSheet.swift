@@ -37,7 +37,6 @@ struct AgentConfigSheet: View {
     @State private var selectedSkills: Set<String> = []
     @State private var allSkills: [String] = []
     @State private var isPm: Bool = false
-    @State private var saveGlobally: Bool = false
     @State private var toolSearchText = ""
 
     // MARK: - Body
@@ -317,13 +316,10 @@ struct AgentConfigSheet: View {
 
                 GlassPanel(
                     title: "Options",
-                    subtitle: "Apply role and scope changes."
+                    subtitle: "Applies wherever this agent is used."
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
                         Toggle("Set as Project Manager", isOn: $isPm)
-                        Divider()
-                            .opacity(0.30)
-                        Toggle("Change all projects this agent is in", isOn: $saveGlobally)
                     }
                 }
             }
@@ -336,7 +332,7 @@ struct AgentConfigSheet: View {
     private var summaryCard: some View {
         GlassPanel(
             title: "Agent",
-            subtitle: "Configure model, tools, and role scope."
+            subtitle: "Configure shared model, tools, and role."
         ) {
             HStack(spacing: 10) {
                 statPill(label: "Name", value: agent.name)
@@ -550,26 +546,14 @@ struct AgentConfigSheet: View {
             let selectedModel = allModels.isEmpty ? nil : allModels[selectedModelIndex]
             let tags: [String] = isPm ? ["pm"] : []
 
-            if saveGlobally {
-                try await coreManager.safeCore.updateGlobalAgentConfig(
-                    agentPubkey: agent.pubkey,
-                    model: selectedModel,
-                    tools: Array(selectedTools),
-                    skills: Array(selectedSkills),
-                    mcpServers: agent.mcpServers,
-                    tags: tags
-                )
-            } else {
-                try await coreManager.safeCore.updateAgentConfig(
-                    projectId: projectId,
-                    agentPubkey: agent.pubkey,
-                    model: selectedModel,
-                    tools: Array(selectedTools),
-                    skills: Array(selectedSkills),
-                    mcpServers: agent.mcpServers,
-                    tags: tags
-                )
-            }
+            try await coreManager.safeCore.updateGlobalAgentConfig(
+                agentPubkey: agent.pubkey,
+                model: selectedModel,
+                tools: Array(selectedTools),
+                skills: Array(selectedSkills),
+                mcpServers: agent.mcpServers,
+                tags: tags
+            )
 
             dismiss()
         } catch {

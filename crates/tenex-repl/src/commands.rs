@@ -1155,7 +1155,6 @@ pub(crate) fn handle_config_command(
 
     let mut open_model = false;
     let mut is_set_pm = false;
-    let mut is_global = false;
     let mut agent_filter = String::new();
     let mut open_agent_select = false;
 
@@ -1163,7 +1162,9 @@ pub(crate) fn handle_config_command(
         match part {
             "--model" => open_model = true,
             "--set-pm" => is_set_pm = true,
-            "--global" => is_global = true,
+            "--global" => {
+                // Compatibility: kind:24020 config is always shared now.
+            }
             _ if part.starts_with('@') => {
                 let name = &part[1..];
                 if name.is_empty() {
@@ -1221,7 +1222,6 @@ pub(crate) fn handle_config_command(
     panel.agent_pubkey = agent_pubkey;
     panel.agent_name = agent_name;
     panel.project_a_tag = a_tag;
-    panel.is_global = is_global;
     panel.cursor = 0;
     panel.scroll_offset = 0;
     panel.origin_command = format!(
@@ -1288,7 +1288,6 @@ pub(crate) fn handle_model_command(
     panel.agent_pubkey = agent_pubkey;
     panel.agent_name = agent_name;
     panel.project_a_tag = a_tag;
-    panel.is_global = false;
     panel.cursor = 0;
     panel.scroll_offset = 0;
     panel.origin_command = format!(

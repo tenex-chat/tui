@@ -1896,7 +1896,6 @@ fn handle_request(
             match lookup {
                 Ok(result) => {
                     match core_handle.send(NostrCommand::UpdateAgentConfig {
-                        project_a_tag: result.project_a_tag.clone(),
                         agent_pubkey: result.agent_pubkey.clone(),
                         model: Some(params.model.clone()),
                         tools: params.tools.clone(),
@@ -1957,7 +1956,7 @@ fn handle_request(
                                         id,
                                         serde_json::json!({
                                             "status": "sent",
-                                            "message": "Agent settings update sent. Use --wait to confirm application."
+                                            "message": "Shared agent settings update sent. Use --wait to confirm application."
                                         }),
                                     ),
                                     false,

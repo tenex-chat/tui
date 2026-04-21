@@ -183,9 +183,9 @@ enum Commands {
         mcp_tool_ids: Vec<String>,
     },
 
-    /// Set agent settings (publishes kind:24020 event to override model/tools)
+    /// Set shared agent settings (publishes kind:24020 event to override model/tools)
     SetAgentSettings {
-        /// Project slug (d-tag)
+        /// Project slug (d-tag) used to find the agent and available backend status
         project_slug: String,
         /// Agent slug (name) within the project
         agent_slug: String,
