@@ -113,8 +113,7 @@ extension MessageComposerView {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.image, .png, .jpeg, .gif, .webP, .heic]
-        panel.message = "Select images to attach"
+        panel.message = "Select files to attach"
 
         guard panel.runModal() == .OK else { return }
 
@@ -125,8 +124,7 @@ extension MessageComposerView {
             var failures: [String] = []
             for url in panel.urls {
                 do {
-                    let droppedImage = try attachmentUploadService.loadDroppedImage(at: url)
-                    try await uploadImageAttachment(data: droppedImage.data, mimeType: droppedImage.mimeType)
+                    try await uploadPickedFile(at: url)
                 } catch {
                     failures.append(error.localizedDescription)
                 }
@@ -167,7 +165,7 @@ extension MessageComposerView {
         for provider in providers {
             do {
                 let fileURL = try await attachmentUploadService.loadDroppedFileURL(from: provider)
-                try await uploadDroppedFile(at: fileURL)
+                try await uploadPickedFile(at: fileURL)
                 uploadedCount += 1
             } catch {
                 failures.append(error.localizedDescription)
@@ -183,9 +181,27 @@ extension MessageComposerView {
         }
     }
 
-    func uploadDroppedFile(at fileURL: URL) async throws {
-        let droppedImage = try attachmentUploadService.loadDroppedImage(at: fileURL)
-        try await uploadImageAttachment(data: droppedImage.data, mimeType: droppedImage.mimeType)
+    func uploadPickedFile(at fileURL: URL) async throws {
+        let file = try attachmentUploadService.loadDroppedFile(at: fileURL)
+        let blobURL = try await attachmentUploadService.uploadImage(data: file.data, mimeType: file.mimeType)
+
+        if file.isImage {
+            let imageId = draft.addImageAttachment(url: blobURL)
+            let attachment = ImageAttachment(id: imageId, url: blobURL)
+            localImageAttachments.append(attachment)
+            localText.append("[Image #\(imageId)] ")
+        } else {
+            let filename = fileURL.lastPathComponent
+            localText.append("[\(filename)](\(blobURL)) ")
+        }
+
+        isDirty = true
+        if let projectId = selectedProject?.id {
+            await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
+            if file.isImage {
+                await draftManager.updateImageAttachments(localImageAttachments, conversationId: conversationId, projectId: projectId)
+            }
+        }
     }
     #endif
 }

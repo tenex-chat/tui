@@ -13,15 +13,12 @@ struct AttachmentUploadService {
     #if os(macOS)
     enum FileDropError: LocalizedError {
         case noReadableFileURL
-        case unsupportedFileType(String)
         case readFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .noReadableFileURL:
                 return "Could not read dropped file URL."
-            case .unsupportedFileType(let name):
-                return "Unsupported file '\(name)'. Supported: png, jpg, jpeg, gif, webp, bmp."
             case .readFailed(let name):
                 return "Failed to read '\(name)'."
             }
@@ -54,38 +51,32 @@ struct AttachmentUploadService {
         }
     }
 
-    func mimeTypeForDroppedImage(url: URL) -> String? {
+    func mimeTypeForFile(url: URL) -> (mimeType: String, isImage: Bool) {
         switch url.pathExtension.lowercased() {
-        case "png":
-            return "image/png"
-        case "jpg", "jpeg":
-            return "image/jpeg"
-        case "gif":
-            return "image/gif"
-        case "webp":
-            return "image/webp"
-        case "bmp":
-            return "image/bmp"
+        case "png":  return ("image/png", true)
+        case "jpg", "jpeg": return ("image/jpeg", true)
+        case "gif":  return ("image/gif", true)
+        case "webp": return ("image/webp", true)
+        case "bmp":  return ("image/bmp", true)
+        case "heic", "heif": return ("image/heic", true)
         default:
-            return nil
+            let mimeType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
+                ?? "application/octet-stream"
+            return (mimeType, false)
         }
     }
 
-    func loadDroppedImage(at fileURL: URL) throws -> (data: Data, mimeType: String) {
-        guard let mimeType = mimeTypeForDroppedImage(url: fileURL) else {
-            throw FileDropError.unsupportedFileType(fileURL.lastPathComponent)
-        }
+    func loadDroppedFile(at fileURL: URL) throws -> (data: Data, mimeType: String, isImage: Bool) {
+        let (mimeType, isImage) = mimeTypeForFile(url: fileURL)
 
         let hasSecurityScope = fileURL.startAccessingSecurityScopedResource()
         defer {
-            if hasSecurityScope {
-                fileURL.stopAccessingSecurityScopedResource()
-            }
+            if hasSecurityScope { fileURL.stopAccessingSecurityScopedResource() }
         }
 
         do {
             let data = try Data(contentsOf: fileURL)
-            return (data: data, mimeType: mimeType)
+            return (data: data, mimeType: mimeType, isImage: isImage)
         } catch {
             throw FileDropError.readFailed(fileURL.lastPathComponent)
         }
