@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(macOS)
 import AppKit
@@ -276,6 +277,8 @@ struct ConversationWorkspaceView: View {
     @State private var workspaceWidth: CGFloat = .infinity
     @State private var selectedDelegationConversation: ConversationFullInfo?
     @State private var visibleMessageWindow: Int = 30
+    @State private var transcriptDropProviders: [NSItemProvider]? = nil
+    @State private var isTranscriptDropTargeted = false
     @State private var navigationErrorMessage: String?
     @State private var rawEventDestination: RawEventDestination?
     @State private var localReferenceLaunchPayload: ReferenceConversationLaunchPayload?
@@ -722,6 +725,21 @@ struct ConversationWorkspaceView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             inlineComposer
         }
+        #if os(macOS)
+        .onDrop(of: [.fileURL], isTargeted: $isTranscriptDropTargeted) { providers in
+            guard !providers.isEmpty else { return false }
+            transcriptDropProviders = providers
+            return true
+        }
+        .overlay {
+            if isTranscriptDropTargeted {
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.accentColor, lineWidth: 2)
+                    .padding(4)
+                    .allowsHitTesting(false)
+            }
+        }
+        #endif
     }
 
     @ViewBuilder
@@ -781,6 +799,7 @@ struct ConversationWorkspaceView: View {
                 initialContent: isNewThreadMode ? newThreadComposerSeed?.initialContent : nil,
                 initialTextAttachments: isNewThreadMode ? (newThreadComposerSeed?.textAttachments ?? []) : [],
                 referenceConversationId: isNewThreadMode ? newThreadComposerSeed?.referenceConversationId : nil,
+                externalDropProviders: $transcriptDropProviders,
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace,
                 onSend: isNewThreadMode ? { result in
