@@ -547,7 +547,11 @@ extension MessageComposerView {
 
     func openAgentSelector(initialQuery: String = "") {
         agentSelectorInitialQuery = initialQuery
-        showAgentSelector = true
+        if usesWorkspaceInlineLayout {
+            showWorkspaceAgentPopover = true
+        } else {
+            showAgentSelector = true
+        }
     }
 
     func saveDraftAsNamed() {

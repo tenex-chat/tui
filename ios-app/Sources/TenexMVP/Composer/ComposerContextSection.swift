@@ -409,6 +409,7 @@ extension MessageComposerView {
 
     var agentPopoverToken: some View {
         Button {
+            agentSelectorInitialQuery = ""
             showWorkspaceAgentPopover.toggle()
         } label: {
             HStack(spacing: 4) {
@@ -430,6 +431,7 @@ extension MessageComposerView {
             WorkspaceAgentPopoverContent(
                 agents: availableAgents,
                 selectedPubkey: draft.agentPubkey,
+                initialSearchQuery: agentSelectorInitialQuery,
                 onSelect: { pubkey in
                     draft.agentPubkey = pubkey
                     isDirty = true
@@ -678,6 +680,7 @@ struct WorkspaceAgentPopoverContent: View {
     @Environment(TenexCoreManager.self) var coreManager
     let agents: [ProjectAgent]
     let selectedPubkey: String?
+    let initialSearchQuery: String
     let onSelect: (String) -> Void
     let onClear: () -> Void
     let onConfig: (ProjectAgent) -> Void
@@ -749,6 +752,9 @@ struct WorkspaceAgentPopoverContent: View {
             }
         }
         .frame(width: 280)
+        .onAppear {
+            searchText = initialSearchQuery
+        }
     }
 
     private func agentRow(_ agent: ProjectAgent) -> some View {
