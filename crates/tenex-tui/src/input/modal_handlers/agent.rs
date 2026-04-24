@@ -339,7 +339,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                 if let Some(settings) = state.settings.as_ref() {
                     let agent_pubkey = settings.agent_pubkey.clone();
                     let model = settings.selected_model().map(str::to_string);
-                    let tools = settings.selected_tools_vec();
                     let skills = settings.selected_skills_vec();
                     let mcp_servers = settings.selected_mcp_servers_vec();
                     let tags = if settings.is_pm {
@@ -352,7 +351,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                         if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
                             agent_pubkey,
                             model,
-                            tools,
                             skills,
                             mcp_servers,
                             tags,

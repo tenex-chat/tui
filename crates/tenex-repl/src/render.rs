@@ -894,7 +894,6 @@ pub(crate) fn redraw_input(
     if panel.active {
         // Header per mode
         let header = match panel.mode {
-            PanelMode::Tools => format!("  Tools for {}", panel.agent_name),
             PanelMode::AgentSelect => {
                 if panel.filter.is_empty() {
                     "  Select agent".to_string()
@@ -933,13 +932,6 @@ pub(crate) fn redraw_input(
 
             // Per-mode markers
             let (marker, marker_len) = match panel.mode {
-                PanelMode::Tools => {
-                    if panel.tools_selected.contains(item.as_str()) {
-                        ("[x] ", 4)
-                    } else {
-                        ("[ ] ", 4)
-                    }
-                }
                 PanelMode::AgentSelect => ("", 0),
                 PanelMode::FlagSelect => ("", 0), // markers are baked into item text
                 PanelMode::ModelSelect => {
@@ -976,7 +968,6 @@ pub(crate) fn redraw_input(
 
         // Footer per mode
         let footer = match panel.mode {
-            PanelMode::Tools => "  Space: toggle  @: agent  -: options  Enter: save  Esc: cancel",
             PanelMode::AgentSelect => "  Enter: select  Type to filter  Esc: back",
             PanelMode::FlagSelect => "  Enter: select  Esc: back",
             PanelMode::ModelSelect => "  Enter: select  Type to filter  Esc: back",

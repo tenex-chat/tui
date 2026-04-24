@@ -4,7 +4,7 @@ pub mod bookmark;
 pub mod conversation_metadata;
 pub mod draft;
 pub mod inbox;
-pub mod installed_agent;
+pub mod agent_config;
 pub mod lesson;
 pub mod mcp_tool;
 pub mod message;
@@ -30,7 +30,7 @@ pub use draft::{
     PUBLISHED_DRAFT_GRACE_PERIOD_SECS,
 };
 pub use inbox::{AgentChatter, InboxEventType, InboxItem};
-pub use installed_agent::InstalledAgent;
+pub use agent_config::AgentConfig;
 pub use lesson::Lesson;
 pub use mcp_tool::MCPTool;
 pub use message::{AskEvent, AskQuestion, Message};

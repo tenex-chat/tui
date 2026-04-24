@@ -144,13 +144,16 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let input_bg = theme::BG_INPUT;
 
-    // Agent display with model info in a single selectable chip (no @ prefix)
+    // Agent display with model info in a single selectable chip (no @ prefix).
+    // The active model lives on the per-agent kind:24011 event now.
     let agent_chip_display = app
         .selected_agent()
         .map(|a| {
-            let model_display = a
-                .model
-                .as_ref()
+            let store = app.data_store.borrow();
+            let model = store
+                .get_agent_config(&a.backend_pubkey, &a.pubkey)
+                .and_then(|c| c.active_model.clone());
+            let model_display = model
                 .map(|m| format!("({})", m))
                 .unwrap_or_else(|| "(no model)".to_string());
             format!("{} {}", a.name, model_display)

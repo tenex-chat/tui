@@ -215,11 +215,18 @@ pub(crate) fn agent_completion_items(
         .get_online_agents(a_tag)
         .map(|a| a.iter().collect())
         .unwrap_or_default();
+    let backend = store
+        .get_project_status(a_tag)
+        .map(|s| s.backend_pubkey.clone());
     agents
         .iter()
         .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(filter))
         .map(|a| {
-            let model = a.model.as_deref().unwrap_or("unknown");
+            let model = backend
+                .as_deref()
+                .and_then(|bp| store.get_agent_config(bp, &a.pubkey))
+                .and_then(|c| c.active_model.clone())
+                .unwrap_or_else(|| "unknown".to_string());
             let pm = if a.is_pm { " [PM]" } else { "" };
             let label = format!("{}{pm}", a.name);
             let fill = match project_prefix {
@@ -564,6 +571,9 @@ impl CompletionMenu {
                                                 })
                                                 .and_then(|project| {
                                                     let a_tag = project.a_tag();
+                                                    let backend = store_ref
+                                                        .get_project_status(&a_tag)
+                                                        .map(|s| s.backend_pubkey.clone());
                                                     store_ref.get_online_agents(&a_tag).map(
                                                         |agents| {
                                                             agents
@@ -575,10 +585,20 @@ impl CompletionMenu {
                                                                             .contains(&agent_filter)
                                                                 })
                                                                 .map(|a| {
-                                                                    let model = a
-                                                                        .model
+                                                                    let model = backend
                                                                         .as_deref()
-                                                                        .unwrap_or("unknown");
+                                                                        .and_then(|bp| {
+                                                                            store_ref
+                                                                                .get_agent_config(
+                                                                                    bp, &a.pubkey,
+                                                                                )
+                                                                        })
+                                                                        .and_then(|c| {
+                                                                            c.active_model.clone()
+                                                                        })
+                                                                        .unwrap_or_else(|| {
+                                                                            "unknown".to_string()
+                                                                        });
                                                                     let pm = if a.is_pm {
                                                                         " [PM]"
                                                                     } else {
@@ -589,8 +609,7 @@ impl CompletionMenu {
                                                                             "{}{pm}",
                                                                             a.name
                                                                         ),
-                                                                        description: model
-                                                                            .to_string(),
+                                                                        description: model,
                                                                         fill: format!(
                                                                             "/new {}@{}",
                                                                             a.name, project_part
@@ -631,17 +650,24 @@ impl CompletionMenu {
                                 .get_online_agents(a_tag)
                                 .map(|a| a.iter().collect())
                                 .unwrap_or_default();
+                            let backend = store_ref
+                                .get_project_status(a_tag)
+                                .map(|s| s.backend_pubkey.clone());
                             self.items = agents
                                 .iter()
                                 .filter(|a| {
                                     filter.is_empty() || a.name.to_lowercase().contains(&filter)
                                 })
                                 .map(|a| {
-                                    let model = a.model.as_deref().unwrap_or("unknown");
+                                    let model = backend
+                                        .as_deref()
+                                        .and_then(|bp| store_ref.get_agent_config(bp, &a.pubkey))
+                                        .and_then(|c| c.active_model.clone())
+                                        .unwrap_or_else(|| "unknown".to_string());
                                     let pm = if a.is_pm { " [PM]" } else { "" };
                                     CompletionItem {
                                         label: format!("{}{pm}", a.name),
-                                        description: model.to_string(),
+                                        description: model,
                                         fill: format!("/new {}", a.name),
                                         completed: false,
                                     }

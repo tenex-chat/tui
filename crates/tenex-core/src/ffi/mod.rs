@@ -51,7 +51,7 @@ use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction
 
 use crate::models::agent_definition::AgentDefinition;
 use crate::models::{
-    AskEvent, ConversationMetadata, InboxItem, InstalledAgent, MCPTool, Message, Nudge,
+    AgentConfig, AskEvent, ConversationMetadata, InboxItem, MCPTool, Message, Nudge,
     OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Skill, TeamPack, Thread,
 };
 use crate::nostr::{set_log_path, DataChange, NostrCommand, NostrWorker};
@@ -423,7 +423,7 @@ struct DeltaSummary {
     diagnostics_updated: usize,
     general: usize,
     bunker_sign_request: usize,
-    installed_agents_changed: usize,
+    agent_configs_changed: usize,
 }
 
 impl DeltaSummary {
@@ -448,14 +448,14 @@ impl DeltaSummary {
             DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
             DataChangeType::General => self.general += 1,
             DataChangeType::BunkerSignRequest { .. } => self.bunker_sign_request += 1,
-            DataChangeType::InstalledAgentsChanged { .. } => self.installed_agents_changed += 1,
+            DataChangeType::AgentConfigsChanged { .. } => self.agent_configs_changed += 1,
             DataChangeType::BookmarkListChanged { .. } => {}
         }
     }
 
     fn compact(&self) -> String {
         format!(
-            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} content={} stats={} diag={} general={} bunker={} installed={}",
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} content={} stats={} diag={} general={} bunker={} agentConfigs={}",
             self.total,
             self.message_appended,
             self.conversation_upsert,
@@ -473,7 +473,7 @@ impl DeltaSummary {
             self.diagnostics_updated,
             self.general,
             self.bunker_sign_request,
-            self.installed_agents_changed
+            self.agent_configs_changed
         )
     }
 }
@@ -725,7 +725,7 @@ fn process_data_changes_with_deltas(
     let started_at = Instant::now();
     let mut deltas: Vec<DataChangeType> = Vec::new();
     let mut project_status_changes = 0usize;
-    let mut installed_agent_changes = 0usize;
+    let mut agent_config_changes = 0usize;
     let mut stream_chunks = 0usize;
     let mut mcp_tools_changed = 0usize;
 
@@ -799,14 +799,13 @@ fn process_data_changes_with_deltas(
                     }
                 }
             }
-            DataChange::InstalledAgentList { json } => {
-                installed_agent_changes += 1;
+            DataChange::AgentConfig { json } => {
+                agent_config_changes += 1;
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
-                    if let Some((backend_pubkey, _)) =
-                        crate::models::InstalledAgent::from_value(&event)
-                    {
+                    if let Some(config) = AgentConfig::from_value(&event) {
+                        let backend_pubkey = config.backend_pubkey.clone();
                         store.handle_status_event_value(&event);
-                        deltas.push(DataChangeType::InstalledAgentsChanged { backend_pubkey });
+                        deltas.push(DataChangeType::AgentConfigsChanged { backend_pubkey });
                     }
                 }
             }
@@ -854,16 +853,17 @@ fn process_data_changes_with_deltas(
                     });
                 }
             }
+            DataChange::AgentWhitelistPublished { .. } => {}
         }
     }
 
     let delta_summary = summarize_deltas(&deltas);
     tlog!(
         "PERF",
-        "process_data_changes_with_deltas input={} projectStatus={} installedAgents={} streamChunks={} mcpToolsChanged={} deltas=[{}] elapsedMs={}",
+        "process_data_changes_with_deltas input={} projectStatus={} agentConfigs={} streamChunks={} mcpToolsChanged={} deltas=[{}] elapsedMs={}",
         data_changes.len(),
         project_status_changes,
-        installed_agent_changes,
+        agent_config_changes,
         stream_chunks,
         mcp_tools_changed,
         delta_summary.compact(),
@@ -899,7 +899,7 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
             }
             DataChangeType::ProjectStatusChanged { .. }
             | DataChangeType::PendingBackendApproval { .. }
-            | DataChangeType::InstalledAgentsChanged { .. }
+            | DataChangeType::AgentConfigsChanged { .. }
             | DataChangeType::ActiveConversationsChanged { .. }
             | DataChangeType::McpToolsChanged
             | DataChangeType::TeamsChanged => {
@@ -1119,16 +1119,19 @@ pub struct TeamCommentInfo {
     pub parent_comment_id: Option<String>,
 }
 
-/// Available configuration options for a project.
-/// Used by iOS to populate the agent config modal.
+/// Available configuration options derived from a single agent's kind:24011
+/// event. Used by iOS to populate the agent config modal.
+///
+/// Per the current protocol kind:24010 no longer carries aggregate
+/// model/skill/mcp info — those live on each agent's kind:24011 event.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProjectConfigOptions {
-    /// All available models for the project
+    /// All models visible to this agent.
     pub all_models: Vec<String>,
-    /// All available tools for the project
-    pub all_tools: Vec<String>,
-    /// All available skills for the project
+    /// All skills visible to this agent.
     pub all_skills: Vec<String>,
+    /// All MCP servers visible to this agent.
+    pub all_mcp_servers: Vec<String>,
 }
 
 /// Information about the current logged-in user.
@@ -1713,7 +1716,8 @@ pub enum DataChangeType {
         backend_pubkey: String,
         project_a_tag: String,
     },
-    InstalledAgentsChanged {
+    /// A per-agent config event (kind:24011) arrived for an installed agent.
+    AgentConfigsChanged {
         backend_pubkey: String,
     },
     /// Active conversations updated for a project (kind:24133)

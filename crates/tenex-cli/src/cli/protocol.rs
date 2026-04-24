@@ -92,12 +92,6 @@ pub enum CliCommand {
     Status,
     /// Shutdown the daemon
     Shutdown,
-    /// List all agent definitions (kind:4199)
-    ListAgentDefinitions,
-    /// List all MCP tools (kind:4200)
-    ListMCPTools,
-    /// List all skills (kind:4202)
-    ListSkills,
     /// Show detailed project information (kind:24010)
     ShowProject {
         project_slug: String,
@@ -116,7 +110,6 @@ pub enum CliCommand {
         project_slug: String,
         agent_slug: String,
         model: String,
-        tools: Vec<String>,
         wait_for_project: bool,
         wait: bool,
     },
@@ -219,9 +212,6 @@ impl CliCommand {
             ),
             CliCommand::Status => ("status", serde_json::json!({})),
             CliCommand::Shutdown => ("shutdown", serde_json::json!({})),
-            CliCommand::ListAgentDefinitions => ("list_agent_definitions", serde_json::json!({})),
-            CliCommand::ListMCPTools => ("list_mcp_tools", serde_json::json!({})),
-            CliCommand::ListSkills => ("list_skills", serde_json::json!({})),
             CliCommand::ShowProject {
                 project_slug,
                 wait_for_project,
@@ -250,7 +240,6 @@ impl CliCommand {
                 project_slug,
                 agent_slug,
                 model,
-                tools,
                 wait_for_project,
                 wait,
             } => (
@@ -259,7 +248,6 @@ impl CliCommand {
                     "project_slug": project_slug,
                     "agent_slug": agent_slug,
                     "model": model,
-                    "tools": tools,
                     "wait_for_project": wait_for_project,
                     "wait": wait
                 }),

@@ -1,7 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{
-    AgentChatter, AskEvent, BookmarkList, ConversationMetadata, InboxEventType, InboxItem,
-    InstalledAgent, Message, Project, ProjectAgent, ProjectStatus, Thread,
+    AgentChatter, AgentConfig, AskEvent, BookmarkList, ConversationMetadata, InboxEventType,
+    InboxItem, Message, Project, ProjectAgent, ProjectStatus, Thread,
 };
 #[cfg(test)]
 use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, OperationsStatus, Report};
@@ -37,7 +37,7 @@ pub struct AppDataStore {
     project_tombstones: HashMap<String, u64>,
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
     pub project_statuses_by_backend: HashMap<String, HashMap<String, ProjectStatus>>, // project a_tag -> backend pubkey -> status
-    pub installed_agents_by_backend: HashMap<String, Vec<InstalledAgent>>,
+    pub agent_configs_by_backend: HashMap<String, Vec<AgentConfig>>,
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
     pub profiles: HashMap<String, String>,                // pubkey -> display name
@@ -90,7 +90,7 @@ impl AppDataStore {
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
-            installed_agents_by_backend: HashMap::new(),
+            agent_configs_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -128,7 +128,7 @@ impl AppDataStore {
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
-            installed_agents_by_backend: HashMap::new(),
+            agent_configs_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -215,7 +215,7 @@ impl AppDataStore {
         self.project_tombstones.clear();
         self.project_statuses.clear();
         self.project_statuses_by_backend.clear();
-        self.installed_agents_by_backend.clear();
+        self.agent_configs_by_backend.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
         self.profiles.clear();
@@ -1532,7 +1532,7 @@ impl AppDataStore {
         if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
             match kind {
                 24010 => self.handle_project_status_event_value(event),
-                24011 => self.handle_installed_agent_list_event_value(event),
+                24011 => self.handle_agent_config_event_value(event),
                 24133 => self.handle_operations_status_event_value(event),
                 _ => {} // Ignore unknown kinds
             }
@@ -1641,19 +1641,38 @@ impl AppDataStore {
         self.operations.handle_operations_status_event_value(event);
     }
 
-    fn handle_installed_agent_list_event_value(&mut self, event: &serde_json::Value) {
-        let Some((backend_pubkey, installed_agents)) = InstalledAgent::from_value(event) else {
+    /// Handle a kind:24011 per-agent config event.
+    ///
+    /// Each event describes one installed agent. Upserts the `AgentConfig` into
+    /// the bucket for `backend_pubkey` (keyed by agent pubkey within the bucket).
+    fn handle_agent_config_event_value(&mut self, event: &serde_json::Value) {
+        let Some(config) = AgentConfig::from_value(event) else {
             return;
         };
 
-        if self.trust.is_blocked(&backend_pubkey) {
+        if self.trust.is_blocked(&config.backend_pubkey) {
             return;
         }
 
-        if self.trust.is_approved(&backend_pubkey) {
-            self.installed_agents_by_backend
-                .insert(backend_pubkey, installed_agents);
+        if !self.trust.is_approved(&config.backend_pubkey) {
+            return;
         }
+
+        let entry = self
+            .agent_configs_by_backend
+            .entry(config.backend_pubkey.clone())
+            .or_default();
+
+        if let Some(existing) = entry.iter_mut().find(|c| c.pubkey == config.pubkey) {
+            // Only accept newer events (protects against out-of-order delivery).
+            if config.created_at >= existing.created_at {
+                *existing = config;
+            }
+        } else {
+            entry.push(config);
+        }
+
+        entry.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
     }
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
@@ -2120,11 +2139,18 @@ impl AppDataStore {
         self.project_statuses.get(a_tag)
     }
 
-    pub fn get_installed_agents(&self, backend_pubkey: &str) -> &[InstalledAgent] {
-        self.installed_agents_by_backend
+    pub fn get_agent_configs(&self, backend_pubkey: &str) -> &[AgentConfig] {
+        self.agent_configs_by_backend
             .get(backend_pubkey)
-            .map(|agents| agents.as_slice())
+            .map(|configs| configs.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// Find the `AgentConfig` for a specific agent under a specific backend.
+    pub fn get_agent_config(&self, backend_pubkey: &str, agent_pubkey: &str) -> Option<&AgentConfig> {
+        self.agent_configs_by_backend
+            .get(backend_pubkey)
+            .and_then(|configs| configs.iter().find(|c| c.pubkey == agent_pubkey))
     }
 
     /// Get online agents for a project (from ProjectStatus if online)
@@ -3505,16 +3531,8 @@ mod tests {
                 backend_pubkey: "backend".to_string(),
                 is_pm: true,
                 is_online: true,
-                model: None,
-                tools: vec![],
-                skills: vec![],
-                mcp_servers: vec![],
             }],
             branches: vec![],
-            all_models: vec![],
-            all_tools: vec![],
-            all_skills: vec![],
-            all_mcp_servers: vec![],
             created_at: 0,
             backend_pubkey: "backend".to_string(),
             last_seen_at: 0,
@@ -3613,9 +3631,6 @@ mod tests {
             "tags": [
                 ["a", "31933:user:project"],
                 ["agent", "agentpk1", "agent1", "pm"],
-                ["model", "model-a", "agent1"],
-                ["tool", "tool-a", "agent1"],
-                ["skill", "skill-a", "agent1"],
                 ["branch", "main"]
             ]
         }"#;
@@ -3627,10 +3642,6 @@ mod tests {
             "tags": [
                 ["a", "31933:user:project"],
                 ["agent", "agentpk2", "agent2"],
-                ["model", "model-b", "agent2"],
-                ["tool", "tool-b", "agent2"],
-                ["skill", "skill-b", "agent2"],
-                ["mcp", "mcp-b", "agent2"],
                 ["branch", "feature"]
             ]
         }"#;
@@ -3661,13 +3672,8 @@ mod tests {
                 .backend_pubkey,
             "backend2"
         );
-        assert!(status.models().contains(&"model-a"));
-        assert!(status.models().contains(&"model-b"));
-        assert!(status.all_tools().contains(&"tool-a"));
-        assert!(status.all_tools().contains(&"tool-b"));
-        assert!(status.all_skills().contains(&"skill-a"));
-        assert!(status.all_skills().contains(&"skill-b"));
-        assert!(status.all_mcp_servers().contains(&"mcp-b"));
+        assert!(status.branches.contains(&"main".to_string()));
+        assert!(status.branches.contains(&"feature".to_string()));
         assert_eq!(
             store
                 .project_statuses_by_backend
@@ -5491,10 +5497,6 @@ mod tests {
                 project_coordinate: "31933:pk:proj1".to_string(),
                 agents: vec![],
                 branches: vec![],
-                all_models: vec![],
-                all_tools: vec![],
-                all_skills: vec![],
-                all_mcp_servers: vec![],
                 created_at: 100,
                 backend_pubkey: "pk1".to_string(),
                 last_seen_at: 100,
@@ -5530,10 +5532,6 @@ mod tests {
                     project_coordinate: "proj1".to_string(),
                     agents: vec![],
                     branches: vec![],
-                    all_models: vec![],
-                    all_tools: vec![],
-                    all_skills: vec![],
-                    all_mcp_servers: vec![],
                     created_at: 100,
                     backend_pubkey: "pk1".to_string(),
                     last_seen_at: 100,
@@ -5563,10 +5561,6 @@ mod tests {
                     project_coordinate: "31933:pk:proj1".to_string(),
                     agents: vec![],
                     branches: vec![],
-                    all_models: vec![],
-                    all_tools: vec![],
-                    all_skills: vec![],
-                    all_mcp_servers: vec![],
                     created_at: 100,
                     backend_pubkey: "pk1".to_string(),
                     last_seen_at: 100,
@@ -5599,10 +5593,6 @@ mod tests {
                     project_coordinate: "proj".to_string(),
                     agents: vec![],
                     branches: vec![],
-                    all_models: vec![],
-                    all_tools: vec![],
-                    all_skills: vec![],
-                    all_mcp_servers: vec![],
                     created_at: 100,
                     backend_pubkey: "pk3".to_string(),
                     last_seen_at: 100,

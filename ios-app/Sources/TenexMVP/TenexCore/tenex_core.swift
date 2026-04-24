@@ -1248,15 +1248,15 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func unarchiveConversation(conversationId: String) 
     
     /**
-     * Update an agent's configuration (model and tools).
+     * Update an agent's shared configuration (model, tools, skills, and MCP servers).
      *
-     * Publishes a kind:24020 event to update the agent's configuration.
-     * The backend will process this event and update the agent's config.
+     * Publishes a kind:24020 event without a project a-tag. `project_id` is kept
+     * for API compatibility with clients that open the editor from a project view.
      */
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
-     * Update an agent's configuration globally (all projects).
+     * Update an agent's shared configuration.
      *
      * Publishes a kind:24020 event without a project a-tag.
      */
@@ -2587,10 +2587,10 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
 }
     
     /**
-     * Update an agent's configuration (model and tools).
+     * Update an agent's shared configuration (model, tools, skills, and MCP servers).
      *
-     * Publishes a kind:24020 event to update the agent's configuration.
-     * The backend will process this event and update the agent's config.
+     * Publishes a kind:24020 event without a project a-tag. `project_id` is kept
+     * for API compatibility with clients that open the editor from a project view.
      */
 open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_agent_config(self.uniffiClonePointer(),
@@ -2606,7 +2606,7 @@ open func updateAgentConfig(projectId: String, agentPubkey: String, model: Strin
 }
     
     /**
-     * Update an agent's configuration globally (all projects).
+     * Update an agent's shared configuration.
      *
      * Publishes a kind:24020 event without a project a-tag.
      */
@@ -6411,16 +6411,16 @@ public struct FfiConverterTypeProjectAgent: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectAgent {
         return
             try ProjectAgent(
-                pubkey: FfiConverterString.read(from: &buf),
-                name: FfiConverterString.read(from: &buf),
-                backendPubkey: FfiConverterString.read(from: &buf),
-                isPm: FfiConverterBool.read(from: &buf),
-                isOnline: FfiConverterBool.read(from: &buf),
-                model: FfiConverterOptionString.read(from: &buf),
-                tools: FfiConverterSequenceString.read(from: &buf),
-                skills: FfiConverterSequenceString.read(from: &buf),
+                pubkey: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                backendPubkey: FfiConverterString.read(from: &buf), 
+                isPm: FfiConverterBool.read(from: &buf), 
+                isOnline: FfiConverterBool.read(from: &buf), 
+                model: FfiConverterOptionString.read(from: &buf), 
+                tools: FfiConverterSequenceString.read(from: &buf), 
+                skills: FfiConverterSequenceString.read(from: &buf), 
                 mcpServers: FfiConverterSequenceString.read(from: &buf)
-            )
+        )
     }
 
     public static func write(_ value: ProjectAgent, into buf: inout [UInt8]) {
@@ -11261,10 +11261,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 37791) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 24644) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 46781) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 5642) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 26050) {

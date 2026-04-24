@@ -36,7 +36,7 @@ const KIND_SKILL: u16 = 4202;
 const KIND_BOOKMARK_LIST: u16 = 14202;
 const KIND_AGENT_CREATE: u16 = 24001;
 const KIND_PROJECT_STATUS: u16 = 24010;
-const KIND_INSTALLED_AGENT_LIST: u16 = 24011;
+const KIND_AGENT_CONFIG: u16 = 24011;
 const KIND_BACKEND_HEARTBEAT: u16 = 24012;
 const KIND_AGENT_SNAPSHOT: u16 = 14199;
 const KIND_PROJECT_DRAFT: u16 = 31933;
@@ -826,11 +826,14 @@ pub enum NostrCommand {
         /// Human-readable reason for debugging (included as "reason" tag in the event)
         reason: String,
     },
-    /// Update shared agent configuration (kind:24020, no project a-tag)
+    /// Update shared agent configuration (kind:24020, no project a-tag).
+    ///
+    /// Publishes a global update to the agent's `default` config. The current
+    /// protocol dropped `tool` tags entirely — only `model`, `skill`, and `mcp`
+    /// are meaningful.
     UpdateAgentConfig {
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         /// Additional marker tags (e.g. ["pm"])
@@ -995,8 +998,9 @@ pub enum DataChange {
     },
     /// Ephemeral project status event (kind:24010) - not cached in nostrdb
     ProjectStatus { json: String },
-    /// Ephemeral installed agent inventory (kind:24011) - not cached in nostrdb
-    InstalledAgentList { json: String },
+    /// Ephemeral per-agent config event (kind:24011) - not cached in nostrdb.
+    /// One event per installed agent.
+    AgentConfig { json: String },
     /// Ephemeral backend heartbeat (kind:24012) - backend requesting whitelist
     BackendHeartbeat { backend_pubkey: String },
     /// MCP tools changed (kind:4200 events)
@@ -1007,6 +1011,8 @@ pub enum DataChange {
     },
     /// Bookmark list was published (kind:14202) - optimistic update notification
     BookmarkListChanged { bookmarked_ids: Vec<String> },
+    /// Agent whitelist published (kind:14199) - user whitelisted backend pubkeys
+    AgentWhitelistPublished { pubkeys: Vec<String> },
 }
 
 pub struct NostrWorker {
@@ -1311,7 +1317,6 @@ impl NostrWorker {
                     NostrCommand::UpdateAgentConfig {
                         agent_pubkey,
                         model,
-                        tools,
                         skills,
                         mcp_servers,
                         tags,
@@ -1323,7 +1328,6 @@ impl NostrWorker {
                         if let Err(e) = rt.block_on(self.handle_update_agent_config(
                             agent_pubkey,
                             model,
-                            tools,
                             skills,
                             mcp_servers,
                             tags,
@@ -1867,25 +1871,25 @@ impl NostrWorker {
             .with_raw_filter(project_status_json.unwrap_or_default()),
         );
 
-        let installed_agent_filter = Filter::new()
-            .kind(Kind::Custom(KIND_INSTALLED_AGENT_LIST))
+        let agent_config_filter = Filter::new()
+            .kind(Kind::Custom(KIND_AGENT_CONFIG))
             .custom_tag(
                 SingleLetterTag::lowercase(Alphabet::P),
                 user_pubkey.to_string(),
             )
             .since(since_time);
-        let installed_agent_json = serde_json::to_string(&installed_agent_filter).ok();
-        let installed_agent_output = client
-            .subscribe(installed_agent_filter.clone(), None)
+        let agent_config_json = serde_json::to_string(&agent_config_filter).ok();
+        let agent_config_output = client
+            .subscribe(agent_config_filter.clone(), None)
             .await?;
         self.subscription_stats.register(
-            installed_agent_output.val.to_string(),
+            agent_config_output.val.to_string(),
             SubscriptionInfo::new(
-                "Installed agent inventory".to_string(),
-                vec![KIND_INSTALLED_AGENT_LIST],
+                "Per-agent config broadcasts".to_string(),
+                vec![KIND_AGENT_CONFIG],
                 None,
             )
-            .with_raw_filter(installed_agent_json.unwrap_or_default()),
+            .with_raw_filter(agent_config_json.unwrap_or_default()),
         );
 
         // Backend uses uppercase P tag for kind:24133
@@ -1932,7 +1936,7 @@ impl NostrWorker {
             "CONN",
             "Subscribed to status events (kind:{}, kind:{}, kind:{}, kind:{})",
             KIND_PROJECT_STATUS,
-            KIND_INSTALLED_AGENT_LIST,
+            KIND_AGENT_CONFIG,
             KIND_AGENT_STATUS,
             KIND_BACKEND_HEARTBEAT
         );
@@ -2225,12 +2229,12 @@ impl NostrWorker {
 
                                     // Ephemeral events (24010, 24011, 24133) go through DataChange channel
                                     if kind == KIND_PROJECT_STATUS
-                                        || kind == KIND_INSTALLED_AGENT_LIST
+                                        || kind == KIND_AGENT_CONFIG
                                         || kind == KIND_AGENT_STATUS
                                     {
                                         if let Ok(json) = serde_json::to_string(&*event) {
-                                            let data_change = if kind == KIND_INSTALLED_AGENT_LIST {
-                                                DataChange::InstalledAgentList { json: json.clone() }
+                                            let data_change = if kind == KIND_AGENT_CONFIG {
+                                                DataChange::AgentConfig { json: json.clone() }
                                             } else {
                                                 DataChange::ProjectStatus { json: json.clone() }
                                             };
@@ -3444,7 +3448,6 @@ impl NostrWorker {
         &self,
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         tags: Vec<String>,
@@ -3461,7 +3464,6 @@ impl NostrWorker {
         let event = build_agent_config_update_event(
             &agent_pubkey,
             model,
-            &tools,
             &skills,
             &mcp_servers,
             &tags,
@@ -3612,6 +3614,11 @@ impl NostrWorker {
                     &backend_pubkey[..8.min(backend_pubkey.len())],
                     output.id()
                 ));
+                let _ = self
+                    .data_tx
+                    .send(DataChange::AgentWhitelistPublished {
+                        pubkeys: vec![backend_pubkey],
+                    });
             }
             Ok(Err(e)) => tlog!("ERROR", "Failed to publish 14199 to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout publishing 14199 to relay"),
@@ -4136,12 +4143,12 @@ impl NostrWorker {
 
 /// Build a shared kind:24020 agent config update.
 ///
-/// Agent config is keyed by the agent `p` tag only. It intentionally has no
-/// project `a` tag so the same configuration applies across project boundaries.
+/// The event is a global update to the agent's `default` config. It
+/// intentionally has no project `a` tag — project-scoped overrides were
+/// removed from the protocol.
 fn build_agent_config_update_event(
     agent_pubkey: &str,
     model: Option<String>,
-    tools: &[String],
     skills: &[String],
     mcp_servers: &[String],
     tags: &[String],
@@ -4150,7 +4157,6 @@ fn build_agent_config_update_event(
         EventBuilder::new(Kind::Custom(24020), ""),
         agent_pubkey,
         model,
-        tools,
         skills,
         mcp_servers,
         tags,
@@ -4163,15 +4169,17 @@ fn build_agent_config_update_event(
 /// - NIP-89 `client` tag
 /// - `p` tag for `agent_pubkey` (skipped if the pubkey cannot be parsed)
 /// - `model` tag when `model` is `Some`
-/// - one `tool` tag per entry in `tools`
 /// - one `skill` tag per entry in `skills`
 /// - one `mcp` tag per entry in `mcp_servers`
 /// - one bare marker tag per entry in `tags` (e.g. `"pm"`)
+///
+/// Empty skill/mcp lists emit NO placeholder tag — the protocol dropped
+/// empty-valued `tool`/`skill`/`mcp` placeholders. `tool` tags are not emitted
+/// at all.
 fn build_agent_config_event(
     mut event: EventBuilder,
     agent_pubkey: &str,
     model: Option<String>,
-    tools: &[String],
     skills: &[String],
     mcp_servers: &[String],
     tags: &[String],
@@ -4195,49 +4203,18 @@ fn build_agent_config_event(
         ));
     }
 
-    // Tool tags (exhaustive list — empty emits a raw `["tool"]` tag)
-    if tools.is_empty() {
-        event = event.tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-            Vec::<String>::new(),
-        ));
-    } else {
-        for tool in tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-                vec![tool.clone()],
-            ));
-        }
-    }
-
-    // Skill tags (exhaustive list — empty emits a raw `["skill"]` tag)
-    if skills.is_empty() {
+    for skill in skills {
         event = event.tag(Tag::custom(
             TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
-            Vec::<String>::new(),
+            vec![skill.clone()],
         ));
-    } else {
-        for skill in skills {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
-                vec![skill.clone()],
-            ));
-        }
     }
 
-    // MCP server tags (exhaustive list — empty emits a raw `["mcp"]` tag)
-    if mcp_servers.is_empty() {
+    for server in mcp_servers {
         event = event.tag(Tag::custom(
             TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
-            Vec::<String>::new(),
+            vec![server.clone()],
         ));
-    } else {
-        for server in mcp_servers {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
-                vec![server.clone()],
-            ));
-        }
     }
 
     // Marker tags (e.g. ["pm"])
@@ -5296,10 +5273,10 @@ mod tests {
     }
 
     #[test]
-    fn test_build_agent_config_event_emits_empty_snapshot_tags() {
+    fn test_build_agent_config_event_omits_empty_snapshot_tags() {
         let keys = Keys::generate();
         let event =
-            build_agent_config_update_event(&keys.public_key().to_hex(), None, &[], &[], &[], &[])
+            build_agent_config_update_event(&keys.public_key().to_hex(), None, &[], &[], &[])
                 .sign_with_keys(&keys)
                 .unwrap();
 
@@ -5309,28 +5286,31 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("event tags should be an array");
 
-        let has_empty_tool_tag = tags.iter().any(|tag| {
-            let Some(arr) = tag.as_array() else {
-                return false;
-            };
-            arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("tool")
-        });
-        let has_empty_skill_tag = tags.iter().any(|tag| {
-            let Some(arr) = tag.as_array() else {
-                return false;
-            };
-            arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("skill")
-        });
-        let has_empty_mcp_tag = tags.iter().any(|tag| {
-            let Some(arr) = tag.as_array() else {
-                return false;
-            };
-            arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("mcp")
-        });
+        for tag_name in ["tool", "skill", "mcp"] {
+            let has_empty_tag = tags.iter().any(|tag| {
+                let Some(arr) = tag.as_array() else {
+                    return false;
+                };
+                arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some(tag_name)
+            });
+            assert!(
+                !has_empty_tag,
+                "kind:24020 must not emit empty ['{}'] placeholder tag",
+                tag_name
+            );
+        }
 
-        assert!(has_empty_tool_tag, "expected raw empty tool tag");
-        assert!(has_empty_skill_tag, "expected raw empty skill tag");
-        assert!(has_empty_mcp_tag, "expected raw empty mcp tag");
+        // `tool` tags were dropped from the protocol entirely.
+        let has_tool_tag = tags.iter().any(|tag| {
+            tag.as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                == Some("tool")
+        });
+        assert!(
+            !has_tool_tag,
+            "kind:24020 must not emit any tool tags — they were dropped"
+        );
     }
 
     #[test]
@@ -5339,7 +5319,6 @@ mod tests {
         let event = build_agent_config_update_event(
             &keys.public_key().to_hex(),
             Some("gpt-5.4".to_string()),
-            &["Read".to_string()],
             &["testing".to_string()],
             &["local-mcp".to_string()],
             &["pm".to_string()],
@@ -5367,14 +5346,13 @@ mod tests {
     }
 
     #[test]
-    fn test_build_agent_config_event_emits_skill_values_when_present() {
+    fn test_build_agent_config_event_emits_skill_and_mcp_values() {
         let keys = Keys::generate();
         let event = build_agent_config_update_event(
             &keys.public_key().to_hex(),
-            None,
-            &["Read".to_string()],
+            Some("opus".to_string()),
             &["code-review".to_string(), "testing".to_string()],
-            &[],
+            &["github".to_string()],
             &[],
         )
         .sign_with_keys(&keys)
@@ -5386,18 +5364,22 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("event tags should be an array");
 
-        let skill_values: Vec<String> = tags
-            .iter()
-            .filter_map(|tag| {
-                let arr = tag.as_array()?;
-                if arr.first().and_then(|v| v.as_str()) == Some("skill") {
-                    arr.get(1).and_then(|v| v.as_str()).map(str::to_string)
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let values_for = |name: &str| -> Vec<String> {
+            tags.iter()
+                .filter_map(|tag| {
+                    let arr = tag.as_array()?;
+                    if arr.first().and_then(|v| v.as_str()) == Some(name) {
+                        arr.get(1).and_then(|v| v.as_str()).map(str::to_string)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
 
-        assert_eq!(skill_values, vec!["code-review", "testing"]);
+        assert_eq!(values_for("model"), vec!["opus"]);
+        assert_eq!(values_for("skill"), vec!["code-review", "testing"]);
+        assert_eq!(values_for("mcp"), vec!["github"]);
+        assert!(values_for("tool").is_empty());
     }
 }

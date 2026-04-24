@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
-use tenex_core::models::InstalledAgent;
+use tenex_core::models::AgentConfig;
 
 /// Render the project settings modal
 pub fn render_project_settings(
@@ -47,17 +47,17 @@ fn installed_agent_for_pubkey(
     app: &App,
     backend_pubkey: Option<&str>,
     agent_pubkey: &str,
-) -> Option<InstalledAgent> {
+) -> Option<AgentConfig> {
     let backend_pubkey = backend_pubkey?;
     app.data_store
         .borrow()
-        .get_installed_agents(backend_pubkey)
+        .get_agent_configs(backend_pubkey)
         .iter()
         .find(|agent| agent.pubkey == agent_pubkey)
         .cloned()
 }
 
-fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<InstalledAgent> {
+fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<AgentConfig> {
     let filter = &state.add_filter;
     let pending_positions: HashMap<&str, usize> = state
         .pending_agent_pubkeys
@@ -389,19 +389,25 @@ fn render_tools_list(
     show_selection: bool,
     visible_height: usize,
 ) {
-    // Show MCP servers from project status (read-only info)
-    let mcp_servers: Vec<String> = app
-        .data_store
-        .borrow()
-        .get_project_status(&state.project_a_tag)
-        .map(|status| {
-            status
-                .all_mcp_servers()
-                .into_iter()
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+    // Aggregate MCP servers advertised by this project's agents (kind:24011).
+    // kind:24010 no longer carries an aggregate mcp list.
+    let mcp_servers: Vec<String> = {
+        let store = app.data_store.borrow();
+        let backend = store
+            .get_project_status(&state.project_a_tag)
+            .map(|s| s.backend_pubkey.clone());
+        let configs = backend
+            .as_deref()
+            .map(|bp| store.get_agent_configs(bp))
+            .unwrap_or(&[]);
+        let mut all: Vec<String> = configs
+            .iter()
+            .flat_map(|c| c.mcps.iter().cloned())
+            .collect();
+        all.sort();
+        all.dedup();
+        all
+    };
 
     let mcp_header_lines: u16 = if mcp_servers.is_empty() {
         0

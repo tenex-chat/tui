@@ -841,7 +841,7 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
 
             let agent_name = {
                 let ds = app.data_store.borrow();
-                ds.get_installed_agents(state.backend_pubkey.as_deref().unwrap_or(""))
+                ds.get_agent_configs(state.backend_pubkey.as_deref().unwrap_or(""))
                     .iter()
                     .find(|agent| agent.pubkey == agent_pubkey)
                     .map(|agent| agent.slug.clone())

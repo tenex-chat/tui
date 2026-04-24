@@ -6,12 +6,18 @@ use tenex_core::runtime::CoreRuntime;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum PanelMode {
-    Tools,
     AgentSelect,
     FlagSelect,
     ModelSelect,
 }
 
+/// REPL agent-config panel.
+///
+/// Per the current protocol the `/config` command targets an agent's global
+/// `default` config (kind:24020). It can pick a model, toggle PM, and always
+/// sends the agent's full `skills`/`mcp_servers` snapshot from the agent's
+/// latest kind:24011 event so the backend replaces rather than clears those
+/// sets. `tool` tags were dropped from the protocol entirely.
 pub(crate) struct ConfigPanel {
     pub(crate) active: bool,
     pub(crate) mode: PanelMode,
@@ -23,9 +29,6 @@ pub(crate) struct ConfigPanel {
     pub(crate) scroll_offset: usize,
     pub(crate) origin_command: String,
 
-    // Accumulated state across sub-modes
-    pub(crate) tools_items: Vec<String>,
-    pub(crate) tools_selected: HashSet<String>,
     pub(crate) pending_model: Option<String>,
     pub(crate) is_set_pm: bool,
     pub(crate) filter: String,
@@ -36,7 +39,7 @@ impl ConfigPanel {
     pub(crate) fn new() -> Self {
         Self {
             active: false,
-            mode: PanelMode::Tools,
+            mode: PanelMode::FlagSelect,
             agent_pubkey: String::new(),
             agent_name: String::new(),
             project_a_tag: String::new(),
@@ -44,21 +47,11 @@ impl ConfigPanel {
             cursor: 0,
             scroll_offset: 0,
             origin_command: String::new(),
-            tools_items: Vec::new(),
-            tools_selected: HashSet::new(),
             pending_model: None,
             is_set_pm: false,
             filter: String::new(),
             quick_save: false,
         }
-    }
-
-    pub(crate) fn switch_to_tools(&mut self) {
-        self.mode = PanelMode::Tools;
-        self.items = self.tools_items.clone();
-        self.cursor = 0;
-        self.scroll_offset = 0;
-        self.filter.clear();
     }
 
     pub(crate) fn switch_to_agent_select(&mut self, runtime: &CoreRuntime) {
@@ -71,8 +64,12 @@ impl ConfigPanel {
         let store_ref = store.borrow();
         let mut agent_items = Vec::new();
         if let Some(status) = store_ref.get_project_status(&self.project_a_tag) {
+            let backend = status.backend_pubkey.clone();
             for agent in &status.agents {
-                let model = agent.model.as_deref().unwrap_or("unknown");
+                let model = store_ref
+                    .get_agent_config(&backend, &agent.pubkey)
+                    .and_then(|c| c.active_model.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
                 let pm = if agent.is_pm { " [PM]" } else { "" };
                 agent_items.push(format!("{}{pm} ({model})", agent.name));
             }
@@ -101,15 +98,19 @@ impl ConfigPanel {
 
         let store = runtime.data_store();
         let store_ref = store.borrow();
-        self.items = store_ref
+        let backend = store_ref
             .get_project_status(&self.project_a_tag)
-            .map(|s| s.models().iter().map(|m| m.to_string()).collect())
+            .map(|s| s.backend_pubkey.clone());
+        self.items = backend
+            .as_deref()
+            .and_then(|bp| store_ref.get_agent_config(bp, &self.agent_pubkey))
+            .map(|c| c.models.clone())
             .unwrap_or_default();
     }
 
     /// Returns filtered items as (original_index, &item) pairs.
     pub(crate) fn filtered_items(&self) -> Vec<(usize, &String)> {
-        if self.filter.is_empty() || matches!(self.mode, PanelMode::Tools | PanelMode::FlagSelect) {
+        if self.filter.is_empty() || matches!(self.mode, PanelMode::FlagSelect) {
             return self.items.iter().enumerate().collect();
         }
         let lower = self.filter.to_lowercase();
@@ -123,7 +124,6 @@ impl ConfigPanel {
     pub(crate) fn rebuild_origin_command(&mut self) {
         let mut parts = vec!["/config".to_string()];
         if !self.agent_name.is_empty() {
-            // Check if agent differs from default — always include for clarity
             parts.push(format!("@{}", self.agent_name));
         }
         if self.is_set_pm {
@@ -154,25 +154,9 @@ impl ConfigPanel {
         }
     }
 
-    pub(crate) fn toggle_current(&mut self) {
-        let filtered = self.filtered_items();
-        if let Some(&(orig_idx, _)) = filtered.get(self.cursor) {
-            if let Some(item) = self.tools_items.get(orig_idx) {
-                let item = item.clone();
-                if self.tools_selected.contains(&item) {
-                    self.tools_selected.remove(&item);
-                } else {
-                    self.tools_selected.insert(item);
-                }
-            }
-        }
-    }
-
     pub(crate) fn deactivate(&mut self) {
         self.active = false;
         self.items.clear();
-        self.tools_items.clear();
-        self.tools_selected.clear();
         self.pending_model = None;
         self.is_set_pm = false;
         self.filter.clear();
@@ -181,32 +165,40 @@ impl ConfigPanel {
         self.scroll_offset = 0;
     }
 
+    /// Publish a kind:24020 update for this agent.
+    ///
+    /// The skill/mcp snapshots come from the cached kind:24011 event so the
+    /// backend replaces — rather than clears — those sets when only the model
+    /// or PM flag changed.
     pub(crate) fn save(&self, runtime: &CoreRuntime) -> String {
         let store = runtime.data_store();
         let store_ref = store.borrow();
 
-        let agent = match store_ref
-            .get_project_status(&self.project_a_tag)
-            .and_then(|s| s.agents.iter().find(|a| a.pubkey == self.agent_pubkey))
-        {
-            Some(a) => a,
-            None => {
-                return format!(
-                    "Agent {} no longer found in project status",
-                    self.agent_name
-                );
-            }
+        let Some(status) = store_ref.get_project_status(&self.project_a_tag) else {
+            return format!("Project {} is offline", self.project_a_tag);
         };
 
-        // Model: use pending_model if set, otherwise keep agent's current
-        let model = self.pending_model.clone().or_else(|| agent.model.clone());
+        let Some(agent) = status
+            .agents
+            .iter()
+            .find(|a| a.pubkey == self.agent_pubkey)
+        else {
+            return format!(
+                "Agent {} no longer found in project status",
+                self.agent_name
+            );
+        };
 
-        // Tools: from accumulated tools_selected
-        let tools: Vec<String> = self.tools_selected.iter().cloned().collect();
-        let skills = agent.skills.clone();
-        let mcp_servers = agent.mcp_servers.clone();
+        let config = store_ref.get_agent_config(&status.backend_pubkey, &agent.pubkey);
+        let model = self
+            .pending_model
+            .clone()
+            .or_else(|| config.and_then(|c| c.active_model.clone()));
+        let skills = config
+            .map(|c| c.active_skills.clone())
+            .unwrap_or_default();
+        let mcp_servers = config.map(|c| c.active_mcps.clone()).unwrap_or_default();
 
-        // Tags: include "pm" if is_set_pm flag is on, or agent was already PM
         let tags: Vec<String> = if self.is_set_pm || agent.is_pm {
             vec!["pm".to_string()]
         } else {
@@ -218,13 +210,11 @@ impl ConfigPanel {
         let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
             agent_pubkey: self.agent_pubkey.clone(),
             model,
-            tools,
             skills,
             mcp_servers,
             tags,
         });
 
-        // Build descriptive message
         let mut changes = Vec::new();
         if self.pending_model.is_some() {
             changes.push(format!(
@@ -235,59 +225,15 @@ impl ConfigPanel {
         if self.is_set_pm {
             changes.push("set as PM".to_string());
         }
-        changes.push(format!("{} tools", self.tools_selected.len()));
 
-        format!(
-            "Updated {} (shared) [{}]",
-            self.agent_name,
-            changes.join(", ")
-        )
-    }
-
-    /// Save just the model (for quick_save / /model command).
-    pub(crate) fn save_model_only(&self, runtime: &CoreRuntime) -> String {
-        let store = runtime.data_store();
-        let store_ref = store.borrow();
-
-        let agent = match store_ref
-            .get_project_status(&self.project_a_tag)
-            .and_then(|s| s.agents.iter().find(|a| a.pubkey == self.agent_pubkey))
-        {
-            Some(a) => a,
-            None => {
-                return format!(
-                    "Agent {} no longer found in project status",
-                    self.agent_name
-                );
-            }
-        };
-
-        let model = self.pending_model.clone();
-        let tools = agent.tools.clone();
-        let skills = agent.skills.clone();
-        let mcp_servers = agent.mcp_servers.clone();
-        let tags: Vec<String> = if agent.is_pm {
-            vec!["pm".to_string()]
+        if changes.is_empty() {
+            format!("No changes for {}", self.agent_name)
         } else {
-            vec![]
-        };
-
-        drop(store_ref);
-
-        let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
-            agent_pubkey: self.agent_pubkey.clone(),
-            model: model.clone(),
-            tools,
-            skills,
-            mcp_servers,
-            tags,
-        });
-
-        let model_name = model.as_deref().unwrap_or("none");
-        format!("Set shared model for {} → {}", self.agent_name, model_name)
+            format!("Updated {} [{}]", self.agent_name, changes.join(", "))
+        }
     }
 
-    /// Resolve the selected agent from AgentSelect mode and reload tools for that agent.
+    /// Resolve the selected agent from AgentSelect mode.
     pub(crate) fn resolve_selected_agent(&mut self, runtime: &CoreRuntime) -> bool {
         let filtered = self.filtered_items();
         let Some(&(orig_idx, _)) = filtered.get(self.cursor) else {
@@ -306,11 +252,6 @@ impl ConfigPanel {
         self.agent_pubkey = agent.pubkey.clone();
         self.agent_name = agent.name.clone();
 
-        // Reload tools for this agent
-        self.tools_items = status.all_tools().iter().map(|t| t.to_string()).collect();
-        self.tools_selected = agent.tools.iter().cloned().collect();
-
-        // Reset pending model — new agent, fresh state
         self.pending_model = None;
         self.is_set_pm = agent.is_pm;
 
@@ -677,7 +618,6 @@ impl NudgeSkillPanel {
         self.cursor = 0;
         self.scroll_offset = 0;
 
-        // Pre-populate selected_ids from state
         self.selected_ids.clear();
         for id in state_skill_ids {
             self.selected_ids.insert(id.clone());

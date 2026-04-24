@@ -164,20 +164,17 @@ pub struct ToolPermissionConflict {
     pub tool_name: String,
 }
 
-/// Helper function to extract sorted tools from project statuses
-/// This centralizes the tool discovery logic used by nudge forms
+/// Tool inventories are no longer advertised on kind:24010 or kind:24011 —
+/// the protocol dropped `tool` tags from both. Nudge permissions still
+/// target tools by name (the `allow-tool` / `deny-tool` / `only-tool` tags
+/// on kind:4201), but the client has no remote list to offer as
+/// autocomplete. Callers must rely on free-text entry or a locally-maintained
+/// catalogue.
 pub fn get_available_tools_from_statuses(
     statuses: &std::collections::HashMap<String, tenex_core::models::ProjectStatus>,
 ) -> Vec<String> {
-    let mut all_tools: HashSet<String> = HashSet::new();
-    for status in statuses.values() {
-        for tool in status.all_tools() {
-            all_tools.insert(tool.to_string());
-        }
-    }
-    let mut tools: Vec<String> = all_tools.into_iter().collect();
-    tools.sort();
-    tools
+    let _ = statuses;
+    Vec::new()
 }
 
 #[cfg(test)]
