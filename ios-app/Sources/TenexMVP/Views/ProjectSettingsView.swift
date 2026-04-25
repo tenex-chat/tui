@@ -18,23 +18,17 @@ struct ProjectSettingsView: View {
     @State private var baselineGeneralDraft = ProjectGeneralDraft()
     @State private var pendingAgentPubkeys: [String] = []
     @State private var baselineAgentPubkeys: [String] = []
-    @State private var pendingToolIds: [String] = []
-    @State private var baselineToolIds: [String] = []
 
-    @State private var installedAgents: [InstalledAgent] = []
+    @State private var installedAgents: [AgentConfig] = []
     @State private var projectBackendPubkey: String?
-    @State private var allMcpTools: [McpTool] = []
 
     @State private var showAddAgentSheet = false
-    @State private var showAddToolSheet = false
     @State private var showDeleteDialog = false
 
     @State private var agentSearch = ""
-    @State private var toolSearch = ""
 
     @State private var isSavingGeneral = false
     @State private var isSavingAgents = false
-    @State private var isSavingTools = false
     @State private var isBooting = false
     @State private var isDeleting = false
 
@@ -53,10 +47,6 @@ struct ProjectSettingsView: View {
         pendingAgentPubkeys != baselineAgentPubkeys
     }
 
-    private var toolsHaveChanges: Bool {
-        pendingToolIds != baselineToolIds
-    }
-
     private var isProjectOnline: Bool {
         coreManager.projectOnlineStatus[projectId] ?? false
     }
@@ -65,7 +55,7 @@ struct ProjectSettingsView: View {
         coreManager.onlineAgents[projectId]?.count ?? 0
     }
 
-    private var filteredAvailableAgents: [InstalledAgent] {
+    private var filteredAvailableAgents: [AgentConfig] {
         let remaining = installedAgents.filter { !pendingAgentPubkeys.contains($0.pubkey) }
         guard !agentSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return remaining
@@ -82,27 +72,12 @@ struct ProjectSettingsView: View {
         projectBackendPubkey != nil
     }
 
-    private var filteredAvailableTools: [McpTool] {
-        let remaining = allMcpTools.filter { !pendingToolIds.contains($0.id) }
-        guard !toolSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return remaining
-        }
-
-        let query = toolSearch.lowercased()
-        return remaining.filter { tool in
-            tool.name.lowercased().contains(query)
-                || tool.command.lowercased().contains(query)
-                || tool.description.lowercased().contains(query)
-        }
-    }
-
     var body: some View {
         Form {
             if let project {
                 headerSection(project: project)
                 generalSection(project: project)
                 agentsSection(project: project)
-                toolsSection(project: project)
                 advancedSection
                 dangerSection(project: project)
             } else {
@@ -129,9 +104,6 @@ struct ProjectSettingsView: View {
         }
         .sheet(isPresented: $showAddAgentSheet) {
             addAgentSheet
-        }
-        .sheet(isPresented: $showAddToolSheet) {
-            addToolSheet
         }
         .confirmationDialog(
             "Delete Project",
@@ -379,70 +351,6 @@ struct ProjectSettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func toolsSection(project: Project) -> some View {
-        Section("Tools") {
-            if pendingToolIds.isEmpty {
-                ContentUnavailableView(
-                    "No Tools Assigned",
-                    systemImage: "wrench.and.screwdriver",
-                    description: Text("Add MCP tools to make them available to project agents.")
-                )
-            } else {
-                ForEach(pendingToolIds, id: \.self) { toolId in
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(toolName(for: toolId))
-                                .font(.body.weight(.medium))
-                                .lineLimit(1)
-                            let command = toolCommand(for: toolId)
-                            if !command.isEmpty {
-                                Text(command)
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Spacer()
-                        Button(role: .destructive) {
-                            removeTool(toolId: toolId)
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                }
-            }
-
-            Button {
-                showAddToolSheet = true
-            } label: {
-                Label("Add Tool", systemImage: "plus")
-            }
-            .adaptiveGlassButtonStyle()
-            .disabled(isSavingTools || isDeleting)
-
-            HStack(spacing: 12) {
-                Button("Cancel") {
-                    pendingToolIds = baselineToolIds
-                }
-                .disabled(!toolsHaveChanges || isSavingTools)
-
-                Button {
-                    Task { await saveTools(project: project) }
-                } label: {
-                    if isSavingTools {
-                        ProgressView()
-                    } else {
-                        Text("Save")
-                    }
-                }
-                .disabled(!toolsHaveChanges || isSavingTools || isDeleting)
-                .adaptiveGlassButtonStyle()
-            }
-        }
-    }
-
     private var advancedSection: some View {
         Section("Advanced") {
             Label("Coming soon", systemImage: "clock")
@@ -464,7 +372,7 @@ struct ProjectSettingsView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .disabled(isDeleting || isSavingGeneral || isSavingAgents || isSavingTools)
+            .disabled(isDeleting || isSavingGeneral || isSavingAgents)
 
             Text("This publishes a tombstone kind 31933 event with a deleted tag for \(project.title).")
                 .font(.caption)
@@ -520,46 +428,6 @@ struct ProjectSettingsView: View {
         #endif
     }
 
-    private var addToolSheet: some View {
-        NavigationStack {
-            List(filteredAvailableTools, id: \.id) { tool in
-                Button {
-                    addTool(toolId: tool.id)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(tool.name)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
-                        if !tool.command.isEmpty {
-                            Text(tool.command)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                        }
-                        if !tool.description.isEmpty {
-                            Text(tool.description)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-            }
-            .searchable(text: $toolSearch, prompt: "Search tools")
-            .navigationTitle("Add Tools")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        showAddToolSheet = false
-                        toolSearch = ""
-                    }
-                }
-            }
-        }
-        .tenexModalPresentation(detents: [.medium, .large])
-    }
-
     private func syncDraftsFromProject() {
         guard let project else { return }
 
@@ -574,28 +442,24 @@ struct ProjectSettingsView: View {
 
         pendingAgentPubkeys = project.agentPubkeys
         baselineAgentPubkeys = project.agentPubkeys
-
-        pendingToolIds = project.mcpToolIds
-        baselineToolIds = project.mcpToolIds
     }
 
     private func reloadSelectionData() async {
         let backendPubkey = coreManager.safeCore.getProjectBackendPubkey(projectId: projectId)
 
         do {
-            async let fetchedTools = coreManager.safeCore.getAllMcpTools()
-            async let fetchedInstalledAgents: [InstalledAgent] = {
-                guard let backendPubkey else { return [] }
-                return try coreManager.safeCore.getInstalledAgents(backendPubkey: backendPubkey)
-            }()
-            let (installedAgents, tools) = try await (fetchedInstalledAgents, fetchedTools)
+            let installedAgents: [AgentConfig]
+            if let backendPubkey {
+                installedAgents = try await coreManager.safeCore.getAgentConfigs(backendPubkey: backendPubkey)
+            } else {
+                installedAgents = []
+            }
 
             await MainActor.run {
                 projectBackendPubkey = backendPubkey
                 self.installedAgents = installedAgents.sorted {
                     $0.slug.localizedCaseInsensitiveCompare($1.slug) == .orderedAscending
                 }
-                allMcpTools = tools.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             }
         } catch {
             presentError(error)
@@ -654,26 +518,6 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private func saveTools(project: Project) async {
-        isSavingTools = true
-        defer { isSavingTools = false }
-
-        do {
-            try await coreManager.safeCore.updateProject(
-                projectId: project.id,
-                title: project.title,
-                description: project.description ?? "",
-                repoUrl: project.repoUrl,
-                pictureUrl: project.pictureUrl,
-                agentPubkeys: project.agentPubkeys,
-                mcpToolIds: pendingToolIds
-            )
-            baselineToolIds = pendingToolIds
-        } catch {
-            presentError(error)
-        }
-    }
-
     private func deleteProject() async {
         guard let project else { return }
         isDeleting = true
@@ -702,15 +546,6 @@ struct ProjectSettingsView: View {
         pendingAgentPubkeys.insert(agentPubkey, at: 0)
     }
 
-    private func addTool(toolId: String) {
-        guard !pendingToolIds.contains(toolId) else { return }
-        pendingToolIds.append(toolId)
-    }
-
-    private func removeTool(toolId: String) {
-        pendingToolIds.removeAll { $0 == toolId }
-    }
-
     private func agentName(for pubkey: String) -> String {
         if let slug = installedAgents.first(where: { $0.pubkey == pubkey })?.slug {
             return slug
@@ -722,14 +557,6 @@ struct ProjectSettingsView: View {
     private func shortPubkey(_ pubkey: String) -> String {
         guard pubkey.count > 16 else { return pubkey }
         return "\(pubkey.prefix(8))…\(pubkey.suffix(8))"
-    }
-
-    private func toolName(for id: String) -> String {
-        allMcpTools.first(where: { $0.id == id })?.name ?? "Unknown Tool"
-    }
-
-    private func toolCommand(for id: String) -> String {
-        allMcpTools.first(where: { $0.id == id })?.command ?? ""
     }
 
     private func normalizedOptional(_ value: String) -> String? {
