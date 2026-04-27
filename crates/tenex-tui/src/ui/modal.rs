@@ -11,6 +11,7 @@ pub enum SettingsTab {
     AI,
     Appearance,
     Bunker,
+    Backends,
 }
 
 impl SettingsTab {
@@ -19,6 +20,7 @@ impl SettingsTab {
         SettingsTab::AI,
         SettingsTab::Appearance,
         SettingsTab::Bunker,
+        SettingsTab::Backends,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -27,6 +29,89 @@ impl SettingsTab {
             SettingsTab::AI => "AI",
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Bunker => "Bunker",
+            SettingsTab::Backends => "Backends",
+        }
+    }
+}
+
+/// State for the Backends settings tab
+#[derive(Debug, Clone)]
+pub struct BackendsSettingsState {
+    /// Sorted list of approved backend pubkeys
+    pub approved: Vec<String>,
+    /// Sorted list of blocked backend pubkeys
+    pub blocked: Vec<String>,
+    /// Index into the combined list (approved first, then blocked)
+    pub selected_index: usize,
+}
+
+impl BackendsSettingsState {
+    pub fn new(mut approved: Vec<String>, mut blocked: Vec<String>) -> Self {
+        approved.sort();
+        blocked.sort();
+        Self {
+            approved,
+            blocked,
+            selected_index: 0,
+        }
+    }
+
+    pub fn total_len(&self) -> usize {
+        self.approved.len() + self.blocked.len()
+    }
+
+    pub fn navigate_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn navigate_down(&mut self) {
+        let len = self.total_len();
+        if len > 0 && self.selected_index + 1 < len {
+            self.selected_index += 1;
+        }
+    }
+
+    /// Returns the pubkey of the selected item if it is in the approved list.
+    pub fn selected_approved_pubkey(&self) -> Option<&str> {
+        if self.selected_index < self.approved.len() {
+            Some(&self.approved[self.selected_index])
+        } else {
+            None
+        }
+    }
+
+    /// Returns the pubkey of the selected item if it is in the blocked list.
+    pub fn selected_blocked_pubkey(&self) -> Option<&str> {
+        let bi = self.selected_index.checked_sub(self.approved.len())?;
+        self.blocked.get(bi).map(|s| s.as_str())
+    }
+
+    /// Move the selected approved backend to the blocked list.
+    pub fn move_selected_to_blocked(&mut self) {
+        if self.selected_index < self.approved.len() {
+            let pubkey = self.approved.remove(self.selected_index);
+            self.blocked.push(pubkey);
+            self.blocked.sort();
+            if self.selected_index > 0 && self.selected_index >= self.approved.len() {
+                self.selected_index -= 1;
+            }
+        }
+    }
+
+    /// Move the selected blocked backend to the approved list.
+    pub fn move_selected_to_approved(&mut self) {
+        let bi = match self.selected_index.checked_sub(self.approved.len()) {
+            Some(i) if i < self.blocked.len() => i,
+            _ => return,
+        };
+        let pubkey = self.blocked.remove(bi);
+        self.approved.push(pubkey);
+        self.approved.sort();
+        let total = self.total_len();
+        if total > 0 && self.selected_index >= total {
+            self.selected_index = total - 1;
         }
     }
 }
@@ -373,6 +458,8 @@ pub struct AppSettingsState {
     pub voice_browser: Option<VoiceBrowserState>,
     /// Active model browser overlay (None = not browsing)
     pub model_browser: Option<ModelBrowserState>,
+    /// Backends tab state
+    pub backends: BackendsSettingsState,
 }
 
 impl AppSettingsState {
@@ -381,6 +468,8 @@ impl AppSettingsState {
         preferences: &tenex_core::models::PreferencesStorage,
     ) -> Self {
         let ai_settings = preferences.ai_audio_settings();
+        let approved: Vec<String> = preferences.approved_backend_pubkeys().iter().cloned().collect();
+        let blocked: Vec<String> = preferences.blocked_backend_pubkeys().iter().cloned().collect();
         Self {
             current_tab: SettingsTab::General,
             general_index: 0,
@@ -399,6 +488,7 @@ impl AppSettingsState {
             ),
             voice_browser: None,
             model_browser: None,
+            backends: BackendsSettingsState::new(approved, blocked),
         }
     }
 
@@ -519,6 +609,9 @@ impl AppSettingsState {
                     self.bunker_index -= 1;
                 }
             }
+            SettingsTab::Backends => {
+                self.backends.navigate_up();
+            }
         }
     }
 
@@ -543,6 +636,9 @@ impl AppSettingsState {
                 if self.bunker_index + 1 < BunkerSetting::count() {
                     self.bunker_index += 1;
                 }
+            }
+            SettingsTab::Backends => {
+                self.backends.navigate_down();
             }
         }
     }

@@ -49,6 +49,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
         SettingsTab::AI => render_ai_tab(f, content_area, state),
         SettingsTab::Appearance => render_appearance_tab(f, app, content_area, state),
         SettingsTab::Bunker => render_bunker_tab(f, app, content_area, state),
+        SettingsTab::Backends => render_backends_tab(f, content_area, state),
     };
 
     // Hints at bottom
@@ -371,6 +372,117 @@ fn render_bunker_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsSt
     );
 }
 
+/// Render Backends tab content
+fn render_backends_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
+    let bs = &state.backends;
+    let mut y = area.y;
+
+    render_section_header(
+        f,
+        area.x,
+        y,
+        area.width,
+        &format!("Approved Backends ({})", bs.approved.len()),
+    );
+    y += 1;
+
+    if bs.approved.is_empty() {
+        let row_area = Rect::new(area.x + 2, y, area.width.saturating_sub(2), 1);
+        f.render_widget(
+            Paragraph::new("(none)").style(Style::default().fg(theme::TEXT_DIM)),
+            row_area,
+        );
+        y += 1;
+    } else {
+        for (i, pubkey) in bs.approved.iter().enumerate() {
+            let is_selected = bs.selected_index == i;
+            render_backend_row(f, area.x, y, area.width, pubkey, BackendStatus::Approved, is_selected);
+            y += 1;
+        }
+    }
+
+    y += 1;
+
+    render_section_header(
+        f,
+        area.x,
+        y,
+        area.width,
+        &format!("Blocked Backends ({})", bs.blocked.len()),
+    );
+    y += 1;
+
+    if bs.blocked.is_empty() {
+        let row_area = Rect::new(area.x + 2, y, area.width.saturating_sub(2), 1);
+        f.render_widget(
+            Paragraph::new("(none)").style(Style::default().fg(theme::TEXT_DIM)),
+            row_area,
+        );
+    } else {
+        for (i, pubkey) in bs.blocked.iter().enumerate() {
+            let global_index = bs.approved.len() + i;
+            let is_selected = bs.selected_index == global_index;
+            render_backend_row(f, area.x, y, area.width, pubkey, BackendStatus::Blocked, is_selected);
+            y += 1;
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BackendStatus {
+    Approved,
+    Blocked,
+}
+
+fn render_backend_row(
+    f: &mut Frame,
+    x: u16,
+    y: u16,
+    width: u16,
+    pubkey: &str,
+    status: BackendStatus,
+    is_selected: bool,
+) {
+    let row_area = Rect::new(x, y, width, 1);
+
+    let border_char = if is_selected { "▌" } else { " " };
+    let border_color = if is_selected {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+
+    let truncated = if pubkey.len() > 16 {
+        format!("{}…{}", &pubkey[..8], &pubkey[pubkey.len() - 8..])
+    } else {
+        pubkey.to_string()
+    };
+
+    let (badge, badge_color) = match status {
+        BackendStatus::Approved => (" [approved]", theme::ACCENT_SUCCESS),
+        BackendStatus::Blocked => (" [blocked]", theme::ACCENT_WARNING),
+    };
+
+    let label_style = if is_selected {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
+    let spans = vec![
+        Span::styled(border_char, Style::default().fg(border_color)),
+        Span::styled(format!(" {}", truncated), label_style),
+        Span::styled(badge, Style::default().fg(badge_color)),
+    ];
+
+    f.render_widget(
+        Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE)),
+        row_area,
+    );
+}
+
 /// Render a select field (read-only value with cycling)
 fn render_select_field(
     f: &mut Frame,
@@ -677,7 +789,23 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
         ];
 
         // Context-aware Enter behavior hint
-        if state.current_tab == SettingsTab::Appearance {
+        if state.current_tab == SettingsTab::Backends {
+            let bs = &state.backends;
+            if bs.selected_approved_pubkey().is_some() {
+                hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+                hints.push(Span::styled("b", Style::default().fg(theme::ACCENT_WARNING)));
+                hints.push(Span::styled(" block", Style::default().fg(theme::TEXT_MUTED)));
+            } else if bs.selected_blocked_pubkey().is_some() {
+                hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+                hints.push(Span::styled("u", Style::default().fg(theme::ACCENT_WARNING)));
+                hints.push(Span::styled(" unblock", Style::default().fg(theme::TEXT_MUTED)));
+            }
+            hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)));
+            hints.push(Span::styled(" close", Style::default().fg(theme::TEXT_MUTED)));
+            f.render_widget(Paragraph::new(Line::from(hints)), hints_area);
+            return;
+        } else if state.current_tab == SettingsTab::Appearance {
             // Appearance tab uses toggle/cycle, not edit mode
             match state.selected_appearance_setting() {
                 Some(AppearanceSetting::TimeFilter) => {
