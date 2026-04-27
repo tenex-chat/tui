@@ -578,7 +578,7 @@ struct MessageComposerView: View {
                             coreManager.displayName(for: pubkey),
                             fallbackPubkey: pubkey
                         )
-                        return ProjectAgent(pubkey: pubkey, name: name, backendPubkey: "", isPm: false, isOnline: false, model: nil, tools: [], skills: [], mcpServers: [])
+                        return ProjectAgent(pubkey: pubkey, name: name, backendPubkey: "", isPm: false, isOnline: false)
                     } ?? []
                 availableAgents = ComposerViewModel.mergeProjectAgents(onlineAgents: onlineAgents, offlineAgents: offlineAgents)
             }

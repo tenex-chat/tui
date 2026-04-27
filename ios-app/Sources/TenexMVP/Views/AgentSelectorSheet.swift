@@ -230,9 +230,8 @@ struct OnlineAgentRowView: View {
                     }
                 }
 
-                let statusText = agent.isOnline ? agent.model : "Offline"
-                if let statusText, !statusText.isEmpty {
-                    Text(statusText)
+                if !agent.isOnline {
+                    Text("Offline")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -481,33 +480,21 @@ struct AgentDeletionSheet: View {
                 name: "claude-code",
                 backendPubkey: "backend",
                 isPm: true,
-                isOnline: true,
-                model: "claude-3-opus",
-                tools: ["Read", "Write", "Bash"],
-                skills: [],
-                mcpServers: []
+                isOnline: true
             ),
             ProjectAgent(
                 pubkey: "def456ghi789",
                 name: "architect",
                 backendPubkey: "backend",
                 isPm: false,
-                isOnline: true,
-                model: "claude-3-sonnet",
-                tools: ["Read", "Edit"],
-                skills: [],
-                mcpServers: []
+                isOnline: true
             ),
             ProjectAgent(
                 pubkey: "ghi789jkl012",
                 name: "test-writer",
                 backendPubkey: "",
                 isPm: false,
-                isOnline: false,
-                model: nil,
-                tools: [],
-                skills: [],
-                mcpServers: []
+                isOnline: false
             )
         ],
         projectId: "test-project",

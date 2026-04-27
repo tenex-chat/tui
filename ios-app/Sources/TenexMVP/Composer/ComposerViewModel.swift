@@ -321,11 +321,7 @@ final class ComposerViewModel {
                 name: name,
                 backendPubkey: "",
                 isPm: false,
-                isOnline: false,
-                model: nil,
-                tools: [],
-                skills: [],
-                mcpServers: []
+                isOnline: false
             ))
         }
         return result

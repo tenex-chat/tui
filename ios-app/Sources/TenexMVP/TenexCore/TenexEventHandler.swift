@@ -129,7 +129,7 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
             case .bookmarkListChanged(let bookmarkedIds):
                 coreManager.applyBookmarkListChanged(bookmarkedIds: bookmarkedIds)
 
-            case .installedAgentsChanged:
+            case .agentConfigsChanged:
                 break
 
             case .mcpToolsChanged, .teamsChanged, .contentCatalogChanged, .statsUpdated, .diagnosticsUpdated, .general:

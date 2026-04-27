@@ -333,29 +333,15 @@ extension TenexCoreManager {
     }
 
     nonisolated static func canonicalOnlineAgents(_ agents: [ProjectAgent]) -> [ProjectAgent] {
-        agents
-            .map { agent in
-                var normalized = agent
-                normalized.tools = agent.tools.sorted()
-                return normalized
+        agents.sorted { lhs, rhs in
+            if lhs.isPm != rhs.isPm {
+                return lhs.isPm && !rhs.isPm
             }
-            .sorted { lhs, rhs in
-                if lhs.isPm != rhs.isPm {
-                    return lhs.isPm && !rhs.isPm
-                }
-                if lhs.name != rhs.name {
-                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                }
-                if lhs.pubkey != rhs.pubkey {
-                    return lhs.pubkey < rhs.pubkey
-                }
-                let lhsModel = lhs.model ?? ""
-                let rhsModel = rhs.model ?? ""
-                if lhsModel != rhsModel {
-                    return lhsModel < rhsModel
-                }
-                return lhs.tools.lexicographicallyPrecedes(rhs.tools)
+            if lhs.name != rhs.name {
+                return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
+            return lhs.pubkey < rhs.pubkey
+        }
     }
 
     @MainActor

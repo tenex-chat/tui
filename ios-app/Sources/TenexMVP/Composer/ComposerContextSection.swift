@@ -216,12 +216,6 @@ extension MessageComposerView {
                             agentPopoverToken
                         }
 
-                        if let agent = selectedAgent, let model = agent.model, !model.isEmpty {
-                            inlineContextToken(text: model, showChevron: false) {
-                                workspaceAgentToConfig = agent
-                            }
-                        }
-
                         nudgeSkillToken
                     }
                 }
@@ -786,9 +780,8 @@ struct WorkspaceAgentPopoverContent: View {
                                 .background(Capsule().fill(Color.agentBrand))
                         }
                     }
-                    let statusText = agent.isOnline ? agent.model : "Offline"
-                    if let statusText, !statusText.isEmpty {
-                        Text(statusText)
+                    if !agent.isOnline {
+                        Text("Offline")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
