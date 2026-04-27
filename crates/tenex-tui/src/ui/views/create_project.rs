@@ -216,7 +216,7 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
     );
 
     let msg = if state.agent_selector.filter.is_empty() {
-        "Assign agents after creation, once the project has an online backend publishing 24011."
+        "Assign agents after creation, once the project has an online backend publishing 34011."
     } else {
         "Agent assignment is unavailable during project creation."
     };

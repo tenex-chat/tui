@@ -310,7 +310,7 @@ fn render_agents_list(
                 "Waiting for live project status to identify this project's backend before assigning agents."
             }
         } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-            "Waiting for backend 24011 inventory before assigning agents."
+            "Waiting for backend 34011 inventory before assigning agents."
         } else {
             "No agents assigned. Press 'a' to add."
         };
@@ -389,7 +389,7 @@ fn render_tools_list(
     show_selection: bool,
     visible_height: usize,
 ) {
-    // Aggregate MCP servers advertised by this project's agents (kind:24011).
+    // Aggregate MCP servers advertised by this project's agents (kind:34011).
     // kind:24010 no longer carries an aggregate mcp list.
     let mcp_servers: Vec<String> = {
         let store = app.data_store.borrow();
@@ -645,7 +645,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                 "Waiting for live project status to identify this project's backend."
             }
         } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-            "Waiting for backend 24011 inventory."
+            "Waiting for backend 34011 inventory."
         } else if state.add_filter.is_empty() {
             "No installed agents available."
         } else {

@@ -663,7 +663,7 @@ impl TenexCore {
     /// Get available configuration options for a specific agent.
     ///
     /// Per the current protocol, model/skill/mcp inventories live on the
-    /// per-agent kind:24011 event — not on kind:24010. The caller supplies the
+    /// per-agent kind:34011 event — not on kind:24010. The caller supplies the
     /// `agent_pubkey` and we look up the `AgentConfig` cached under the
     /// project's backend.
     pub fn get_agent_config_options(

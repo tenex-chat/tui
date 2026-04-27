@@ -1708,6 +1708,7 @@ impl App {
                 }
                 DataChange::AgentConfig { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
+                    self.refresh_agent_config_modal_if_open();
                 }
                 DataChange::BackendHeartbeat { backend_pubkey } => {
                     let is_blocked = self.data_store.borrow().trust.is_blocked(&backend_pubkey);
@@ -1933,7 +1934,14 @@ impl App {
             );
         }
 
-        agents.into_values().collect()
+        let pm_pubkey = project.agent_pubkeys.first().cloned();
+        let mut result: Vec<crate::models::ProjectAgent> = agents.into_values().collect();
+        if let Some(ref pm_pk) = pm_pubkey {
+            for agent in &mut result {
+                agent.is_pm = &agent.pubkey == pm_pk;
+            }
+        }
+        result
     }
 
     /// Get the most recent agent that published a message in the current conversation.
@@ -2086,6 +2094,24 @@ impl App {
         ))
     }
 
+    /// Refresh the agent config modal if it is currently open.
+    ///
+    /// Called when a fresh kind:34011 event arrives so the modal picks up
+    /// models/skills that weren't in the store when it was first opened.
+    fn refresh_agent_config_modal_if_open(&mut self) {
+        if !matches!(self.modal_state, ModalState::AgentConfig(_)) {
+            return;
+        }
+        let old = std::mem::replace(&mut self.modal_state, ModalState::None);
+        if let ModalState::AgentConfig(mut state) = old {
+            // Clear the cached pubkey so the early-return in
+            // refresh_agent_config_modal_state doesn't skip the reload.
+            state.active_agent_pubkey = None;
+            self.refresh_agent_config_modal_state(&mut state);
+            self.modal_state = ModalState::AgentConfig(state);
+        }
+    }
+
     /// Refresh right-pane settings for the currently highlighted agent in the unified modal.
     pub fn refresh_agent_config_modal_state(&self, state: &mut AgentConfigState) {
         let filtered = self.filtered_agents_with_filter(&state.selector.filter);
@@ -2109,7 +2135,7 @@ impl App {
 
         let settings = self.build_agent_settings_for(agent);
 
-        // Snapshot the cached kind:24011 config so change detection compares
+        // Snapshot the cached kind:34011 config so change detection compares
         // against what's actually on the wire, not against the (now stale)
         // ProjectAgent literals.
         let (model, skills, mcps) = {
@@ -3335,7 +3361,7 @@ impl App {
         self.user_explicitly_selected_agent = false;
     }
 
-    /// Whether we have at least one cached kind:24011 event from this backend.
+    /// Whether we have at least one cached kind:34011 event from this backend.
     pub fn has_installed_agent_inventory(&self, backend_pubkey: Option<&str>) -> bool {
         let Some(backend_pubkey) = backend_pubkey else {
             return false;
@@ -3348,7 +3374,7 @@ impl App {
             .is_empty()
     }
 
-    /// All backends for which we have at least one cached kind:24011 event.
+    /// All backends for which we have at least one cached kind:34011 event.
     pub fn available_install_backends(&self) -> Vec<String> {
         let mut backends: Vec<String> = self
             .data_store
@@ -5107,20 +5133,18 @@ mod selected_agent_refresh_tests {
     use serde_json::json;
 
     fn make_status(agents: Vec<ProjectAgent>) -> ProjectStatus {
-        let mut tags: Vec<Vec<String>> =
-            vec![vec!["a".to_string(), "31933:backend:project".to_string()]];
-
-        for agent in &agents {
-            let mut agent_tag = vec![
+        let tags: Vec<Vec<String>> = std::iter::once(vec![
+            "a".to_string(),
+            "31933:backend:project".to_string(),
+        ])
+        .chain(agents.iter().map(|agent| {
+            vec![
                 "agent".to_string(),
                 agent.pubkey.clone(),
                 agent.name.clone(),
-            ];
-            if agent.is_pm {
-                agent_tag.push("pm".to_string());
-            }
-            tags.push(agent_tag);
-        }
+            ]
+        }))
+        .collect();
 
         let event = json!({
             "kind": 24010,
@@ -5129,7 +5153,15 @@ mod selected_agent_refresh_tests {
             "tags": tags,
         });
 
-        ProjectStatus::from_value(&event).expect("status fixture should parse")
+        let mut status = ProjectStatus::from_value(&event).expect("status fixture should parse");
+        // Simulate what the store layer does: set is_pm from the caller's input,
+        // since ProjectStatus::from_value no longer derives it from the event tags.
+        for status_agent in &mut status.agents {
+            if let Some(input) = agents.iter().find(|a| a.pubkey == status_agent.pubkey) {
+                status_agent.is_pm = input.is_pm;
+            }
+        }
+        status
     }
 
     #[test]

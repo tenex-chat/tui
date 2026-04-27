@@ -36,7 +36,7 @@ const KIND_SKILL: u16 = 4202;
 const KIND_BOOKMARK_LIST: u16 = 14202;
 const KIND_AGENT_CREATE: u16 = 24001;
 const KIND_PROJECT_STATUS: u16 = 24010;
-const KIND_AGENT_CONFIG: u16 = 24011;
+const KIND_AGENT_CONFIG: u16 = 34011;
 const KIND_BACKEND_HEARTBEAT: u16 = 24012;
 const KIND_AGENT_SNAPSHOT: u16 = 14199;
 const KIND_PROJECT_DRAFT: u16 = 31933;
@@ -95,10 +95,17 @@ struct StreamDeltaCounters {
     malformed_dropped: u64,
 }
 
-/// Wrapper around `nostr_ndb::NdbDatabase` that rejects ephemeral events.
+/// Wrapper around `nostr_ndb::NdbDatabase` that rejects ephemeral events and
+/// certain addressable config events that are delivered via the `DataChange`
+/// channel rather than through nostrdb.
 ///
-/// This keeps relay notifications flowing, but avoids persisting ephemeral kinds
-/// (20000-29999) into the shared `nostrdb` cache.
+/// Rejecting with `RejectedReason::Ephemeral` keeps relay notifications
+/// flowing (nostr-sdk still emits the `RelayPoolNotification::Event`) while
+/// preventing the event from being stored in the shared nostrdb cache.
+/// Without this, addressable events such as kind:34011 (per-agent config)
+/// would be deduplicated by nostr-sdk on reconnect — the second session would
+/// find the event already stored, suppress the notification, and leave
+/// `agent_configs_by_backend` empty.
 #[derive(Debug, Clone)]
 struct EphemeralFilteringNdbDatabase {
     inner: nostr_ndb::NdbDatabase,
@@ -121,7 +128,12 @@ impl NostrDatabase for EphemeralFilteringNdbDatabase {
         &'a self,
         event: &'a Event,
     ) -> NostrBoxedFuture<'a, Result<SaveEventStatus, DatabaseError>> {
-        if event.kind.is_ephemeral() {
+        // Reject ephemeral events (20000-29999) and kind:34011 agent-config events.
+        // kind:34011 is NIP-33 addressable (30000-39999) so it would be stored and
+        // deduplicated — the relay would send the same event_id on reconnect, nostr-sdk
+        // would find it already stored, and suppress the notification entirely, leaving
+        // `agent_configs_by_backend` empty for the entire session.
+        if event.kind.is_ephemeral() || event.kind.as_u16() == KIND_AGENT_CONFIG {
             return Box::pin(async { Ok(SaveEventStatus::Rejected(RejectedReason::Ephemeral)) });
         }
 
@@ -998,7 +1010,7 @@ pub enum DataChange {
     },
     /// Ephemeral project status event (kind:24010) - not cached in nostrdb
     ProjectStatus { json: String },
-    /// Ephemeral per-agent config event (kind:24011) - not cached in nostrdb.
+    /// Per-agent config event (kind:34011) - addressable, not cached in nostrdb.
     /// One event per installed agent.
     AgentConfig { json: String },
     /// Ephemeral backend heartbeat (kind:24012) - backend requesting whitelist
@@ -1845,7 +1857,7 @@ impl NostrWorker {
             KIND_PROJECT_DRAFT
         );
 
-        // 2. Status events (kind:24010, kind:24011, kind:24133) - since 45 seconds ago
+        // 2. Status events (kind:24010, kind:34011, kind:24133) - since 45 seconds ago
         // kind:24010 is the GLOBAL subscription that tells us which projects are online.
         // When we receive these events, we create per-project subscriptions for
         // kind:1, 513, 30023, and 24135.
@@ -1871,13 +1883,15 @@ impl NostrWorker {
             .with_raw_filter(project_status_json.unwrap_or_default()),
         );
 
+        // kind:34011 is NIP-33 addressable — relays serve the latest version regardless of
+        // created_at, so a `since` filter would silently exclude configs published outside
+        // the 45-second window. Subscribe without a time constraint.
         let agent_config_filter = Filter::new()
             .kind(Kind::Custom(KIND_AGENT_CONFIG))
             .custom_tag(
                 SingleLetterTag::lowercase(Alphabet::P),
                 user_pubkey.to_string(),
-            )
-            .since(since_time);
+            );
         let agent_config_json = serde_json::to_string(&agent_config_filter).ok();
         let agent_config_output = client
             .subscribe(agent_config_filter.clone(), None)
@@ -2227,7 +2241,7 @@ impl NostrWorker {
                                         continue;
                                     }
 
-                                    // Ephemeral events (24010, 24011, 24133) go through DataChange channel
+                                    // Status/config events (24010, 34011, 24133) go through DataChange channel
                                     if kind == KIND_PROJECT_STATUS
                                         || kind == KIND_AGENT_CONFIG
                                         || kind == KIND_AGENT_STATUS
@@ -4583,6 +4597,42 @@ mod tests {
         assert!(
             results.is_empty(),
             "stream text deltas must not be cached in nostrdb"
+        );
+    }
+
+    #[test]
+    fn test_ephemeral_filtering_database_rejects_agent_config_events() {
+        // kind:34011 is NIP-33 addressable (NOT ephemeral by kind range) but must be
+        // excluded from nostrdb so nostr-sdk does not deduplicate it across sessions.
+        // If stored, reconnects would find the same event_id already present and suppress
+        // the RelayPoolNotification::Event, leaving agent_configs_by_backend permanently empty.
+        let dir = tempdir().unwrap();
+        let db = crate::store::Database::new(dir.path()).unwrap();
+        let ndb_database =
+            EphemeralFilteringNdbDatabase::new(nostr_ndb::NdbDatabase::from((*db.ndb).clone()));
+
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(KIND_AGENT_CONFIG), "")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(nostr_sdk::Alphabet::D)),
+                ["agent_pubkey_hex"],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let status = rt.block_on(ndb_database.save_event(&event)).unwrap();
+
+        assert_eq!(status, SaveEventStatus::Rejected(RejectedReason::Ephemeral));
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let filter = nostrdb::Filter::new()
+            .kinds([KIND_AGENT_CONFIG as u64])
+            .build();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(
+            results.is_empty(),
+            "agent config events must not be cached in nostrdb"
         );
     }
 

@@ -6,8 +6,9 @@ use crate::constants::STALENESS_THRESHOLD_SECS;
 
 /// Represents an agent listed in a project status event (kind:24010).
 ///
-/// Per the current protocol, kind:24010 only surfaces agent identity and PM
-/// status. Model/skill/mcp/tool configuration lives in per-agent kind:24011
+/// `is_pm` is set by the store layer based on the agent's position in the
+/// kind:31933 project event — the first `p`-tag agent is the PM.
+/// Model/skill/mcp/tool configuration lives in per-agent kind:34011
 /// events — use `AgentConfig` to retrieve those.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProjectAgent {
@@ -22,7 +23,7 @@ pub struct ProjectAgent {
 ///
 /// Carries the project coordinate, each active agent's identity, and the set of
 /// active worktrees. Per-agent configuration (model, skills, mcp servers) is
-/// delivered separately via kind:24011.
+/// delivered separately via kind:34011.
 #[derive(Debug, Clone)]
 pub struct ProjectStatus {
     pub project_coordinate: String,
@@ -118,13 +119,11 @@ impl ProjectStatus {
                 }
                 "agent" => {
                     if tag.len() >= 3 {
-                        // PM detection: check for "pm" marker in tag[3] (if present)
-                        let is_pm = tag.len() >= 4 && tag[3] == "pm";
                         let agent = ProjectAgent {
                             pubkey: tag[1].clone(),
                             name: tag[2].clone(),
                             backend_pubkey: backend_pubkey.clone(),
-                            is_pm,
+                            is_pm: false,
                             is_online: true,
                         };
                         agent_map.insert(tag[2].clone(), agent);
@@ -321,81 +320,4 @@ mod tests {
         assert!(names.contains(&"agent2"));
     }
 
-    #[test]
-    fn test_pm_tag_detection() {
-        let json = r#"{
-            "kind": 24010,
-            "pubkey": "backend_pubkey",
-            "created_at": 1706400000,
-            "tags": [
-                ["a", "31933:user_pubkey:project_id"],
-                ["agent", "agent1_pubkey", "architect", "pm"],
-                ["agent", "agent2_pubkey", "claude-code"],
-                ["agent", "agent3_pubkey", "researcher"]
-            ]
-        }"#;
-
-        let status = ProjectStatus::from_json(json).unwrap();
-
-        let architect = status
-            .agents
-            .iter()
-            .find(|a| a.name == "architect")
-            .unwrap();
-        let claude_code = status
-            .agents
-            .iter()
-            .find(|a| a.name == "claude-code")
-            .unwrap();
-        let researcher = status
-            .agents
-            .iter()
-            .find(|a| a.name == "researcher")
-            .unwrap();
-
-        assert!(architect.is_pm);
-        assert!(!claude_code.is_pm);
-        assert!(!researcher.is_pm);
-
-        let pm = status.pm_agent().expect("Should have a PM agent");
-        assert_eq!(pm.name, "architect");
-    }
-
-    #[test]
-    fn test_pm_tag_on_non_first_agent() {
-        let json = r#"{
-            "kind": 24010,
-            "pubkey": "backend_pubkey",
-            "created_at": 1706400000,
-            "tags": [
-                ["a", "31933:user_pubkey:project_id"],
-                ["agent", "agent1_pubkey", "researcher"],
-                ["agent", "agent2_pubkey", "execution-coordinator", "pm"],
-                ["agent", "agent3_pubkey", "claude-code"]
-            ]
-        }"#;
-
-        let status = ProjectStatus::from_json(json).unwrap();
-        let pm = status.pm_agent().expect("Should have a PM agent");
-        assert_eq!(pm.name, "execution-coordinator");
-    }
-
-    #[test]
-    fn test_no_pm_marker() {
-        let json = r#"{
-            "kind": 24010,
-            "pubkey": "backend_pubkey",
-            "created_at": 1706400000,
-            "tags": [
-                ["a", "31933:user_pubkey:project_id"],
-                ["agent", "agent1_pubkey", "agent1"],
-                ["agent", "agent2_pubkey", "agent2"]
-            ]
-        }"#;
-
-        let status = ProjectStatus::from_json(json).unwrap();
-
-        assert!(!status.agents.iter().any(|a| a.is_pm));
-        assert!(status.pm_agent().is_none());
-    }
 }

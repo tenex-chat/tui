@@ -16,7 +16,7 @@ pub(crate) enum PanelMode {
 /// Per the current protocol the `/config` command targets an agent's global
 /// `default` config (kind:24020). It can pick a model, toggle PM, and always
 /// sends the agent's full `skills`/`mcp_servers` snapshot from the agent's
-/// latest kind:24011 event so the backend replaces rather than clears those
+/// latest kind:34011 event so the backend replaces rather than clears those
 /// sets. `tool` tags were dropped from the protocol entirely.
 pub(crate) struct ConfigPanel {
     pub(crate) active: bool,
@@ -167,7 +167,7 @@ impl ConfigPanel {
 
     /// Publish a kind:24020 update for this agent.
     ///
-    /// The skill/mcp snapshots come from the cached kind:24011 event so the
+    /// The skill/mcp snapshots come from the cached kind:34011 event so the
     /// backend replaces — rather than clears — those sets when only the model
     /// or PM flag changed.
     pub(crate) fn save(&self, runtime: &CoreRuntime) -> String {

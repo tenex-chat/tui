@@ -1119,11 +1119,11 @@ pub struct TeamCommentInfo {
     pub parent_comment_id: Option<String>,
 }
 
-/// Available configuration options derived from a single agent's kind:24011
+/// Available configuration options derived from a single agent's kind:34011
 /// event. Used by iOS to populate the agent config modal.
 ///
 /// Per the current protocol kind:24010 no longer carries aggregate
-/// model/skill/mcp info — those live on each agent's kind:24011 event.
+/// model/skill/mcp info — those live on each agent's kind:34011 event.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProjectConfigOptions {
     /// All models visible to this agent.
@@ -1716,7 +1716,7 @@ pub enum DataChangeType {
         backend_pubkey: String,
         project_a_tag: String,
     },
-    /// A per-agent config event (kind:24011) arrived for an installed agent.
+    /// A per-agent config event (kind:34011) arrived for an installed agent.
     AgentConfigsChanged {
         backend_pubkey: String,
     },

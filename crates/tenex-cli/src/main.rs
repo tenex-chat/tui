@@ -181,7 +181,7 @@ enum Commands {
     ///
     /// Per the current protocol this only updates `model`, `skill`, and `mcp`
     /// — `tool` tags were dropped from the protocol entirely. Skills and MCP
-    /// servers are preserved from the agent's latest kind:24011 broadcast.
+    /// servers are preserved from the agent's latest kind:34011 broadcast.
     SetAgentSettings {
         /// Project slug (d-tag) used to find the agent and available backend status
         project_slug: String,

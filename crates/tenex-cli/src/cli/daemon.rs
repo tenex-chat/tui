@@ -1722,7 +1722,7 @@ fn handle_request(
             let response = match status {
                 Some(status) => {
                     // Agents now expose only identity + PM marker on kind:24010.
-                    // Model/skill/mcp config lives on per-agent kind:24011 events.
+                    // Model/skill/mcp config lives on per-agent kind:34011 events.
                     let backend = &status.backend_pubkey;
                     let agents: Vec<_> = status
                         .agents
@@ -1971,7 +1971,7 @@ fn handle_request(
                                         if status.created_at > current_timestamp {
                                             // New status received — confirm the
                                             // agent's active model from the
-                                            // per-agent kind:24011 broadcast.
+                                            // per-agent kind:34011 broadcast.
                                             let agent_updated = status
                                                 .agents
                                                 .iter()
@@ -2056,7 +2056,7 @@ fn handle_request(
 
 /// Serialize a `ProjectAgent` to JSON for CLI output.
 ///
-/// The active model lives on the agent's kind:24011 event — we pull it from
+/// The active model lives on the agent's kind:34011 event — we pull it from
 /// the store when available.
 fn agent_to_json(a: &tenex_core::models::ProjectAgent, store: &AppDataStore) -> serde_json::Value {
     let model = store
@@ -2167,7 +2167,7 @@ struct AgentLookupResult {
 ///
 /// Uses the online agents from `ProjectStatus` (kind:24010) for identity and PM
 /// status, and pulls `skills` / `mcp_servers` from the agent's `AgentConfig`
-/// (kind:24011) so `set_agent_settings` can preserve them when sending a
+/// (kind:34011) so `set_agent_settings` can preserve them when sending a
 /// kind:24020 update.
 fn find_agent_in_project(
     store: &AppDataStore,

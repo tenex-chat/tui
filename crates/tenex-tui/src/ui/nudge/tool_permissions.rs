@@ -164,7 +164,7 @@ pub struct ToolPermissionConflict {
     pub tool_name: String,
 }
 
-/// Tool inventories are no longer advertised on kind:24010 or kind:24011 —
+/// Tool inventories are no longer advertised on kind:24010 or kind:34011 —
 /// the protocol dropped `tool` tags from both. Nudge permissions still
 /// target tools by name (the `allow-tool` / `deny-tool` / `only-tool` tags
 /// on kind:4201), but the client has no remote list to offer as

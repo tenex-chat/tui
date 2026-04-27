@@ -145,7 +145,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     let input_bg = theme::BG_INPUT;
 
     // Agent display with model info in a single selectable chip (no @ prefix).
-    // The active model lives on the per-agent kind:24011 event now.
+    // The active model lives on the per-agent kind:34011 event now.
     let agent_chip_display = app
         .selected_agent()
         .map(|a| {

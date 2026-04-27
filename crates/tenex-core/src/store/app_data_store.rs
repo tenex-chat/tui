@@ -38,6 +38,9 @@ pub struct AppDataStore {
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
     pub project_statuses_by_backend: HashMap<String, HashMap<String, ProjectStatus>>, // project a_tag -> backend pubkey -> status
     pub agent_configs_by_backend: HashMap<String, Vec<AgentConfig>>,
+    // Pending 34011 configs from not-yet-approved backends, keyed by backend pubkey.
+    // Replayed when the backend gets approved.
+    pending_agent_configs: HashMap<String, Vec<AgentConfig>>,
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
     pub profiles: HashMap<String, String>,                // pubkey -> display name
@@ -91,6 +94,7 @@ impl AppDataStore {
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
             agent_configs_by_backend: HashMap::new(),
+            pending_agent_configs: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -129,6 +133,7 @@ impl AppDataStore {
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
             agent_configs_by_backend: HashMap::new(),
+            pending_agent_configs: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -216,6 +221,7 @@ impl AppDataStore {
         self.project_statuses.clear();
         self.project_statuses_by_backend.clear();
         self.agent_configs_by_backend.clear();
+        self.pending_agent_configs.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
         self.profiles.clear();
@@ -1532,7 +1538,7 @@ impl AppDataStore {
         if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
             match kind {
                 24010 => self.handle_project_status_event_value(event),
-                24011 => self.handle_agent_config_event_value(event),
+                34011 => self.handle_agent_config_event_value(event),
                 24133 => self.handle_operations_status_event_value(event),
                 _ => {} // Ignore unknown kinds
             }
@@ -1564,7 +1570,18 @@ impl AppDataStore {
             self.project_statuses_by_backend.remove(project_coordinate);
         }
 
-        if let Some(aggregate) = aggregate {
+        if let Some(mut aggregate) = aggregate {
+            if let Some(pm_pubkey) = self
+                .projects
+                .iter()
+                .find(|p| p.a_tag() == project_coordinate)
+                .and_then(|p| p.agent_pubkeys.first())
+                .cloned()
+            {
+                for agent in &mut aggregate.agents {
+                    agent.is_pm = agent.pubkey == pm_pubkey;
+                }
+            }
             self.project_statuses
                 .insert(project_coordinate.to_string(), aggregate.clone());
             Some(aggregate)
@@ -1641,7 +1658,7 @@ impl AppDataStore {
         self.operations.handle_operations_status_event_value(event);
     }
 
-    /// Handle a kind:24011 per-agent config event.
+    /// Handle a kind:34011 per-agent config event.
     ///
     /// Each event describes one installed agent. Upserts the `AgentConfig` into
     /// the bucket for `backend_pubkey` (keyed by agent pubkey within the bucket).
@@ -1655,6 +1672,17 @@ impl AppDataStore {
         }
 
         if !self.trust.is_approved(&config.backend_pubkey) {
+            let pending = self
+                .pending_agent_configs
+                .entry(config.backend_pubkey.clone())
+                .or_default();
+            if let Some(existing) = pending.iter_mut().find(|c| c.pubkey == config.pubkey) {
+                if config.created_at >= existing.created_at {
+                    *existing = config;
+                }
+            } else {
+                pending.push(config);
+            }
             return;
         }
 
@@ -3038,9 +3066,25 @@ impl AppDataStore {
 
     pub fn add_approved_backend(&mut self, pubkey: &str) {
         let pending_statuses = self.trust.add_approved(pubkey);
-        // Cross-cutting: apply pending statuses to project_statuses
         for status in pending_statuses {
             self.upsert_project_status(status);
+        }
+        // Replay any 34011 agent config events that arrived before approval.
+        if let Some(pending_configs) = self.pending_agent_configs.remove(pubkey) {
+            let entry = self
+                .agent_configs_by_backend
+                .entry(pubkey.to_string())
+                .or_default();
+            for config in pending_configs {
+                if let Some(existing) = entry.iter_mut().find(|c| c.pubkey == config.pubkey) {
+                    if config.created_at >= existing.created_at {
+                        *existing = config;
+                    }
+                } else {
+                    entry.push(config);
+                }
+            }
+            entry.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
         }
     }
 

@@ -1408,11 +1408,11 @@ pub struct AgentSettingsState {
     pub agent_pubkey: String,
     /// Whether this agent is currently the PM for the project
     pub is_pm: bool,
-    /// Available models to choose from (from the agent's kind:24011 event)
+    /// Available models to choose from (from the agent's kind:34011 event)
     pub available_models: Vec<String>,
     /// Index of selected model in available_models
     pub model_index: usize,
-    /// Available skills (from the agent's kind:24011 event)
+    /// Available skills (from the agent's kind:34011 event)
     pub available_skills: Vec<String>,
     /// Selected skills by name
     pub selected_skills: std::collections::HashSet<String>,
@@ -1420,7 +1420,7 @@ pub struct AgentSettingsState {
     pub skills_cursor: usize,
     /// Scroll offset for skills list
     pub skills_scroll: usize,
-    /// Available MCP servers (from the agent's kind:24011 event)
+    /// Available MCP servers (from the agent's kind:34011 event)
     pub available_mcp_servers: Vec<String>,
     /// Selected MCP servers by name
     pub selected_mcp_servers: std::collections::HashSet<String>,

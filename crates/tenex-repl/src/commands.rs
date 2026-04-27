@@ -1236,7 +1236,7 @@ pub(crate) fn handle_config_command(
     } else if open_model {
         panel.switch_to_model_select(runtime);
     } else {
-        // With per-agent configs (kind:24011), the default flow is the flag
+        // With per-agent configs (kind:34011), the default flow is the flag
         // selector (model / PM). Tool selection was dropped from the protocol.
         panel.switch_to_flag_select();
     }
