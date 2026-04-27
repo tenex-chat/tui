@@ -41,6 +41,9 @@ pub struct AppDataStore {
     // Pending 34011 configs from not-yet-approved backends, keyed by backend pubkey.
     // Replayed when the backend gets approved.
     pending_agent_configs: HashMap<String, Vec<AgentConfig>>,
+    /// kind:24011 catalog: backend_pubkey → [(agent_pubkey, agent_slug)]
+    /// Lists all agents a backend makes available for installation.
+    pub available_agents_catalog: HashMap<String, Vec<(String, String)>>,
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
     pub profiles: HashMap<String, String>,                // pubkey -> display name
@@ -95,6 +98,7 @@ impl AppDataStore {
             project_statuses_by_backend: HashMap::new(),
             agent_configs_by_backend: HashMap::new(),
             pending_agent_configs: HashMap::new(),
+            available_agents_catalog: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -134,6 +138,7 @@ impl AppDataStore {
             project_statuses_by_backend: HashMap::new(),
             agent_configs_by_backend: HashMap::new(),
             pending_agent_configs: HashMap::new(),
+            available_agents_catalog: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -222,6 +227,7 @@ impl AppDataStore {
         self.project_statuses_by_backend.clear();
         self.agent_configs_by_backend.clear();
         self.pending_agent_configs.clear();
+        self.available_agents_catalog.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
         self.profiles.clear();
@@ -1538,6 +1544,7 @@ impl AppDataStore {
         if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
             match kind {
                 24010 => self.handle_project_status_event_value(event),
+                24011 => self.handle_backend_available_agents_event_value(event),
                 34011 => self.handle_agent_config_event_value(event),
                 24133 => self.handle_operations_status_event_value(event),
                 _ => {} // Ignore unknown kinds
@@ -1636,6 +1643,12 @@ impl AppDataStore {
     fn handle_project_status_event_value(&mut self, event: &serde_json::Value) {
         if let Some(status) = ProjectStatus::from_value(event) {
             let backend_pubkey = status.backend_pubkey.clone();
+            let bpk_short = &backend_pubkey[..8.min(backend_pubkey.len())];
+            let agent_pks: Vec<&str> = status.agents.iter().map(|a| &a.pubkey[..8.min(a.pubkey.len())]).collect();
+            crate::nostr::worker::log_to_file(
+                "24010",
+                &format!("backend={} project={} agents=[{}]", bpk_short, &status.project_coordinate, agent_pks.join(", ")),
+            );
 
             if self.trust.is_blocked(&backend_pubkey) {
                 return;
@@ -1653,6 +1666,48 @@ impl AppDataStore {
         }
     }
 
+    /// Handle a kind:24011 backend available-agents catalog event.
+    ///
+    /// Extracts all `["agent", pubkey, slug]` tags and replaces the catalog
+    /// entry for this backend. Trust-gated: unknown backends are silently dropped.
+    fn handle_backend_available_agents_event_value(&mut self, event: &serde_json::Value) {
+        let backend_pubkey = match event.get("pubkey").and_then(|v| v.as_str()) {
+            Some(pk) => pk.to_string(),
+            None => return,
+        };
+
+        if self.trust.is_blocked(&backend_pubkey) || !self.trust.is_approved(&backend_pubkey) {
+            return;
+        }
+
+        let tags = match event.get("tags").and_then(|t| t.as_array()) {
+            Some(t) => t,
+            None => return,
+        };
+
+        let mut agents: Vec<(String, String)> = Vec::new();
+        for tag in tags {
+            let arr = match tag.as_array() {
+                Some(a) => a,
+                None => continue,
+            };
+            if arr.first().and_then(|v| v.as_str()) == Some("agent") && arr.len() >= 3 {
+                let pubkey = arr[1].as_str().unwrap_or("").to_string();
+                let slug = arr[2].as_str().unwrap_or("").to_string();
+                if !pubkey.is_empty() && !slug.is_empty() {
+                    agents.push((pubkey, slug));
+                }
+            }
+        }
+
+        let bpk_short = &backend_pubkey[..8.min(backend_pubkey.len())];
+        crate::nostr::worker::log_to_file(
+            "24011",
+            &format!("backend={} catalog updated: {} agents", bpk_short, agents.len()),
+        );
+        self.available_agents_catalog.insert(backend_pubkey, agents);
+    }
+
     /// Handle an operations status event from pre-parsed Value (kind:24133)
     fn handle_operations_status_event_value(&mut self, event: &serde_json::Value) {
         self.operations.handle_operations_status_event_value(event);
@@ -1664,14 +1719,28 @@ impl AppDataStore {
     /// the bucket for `backend_pubkey` (keyed by agent pubkey within the bucket).
     fn handle_agent_config_event_value(&mut self, event: &serde_json::Value) {
         let Some(config) = AgentConfig::from_value(event) else {
+            crate::nostr::worker::log_to_file("34011", "parse failed — AgentConfig::from_value returned None");
             return;
         };
 
+        let bpk_short = config.backend_pubkey[..8.min(config.backend_pubkey.len())].to_string();
+        let apk_short = config.pubkey[..8.min(config.pubkey.len())].to_string();
+        crate::nostr::worker::log_to_file(
+            "34011",
+            &format!(
+                "parsing ok: backend={} agent={} slug={} models={} skills={}",
+                bpk_short, apk_short, config.slug,
+                config.models.len(), config.skills.len()
+            ),
+        );
+
         if self.trust.is_blocked(&config.backend_pubkey) {
+            crate::nostr::worker::log_to_file("34011", &format!("backend={} is BLOCKED — dropping", bpk_short));
             return;
         }
 
         if !self.trust.is_approved(&config.backend_pubkey) {
+            crate::nostr::worker::log_to_file("34011", &format!("backend={} NOT approved — queuing pending", bpk_short));
             let pending = self
                 .pending_agent_configs
                 .entry(config.backend_pubkey.clone())
@@ -1685,6 +1754,8 @@ impl AppDataStore {
             }
             return;
         }
+
+        crate::nostr::worker::log_to_file("34011", &format!("backend={} approved — storing agent={}", bpk_short, apk_short));
 
         let entry = self
             .agent_configs_by_backend
@@ -1701,6 +1772,11 @@ impl AppDataStore {
         }
 
         entry.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
+
+        crate::nostr::worker::log_to_file(
+            "34011",
+            &format!("agent_configs_by_backend[{}] now has {} entries", bpk_short, entry.len()),
+        );
     }
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
@@ -2179,6 +2255,15 @@ impl AppDataStore {
         self.agent_configs_by_backend
             .get(backend_pubkey)
             .and_then(|configs| configs.iter().find(|c| c.pubkey == agent_pubkey))
+    }
+
+    /// Find the `AgentConfig` for an agent by pubkey alone, searching across all backends.
+    /// Use this when the backend pubkey is not known (e.g. agent config modal lookup).
+    pub fn get_agent_config_by_pubkey(&self, agent_pubkey: &str) -> Option<&AgentConfig> {
+        self.agent_configs_by_backend
+            .values()
+            .flat_map(|configs| configs.iter())
+            .find(|c| c.pubkey == agent_pubkey)
     }
 
     /// Get online agents for a project (from ProjectStatus if online)

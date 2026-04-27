@@ -1705,6 +1705,9 @@ impl App {
                 DataChange::ProjectStatus { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
                     self.refresh_selected_agent_from_project_status();
+                    self.refresh_agent_config_modal_if_open();
+                    // If this was a 24011 catalog, fetch 34011 configs by d-tag for each agent.
+                    self.fetch_agent_configs_for_catalog_if_needed(&json);
                 }
                 DataChange::AgentConfig { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
@@ -2059,14 +2062,9 @@ impl App {
         &self,
         agent: &crate::models::ProjectAgent,
     ) -> Option<crate::ui::modal::AgentSettingsState> {
-        let project = self.selected_project.as_ref()?;
         let store = self.data_store.borrow();
-        let backend = store
-            .get_project_status(&project.a_tag())
-            .map(|s| s.backend_pubkey.clone());
-        let config = backend
-            .as_deref()
-            .and_then(|bp| store.get_agent_config(bp, &agent.pubkey));
+        let config = store.get_agent_config_by_pubkey(&agent.pubkey);
+        tlog!("34011", "build_agent_settings_for: agent={} ({}), config={}", &agent.pubkey[..8.min(agent.pubkey.len())], agent.name, if config.is_some() { "FOUND" } else { "NOT FOUND" });
 
         let (active_model, active_skills, active_mcps, all_models, all_skills, all_mcp_servers) =
             match config {
@@ -2094,6 +2092,47 @@ impl App {
         ))
     }
 
+    /// When a kind:24011 catalog arrives, subscribe to kind:34011 by d-tag for each listed agent.
+    /// This bypasses relay default limits that prevent bulk author-only queries from returning all events.
+    fn fetch_agent_configs_for_catalog_if_needed(&self, json: &str) {
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(json) else { return };
+        let kind = event.get("kind").and_then(|k| k.as_u64());
+        if kind != Some(24011) { return }
+
+        let backend_pubkey = match event.get("pubkey").and_then(|v| v.as_str()) {
+            Some(pk) => pk.to_string(),
+            None => return,
+        };
+        let agent_pubkeys: Vec<String> = event
+            .get("tags")
+            .and_then(|t| t.as_array())
+            .map(|tags| {
+                tags.iter()
+                    .filter_map(|tag| {
+                        let arr = tag.as_array()?;
+                        if arr.first()?.as_str() == Some("agent") && arr.len() >= 2 {
+                            arr[1].as_str().map(|s| s.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if agent_pubkeys.is_empty() { return }
+
+        tlog!("34011", "24011 catalog from {}: fetching 34011 configs for {} agents by d-tag",
+            &backend_pubkey[..8.min(backend_pubkey.len())], agent_pubkeys.len());
+
+        if let Some(ref handle) = self.core_handle {
+            let _ = handle.send(NostrCommand::FetchAgentConfigsByDTag {
+                backend_pubkey,
+                agent_pubkeys,
+            });
+        }
+    }
+
     /// Refresh the agent config modal if it is currently open.
     ///
     /// Called when a fresh kind:34011 event arrives so the modal picks up
@@ -2104,10 +2143,11 @@ impl App {
         }
         let old = std::mem::replace(&mut self.modal_state, ModalState::None);
         if let ModalState::AgentConfig(mut state) = old {
-            // Clear the cached pubkey so the early-return in
-            // refresh_agent_config_modal_state doesn't skip the reload.
-            state.active_agent_pubkey = None;
-            self.refresh_agent_config_modal_state(&mut state);
+            // Don't clobber pending user edits — only reload when there's nothing in flight.
+            if !state.has_config_changes() {
+                state.active_agent_pubkey = None;
+                self.refresh_agent_config_modal_state(&mut state);
+            }
             self.modal_state = ModalState::AgentConfig(state);
         }
     }
@@ -2140,15 +2180,7 @@ impl App {
         // ProjectAgent literals.
         let (model, skills, mcps) = {
             let store = self.data_store.borrow();
-            let backend = self
-                .selected_project
-                .as_ref()
-                .and_then(|p| store.get_project_status(&p.a_tag()))
-                .map(|s| s.backend_pubkey.clone());
-            match backend
-                .as_deref()
-                .and_then(|bp| store.get_agent_config(bp, &agent.pubkey))
-            {
+            match store.get_agent_config_by_pubkey(&agent.pubkey) {
                 Some(c) => (
                     c.active_model.clone(),
                     c.active_skills.iter().cloned().collect::<HashSet<_>>(),
@@ -3406,24 +3438,50 @@ impl App {
 
     pub fn installed_agents_filtered_by(
         &self,
-        backend_pubkey: Option<&str>,
+        _backend_pubkey: Option<&str>,
         filter: &str,
     ) -> Vec<AgentConfig> {
-        let Some(backend_pubkey) = backend_pubkey else {
-            return Vec::new();
-        };
+        let store = self.data_store.borrow();
 
-        self.data_store
-            .borrow()
-            .get_agent_configs(backend_pubkey)
+        // Collect from kind:24011 catalog (primary source), enriched with 34011 config when available.
+        let mut seen_pubkeys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut agents: Vec<AgentConfig> = store
+            .available_agents_catalog
             .iter()
-            .filter(|agent| {
-                filter.is_empty()
-                    || fuzzy_matches(&agent.slug, filter)
-                    || fuzzy_matches(&agent.pubkey, filter)
+            .flat_map(|(backend_pubkey, catalog)| {
+                catalog.iter().map(move |(pubkey, slug)| (backend_pubkey.clone(), pubkey.clone(), slug.clone()))
             })
-            .cloned()
-            .collect()
+            .filter(|(_, pubkey, slug)| {
+                filter.is_empty()
+                    || fuzzy_matches(slug, filter)
+                    || fuzzy_matches(pubkey, filter)
+            })
+            .filter_map(|(backend_pubkey, pubkey, slug)| {
+                if !seen_pubkeys.insert(pubkey.clone()) {
+                    return None;
+                }
+                // Enrich with 34011 config if available, otherwise create minimal entry.
+                if let Some(config) = store.get_agent_config_by_pubkey(&pubkey) {
+                    Some(config.clone())
+                } else {
+                    Some(AgentConfig {
+                        backend_pubkey,
+                        pubkey,
+                        slug,
+                        created_at: 0,
+                        active_model: None,
+                        models: Vec::new(),
+                        active_skills: Vec::new(),
+                        skills: Vec::new(),
+                        active_mcps: Vec::new(),
+                        mcps: Vec::new(),
+                    })
+                }
+            })
+            .collect();
+
+        agents.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
+        agents
     }
 
     /// Get MCP tools filtered by a custom filter string
@@ -4618,14 +4676,19 @@ impl App {
         self.preferences.borrow_mut().approve_backend(pubkey);
         self.data_store.borrow_mut().add_approved_backend(pubkey);
 
-        // Publish 14199 so the relay whitelists this backend
-        if !self.whitelisted_backends.contains(pubkey) {
-            if let Some(ref handle) = self.core_handle {
+        if let Some(ref handle) = self.core_handle {
+            // Publish 14199 so the relay whitelists this backend
+            if !self.whitelisted_backends.contains(pubkey) {
                 let _ = handle.send(NostrCommand::WhitelistBackend {
                     backend_pubkey: pubkey.to_string(),
                 });
+                self.whitelisted_backends.insert(pubkey.to_string());
             }
-            self.whitelisted_backends.insert(pubkey.to_string());
+            // Subscribe to kind:34011 events from this backend
+            tlog!("34011", "approve_backend: sending SubscribeToBackendAgentConfigs for {}", &pubkey[..8.min(pubkey.len())]);
+            let _ = handle.send(NostrCommand::SubscribeToBackendAgentConfigs {
+                backend_pubkeys: vec![pubkey.to_string()],
+            });
         }
     }
 
@@ -4647,10 +4710,28 @@ impl App {
         let approved = prefs.approved_backend_pubkeys().clone();
         let blocked = prefs.blocked_backend_pubkeys().clone();
         drop(prefs);
+        tlog!("34011", "init_trusted_backends: {} approved, {} blocked", approved.len(), blocked.len());
         self.data_store
             .borrow_mut()
             .trust
-            .set_trusted_backends(approved, blocked);
+            .set_trusted_backends(approved.clone(), blocked);
+
+        // Subscribe to kind:34011 from all previously-approved backends
+        if !approved.is_empty() {
+            tlog!(
+                "34011",
+                "init_trusted_backends: sending SubscribeToBackendAgentConfigs for {} backend(s): [{}]",
+                approved.len(),
+                approved.iter().map(|pk| &pk[..8.min(pk.len())]).collect::<Vec<_>>().join(", ")
+            );
+            if let Some(ref handle) = self.core_handle {
+                let _ = handle.send(NostrCommand::SubscribeToBackendAgentConfigs {
+                    backend_pubkeys: approved.into_iter().collect(),
+                });
+            }
+        } else {
+            tlog!("34011", "init_trusted_backends: no approved backends, skipping subscription");
+        }
     }
 
     // ===== Sidebar Search Methods =====

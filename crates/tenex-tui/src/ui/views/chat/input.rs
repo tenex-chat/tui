@@ -151,7 +151,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|a| {
             let store = app.data_store.borrow();
             let model = store
-                .get_agent_config(&a.backend_pubkey, &a.pubkey)
+                .get_agent_config_by_pubkey(&a.pubkey)
                 .and_then(|c| c.active_model.clone());
             let model_display = model
                 .map(|m| format!("({})", m))

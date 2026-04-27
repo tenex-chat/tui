@@ -36,6 +36,7 @@ const KIND_SKILL: u16 = 4202;
 const KIND_BOOKMARK_LIST: u16 = 14202;
 const KIND_AGENT_CREATE: u16 = 24001;
 const KIND_PROJECT_STATUS: u16 = 24010;
+const KIND_BACKEND_AVAILABLE_AGENTS: u16 = 24011;
 const KIND_AGENT_CONFIG: u16 = 34011;
 const KIND_BACKEND_HEARTBEAT: u16 = 24012;
 const KIND_AGENT_SNAPSHOT: u16 = 14199;
@@ -994,6 +995,17 @@ pub enum NostrCommand {
     WhitelistBackend {
         backend_pubkey: String,
     },
+    /// Subscribe to kind:34011 agent-config events authored by these backends.
+    /// Safe to call multiple times — already-subscribed backends are skipped.
+    SubscribeToBackendAgentConfigs {
+        backend_pubkeys: Vec<String>,
+    },
+    /// Fetch kind:34011 configs for specific agents by d-tag.
+    /// Used after receiving a 24011 catalog to fetch configs for known agent pubkeys.
+    FetchAgentConfigsByDTag {
+        backend_pubkey: String,
+        agent_pubkeys: Vec<String>,
+    },
     Shutdown,
 }
 
@@ -1045,6 +1057,8 @@ pub struct NostrWorker {
     /// This prevents duplicate subscriptions when projects are rediscovered
     /// Uses tokio::sync::RwLock to avoid blocking the Tokio runtime
     subscribed_projects: Arc<RwLock<HashSet<String>>>,
+    /// Backend pubkeys for which we've already subscribed to kind:34011 agent configs
+    subscribed_agent_config_backends: Arc<RwLock<HashSet<String>>>,
     /// Cancellation token sender - signals background tasks to stop on disconnect
     cancel_tx: Option<watch::Sender<bool>>,
     /// NIP-46 bunker service (remote signer)
@@ -1075,6 +1089,7 @@ impl NostrWorker {
             negentropy_stats,
             requested_profiles: Arc::new(RwLock::new(HashSet::new())),
             subscribed_projects: Arc::new(RwLock::new(HashSet::new())),
+            subscribed_agent_config_backends: Arc::new(RwLock::new(HashSet::new())),
             cancel_tx: None,
             bunker_service: None,
             relay_urls: vec![RELAY_URL.to_string()],
@@ -1671,6 +1686,20 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to whitelist backend: {}", e);
                         }
                     }
+                    NostrCommand::SubscribeToBackendAgentConfigs { backend_pubkeys } => {
+                        if let Err(e) = rt.block_on(
+                            self.handle_subscribe_to_backend_agent_configs(backend_pubkeys),
+                        ) {
+                            tlog!("ERROR", "Failed to subscribe to backend agent configs: {}", e);
+                        }
+                    }
+                    NostrCommand::FetchAgentConfigsByDTag { backend_pubkey, agent_pubkeys } => {
+                        if let Err(e) = rt.block_on(
+                            self.handle_fetch_agent_configs_by_dtag(backend_pubkey, agent_pubkeys),
+                        ) {
+                            tlog!("ERROR", "Failed to fetch agent configs by d-tag: {}", e);
+                        }
+                    }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
                         // Stop bunker if running
@@ -1883,28 +1912,12 @@ impl NostrWorker {
             .with_raw_filter(project_status_json.unwrap_or_default()),
         );
 
-        // kind:34011 is NIP-33 addressable — relays serve the latest version regardless of
-        // created_at, so a `since` filter would silently exclude configs published outside
-        // the 45-second window. Subscribe without a time constraint.
-        let agent_config_filter = Filter::new()
-            .kind(Kind::Custom(KIND_AGENT_CONFIG))
-            .custom_tag(
-                SingleLetterTag::lowercase(Alphabet::P),
-                user_pubkey.to_string(),
-            );
-        let agent_config_json = serde_json::to_string(&agent_config_filter).ok();
-        let agent_config_output = client
-            .subscribe(agent_config_filter.clone(), None)
-            .await?;
-        self.subscription_stats.register(
-            agent_config_output.val.to_string(),
-            SubscriptionInfo::new(
-                "Per-agent config broadcasts".to_string(),
-                vec![KIND_AGENT_CONFIG],
-                None,
-            )
-            .with_raw_filter(agent_config_json.unwrap_or_default()),
-        );
+        // kind:34011 subscriptions are set up per approved backend via
+        // NostrCommand::SubscribeToBackendAgentConfigs, not here.
+
+        // kind:24011 subscriptions are set up per approved backend via
+        // NostrCommand::SubscribeToBackendAgentConfigs, not here.
+        // (24011 events have no #p tag — they are filtered by authors)
 
         // Backend uses uppercase P tag for kind:24133
         let agent_status_filter = Filter::new()
@@ -1948,9 +1961,8 @@ impl NostrWorker {
 
         tlog!(
             "CONN",
-            "Subscribed to status events (kind:{}, kind:{}, kind:{}, kind:{})",
+            "Subscribed to status events (kind:{}, kind:{}, kind:{})",
             KIND_PROJECT_STATUS,
-            KIND_AGENT_CONFIG,
             KIND_AGENT_STATUS,
             KIND_BACKEND_HEARTBEAT
         );
@@ -2241,13 +2253,15 @@ impl NostrWorker {
                                         continue;
                                     }
 
-                                    // Status/config events (24010, 34011, 24133) go through DataChange channel
+                                    // Status/config events (24010, 24011, 34011, 24133) go through DataChange channel
                                     if kind == KIND_PROJECT_STATUS
+                                        || kind == KIND_BACKEND_AVAILABLE_AGENTS
                                         || kind == KIND_AGENT_CONFIG
                                         || kind == KIND_AGENT_STATUS
                                     {
                                         if let Ok(json) = serde_json::to_string(&*event) {
                                             let data_change = if kind == KIND_AGENT_CONFIG {
+                                                tlog!("34011", "received kind:34011 from {} id={}", &event.pubkey.to_hex()[..8], &event.id.to_hex()[..8]);
                                                 DataChange::AgentConfig { json: json.clone() }
                                             } else {
                                                 DataChange::ProjectStatus { json: json.clone() }
@@ -3638,6 +3652,156 @@ impl NostrWorker {
             Err(_) => tlog!("ERROR", "Timeout publishing 14199 to relay"),
         }
 
+        Ok(())
+    }
+
+    async fn handle_subscribe_to_backend_agent_configs(
+        &self,
+        backend_pubkeys: Vec<String>,
+    ) -> Result<()> {
+        tlog!(
+            "34011",
+            "SubscribeToBackendAgentConfigs received: {} pubkey(s): [{}]",
+            backend_pubkeys.len(),
+            backend_pubkeys
+                .iter()
+                .map(|pk| &pk[..8.min(pk.len())])
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+
+        let (new_backends, already_seen_count): (Vec<String>, usize) = {
+            let mut seen = self.subscribed_agent_config_backends.write().await;
+            let total = backend_pubkeys.len();
+            let new: Vec<String> = backend_pubkeys
+                .into_iter()
+                .filter(|pk| seen.insert(pk.clone()))
+                .collect();
+            let already = total - new.len();
+            (new, already)
+        };
+
+        tlog!(
+            "34011",
+            "After dedup: {} new backend(s), {} already-subscribed",
+            new_backends.len(),
+            already_seen_count
+        );
+
+        if new_backends.is_empty() {
+            tlog!("34011", "No new backends — skipping subscription");
+            return Ok(());
+        }
+
+        let authors: Vec<PublicKey> = new_backends
+            .iter()
+            .filter_map(|pk| PublicKey::parse(pk).ok())
+            .collect();
+
+        if authors.is_empty() {
+            return Ok(());
+        }
+
+        // kind:34011 (NIP-33 addressable) + kind:24011 (catalog) — no `since` so the
+        // relay serves current stored events for each backend.
+        let filter = Filter::new()
+            .kinds([
+                Kind::Custom(KIND_AGENT_CONFIG),
+                Kind::Custom(KIND_BACKEND_AVAILABLE_AGENTS),
+            ])
+            .authors(authors);
+        let filter_json = serde_json::to_string(&filter).ok();
+        let output = client.subscribe(filter.clone(), None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new(
+                format!("Agent configs + catalog for {} backend(s)", new_backends.len()),
+                vec![KIND_AGENT_CONFIG, KIND_BACKEND_AVAILABLE_AGENTS],
+                None,
+            )
+            .with_raw_filter(filter_json.unwrap_or_default()),
+        );
+        tlog!(
+            "CONN",
+            "Subscribed to kind:34011+24011 for {} backend(s): {}",
+            new_backends.len(),
+            new_backends
+                .iter()
+                .map(|pk| &pk[..8.min(pk.len())])
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Ok(())
+    }
+
+    /// Fetch kind:34011 configs for specific agents by d-tag (NIP-33).
+    /// Called after receiving a 24011 catalog so we get the exact stored event
+    /// per (author, kind, d-tag), bypassing relay default limits.
+    async fn handle_fetch_agent_configs_by_dtag(
+        &self,
+        backend_pubkey: String,
+        agent_pubkeys: Vec<String>,
+    ) -> Result<()> {
+        if agent_pubkeys.is_empty() {
+            return Ok(());
+        }
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let author = match PublicKey::parse(&backend_pubkey) {
+            Ok(pk) => pk,
+            Err(_) => return Ok(()),
+        };
+        // NIP-33: query by (author, kind, d-tag) to get exactly one event per agent.
+        // Batch into chunks of 10 to avoid relay truncation of large #d filter arrays.
+        const DTAG_BATCH_SIZE: usize = 10;
+        let total = agent_pubkeys.len();
+        for (batch_idx, chunk) in agent_pubkeys.chunks(DTAG_BATCH_SIZE).enumerate() {
+            let filter = Filter::new()
+                .kind(Kind::Custom(KIND_AGENT_CONFIG))
+                .author(author)
+                .custom_tags(
+                    SingleLetterTag::lowercase(Alphabet::D),
+                    chunk.iter().map(|s| s.as_str()),
+                );
+            tlog!(
+                "34011",
+                "d-tag batch {}/{} for backend {}: agents=[{}]",
+                batch_idx + 1,
+                (total + DTAG_BATCH_SIZE - 1) / DTAG_BATCH_SIZE,
+                &backend_pubkey[..8.min(backend_pubkey.len())],
+                chunk.iter().map(|s| &s[..8.min(s.len())]).collect::<Vec<_>>().join(", ")
+            );
+            let filter_json = serde_json::to_string(&filter).ok();
+            let output = client.subscribe(filter.clone(), None).await?;
+            self.subscription_stats.register(
+                output.val.to_string(),
+                SubscriptionInfo::new(
+                    format!(
+                        "Agent 34011 configs batch {}/{} for backend {}",
+                        batch_idx + 1,
+                        (total + DTAG_BATCH_SIZE - 1) / DTAG_BATCH_SIZE,
+                        &backend_pubkey[..8.min(backend_pubkey.len())]
+                    ),
+                    vec![KIND_AGENT_CONFIG],
+                    None,
+                )
+                .with_raw_filter(filter_json.unwrap_or_default()),
+            );
+        }
+        tlog!(
+            "34011",
+            "Subscribed by d-tag for {} agents from backend {} in {} batches",
+            total,
+            &backend_pubkey[..8.min(backend_pubkey.len())],
+            (total + DTAG_BATCH_SIZE - 1) / DTAG_BATCH_SIZE
+        );
         Ok(())
     }
 

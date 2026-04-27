@@ -327,8 +327,6 @@ fn render_agents_list(
             .map(|(i, agent_pubkey)| {
                 let is_selected = show_selection && i == state.selector_index;
                 let is_pm = i == 0;
-                let installed_agent =
-                    installed_agent_for_pubkey(app, state.backend_pubkey.as_deref(), agent_pubkey);
 
                 let mut spans = vec![];
 
@@ -352,10 +350,7 @@ fn render_agents_list(
                     spans.push(Span::styled("     ", Style::default()));
                 }
 
-                let agent_name = installed_agent
-                    .as_ref()
-                    .map(|agent| format!("@{}", agent.slug))
-                    .unwrap_or_else(|| short_pubkey(agent_pubkey));
+                let agent_name = app.data_store.borrow().get_profile_name(agent_pubkey);
                 let name_style = if is_selected {
                     Style::default()
                         .fg(theme::ACCENT_PRIMARY)
@@ -364,12 +359,6 @@ fn render_agents_list(
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
                 spans.push(Span::styled(agent_name, name_style));
-
-                let role_display = format!(" [{}]", short_pubkey(agent_pubkey));
-                spans.push(Span::styled(
-                    role_display,
-                    Style::default().fg(theme::ACCENT_SPECIAL),
-                ));
 
                 ListItem::new(Line::from(spans))
             })
