@@ -554,7 +554,7 @@ impl AppDataStore {
         // subscription was active, or events older than the incremental-catchup window).
         // handle_text_event is idempotent — duplicate threads/messages are silently ignored.
         let reconcile_started_at = Instant::now();
-        self.reconcile_threads_from_ndb();
+        self.reconcile_threads_from_ndb(saved_at);
         let reconcile_elapsed_ms = reconcile_started_at.elapsed().as_millis();
 
         self.needs_rebuild = false;
@@ -695,7 +695,7 @@ impl AppDataStore {
     /// that window (e.g., from unknown pubkeys while the TUI was offline) are recovered here.
     ///
     /// `handle_text_event` is idempotent — threads/messages already in memory are skipped.
-    fn reconcile_threads_from_ndb(&mut self) {
+    fn reconcile_threads_from_ndb(&mut self, saved_at: u64) {
         let a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
         if a_tags.is_empty() {
             return;
@@ -710,8 +710,14 @@ impl AppDataStore {
             }
         };
 
+        // Only scan events in a 48h window before saved_at. Events older than that
+        // should already be reflected in the cache; scanning further is wasteful and
+        // causes O(NDB-size) startup delays on large databases.
+        const RECONCILE_WINDOW_SECS: u64 = 48 * 60 * 60;
+        let since = saved_at.saturating_sub(RECONCILE_WINDOW_SECS);
+
         let a_tag_strs: Vec<&str> = a_tags.iter().map(|s| s.as_str()).collect();
-        let filter = Filter::new().kinds([1]).tags(a_tag_strs, 'a').build();
+        let filter = Filter::new().kinds([1]).tags(a_tag_strs, 'a').since(since).build();
         let results = match ndb.query(&txn, &[filter], 500_000) {
             Ok(r) => r,
             Err(e) => {
