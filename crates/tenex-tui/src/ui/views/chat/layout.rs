@@ -874,7 +874,9 @@ fn render_agent_config_modal(
                     .add_modifier(Modifier::BOLD)
             };
             let offline_style = if is_selected {
-                Style::default().fg(Color::Black).bg(theme::ACCENT_WARNING)
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(theme::ACCENT_WARNING)
             } else {
                 Style::default().fg(theme::TEXT_MUTED)
             };
@@ -1063,13 +1065,19 @@ fn render_agent_config_modal(
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
+    let global_prefix = if state.save_globally { "[x] " } else { "[ ] " };
+    let global_style = if state.save_globally {
+        Style::default().fg(theme::ACCENT_WARNING)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(format!("{}Set as PM", pm_prefix), pm_style),
             Span::styled("  ", Style::default()),
             Span::styled(
-                "Shared across projects",
-                Style::default().fg(theme::TEXT_MUTED),
+                format!("{}Change all projects", global_prefix),
+                global_style,
             ),
         ])),
         toggles_area,
@@ -1084,7 +1092,7 @@ fn render_agent_config_modal(
     let hints_text = if state.focus == AgentConfigFocus::Agents {
         "tab switch panes · type to search · a manage project agents · enter save/select · esc"
     } else {
-        "tab switch panes · space toggle · a toggle all · ctrl+m pm · enter save · esc"
+        "tab switch panes · space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc"
     };
     let hints = Paragraph::new(hints_text).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);

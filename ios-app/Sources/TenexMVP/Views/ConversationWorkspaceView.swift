@@ -799,7 +799,6 @@ struct ConversationWorkspaceView: View {
                 initialContent: isNewThreadMode ? newThreadComposerSeed?.initialContent : nil,
                 initialTextAttachments: isNewThreadMode ? (newThreadComposerSeed?.textAttachments ?? []) : [],
                 referenceConversationId: isNewThreadMode ? newThreadComposerSeed?.referenceConversationId : nil,
-                externalDropProviders: $transcriptDropProviders,
                 displayStyle: .inline,
                 inlineLayoutStyle: .workspace,
                 onSend: isNewThreadMode ? { result in

@@ -370,10 +370,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    func getAgentConfigs(backendPubkey: String) throws -> [AgentConfig] {
-        try profiler.measureFFI("getAgentConfigs") {
+    func getInstalledAgents(backendPubkey: String) throws -> [InstalledAgent] {
+        try profiler.measureFFI("getInstalledAgents") {
             do {
-                return try core.getAgentConfigs(backendPubkey: backendPubkey)
+                return try core.getInstalledAgents(backendPubkey: backendPubkey)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -465,26 +465,45 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Get available configuration options for an agent in a project.
-    /// Returns the available models, skills, and MCP servers from the agent's kind:34011 event.
-    func getAgentConfigOptions(projectId: String, agentPubkey: String) throws -> ProjectConfigOptions {
-        try profiler.measureFFI("getAgentConfigOptions") {
+    /// Get available configuration options for a project.
+    /// Returns all available models and tools from the project status.
+    func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions {
+        try profiler.measureFFI("getProjectConfigOptions") {
             do {
-                return try core.getAgentConfigOptions(projectId: projectId, agentPubkey: agentPubkey)
+                return try core.getProjectConfigOptions(projectId: projectId)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
         }
     }
 
-    /// Update an agent's global configuration (model, skills, MCP servers, tags).
-    /// Publishes a kind:24020 event.
-    func updateAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws {
+    /// Update an agent's configuration (model and tools).
+    /// Publishes a kind:24020 event to update the agent's config.
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateAgentConfig") {
             do {
                 try core.updateAgentConfig(
+                    projectId: projectId,
                     agentPubkey: agentPubkey,
                     model: model,
+                    tools: tools,
+                    skills: skills,
+                    mcpServers: mcpServers,
+                    tags: tags
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
+        try profiler.measureFFI("updateGlobalAgentConfig") {
+            do {
+                try core.updateGlobalAgentConfig(
+                    agentPubkey: agentPubkey,
+                    model: model,
+                    tools: tools,
                     skills: skills,
                     mcpServers: mcpServers,
                     tags: tags

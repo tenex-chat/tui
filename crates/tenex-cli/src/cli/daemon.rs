@@ -96,15 +96,16 @@ pub async fn run_daemon(
     config: Option<CliConfig>,
     http_enabled: bool,
     http_bind: String,
-    watch: bool,
-    auto_approve: bool,
 ) -> Result<()> {
+    eprintln!("Starting tenex-cli daemon...");
+
     // Ensure data directory exists
     fs::create_dir_all(&data_dir)?;
 
     // Set log path before any logging happens
     let log_path = data_dir.join(LOG_FILE);
-    set_log_path(log_path);
+    set_log_path(log_path.clone());
+    eprintln!("Log file: {:?}", log_path);
 
     // Socket path
     let socket_path = data_dir.join(SOCKET_NAME);
@@ -120,6 +121,7 @@ pub async fn run_daemon(
 
     // Bind socket early so clients can connect while we initialize
     let listener = UnixListener::bind(&socket_path)?;
+    eprintln!("Listening on {:?}", socket_path);
 
     // Initialize core runtime
     let mut core_runtime = CoreRuntime::new(CoreConfig::new(&data_dir))?;
@@ -191,12 +193,11 @@ pub async fn run_daemon(
         let prefs_guard = prefs.lock().unwrap();
         try_auto_login_with_config(config.as_ref(), &prefs_guard, &core_handle)
     };
-
-    let pubkey_display = keys
-        .as_ref()
-        .map(|k| nostr::get_current_pubkey(k))
-        .unwrap_or_else(|| "no key".to_string());
-    eprintln!("Starting tenex-cli daemon ({})", pubkey_display);
+    if keys.is_some() {
+        eprintln!("Auto-login successful");
+    } else {
+        eprintln!("No stored credentials or password required - daemon running without login");
+    }
 
     if let Some(ref keys) = keys {
         let user_pubkey = nostr::get_current_pubkey(keys);
@@ -245,75 +246,26 @@ pub async fn run_daemon(
     // Subscribe to broadcast for daemon's own use (handling ProjectStatus)
     let mut daemon_rx = broadcast_tx.subscribe();
 
-    // Track project coordinates seen so far to detect first-online / offline transitions
-    let mut seen_projects: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut online_projects: std::collections::HashSet<String> = std::collections::HashSet::new();
-
     // Main event loop - unified for both HTTP and socket-only modes
     loop {
         // Drain any pending DataChange events from broadcast (non-blocking)
+        // Update the shared data store with status events
         loop {
             match daemon_rx.try_recv() {
-                Ok(data_change) => match data_change {
-                    DataChange::ProjectStatus { json } => {
-                        if watch {
-                            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json) {
-                                if let Some(status) =
-                                    tenex_core::models::ProjectStatus::from_value(&val)
-                                {
-                                    let coord = status.project_coordinate.clone();
-                                    let project_name = coord
-                                        .splitn(3, ':')
-                                        .nth(2)
-                                        .unwrap_or(&coord);
-                                    if seen_projects.insert(coord.clone()) {
-                                        println!("[PROJECT] {} booted up", project_name);
-                                    }
-                                    online_projects.insert(coord);
-                                }
-                            }
-                        }
+                Ok(data_change) => {
+                    if let DataChange::ProjectStatus { json } = &data_change {
                         shared_data_store
                             .lock()
                             .unwrap()
-                            .handle_status_event_json(&json);
+                            .handle_status_event_json(json);
+                    } else if let DataChange::BunkerSignRequest { request } = data_change {
+                        let mut state = bunker_state.lock().unwrap();
+                        state.upsert_pending(request);
+                        state.expire_stale_pending();
                     }
-                    DataChange::BackendHeartbeat { backend_pubkey } => {
-                        if watch {
-                            println!("[HEARTBEAT] backend={}", backend_pubkey);
-                        }
-                    }
-                    DataChange::BunkerSignRequest { request } => {
-                        if auto_approve {
-                            if watch {
-                                println!(
-                                    "[AUTO-APPROVE] bunker request_id={}",
-                                    request.request_id
-                                );
-                            }
-                            let _ = core_handle.send(NostrCommand::BunkerResponse {
-                                request_id: request.request_id.clone(),
-                                approved: true,
-                            });
-                        } else {
-                            let mut state = bunker_state.lock().unwrap();
-                            state.upsert_pending(request);
-                            state.expire_stale_pending();
-                        }
-                    }
-                    DataChange::AgentWhitelistPublished { pubkeys } => {
-                        if watch {
-                            println!(
-                                "[WHITELIST] Published agent whitelist (kind:14199) with {} pubkey{}",
-                                pubkeys.len(),
-                                if pubkeys.len() == 1 { "" } else { "s" }
-                            );
-                        }
-                    }
-                    _ => {}
-                },
+                }
                 Err(broadcast::error::TryRecvError::Empty) => break,
-                Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue, // Skip lagged messages
                 Err(broadcast::error::TryRecvError::Closed) => break,
             }
         }
@@ -335,7 +287,6 @@ pub async fn run_daemon(
                             &bunker_state,
                             start_time,
                             logged_in,
-                            watch,
                         )?;
 
                         if should_shutdown {
@@ -349,55 +300,20 @@ pub async fn run_daemon(
                 }
             }
             Some(note_keys) = core_runtime.next_note_keys() => {
+                // Process note keys and update the SHARED data store
+                // This ensures both HTTP and Unix socket see the same data
                 let mut store = shared_data_store.lock().unwrap();
-                match tenex_core::runtime::process_note_keys(
+                if let Err(e) = tenex_core::runtime::process_note_keys(
                     ndb.as_ref(),
                     &mut store,
                     &core_handle,
                     &note_keys,
                 ) {
-                    Ok(events) => {
-                        if watch {
-                            for event in events {
-                                if let tenex_core::events::CoreEvent::Message(msg) = event {
-                                    println!(
-                                        "[MSG] thread={} from={} content={}",
-                                        msg.thread_id,
-                                        msg.pubkey,
-                                        msg.content.chars().take(120).collect::<String>()
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => eprintln!("Failed to process core events: {}", e),
+                    eprintln!("Failed to process core events: {}", e);
                 }
             }
-            // Small timeout to periodically check for DataChange events and stale projects
-            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
-                if watch && !online_projects.is_empty() {
-                    let store = shared_data_store.lock().unwrap();
-                    let gone_offline: Vec<String> = online_projects
-                        .iter()
-                        .filter(|coord| {
-                            store
-                                .get_project_status(coord)
-                                .map_or(true, |s| !s.is_online())
-                        })
-                        .cloned()
-                        .collect();
-                    drop(store);
-                    for coord in gone_offline {
-                        online_projects.remove(&coord);
-                        let project_name = coord
-                            .splitn(3, ':')
-                            .nth(2)
-                            .map(|s| s.to_string())
-                            .unwrap_or(coord.clone());
-                        println!("[PROJECT] {} went offline", project_name);
-                    }
-                }
-            }
+            // Small timeout to periodically check for DataChange events
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
         }
     }
 
@@ -675,7 +591,6 @@ fn handle_connection(
     bunker_state: &Arc<Mutex<BunkerDaemonState>>,
     start_time: Instant,
     logged_in: bool,
-    watch: bool,
 ) -> Result<bool> {
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
@@ -700,7 +615,6 @@ fn handle_connection(
             bunker_state,
             start_time,
             logged_in,
-            watch,
         );
 
         writeln!(writer, "{}", serde_json::to_string(&response)?)?;
@@ -724,7 +638,6 @@ fn handle_request(
     bunker_state: &Arc<Mutex<BunkerDaemonState>>,
     _start_time: Instant,
     logged_in: bool,
-    watch: bool,
 ) -> (Response, bool) {
     let id = request.id;
 
@@ -743,10 +656,8 @@ fn handle_request(
                         "booted": online_agents.is_some(),
                     });
                     if let Some(agents) = online_agents {
-                        obj["participants"] = serde_json::json!(agents
-                            .iter()
-                            .map(|a| agent_to_json(a, &store))
-                            .collect::<Vec<_>>());
+                        obj["participants"] =
+                            serde_json::json!(agents.iter().map(agent_to_json).collect::<Vec<_>>());
                     }
                     obj
                 })
@@ -829,12 +740,7 @@ fn handle_request(
 
             let agents: Vec<_> = store
                 .get_online_agents(&project_a_tag)
-                .map(|agents| {
-                    agents
-                        .iter()
-                        .map(|a| agent_to_json(a, &store))
-                        .collect()
-                })
+                .map(|agents| agents.iter().map(agent_to_json).collect())
                 .unwrap_or_default();
             (Response::success(id, serde_json::json!(agents)), false)
         }
@@ -969,12 +875,6 @@ fn handle_request(
                         response_tx: Some(response_tx),
                     }) {
                         Ok(_) => {
-                            if watch {
-                                println!(
-                                    "[MSG] Sending message to {} in {}",
-                                    recipient_slug, project_slug
-                                );
-                            }
                             // Wait for the event ID (with timeout)
                             match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
                                 Ok(message_id) => (
@@ -1116,12 +1016,6 @@ fn handle_request(
                         response_tx: Some(response_tx),
                     }) {
                         Ok(_) => {
-                            if watch {
-                                println!(
-                                    "[THREAD] Creating thread in {} (recipient: {})",
-                                    project_slug, recipient_slug
-                                );
-                            }
                             // Wait for the event ID (with timeout)
                             match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
                                 Ok(thread_id) => (
@@ -1213,14 +1107,11 @@ fn handle_request(
 
             if core_handle
                 .send(NostrCommand::BootProject {
-                    project_a_tag: project_a_tag.clone(),
+                    project_a_tag,
                     project_pubkey,
                 })
                 .is_ok()
             {
-                if watch {
-                    println!("[BOOT] Booting {}", project_slug);
-                }
                 (
                     Response::success(id, serde_json::json!({"status": "boot_sent"})),
                     false,
@@ -1653,6 +1544,81 @@ fn handle_request(
             true,
         ),
 
+        "list_agent_definitions" => {
+            let store = data_store.lock().unwrap();
+            let agent_defs: Vec<_> = store
+                .content
+                .get_agent_definitions()
+                .iter()
+                .map(|ad| {
+                    serde_json::json!({
+                        "id": ad.id,
+                        "pubkey": ad.pubkey,
+                        "d_tag": ad.d_tag,
+                        "name": ad.name,
+                        "description": ad.description,
+                        "role": ad.role,
+                        "instructions": ad.instructions,
+                        "picture": ad.picture,
+                        "version": ad.version,
+                        "model": ad.model,
+                        "tools": ad.tools,
+                        "mcp_servers": ad.mcp_servers,
+                        "use_criteria": ad.use_criteria,
+                        "created_at": ad.created_at,
+                    })
+                })
+                .collect();
+            (Response::success(id, serde_json::json!(agent_defs)), false)
+        }
+
+        "list_mcp_tools" => {
+            let store = data_store.lock().unwrap();
+            let mcp_tools: Vec<_> = store
+                .content
+                .get_mcp_tools()
+                .iter()
+                .map(|tool| {
+                    serde_json::json!({
+                        "id": tool.id,
+                        "pubkey": tool.pubkey,
+                        "d_tag": tool.d_tag,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "command": tool.command,
+                        "parameters": tool.parameters,
+                        "capabilities": tool.capabilities,
+                        "server_url": tool.server_url,
+                        "version": tool.version,
+                        "created_at": tool.created_at,
+                    })
+                })
+                .collect();
+            (Response::success(id, serde_json::json!(mcp_tools)), false)
+        }
+
+        "list_skills" => {
+            let store = data_store.lock().unwrap();
+            let skills: Vec<_> = store
+                .content
+                .get_skills()
+                .iter()
+                .map(|skill| {
+                    serde_json::json!({
+                        "id": skill.id,
+                        "pubkey": skill.pubkey,
+                        "title": skill.title,
+                        "description": skill.description,
+                        "content": skill.content,
+                        "hashtags": skill.hashtags,
+                        "file_ids": skill.file_ids,
+                        "created_at": skill.created_at,
+                    })
+                })
+                .collect();
+            (Response::success(id, serde_json::json!(skills)), false)
+        }
+
         "list_nudges" => {
             let store = data_store.lock().unwrap();
             let nudges: Vec<_> = store
@@ -1721,21 +1687,17 @@ fn handle_request(
 
             let response = match status {
                 Some(status) => {
-                    // Agents now expose only identity + PM marker on kind:24010.
-                    // Model/skill/mcp config lives on per-agent kind:34011 events.
-                    let backend = &status.backend_pubkey;
+                    // Build detailed agents array with models and tools
                     let agents: Vec<_> = status
                         .agents
                         .iter()
                         .map(|a| {
-                            let config = store.get_agent_config(backend, &a.pubkey);
                             serde_json::json!({
                                 "name": a.name,
                                 "pubkey": a.pubkey,
                                 "is_pm": a.is_pm,
-                                "model": config.and_then(|c| c.active_model.clone()),
-                                "skills": config.map(|c| c.active_skills.clone()).unwrap_or_default(),
-                                "mcp_servers": config.map(|c| c.active_mcps.clone()).unwrap_or_default(),
+                                "model": a.model,
+                                "tools": a.tools,
                             })
                         })
                         .collect();
@@ -1747,11 +1709,14 @@ fn handle_request(
                         "booted": status.is_online(),
                         "agents": agents,
                         "branches": status.branches,
+                        "all_models": status.all_models,
+                        "all_tools": status.all_tools(),
                         "backend_pubkey": status.backend_pubkey,
                         "created_at": status.created_at,
                     })
                 }
                 None => {
+                    // Project exists but no status event (not booted)
                     serde_json::json!({
                         "slug": project.id,
                         "name": project.title,
@@ -1759,6 +1724,8 @@ fn handle_request(
                         "booted": false,
                         "agents": [],
                         "branches": [],
+                        "all_models": [],
+                        "all_tools": [],
                         "backend_pubkey": null,
                         "created_at": null,
                     })
@@ -1863,9 +1830,6 @@ fn handle_request(
                 })
                 .is_ok()
             {
-                if watch {
-                    println!("[SAVE] Saving project {}", final_slug);
-                }
                 let mut response = serde_json::json!({"status": "saved", "slug": final_slug});
                 if slug_was_generated {
                     response["slug_generated"] = serde_json::json!(true);
@@ -1885,6 +1849,8 @@ fn handle_request(
                 project_slug: String,
                 agent_slug: String,
                 model: String,
+                #[serde(default)]
+                tools: Vec<String>,
                 #[serde(default)]
                 wait_for_project: bool,
                 #[serde(default)]
@@ -1930,19 +1896,15 @@ fn handle_request(
             match lookup {
                 Ok(result) => {
                     match core_handle.send(NostrCommand::UpdateAgentConfig {
+                        project_a_tag: result.project_a_tag.clone(),
                         agent_pubkey: result.agent_pubkey.clone(),
                         model: Some(params.model.clone()),
+                        tools: params.tools.clone(),
                         skills: result.skills.clone(),
                         mcp_servers: result.mcp_servers.clone(),
                         tags: Vec::new(),
                     }) {
                         Ok(_) => {
-                            if watch {
-                                println!(
-                                    "[AGENT] Changing agent {}'s config",
-                                    result.agent_pubkey
-                                );
-                            }
                             if params.wait {
                                 // Wait for a new 24010 event with updated timestamp
                                 let start = std::time::Instant::now();
@@ -1969,20 +1931,11 @@ fn handle_request(
                                         store.get_project_status(&result.project_a_tag)
                                     {
                                         if status.created_at > current_timestamp {
-                                            // New status received — confirm the
-                                            // agent's active model from the
-                                            // per-agent kind:34011 broadcast.
-                                            let agent_updated = status
-                                                .agents
-                                                .iter()
-                                                .any(|a| a.pubkey == result.agent_pubkey)
-                                                && store
-                                                    .get_agent_config(
-                                                        &status.backend_pubkey,
-                                                        &result.agent_pubkey,
-                                                    )
-                                                    .and_then(|c| c.active_model.as_deref())
-                                                    == Some(&params.model);
+                                            // New status received - check if settings were applied
+                                            let agent_updated = status.agents.iter().any(|a| {
+                                                a.pubkey == result.agent_pubkey
+                                                    && a.model.as_deref() == Some(&params.model)
+                                            });
 
                                             return (
                                                 Response::success(
@@ -2004,7 +1957,7 @@ fn handle_request(
                                         id,
                                         serde_json::json!({
                                             "status": "sent",
-                                            "message": "Shared agent settings update sent. Use --wait to confirm application."
+                                            "message": "Agent settings update sent. Use --wait to confirm application."
                                         }),
                                     ),
                                     false,
@@ -2054,19 +2007,13 @@ fn handle_request(
     }
 }
 
-/// Serialize a `ProjectAgent` to JSON for CLI output.
-///
-/// The active model lives on the agent's kind:34011 event — we pull it from
-/// the store when available.
-fn agent_to_json(a: &tenex_core::models::ProjectAgent, store: &AppDataStore) -> serde_json::Value {
-    let model = store
-        .get_agent_config(&a.backend_pubkey, &a.pubkey)
-        .and_then(|c| c.active_model.clone());
+/// Serialize a ProjectAgent to JSON for CLI output
+fn agent_to_json(a: &tenex_core::models::ProjectAgent) -> serde_json::Value {
     serde_json::json!({
         "name": a.name,
         "pubkey": a.pubkey,
         "is_pm": a.is_pm,
-        "model": model,
+        "model": a.model,
     })
 }
 
@@ -2164,35 +2111,29 @@ struct AgentLookupResult {
 }
 
 /// Find an agent's pubkey by their name within a specific project (identified by slug).
-///
-/// Uses the online agents from `ProjectStatus` (kind:24010) for identity and PM
-/// status, and pulls `skills` / `mcp_servers` from the agent's `AgentConfig`
-/// (kind:34011) so `set_agent_settings` can preserve them when sending a
-/// kind:24020 update.
+/// Uses the online agents from ProjectStatus (kind:24010).
+/// Also returns the project's a_tag to avoid a second lookup.
 fn find_agent_in_project(
     store: &AppDataStore,
     project_slug: &str,
     agent_name: &str,
 ) -> Result<AgentLookupResult, AgentLookupError> {
+    // Find the project by slug to get its a_tag
     let project_a_tag =
         find_project_a_tag_by_slug(store, project_slug).ok_or(AgentLookupError::ProjectNotFound)?;
 
-    let status = store
-        .get_project_status(&project_a_tag)
-        .ok_or(AgentLookupError::AgentNotFound)?;
-
+    // Look through the online agents from ProjectStatus
     let agents = store
         .get_online_agents(&project_a_tag)
         .ok_or(AgentLookupError::AgentNotFound)?;
 
     for agent in agents {
         if agent.name == agent_name {
-            let config = store.get_agent_config(&status.backend_pubkey, &agent.pubkey);
             return Ok(AgentLookupResult {
                 project_a_tag,
                 agent_pubkey: agent.pubkey.clone(),
-                skills: config.map(|c| c.active_skills.clone()).unwrap_or_default(),
-                mcp_servers: config.map(|c| c.active_mcps.clone()).unwrap_or_default(),
+                skills: agent.skills.clone(),
+                mcp_servers: agent.mcp_servers.clone(),
             });
         }
     }

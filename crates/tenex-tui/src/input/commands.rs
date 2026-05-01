@@ -829,7 +829,7 @@ fn install_selected_agent_definition_to_backend(app: &mut App) {
     let Some(backend_pubkey) = app.install_target_backend_pubkey() else {
         let install_backends = app.available_install_backends();
         if install_backends.is_empty() {
-            app.set_warning_status("No approved online backend publishing 34011");
+            app.set_warning_status("No approved online backend publishing 24011");
         } else {
             app.set_warning_status(
                 "Multiple live backends available; install from a project-backed flow",

@@ -52,9 +52,6 @@ struct MessageComposerView: View {
     /// Callback when the view is dismissed
     var onDismiss: (() -> Void)?
 
-    /// External file drop providers forwarded from a parent drop target (e.g. transcript area on macOS).
-    @Binding var externalDropProviders: [NSItemProvider]?
-
     /// Rendering style for the composer container
     let displayStyle: DisplayStyle
 
@@ -245,7 +242,6 @@ struct MessageComposerView: View {
         initialTextAttachments: [TextAttachment] = [],
         referenceConversationId: String? = nil,
         referenceReportATag: String? = nil,
-        externalDropProviders: Binding<[NSItemProvider]?> = .constant(nil),
         displayStyle: DisplayStyle = .modal,
         inlineLayoutStyle: InlineLayoutStyle = .standard,
         onSend: ((SendMessageResult) -> Void)? = nil,
@@ -260,7 +256,6 @@ struct MessageComposerView: View {
         self.initialTextAttachments = initialTextAttachments
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
-        self._externalDropProviders = externalDropProviders
         self.displayStyle = displayStyle
         self.inlineLayoutStyle = inlineLayoutStyle
         self.onSend = onSend
@@ -546,13 +541,6 @@ struct MessageComposerView: View {
         .task(id: scenePhase) {
             await persistDraftForScenePhase(scenePhase)
         }
-        #if os(macOS)
-        .onChange(of: externalDropProviders) { _, providers in
-            guard let providers, !providers.isEmpty else { return }
-            _ = handleFileDrop(providers: providers)
-            externalDropProviders = nil
-        }
-        #endif
         .onChange(of: initialAgentPubkey) { _, newValue in
             guard !isDirty else { return }
             guard !isNewConversation else { return }
@@ -578,7 +566,7 @@ struct MessageComposerView: View {
                             coreManager.displayName(for: pubkey),
                             fallbackPubkey: pubkey
                         )
-                        return ProjectAgent(pubkey: pubkey, name: name, backendPubkey: "", isPm: false, isOnline: false)
+                        return ProjectAgent(pubkey: pubkey, name: name, backendPubkey: "", isPm: false, isOnline: false, model: nil, tools: [], skills: [], mcpServers: [])
                     } ?? []
                 availableAgents = ComposerViewModel.mergeProjectAgents(onlineAgents: onlineAgents, offlineAgents: offlineAgents)
             }

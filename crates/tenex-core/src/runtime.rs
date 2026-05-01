@@ -167,6 +167,17 @@ pub fn process_note_keys(
     Ok(events)
 }
 
+/// Convenience wrapper for callers that hold note key IDs as raw u64 values.
+pub fn process_note_key_ids(
+    ndb: &Ndb,
+    data_store: &mut AppDataStore,
+    handle: &CoreHandle,
+    key_ids: &[u64],
+) -> Result<Vec<CoreEvent>> {
+    let note_keys: Vec<NoteKey> = key_ids.iter().map(|&k| NoteKey::new(k)).collect();
+    process_note_keys(ndb, data_store, handle, &note_keys)
+}
+
 impl CoreRuntime {
     pub fn new(config: CoreConfig) -> Result<Self> {
         std::fs::create_dir_all(&config.data_dir)?;

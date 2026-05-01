@@ -34,10 +34,10 @@ impl TenexCore {
             .collect())
     }
 
-    pub fn get_agent_configs(
+    pub fn get_installed_agents(
         &self,
         backend_pubkey: String,
-    ) -> Result<Vec<AgentConfig>, TenexError> {
+    ) -> Result<Vec<InstalledAgent>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -46,7 +46,7 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store.get_agent_configs(&backend_pubkey).to_vec())
+        Ok(store.get_installed_agents(&backend_pubkey).to_vec())
     }
 
     pub fn create_backend_agent(
@@ -660,16 +660,13 @@ impl TenexCore {
         Ok(agents)
     }
 
-    /// Get available configuration options for a specific agent.
+    /// Get available configuration options for a project.
     ///
-    /// Per the current protocol, model/skill/mcp inventories live on the
-    /// per-agent kind:34011 event — not on kind:24010. The caller supplies the
-    /// `agent_pubkey` and we look up the `AgentConfig` cached under the
-    /// project's backend.
-    pub fn get_agent_config_options(
+    /// Returns all available models and tools from the project status (kind:24010).
+    /// Used by iOS to populate the agent config modal with available options.
+    pub fn get_project_config_options(
         &self,
         project_id: String,
-        agent_pubkey: String,
     ) -> Result<ProjectConfigOptions, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
@@ -679,45 +676,79 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
+        // Find the project by ID
         let project = store
             .get_projects()
             .iter()
             .find(|p| p.id == project_id)
-            .cloned()
-            .ok_or_else(|| TenexError::Internal {
-                message: format!("Project not found: {}", project_id),
-            })?;
+            .cloned();
+        let project = match project {
+            Some(p) => p,
+            None => {
+                return Err(TenexError::Internal {
+                    message: format!("Project not found: {}", project_id),
+                })
+            }
+        };
 
-        let backend_pubkey = store
-            .get_project_status(&project.a_tag())
-            .map(|s| s.backend_pubkey.clone());
-
-        let config = backend_pubkey
-            .as_deref()
-            .and_then(|bp| store.get_agent_config(bp, &agent_pubkey));
-
-        match config {
-            Some(c) => Ok(ProjectConfigOptions {
-                all_models: c.models.clone(),
-                all_skills: c.skills.clone(),
-                all_mcp_servers: c.mcps.clone(),
+        // Get project status to extract all_models and all_tools
+        let status = store.get_project_status(&project.a_tag());
+        match status {
+            Some(s) => Ok(ProjectConfigOptions {
+                all_models: s.all_models.clone(),
+                all_tools: s.all_tools.to_vec(),
+                all_skills: s.all_skills.to_vec(),
             }),
             None => Ok(ProjectConfigOptions {
                 all_models: Vec::new(),
+                all_tools: Vec::new(),
                 all_skills: Vec::new(),
-                all_mcp_servers: Vec::new(),
             }),
         }
     }
 
-    /// Update an agent's global `default` configuration (model, skills, mcps).
+    /// Update an agent's configuration (model and tools).
     ///
-    /// Publishes a kind:24020 event. Per the current protocol these updates
-    /// are always global — there is no project-scoped override concept.
+    /// Publishes a kind:24020 event to update the agent's configuration.
+    /// The backend will process this event and update the agent's config.
     pub fn update_agent_config(
+        &self,
+        project_id: String,
+        agent_pubkey: String,
+        model: Option<String>,
+        tools: Vec<String>,
+        skills: Vec<String>,
+        mcp_servers: Vec<String>,
+        tags: Vec<String>,
+    ) -> Result<(), TenexError> {
+        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::UpdateAgentConfig {
+                project_a_tag,
+                agent_pubkey,
+                model,
+                tools,
+                skills,
+                mcp_servers,
+                tags,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send update agent config command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Update an agent's configuration globally (all projects).
+    ///
+    /// Publishes a kind:24020 event without a project a-tag.
+    pub fn update_global_agent_config(
         &self,
         agent_pubkey: String,
         model: Option<String>,
+        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         tags: Vec<String>,
@@ -725,15 +756,16 @@ impl TenexCore {
         let core_handle = get_core_handle(&self.core_handle)?;
 
         core_handle
-            .send(NostrCommand::UpdateAgentConfig {
+            .send(NostrCommand::UpdateGlobalAgentConfig {
                 agent_pubkey,
                 model,
+                tools,
                 skills,
                 mcp_servers,
                 tags,
             })
             .map_err(|e| TenexError::Internal {
-                message: format!("Failed to send update agent config command: {}", e),
+                message: format!("Failed to send update global agent config command: {}", e),
             })?;
 
         Ok(())

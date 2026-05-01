@@ -19,7 +19,7 @@ struct ProjectSettingsView: View {
     @State private var pendingAgentPubkeys: [String] = []
     @State private var baselineAgentPubkeys: [String] = []
 
-    @State private var installedAgents: [AgentConfig] = []
+    @State private var installedAgents: [InstalledAgent] = []
     @State private var projectBackendPubkey: String?
 
     @State private var showAddAgentSheet = false
@@ -55,7 +55,7 @@ struct ProjectSettingsView: View {
         coreManager.onlineAgents[projectId]?.count ?? 0
     }
 
-    private var filteredAvailableAgents: [AgentConfig] {
+    private var filteredAvailableAgents: [InstalledAgent] {
         let remaining = installedAgents.filter { !pendingAgentPubkeys.contains($0.pubkey) }
         guard !agentSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return remaining
@@ -448,9 +448,9 @@ struct ProjectSettingsView: View {
         let backendPubkey = coreManager.safeCore.getProjectBackendPubkey(projectId: projectId)
 
         do {
-            let installedAgents: [AgentConfig]
+            let installedAgents: [InstalledAgent]
             if let backendPubkey {
-                installedAgents = try await coreManager.safeCore.getAgentConfigs(backendPubkey: backendPubkey)
+                installedAgents = try await coreManager.safeCore.getInstalledAgents(backendPubkey: backendPubkey)
             } else {
                 installedAgents = []
             }

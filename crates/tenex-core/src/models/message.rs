@@ -179,7 +179,7 @@ impl Message {
                                 thread_id = Some(eid);
                             }
                             Some("reply") => {
-                                reply_to = Some(eid);
+                                // Ignore reply marker - don't indent based on it
                             }
                             Some("skill") => {
                                 // Skill marker e-tags are skill references, not thread/reply markers - skip
@@ -580,7 +580,7 @@ mod tests {
         );
         let message = message.unwrap();
         assert_eq!(message.thread_id, thread_id);
-        assert_eq!(message.reply_to, Some(parent_id));
+        assert_eq!(message.reply_to, None);
     }
 
     #[test]

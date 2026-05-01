@@ -475,30 +475,48 @@ async fn run_repl(
                     continue;
                 }
 
-                // ── Config panel keyboard intercept ──
-                // Tools selection was dropped from the protocol — only agent,
-                // model, and PM selection remain.
+                // ── Config panel keyboard intercept (4-mode) ──
                 if panel.active {
                     match panel.mode {
+                        PanelMode::Tools => match code {
+                            KeyCode::Up => panel.move_up(),
+                            KeyCode::Down => panel.move_down(),
+                            KeyCode::Char(' ') => panel.toggle_current(),
+                            KeyCode::Enter => {
+                                let msg = panel.save(runtime);
+                                panel.deactivate();
+                                print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                continue;
+                            }
+                            KeyCode::Char('@') => panel.switch_to_agent_select(runtime),
+                            KeyCode::Char('-') => panel.switch_to_flag_select(),
+                            KeyCode::Esc => panel.deactivate(),
+                            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                                raw_println!();
+                                raw_println!("{}", print_system_raw("Goodbye."));
+                                return Ok(());
+                            }
+                            _ => {}
+                        },
                         PanelMode::AgentSelect => match code {
                             KeyCode::Up => panel.move_up(),
                             KeyCode::Down => panel.move_down(),
                             KeyCode::Enter => {
                                 if panel.resolve_selected_agent(runtime) {
                                     panel.rebuild_origin_command();
-                                    panel.switch_to_flag_select();
+                                    panel.switch_to_tools();
                                 }
                             }
                             KeyCode::Backspace => {
                                 if panel.filter.is_empty() {
-                                    panel.switch_to_flag_select();
+                                    panel.switch_to_tools();
                                 } else {
                                     panel.filter.pop();
                                     panel.cursor = 0;
                                     panel.scroll_offset = 0;
                                 }
                             }
-                            KeyCode::Esc => panel.switch_to_flag_select(),
+                            KeyCode::Esc => panel.switch_to_tools(),
                             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                                 raw_println!();
                                 raw_println!("{}", print_system_raw("Goodbye."));
@@ -514,33 +532,28 @@ async fn run_repl(
                         PanelMode::FlagSelect => match code {
                             KeyCode::Up => panel.move_up(),
                             KeyCode::Down => panel.move_down(),
-                            KeyCode::Char('@') => panel.switch_to_agent_select(runtime),
-                            KeyCode::Enter => {
+                            KeyCode::Enter | KeyCode::Char(' ') => {
                                 match panel.cursor {
                                     0 => {
+                                        // --model
                                         panel.switch_to_model_select(runtime);
                                     }
                                     1 => {
+                                        // --set-pm
                                         panel.is_set_pm = !panel.is_set_pm;
                                         panel.rebuild_origin_command();
-                                        panel.rebuild_flag_items();
+                                        panel.switch_to_tools();
                                     }
-                                    _ => {
-                                        let msg = panel.save(runtime);
-                                        panel.deactivate();
-                                        print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
-                                        continue;
+                                    2 => {
+                                        // --global
+                                        panel.is_global = !panel.is_global;
+                                        panel.rebuild_origin_command();
+                                        panel.switch_to_tools();
                                     }
+                                    _ => {}
                                 }
                             }
-                            KeyCode::Char(' ') => {
-                                // Space saves from flag select (no toggleable list here).
-                                let msg = panel.save(runtime);
-                                panel.deactivate();
-                                print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
-                                continue;
-                            }
-                            KeyCode::Esc => panel.deactivate(),
+                            KeyCode::Esc | KeyCode::Backspace => panel.switch_to_tools(),
                             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                                 raw_println!();
                                 raw_println!("{}", print_system_raw("Goodbye."));
@@ -554,13 +567,13 @@ async fn run_repl(
                             KeyCode::Enter | KeyCode::Char(' ') => {
                                 if panel.select_current_model() {
                                     if panel.quick_save {
-                                        let msg = panel.save(runtime);
+                                        let msg = panel.save_model_only(runtime);
                                         panel.deactivate();
                                         print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
                                         continue;
                                     } else {
                                         panel.rebuild_origin_command();
-                                        panel.switch_to_flag_select();
+                                        panel.switch_to_tools();
                                     }
                                 }
                             }
@@ -569,7 +582,7 @@ async fn run_repl(
                                     if panel.quick_save {
                                         panel.deactivate();
                                     } else {
-                                        panel.switch_to_flag_select();
+                                        panel.switch_to_tools();
                                     }
                                 } else {
                                     panel.filter.pop();
@@ -581,7 +594,7 @@ async fn run_repl(
                                 if panel.quick_save {
                                     panel.deactivate();
                                 } else {
-                                    panel.switch_to_flag_select();
+                                    panel.switch_to_tools();
                                 }
                             }
                             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {

@@ -11,7 +11,6 @@ pub enum SettingsTab {
     AI,
     Appearance,
     Bunker,
-    Backends,
 }
 
 impl SettingsTab {
@@ -20,7 +19,6 @@ impl SettingsTab {
         SettingsTab::AI,
         SettingsTab::Appearance,
         SettingsTab::Bunker,
-        SettingsTab::Backends,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -29,89 +27,6 @@ impl SettingsTab {
             SettingsTab::AI => "AI",
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Bunker => "Bunker",
-            SettingsTab::Backends => "Backends",
-        }
-    }
-}
-
-/// State for the Backends settings tab
-#[derive(Debug, Clone)]
-pub struct BackendsSettingsState {
-    /// Sorted list of approved backend pubkeys
-    pub approved: Vec<String>,
-    /// Sorted list of blocked backend pubkeys
-    pub blocked: Vec<String>,
-    /// Index into the combined list (approved first, then blocked)
-    pub selected_index: usize,
-}
-
-impl BackendsSettingsState {
-    pub fn new(mut approved: Vec<String>, mut blocked: Vec<String>) -> Self {
-        approved.sort();
-        blocked.sort();
-        Self {
-            approved,
-            blocked,
-            selected_index: 0,
-        }
-    }
-
-    pub fn total_len(&self) -> usize {
-        self.approved.len() + self.blocked.len()
-    }
-
-    pub fn navigate_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        }
-    }
-
-    pub fn navigate_down(&mut self) {
-        let len = self.total_len();
-        if len > 0 && self.selected_index + 1 < len {
-            self.selected_index += 1;
-        }
-    }
-
-    /// Returns the pubkey of the selected item if it is in the approved list.
-    pub fn selected_approved_pubkey(&self) -> Option<&str> {
-        if self.selected_index < self.approved.len() {
-            Some(&self.approved[self.selected_index])
-        } else {
-            None
-        }
-    }
-
-    /// Returns the pubkey of the selected item if it is in the blocked list.
-    pub fn selected_blocked_pubkey(&self) -> Option<&str> {
-        let bi = self.selected_index.checked_sub(self.approved.len())?;
-        self.blocked.get(bi).map(|s| s.as_str())
-    }
-
-    /// Move the selected approved backend to the blocked list.
-    pub fn move_selected_to_blocked(&mut self) {
-        if self.selected_index < self.approved.len() {
-            let pubkey = self.approved.remove(self.selected_index);
-            self.blocked.push(pubkey);
-            self.blocked.sort();
-            if self.selected_index > 0 && self.selected_index >= self.approved.len() {
-                self.selected_index -= 1;
-            }
-        }
-    }
-
-    /// Move the selected blocked backend to the approved list.
-    pub fn move_selected_to_approved(&mut self) {
-        let bi = match self.selected_index.checked_sub(self.approved.len()) {
-            Some(i) if i < self.blocked.len() => i,
-            _ => return,
-        };
-        let pubkey = self.blocked.remove(bi);
-        self.approved.push(pubkey);
-        self.approved.sort();
-        let total = self.total_len();
-        if total > 0 && self.selected_index >= total {
-            self.selected_index = total - 1;
         }
     }
 }
@@ -458,8 +373,6 @@ pub struct AppSettingsState {
     pub voice_browser: Option<VoiceBrowserState>,
     /// Active model browser overlay (None = not browsing)
     pub model_browser: Option<ModelBrowserState>,
-    /// Backends tab state
-    pub backends: BackendsSettingsState,
 }
 
 impl AppSettingsState {
@@ -468,8 +381,6 @@ impl AppSettingsState {
         preferences: &tenex_core::models::PreferencesStorage,
     ) -> Self {
         let ai_settings = preferences.ai_audio_settings();
-        let approved: Vec<String> = preferences.approved_backend_pubkeys().iter().cloned().collect();
-        let blocked: Vec<String> = preferences.blocked_backend_pubkeys().iter().cloned().collect();
         Self {
             current_tab: SettingsTab::General,
             general_index: 0,
@@ -488,7 +399,6 @@ impl AppSettingsState {
             ),
             voice_browser: None,
             model_browser: None,
-            backends: BackendsSettingsState::new(approved, blocked),
         }
     }
 
@@ -609,9 +519,6 @@ impl AppSettingsState {
                     self.bunker_index -= 1;
                 }
             }
-            SettingsTab::Backends => {
-                self.backends.navigate_up();
-            }
         }
     }
 
@@ -636,9 +543,6 @@ impl AppSettingsState {
                 if self.bunker_index + 1 < BunkerSetting::count() {
                     self.bunker_index += 1;
                 }
-            }
-            SettingsTab::Backends => {
-                self.backends.navigate_down();
             }
         }
     }
@@ -1504,11 +1408,13 @@ pub struct AgentSettingsState {
     pub agent_pubkey: String,
     /// Whether this agent is currently the PM for the project
     pub is_pm: bool,
-    /// Available models to choose from (from the agent's kind:34011 event)
+    /// Available models to choose from (from project status)
     pub available_models: Vec<String>,
     /// Index of selected model in available_models
     pub model_index: usize,
-    /// Available skills (from the agent's kind:34011 event)
+    /// Selected tools by name (preserved from agent config, not editable in UI)
+    pub selected_tools: std::collections::HashSet<String>,
+    /// Available skills from project status
     pub available_skills: Vec<String>,
     /// Selected skills by name
     pub selected_skills: std::collections::HashSet<String>,
@@ -1516,7 +1422,7 @@ pub struct AgentSettingsState {
     pub skills_cursor: usize,
     /// Scroll offset for skills list
     pub skills_scroll: usize,
-    /// Available MCP servers (from the agent's kind:34011 event)
+    /// Available MCP servers from project status
     pub available_mcp_servers: Vec<String>,
     /// Selected MCP servers by name
     pub selected_mcp_servers: std::collections::HashSet<String>,
@@ -1531,6 +1437,7 @@ impl AgentSettingsState {
         agent_name: String,
         agent_pubkey: String,
         current_model: Option<String>,
+        current_tools: Vec<String>,
         current_skills: Vec<String>,
         current_mcp_servers: Vec<String>,
         is_pm: bool,
@@ -1543,6 +1450,7 @@ impl AgentSettingsState {
             .and_then(|m| available_models.iter().position(|am| am == m))
             .unwrap_or(0);
 
+        let selected_tools: std::collections::HashSet<String> = current_tools.into_iter().collect();
         let selected_skills: std::collections::HashSet<String> =
             current_skills.into_iter().collect();
         let selected_mcp_servers: std::collections::HashSet<String> =
@@ -1554,6 +1462,7 @@ impl AgentSettingsState {
             is_pm,
             available_models,
             model_index,
+            selected_tools,
             available_skills: all_available_skills,
             selected_skills,
             skills_cursor: 0,
@@ -1569,6 +1478,12 @@ impl AgentSettingsState {
         self.available_models
             .get(self.model_index)
             .map(|s| s.as_str())
+    }
+
+    pub fn selected_tools_vec(&self) -> Vec<String> {
+        let mut tools: Vec<String> = self.selected_tools.iter().cloned().collect();
+        tools.sort();
+        tools
     }
 
     pub fn selected_skills_vec(&self) -> Vec<String> {
@@ -1717,12 +1632,16 @@ pub struct AgentConfigState {
     pub settings: Option<AgentSettingsState>,
     /// Original model for change detection
     pub original_model: Option<String>,
+    /// Original tools for change detection
+    pub original_tools: std::collections::HashSet<String>,
     /// Original skills for change detection
     pub original_skills: std::collections::HashSet<String>,
     /// Original MCP servers for change detection
     pub original_mcp_servers: std::collections::HashSet<String>,
     /// Original PM marker for change detection
     pub original_is_pm: bool,
+    /// When true, Enter saves config globally (no project a-tag).
+    pub save_globally: bool,
 }
 
 impl AgentConfigState {
@@ -1733,9 +1652,11 @@ impl AgentConfigState {
             active_agent_pubkey: None,
             settings: None,
             original_model: None,
+            original_tools: std::collections::HashSet::new(),
             original_skills: std::collections::HashSet::new(),
             original_mcp_servers: std::collections::HashSet::new(),
             original_is_pm: false,
+            save_globally: false,
         }
     }
 
@@ -1745,6 +1666,7 @@ impl AgentConfigState {
         active_agent_pubkey: Option<String>,
         settings: Option<AgentSettingsState>,
         original_model: Option<String>,
+        original_tools: std::collections::HashSet<String>,
         original_skills: std::collections::HashSet<String>,
         original_mcp_servers: std::collections::HashSet<String>,
         original_is_pm: bool,
@@ -1752,6 +1674,7 @@ impl AgentConfigState {
         self.active_agent_pubkey = active_agent_pubkey;
         self.settings = settings;
         self.original_model = original_model;
+        self.original_tools = original_tools;
         self.original_skills = original_skills;
         self.original_mcp_servers = original_mcp_servers;
         self.original_is_pm = original_is_pm;
@@ -1764,6 +1687,7 @@ impl AgentConfigState {
         };
         let current_model = settings.selected_model().map(str::to_string);
         current_model != self.original_model
+            || settings.selected_tools != self.original_tools
             || settings.selected_skills != self.original_skills
             || settings.selected_mcp_servers != self.original_mcp_servers
             || settings.is_pm != self.original_is_pm
@@ -2506,11 +2430,12 @@ mod tests {
             "agent-a".to_string(),
             "pubkey-a".to_string(),
             Some("model-a".to_string()),
-            vec!["skill-a".to_string()],
+            vec!["tool_read".to_string()],
+            vec![],
             vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
-            vec!["skill-a".to_string(), "skill-b".to_string()],
+            vec![],
             vec![],
         );
 
@@ -2518,7 +2443,8 @@ mod tests {
             Some("pubkey-a".to_string()),
             Some(settings),
             Some("model-a".to_string()),
-            HashSet::from(["skill-a".to_string()]),
+            HashSet::from(["tool_read".to_string()]),
+            HashSet::new(),
             HashSet::new(),
             false,
         );
@@ -2530,16 +2456,16 @@ mod tests {
         }
         assert!(state.has_config_changes());
 
-        // Revert model, change skills
+        // Revert model, change tools
         if let Some(s) = state.settings.as_mut() {
             s.model_index = 0;
-            s.selected_skills.insert("skill-b".to_string());
+            s.selected_tools.insert("tool_write".to_string());
         }
         assert!(state.has_config_changes());
 
         // PM change
         if let Some(s) = state.settings.as_mut() {
-            s.selected_skills.remove("skill-b");
+            s.selected_tools.remove("tool_write");
             s.is_pm = true;
         }
         assert!(state.has_config_changes());
@@ -2552,11 +2478,12 @@ mod tests {
             "agent-a".to_string(),
             "pubkey-a".to_string(),
             Some("model-a".to_string()),
-            vec!["skill-a".to_string()],
+            vec!["tool_read".to_string()],
+            vec![],
             vec![],
             false,
             vec!["model-a".to_string(), "model-b".to_string()],
-            vec!["skill-a".to_string(), "skill-b".to_string()],
+            vec![],
             vec![],
         );
 
@@ -2564,13 +2491,14 @@ mod tests {
             Some("pubkey-a".to_string()),
             Some(first),
             Some("model-a".to_string()),
-            HashSet::from(["skill-a".to_string()]),
+            HashSet::from(["tool_read".to_string()]),
+            HashSet::new(),
             HashSet::new(),
             false,
         );
         if let Some(s) = state.settings.as_mut() {
             s.model_index = 1;
-            s.selected_skills.insert("skill-b".to_string());
+            s.selected_tools.insert("tool_write".to_string());
             s.is_pm = true;
         }
         assert!(state.has_config_changes());
@@ -2579,18 +2507,20 @@ mod tests {
             "agent-b".to_string(),
             "pubkey-b".to_string(),
             Some("model-b".to_string()),
-            vec!["skill-b".to_string()],
+            vec!["tool_write".to_string()],
+            vec![],
             vec![],
             true,
             vec!["model-a".to_string(), "model-b".to_string()],
-            vec!["skill-a".to_string(), "skill-b".to_string()],
+            vec![],
             vec![],
         );
         state.load_agent_settings(
             Some("pubkey-b".to_string()),
             Some(second),
             Some("model-b".to_string()),
-            HashSet::from(["skill-b".to_string()]),
+            HashSet::from(["tool_write".to_string()]),
+            HashSet::new(),
             HashSet::new(),
             true,
         );

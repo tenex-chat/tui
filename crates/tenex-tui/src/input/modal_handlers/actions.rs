@@ -143,7 +143,7 @@ fn execute_project_action(
                             .as_deref()
                             .and_then(|bp| {
                                 store
-                                    .get_agent_configs(bp)
+                                    .get_installed_agents(&bp)
                                     .iter()
                                     .find(|a| a.pubkey == *first_pubkey)
                                     .map(|a| a.slug.clone())
@@ -155,6 +155,10 @@ fn execute_project_action(
                             backend_pubkey: backend_pubkey.unwrap_or_default(),
                             is_pm: true,
                             is_online: true,
+                            model: None,
+                            tools: Vec::new(),
+                            skills: Vec::new(),
+                            mcp_servers: Vec::new(),
                         }
                     };
                     app.set_selected_agent(Some(fallback_agent));

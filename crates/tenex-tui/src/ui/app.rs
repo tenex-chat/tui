@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use tenex_core::models::{AgentConfig, AgentDefinition, MCPTool};
+use tenex_core::models::{AgentDefinition, InstalledAgent, MCPTool};
 use tenex_core::runtime::CoreHandle;
 use tenex_core::tlog;
 
@@ -1705,13 +1705,9 @@ impl App {
                 DataChange::ProjectStatus { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
                     self.refresh_selected_agent_from_project_status();
-                    self.refresh_agent_config_modal_if_open();
-                    // If this was a 24011 catalog, fetch 34011 configs by d-tag for each agent.
-                    self.fetch_agent_configs_for_catalog_if_needed(&json);
                 }
-                DataChange::AgentConfig { json } => {
+                DataChange::InstalledAgentList { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
-                    self.refresh_agent_config_modal_if_open();
                 }
                 DataChange::BackendHeartbeat { backend_pubkey } => {
                     let is_blocked = self.data_store.borrow().trust.is_blocked(&backend_pubkey);
@@ -1747,9 +1743,24 @@ impl App {
                 DataChange::BookmarkListChanged { bookmarked_ids: _ } => {
                     // Bookmarks are already updated in the store by the worker
                 }
-                DataChange::AgentWhitelistPublished { pubkeys } => {
-                    for pubkey in pubkeys {
-                        self.whitelisted_backends.insert(pubkey);
+                DataChange::NoteKeys(keys) => {
+                    if let Some(handle) = self.core_handle.clone() {
+                        let events = {
+                            let mut store = self.data_store.borrow_mut();
+                            tenex_core::runtime::process_note_key_ids(
+                                &self.db.ndb,
+                                &mut store,
+                                &handle,
+                                &keys,
+                            )
+                        };
+                        if let Ok(events) = events {
+                            for event in events {
+                                if let tenex_core::events::CoreEvent::Message(message) = event {
+                                    self.mark_tab_unread(&message.thread_id);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1933,18 +1944,15 @@ impl App {
                     backend_pubkey: fallback_backend_pubkey.clone(),
                     is_pm: false,
                     is_online: false,
+                    model: None,
+                    tools: vec![],
+                    skills: vec![],
+                    mcp_servers: vec![],
                 },
             );
         }
 
-        let pm_pubkey = project.agent_pubkeys.first().cloned();
-        let mut result: Vec<crate::models::ProjectAgent> = agents.into_values().collect();
-        if let Some(ref pm_pk) = pm_pubkey {
-            for agent in &mut result {
-                agent.is_pm = &agent.pubkey == pm_pk;
-            }
-        }
-        result
+        agents.into_values().collect()
     }
 
     /// Get the most recent agent that published a message in the current conversation.
@@ -2062,94 +2070,35 @@ impl App {
         &self,
         agent: &crate::models::ProjectAgent,
     ) -> Option<crate::ui::modal::AgentSettingsState> {
-        let store = self.data_store.borrow();
-        let config = store.get_agent_config_by_pubkey(&agent.pubkey);
-        tlog!("34011", "build_agent_settings_for: agent={} ({}), config={}", &agent.pubkey[..8.min(agent.pubkey.len())], agent.name, if config.is_some() { "FOUND" } else { "NOT FOUND" });
-
-        let (active_model, active_skills, active_mcps, all_models, all_skills, all_mcp_servers) =
-            match config {
-                Some(c) => (
-                    c.active_model.clone(),
-                    c.active_skills.clone(),
-                    c.active_mcps.clone(),
-                    c.models.clone(),
-                    c.skills.clone(),
-                    c.mcps.clone(),
-                ),
-                None => (None, Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new()),
-            };
+        let project = self.selected_project.as_ref()?;
+        let (all_skills, all_mcp_servers, all_models) = self
+            .data_store
+            .borrow()
+            .get_project_status(&project.a_tag())
+            .map(|status| {
+                let skills = status.all_skills().iter().map(|s| s.to_string()).collect();
+                let mcp_servers = status
+                    .all_mcp_servers()
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                let models = status.all_models.clone();
+                (skills, mcp_servers, models)
+            })
+            .unwrap_or_default();
 
         Some(crate::ui::modal::AgentSettingsState::new(
             agent.name.clone(),
             agent.pubkey.clone(),
-            active_model,
-            active_skills,
-            active_mcps,
+            agent.model.clone(),
+            agent.tools.clone(),
+            agent.skills.clone(),
+            agent.mcp_servers.clone(),
             false,
             all_models,
             all_skills,
             all_mcp_servers,
         ))
-    }
-
-    /// When a kind:24011 catalog arrives, subscribe to kind:34011 by d-tag for each listed agent.
-    /// This bypasses relay default limits that prevent bulk author-only queries from returning all events.
-    fn fetch_agent_configs_for_catalog_if_needed(&self, json: &str) {
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(json) else { return };
-        let kind = event.get("kind").and_then(|k| k.as_u64());
-        if kind != Some(24011) { return }
-
-        let backend_pubkey = match event.get("pubkey").and_then(|v| v.as_str()) {
-            Some(pk) => pk.to_string(),
-            None => return,
-        };
-        let agent_pubkeys: Vec<String> = event
-            .get("tags")
-            .and_then(|t| t.as_array())
-            .map(|tags| {
-                tags.iter()
-                    .filter_map(|tag| {
-                        let arr = tag.as_array()?;
-                        if arr.first()?.as_str() == Some("agent") && arr.len() >= 2 {
-                            arr[1].as_str().map(|s| s.to_string())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
-        if agent_pubkeys.is_empty() { return }
-
-        tlog!("34011", "24011 catalog from {}: fetching 34011 configs for {} agents by d-tag",
-            &backend_pubkey[..8.min(backend_pubkey.len())], agent_pubkeys.len());
-
-        if let Some(ref handle) = self.core_handle {
-            let _ = handle.send(NostrCommand::FetchAgentConfigsByDTag {
-                backend_pubkey,
-                agent_pubkeys,
-            });
-        }
-    }
-
-    /// Refresh the agent config modal if it is currently open.
-    ///
-    /// Called when a fresh kind:34011 event arrives so the modal picks up
-    /// models/skills that weren't in the store when it was first opened.
-    fn refresh_agent_config_modal_if_open(&mut self) {
-        if !matches!(self.modal_state, ModalState::AgentConfig(_)) {
-            return;
-        }
-        let old = std::mem::replace(&mut self.modal_state, ModalState::None);
-        if let ModalState::AgentConfig(mut state) = old {
-            // Don't clobber pending user edits — only reload when there's nothing in flight.
-            if !state.has_config_changes() {
-                state.active_agent_pubkey = None;
-                self.refresh_agent_config_modal_state(&mut state);
-            }
-            self.modal_state = ModalState::AgentConfig(state);
-        }
     }
 
     /// Refresh right-pane settings for the currently highlighted agent in the unified modal.
@@ -2164,6 +2113,7 @@ impl App {
                 None,
                 HashSet::new(),
                 HashSet::new(),
+                HashSet::new(),
                 false,
             );
             return;
@@ -2174,29 +2124,14 @@ impl App {
         }
 
         let settings = self.build_agent_settings_for(agent);
-
-        // Snapshot the cached kind:34011 config so change detection compares
-        // against what's actually on the wire, not against the (now stale)
-        // ProjectAgent literals.
-        let (model, skills, mcps) = {
-            let store = self.data_store.borrow();
-            match store.get_agent_config_by_pubkey(&agent.pubkey) {
-                Some(c) => (
-                    c.active_model.clone(),
-                    c.active_skills.iter().cloned().collect::<HashSet<_>>(),
-                    c.active_mcps.iter().cloned().collect::<HashSet<_>>(),
-                ),
-                None => (None, HashSet::new(), HashSet::new()),
-            }
-        };
-
         state.load_agent_settings(
             Some(agent.pubkey.clone()),
             settings,
-            model,
-            skills,
-            mcps,
-            agent.is_pm,
+            agent.model.clone(),
+            agent.tools.iter().cloned().collect(),
+            agent.skills.iter().cloned().collect(),
+            agent.mcp_servers.iter().cloned().collect(),
+            false,
         );
     }
 
@@ -3393,28 +3328,24 @@ impl App {
         self.user_explicitly_selected_agent = false;
     }
 
-    /// Whether we have at least one cached kind:34011 event from this backend.
     pub fn has_installed_agent_inventory(&self, backend_pubkey: Option<&str>) -> bool {
         let Some(backend_pubkey) = backend_pubkey else {
             return false;
         };
 
-        !self
-            .data_store
+        self.data_store
             .borrow()
-            .get_agent_configs(backend_pubkey)
-            .is_empty()
+            .installed_agents_by_backend
+            .contains_key(backend_pubkey)
     }
 
-    /// All backends for which we have at least one cached kind:34011 event.
     pub fn available_install_backends(&self) -> Vec<String> {
         let mut backends: Vec<String> = self
             .data_store
             .borrow()
-            .agent_configs_by_backend
-            .iter()
-            .filter(|(_, configs)| !configs.is_empty())
-            .map(|(backend, _)| backend.clone())
+            .installed_agents_by_backend
+            .keys()
+            .cloned()
             .collect();
         backends.sort();
         backends
@@ -3438,50 +3369,37 @@ impl App {
 
     pub fn installed_agents_filtered_by(
         &self,
-        _backend_pubkey: Option<&str>,
+        backend_pubkey: Option<&str>,
         filter: &str,
-    ) -> Vec<AgentConfig> {
-        let store = self.data_store.borrow();
+    ) -> Vec<InstalledAgent> {
+        let Some(backend_pubkey) = backend_pubkey else {
+            return Vec::new();
+        };
 
-        // Collect from kind:24011 catalog (primary source), enriched with 34011 config when available.
-        let mut seen_pubkeys: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut agents: Vec<AgentConfig> = store
-            .available_agents_catalog
+        self.data_store
+            .borrow()
+            .get_installed_agents(backend_pubkey)
             .iter()
-            .flat_map(|(backend_pubkey, catalog)| {
-                catalog.iter().map(move |(pubkey, slug)| (backend_pubkey.clone(), pubkey.clone(), slug.clone()))
-            })
-            .filter(|(_, pubkey, slug)| {
+            .filter(|agent| {
                 filter.is_empty()
-                    || fuzzy_matches(slug, filter)
-                    || fuzzy_matches(pubkey, filter)
+                    || fuzzy_matches(&agent.slug, filter)
+                    || fuzzy_matches(&agent.pubkey, filter)
             })
-            .filter_map(|(backend_pubkey, pubkey, slug)| {
-                if !seen_pubkeys.insert(pubkey.clone()) {
-                    return None;
-                }
-                // Enrich with 34011 config if available, otherwise create minimal entry.
-                if let Some(config) = store.get_agent_config_by_pubkey(&pubkey) {
-                    Some(config.clone())
-                } else {
-                    Some(AgentConfig {
-                        backend_pubkey,
-                        pubkey,
-                        slug,
-                        created_at: 0,
-                        active_model: None,
-                        models: Vec::new(),
-                        active_skills: Vec::new(),
-                        skills: Vec::new(),
-                        active_mcps: Vec::new(),
-                        mcps: Vec::new(),
-                    })
-                }
-            })
-            .collect();
+            .cloned()
+            .collect()
+    }
 
-        agents.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
-        agents
+    pub fn backend_display_name(&self, backend_pubkey: &str) -> String {
+        self.data_store.borrow().get_profile_name(backend_pubkey)
+    }
+
+    pub fn agent_backend_count(&self, agent_pubkey: &str) -> usize {
+        self.data_store
+            .borrow()
+            .installed_agents_by_backend
+            .values()
+            .filter(|agents| agents.iter().any(|a| a.pubkey == agent_pubkey))
+            .count()
     }
 
     /// Get MCP tools filtered by a custom filter string
@@ -4676,19 +4594,14 @@ impl App {
         self.preferences.borrow_mut().approve_backend(pubkey);
         self.data_store.borrow_mut().add_approved_backend(pubkey);
 
-        if let Some(ref handle) = self.core_handle {
-            // Publish 14199 so the relay whitelists this backend
-            if !self.whitelisted_backends.contains(pubkey) {
+        // Publish 14199 so the relay whitelists this backend
+        if !self.whitelisted_backends.contains(pubkey) {
+            if let Some(ref handle) = self.core_handle {
                 let _ = handle.send(NostrCommand::WhitelistBackend {
                     backend_pubkey: pubkey.to_string(),
                 });
-                self.whitelisted_backends.insert(pubkey.to_string());
             }
-            // Subscribe to kind:34011 events from this backend
-            tlog!("34011", "approve_backend: sending SubscribeToBackendAgentConfigs for {}", &pubkey[..8.min(pubkey.len())]);
-            let _ = handle.send(NostrCommand::SubscribeToBackendAgentConfigs {
-                backend_pubkeys: vec![pubkey.to_string()],
-            });
+            self.whitelisted_backends.insert(pubkey.to_string());
         }
     }
 
@@ -4710,28 +4623,10 @@ impl App {
         let approved = prefs.approved_backend_pubkeys().clone();
         let blocked = prefs.blocked_backend_pubkeys().clone();
         drop(prefs);
-        tlog!("34011", "init_trusted_backends: {} approved, {} blocked", approved.len(), blocked.len());
         self.data_store
             .borrow_mut()
             .trust
-            .set_trusted_backends(approved.clone(), blocked);
-
-        // Subscribe to kind:34011 from all previously-approved backends
-        if !approved.is_empty() {
-            tlog!(
-                "34011",
-                "init_trusted_backends: sending SubscribeToBackendAgentConfigs for {} backend(s): [{}]",
-                approved.len(),
-                approved.iter().map(|pk| &pk[..8.min(pk.len())]).collect::<Vec<_>>().join(", ")
-            );
-            if let Some(ref handle) = self.core_handle {
-                let _ = handle.send(NostrCommand::SubscribeToBackendAgentConfigs {
-                    backend_pubkeys: approved.into_iter().collect(),
-                });
-            }
-        } else {
-            tlog!("34011", "init_trusted_backends: no approved backends, skipping subscription");
-        }
+            .set_trusted_backends(approved, blocked);
     }
 
     // ===== Sidebar Search Methods =====
@@ -5214,18 +5109,28 @@ mod selected_agent_refresh_tests {
     use serde_json::json;
 
     fn make_status(agents: Vec<ProjectAgent>) -> ProjectStatus {
-        let tags: Vec<Vec<String>> = std::iter::once(vec![
-            "a".to_string(),
-            "31933:backend:project".to_string(),
-        ])
-        .chain(agents.iter().map(|agent| {
-            vec![
+        let mut tags: Vec<Vec<String>> =
+            vec![vec!["a".to_string(), "31933:backend:project".to_string()]];
+
+        for agent in &agents {
+            let mut agent_tag = vec![
                 "agent".to_string(),
                 agent.pubkey.clone(),
                 agent.name.clone(),
-            ]
-        }))
-        .collect();
+            ];
+            if agent.is_pm {
+                agent_tag.push("pm".to_string());
+            }
+            tags.push(agent_tag);
+
+            if let Some(model) = &agent.model {
+                tags.push(vec!["model".to_string(), model.clone(), agent.name.clone()]);
+            }
+
+            for tool in &agent.tools {
+                tags.push(vec!["tool".to_string(), tool.clone(), agent.name.clone()]);
+            }
+        }
 
         let event = json!({
             "kind": 24010,
@@ -5234,39 +5139,38 @@ mod selected_agent_refresh_tests {
             "tags": tags,
         });
 
-        let mut status = ProjectStatus::from_value(&event).expect("status fixture should parse");
-        // Simulate what the store layer does: set is_pm from the caller's input,
-        // since ProjectStatus::from_value no longer derives it from the event tags.
-        for status_agent in &mut status.agents {
-            if let Some(input) = agents.iter().find(|a| a.pubkey == status_agent.pubkey) {
-                status_agent.is_pm = input.is_pm;
-            }
-        }
-        status
+        ProjectStatus::from_value(&event).expect("status fixture should parse")
     }
 
     #[test]
-    fn status_update_resolves_current_agent_from_status() {
+    fn status_update_refreshes_selected_agent_model() {
         let current = ProjectAgent {
             pubkey: "agent-a".to_string(),
             name: "Agent A".to_string(),
             backend_pubkey: "backend".to_string(),
             is_pm: false,
             is_online: true,
+            model: Some("old-model".to_string()),
+            tools: vec!["shell".to_string()],
+            skills: vec![],
+            mcp_servers: vec![],
         };
         let status = make_status(vec![ProjectAgent {
             pubkey: "agent-a".to_string(),
             name: "Agent A".to_string(),
             backend_pubkey: "backend".to_string(),
-            is_pm: true,
+            is_pm: false,
             is_online: true,
+            model: Some("new-model".to_string()),
+            tools: vec!["shell".to_string()],
+            skills: vec![],
+            mcp_servers: vec![],
         }]);
 
         let resolved = resolve_selected_agent_from_status(Some(&current), &status)
             .expect("selected agent should resolve");
 
-        assert_eq!(resolved.pubkey, "agent-a");
-        assert!(resolved.is_pm);
+        assert_eq!(resolved.model.as_deref(), Some("new-model"));
     }
 
     #[test]
@@ -5277,6 +5181,10 @@ mod selected_agent_refresh_tests {
             backend_pubkey: "backend".to_string(),
             is_pm: false,
             is_online: true,
+            model: Some("old-model".to_string()),
+            tools: vec!["shell".to_string()],
+            skills: vec![],
+            mcp_servers: vec![],
         };
         let status = make_status(vec![ProjectAgent {
             pubkey: "agent-b".to_string(),
@@ -5284,12 +5192,17 @@ mod selected_agent_refresh_tests {
             backend_pubkey: "backend".to_string(),
             is_pm: true,
             is_online: true,
+            model: Some("pm-model".to_string()),
+            tools: vec![],
+            skills: vec![],
+            mcp_servers: vec![],
         }]);
 
         let resolved = resolve_selected_agent_from_status(Some(&current), &status)
             .expect("selected agent should remain set");
 
         assert_eq!(resolved.pubkey, "agent-a");
+        assert_eq!(resolved.model.as_deref(), Some("old-model"));
     }
 
     #[test]
@@ -5301,6 +5214,10 @@ mod selected_agent_refresh_tests {
                 backend_pubkey: "backend".to_string(),
                 is_pm: false,
                 is_online: true,
+                model: Some("model-a".to_string()),
+                tools: vec![],
+                skills: vec![],
+                mcp_servers: vec![],
             },
             ProjectAgent {
                 pubkey: "agent-pm".to_string(),
@@ -5308,6 +5225,10 @@ mod selected_agent_refresh_tests {
                 backend_pubkey: "backend".to_string(),
                 is_pm: true,
                 is_online: true,
+                model: Some("model-pm".to_string()),
+                tools: vec![],
+                skills: vec![],
+                mcp_servers: vec![],
             },
         ]);
 

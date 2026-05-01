@@ -188,20 +188,8 @@ pub(crate) fn render_messages_panel(
         .local_streaming_content()
         .and_then(|buffer| buffer.superseded_message_id.clone());
 
-    // Build reply index: parent_id -> Vec<&Message>
-    // Skip messages that e-tag the thread root - those are siblings, not nested replies
-    let mut replies_by_parent: HashMap<&str, Vec<&Message>> = HashMap::new();
-    for msg in all_messages {
-        if let Some(ref parent_id) = msg.reply_to {
-            // Only count as a reply if parent is NOT the thread root
-            if Some(parent_id.as_str()) != thread_id {
-                replies_by_parent
-                    .entry(parent_id.as_str())
-                    .or_default()
-                    .push(msg);
-            }
-        }
-    }
+    // All messages are shown flat — no sub-threading
+    let replies_by_parent: HashMap<&str, Vec<&Message>> = HashMap::new();
     let subthread_root = app.subthread_root().cloned();
     let display_messages: Vec<&Message> = if let Some(ref root_id) = subthread_root {
         // Subthread view: show messages that reply directly to the root
@@ -210,16 +198,8 @@ pub(crate) fn render_messages_panel(
             .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
             .collect()
     } else {
-        // Main view: thread root + messages with no parent or parent = thread root
-        all_messages
-            .iter()
-            .filter(|m| {
-                // Include thread root (id == thread_id) + direct replies
-                Some(m.id.as_str()) == thread_id
-                    || m.reply_to.is_none()
-                    || m.reply_to.as_deref() == thread_id
-            })
-            .collect()
+        // Main view: all messages flat — no collapsing into sub-threads
+        all_messages.iter().collect()
     };
     let display_messages: Vec<&Message> =
         if let Some(ref suppressed_id) = suppressed_kind1_message_id {

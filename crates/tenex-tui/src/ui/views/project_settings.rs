@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
-use tenex_core::models::AgentConfig;
+use tenex_core::models::InstalledAgent;
 
 /// Render the project settings modal
 pub fn render_project_settings(
@@ -47,17 +47,17 @@ fn installed_agent_for_pubkey(
     app: &App,
     backend_pubkey: Option<&str>,
     agent_pubkey: &str,
-) -> Option<AgentConfig> {
+) -> Option<InstalledAgent> {
     let backend_pubkey = backend_pubkey?;
     app.data_store
         .borrow()
-        .get_agent_configs(backend_pubkey)
+        .get_installed_agents(backend_pubkey)
         .iter()
         .find(|agent| agent.pubkey == agent_pubkey)
         .cloned()
 }
 
-fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<AgentConfig> {
+fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<InstalledAgent> {
     let filter = &state.add_filter;
     let pending_positions: HashMap<&str, usize> = state
         .pending_agent_pubkeys
@@ -310,7 +310,7 @@ fn render_agents_list(
                 "Waiting for live project status to identify this project's backend before assigning agents."
             }
         } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-            "Waiting for backend 34011 inventory before assigning agents."
+            "Waiting for backend 24011 inventory before assigning agents."
         } else {
             "No agents assigned. Press 'a' to add."
         };
@@ -327,6 +327,8 @@ fn render_agents_list(
             .map(|(i, agent_pubkey)| {
                 let is_selected = show_selection && i == state.selector_index;
                 let is_pm = i == 0;
+                let installed_agent =
+                    installed_agent_for_pubkey(app, state.backend_pubkey.as_deref(), agent_pubkey);
 
                 let mut spans = vec![];
 
@@ -350,7 +352,10 @@ fn render_agents_list(
                     spans.push(Span::styled("     ", Style::default()));
                 }
 
-                let agent_name = app.data_store.borrow().get_profile_name(agent_pubkey);
+                let agent_name = installed_agent
+                    .as_ref()
+                    .map(|agent| format!("@{}", agent.slug))
+                    .unwrap_or_else(|| short_pubkey(agent_pubkey));
                 let name_style = if is_selected {
                     Style::default()
                         .fg(theme::ACCENT_PRIMARY)
@@ -359,6 +364,12 @@ fn render_agents_list(
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
                 spans.push(Span::styled(agent_name, name_style));
+
+                let role_display = format!(" [{}]", short_pubkey(agent_pubkey));
+                spans.push(Span::styled(
+                    role_display,
+                    Style::default().fg(theme::ACCENT_SPECIAL),
+                ));
 
                 ListItem::new(Line::from(spans))
             })
@@ -378,25 +389,19 @@ fn render_tools_list(
     show_selection: bool,
     visible_height: usize,
 ) {
-    // Aggregate MCP servers advertised by this project's agents (kind:34011).
-    // kind:24010 no longer carries an aggregate mcp list.
-    let mcp_servers: Vec<String> = {
-        let store = app.data_store.borrow();
-        let backend = store
-            .get_project_status(&state.project_a_tag)
-            .map(|s| s.backend_pubkey.clone());
-        let configs = backend
-            .as_deref()
-            .map(|bp| store.get_agent_configs(bp))
-            .unwrap_or(&[]);
-        let mut all: Vec<String> = configs
-            .iter()
-            .flat_map(|c| c.mcps.iter().cloned())
-            .collect();
-        all.sort();
-        all.dedup();
-        all
-    };
+    // Show MCP servers from project status (read-only info)
+    let mcp_servers: Vec<String> = app
+        .data_store
+        .borrow()
+        .get_project_status(&state.project_a_tag)
+        .map(|status| {
+            status
+                .all_mcp_servers()
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mcp_header_lines: u16 = if mcp_servers.is_empty() {
         0
@@ -634,7 +639,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                 "Waiting for live project status to identify this project's backend."
             }
         } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-            "Waiting for backend 34011 inventory."
+            "Waiting for backend 24011 inventory."
         } else if state.add_filter.is_empty() {
             "No installed agents available."
         } else {
@@ -706,10 +711,19 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                     Style::default().fg(theme::TEXT_MUTED)
                 };
                 spans.push(Span::styled(format!("@{}", agent.slug), name_style));
-                spans.push(Span::styled(
-                    format!(" [{}]", short_pubkey(&agent.pubkey)),
-                    Style::default().fg(theme::TEXT_MUTED),
-                ));
+                let backend_count = app.agent_backend_count(&agent.pubkey);
+                let (backend_label, backend_label_style) = if backend_count > 1 {
+                    (
+                        format!(" [⚠ {} backends]", backend_count),
+                        Style::default().fg(theme::ACCENT_ERROR),
+                    )
+                } else {
+                    (
+                        format!(" [{}]", app.backend_display_name(&agent.backend_pubkey)),
+                        Style::default().fg(theme::TEXT_MUTED),
+                    )
+                };
+                spans.push(Span::styled(backend_label, backend_label_style));
 
                 let row_style = if is_cursor {
                     Style::default().bg(theme::BG_SELECTED)
@@ -745,13 +759,20 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
             } else {
                 "Not selected"
             };
-            let desc = Paragraph::new(format!(
-                "{} · Pubkey: {}",
-                status,
-                short_pubkey(&agent.pubkey)
-            ))
-            .style(Style::default().fg(theme::TEXT_DIM))
-            .block(Block::default().borders(Borders::NONE));
+            let backend_count = app.agent_backend_count(&agent.pubkey);
+            let backend_info = if backend_count > 1 {
+                format!("⚠ {} backends have this agent", backend_count)
+            } else {
+                format!("Backend: {}", app.backend_display_name(&agent.backend_pubkey))
+            };
+            let desc_style = if backend_count > 1 {
+                Style::default().fg(theme::ACCENT_ERROR)
+            } else {
+                Style::default().fg(theme::TEXT_DIM)
+            };
+            let desc = Paragraph::new(format!("{} · {}", status, backend_info))
+                .style(desc_style)
+                .block(Block::default().borders(Borders::NONE));
             f.render_widget(desc, desc_area);
         }
     }

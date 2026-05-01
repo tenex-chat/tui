@@ -1,7 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{
-    AgentChatter, AgentConfig, AskEvent, BookmarkList, ConversationMetadata, InboxEventType,
-    InboxItem, Message, Project, ProjectAgent, ProjectStatus, Thread,
+    AgentChatter, AskEvent, BookmarkList, ConversationMetadata, InboxEventType, InboxItem,
+    InstalledAgent, Message, Project, ProjectAgent, ProjectStatus, Thread,
 };
 #[cfg(test)]
 use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, OperationsStatus, Report};
@@ -37,13 +37,7 @@ pub struct AppDataStore {
     project_tombstones: HashMap<String, u64>,
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
     pub project_statuses_by_backend: HashMap<String, HashMap<String, ProjectStatus>>, // project a_tag -> backend pubkey -> status
-    pub agent_configs_by_backend: HashMap<String, Vec<AgentConfig>>,
-    // Pending 34011 configs from not-yet-approved backends, keyed by backend pubkey.
-    // Replayed when the backend gets approved.
-    pending_agent_configs: HashMap<String, Vec<AgentConfig>>,
-    /// kind:24011 catalog: backend_pubkey → [(agent_pubkey, agent_slug)]
-    /// Lists all agents a backend makes available for installation.
-    pub available_agents_catalog: HashMap<String, Vec<(String, String)>>,
+    pub installed_agents_by_backend: HashMap<String, Vec<InstalledAgent>>,
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
     pub profiles: HashMap<String, String>,                // pubkey -> display name
@@ -96,9 +90,7 @@ impl AppDataStore {
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
-            agent_configs_by_backend: HashMap::new(),
-            pending_agent_configs: HashMap::new(),
-            available_agents_catalog: HashMap::new(),
+            installed_agents_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -136,9 +128,7 @@ impl AppDataStore {
             project_tombstones: HashMap::new(),
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
-            agent_configs_by_backend: HashMap::new(),
-            pending_agent_configs: HashMap::new(),
-            available_agents_catalog: HashMap::new(),
+            installed_agents_by_backend: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -225,9 +215,7 @@ impl AppDataStore {
         self.project_tombstones.clear();
         self.project_statuses.clear();
         self.project_statuses_by_backend.clear();
-        self.agent_configs_by_backend.clear();
-        self.pending_agent_configs.clear();
-        self.available_agents_catalog.clear();
+        self.installed_agents_by_backend.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
         self.profiles.clear();
@@ -561,16 +549,25 @@ impl AppDataStore {
             return false;
         }
 
+        // Reconcile any kind:1 thread roots that are in nostrdb but were never processed
+        // into threads_by_project (e.g., events from unknown pubkeys that arrived when no
+        // subscription was active, or events older than the incremental-catchup window).
+        // handle_text_event is idempotent — duplicate threads/messages are silently ignored.
+        let reconcile_started_at = Instant::now();
+        self.reconcile_threads_from_ndb();
+        let reconcile_elapsed_ms = reconcile_started_at.elapsed().as_millis();
+
         self.needs_rebuild = false;
 
         crate::tlog!(
             "PERF",
-            "AppDataStore::try_load_from_cache hit projects={} threads={} messages={} restoreMs={} catchupMs={} totalMs={}",
+            "AppDataStore::try_load_from_cache hit projects={} threads={} messages={} restoreMs={} catchupMs={} reconcileMs={} totalMs={}",
             self.projects.len(),
             self.threads_by_project.values().map(|v| v.len()).sum::<usize>(),
             self.messages_by_thread.values().map(|v| v.len()).sum::<usize>(),
             restore_elapsed_ms,
             catchup_elapsed_ms,
+            reconcile_elapsed_ms,
             started_at.elapsed().as_millis()
         );
 
@@ -688,6 +685,61 @@ impl AppDataStore {
         );
 
         true
+    }
+
+    /// Scan nostrdb for kind:1 events that a-tag known projects and process any that are
+    /// not yet reflected in `threads_by_project` / `messages_by_thread`.
+    ///
+    /// This is a targeted reconciliation step run after cache restoration. The incremental
+    /// catchup only covers events newer than `saved_at - 300s`. Events that arrived outside
+    /// that window (e.g., from unknown pubkeys while the TUI was offline) are recovered here.
+    ///
+    /// `handle_text_event` is idempotent — threads/messages already in memory are skipped.
+    fn reconcile_threads_from_ndb(&mut self) {
+        let a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
+        if a_tags.is_empty() {
+            return;
+        }
+
+        let ndb = Arc::clone(&self.ndb);
+        let txn = match Transaction::new(&ndb) {
+            Ok(t) => t,
+            Err(e) => {
+                warn!("AppDataStore::reconcile_threads_from_ndb: failed to open transaction: {e}");
+                return;
+            }
+        };
+
+        let a_tag_strs: Vec<&str> = a_tags.iter().map(|s| s.as_str()).collect();
+        let filter = Filter::new().kinds([1]).tags(a_tag_strs, 'a').build();
+        let results = match ndb.query(&txn, &[filter], 500_000) {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("AppDataStore::reconcile_threads_from_ndb: query failed: {e}");
+                return;
+            }
+        };
+
+        let mut processed = 0usize;
+        for result in &results {
+            if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+                self.handle_text_event(&note);
+                processed += 1;
+            }
+        }
+
+        if processed > 0 {
+            for threads in self.threads_by_project.values_mut() {
+                threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+            }
+        }
+
+        crate::tlog!(
+            "PERF",
+            "AppDataStore::reconcile_threads_from_ndb scanned={} projects={}",
+            processed,
+            a_tags.len()
+        );
     }
 
     /// Snapshot the current in-memory state and write it to the cache file.
@@ -1544,8 +1596,7 @@ impl AppDataStore {
         if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
             match kind {
                 24010 => self.handle_project_status_event_value(event),
-                24011 => self.handle_backend_available_agents_event_value(event),
-                34011 => self.handle_agent_config_event_value(event),
+                24011 => self.handle_installed_agent_list_event_value(event),
                 24133 => self.handle_operations_status_event_value(event),
                 _ => {} // Ignore unknown kinds
             }
@@ -1577,18 +1628,7 @@ impl AppDataStore {
             self.project_statuses_by_backend.remove(project_coordinate);
         }
 
-        if let Some(mut aggregate) = aggregate {
-            if let Some(pm_pubkey) = self
-                .projects
-                .iter()
-                .find(|p| p.a_tag() == project_coordinate)
-                .and_then(|p| p.agent_pubkeys.first())
-                .cloned()
-            {
-                for agent in &mut aggregate.agents {
-                    agent.is_pm = agent.pubkey == pm_pubkey;
-                }
-            }
+        if let Some(aggregate) = aggregate {
             self.project_statuses
                 .insert(project_coordinate.to_string(), aggregate.clone());
             Some(aggregate)
@@ -1643,12 +1683,6 @@ impl AppDataStore {
     fn handle_project_status_event_value(&mut self, event: &serde_json::Value) {
         if let Some(status) = ProjectStatus::from_value(event) {
             let backend_pubkey = status.backend_pubkey.clone();
-            let bpk_short = &backend_pubkey[..8.min(backend_pubkey.len())];
-            let agent_pks: Vec<&str> = status.agents.iter().map(|a| &a.pubkey[..8.min(a.pubkey.len())]).collect();
-            crate::nostr::worker::log_to_file(
-                "24010",
-                &format!("backend={} project={} agents=[{}]", bpk_short, &status.project_coordinate, agent_pks.join(", ")),
-            );
 
             if self.trust.is_blocked(&backend_pubkey) {
                 return;
@@ -1666,117 +1700,24 @@ impl AppDataStore {
         }
     }
 
-    /// Handle a kind:24011 backend available-agents catalog event.
-    ///
-    /// Extracts all `["agent", pubkey, slug]` tags and replaces the catalog
-    /// entry for this backend. Trust-gated: unknown backends are silently dropped.
-    fn handle_backend_available_agents_event_value(&mut self, event: &serde_json::Value) {
-        let backend_pubkey = match event.get("pubkey").and_then(|v| v.as_str()) {
-            Some(pk) => pk.to_string(),
-            None => return,
-        };
-
-        if self.trust.is_blocked(&backend_pubkey) || !self.trust.is_approved(&backend_pubkey) {
-            return;
-        }
-
-        let tags = match event.get("tags").and_then(|t| t.as_array()) {
-            Some(t) => t,
-            None => return,
-        };
-
-        let mut agents: Vec<(String, String)> = Vec::new();
-        for tag in tags {
-            let arr = match tag.as_array() {
-                Some(a) => a,
-                None => continue,
-            };
-            if arr.first().and_then(|v| v.as_str()) == Some("agent") && arr.len() >= 3 {
-                let pubkey = arr[1].as_str().unwrap_or("").to_string();
-                let slug = arr[2].as_str().unwrap_or("").to_string();
-                if !pubkey.is_empty() && !slug.is_empty() {
-                    agents.push((pubkey, slug));
-                }
-            }
-        }
-
-        let bpk_short = &backend_pubkey[..8.min(backend_pubkey.len())];
-        crate::nostr::worker::log_to_file(
-            "24011",
-            &format!("backend={} catalog updated: {} agents", bpk_short, agents.len()),
-        );
-        self.available_agents_catalog.insert(backend_pubkey, agents);
-    }
-
     /// Handle an operations status event from pre-parsed Value (kind:24133)
     fn handle_operations_status_event_value(&mut self, event: &serde_json::Value) {
         self.operations.handle_operations_status_event_value(event);
     }
 
-    /// Handle a kind:34011 per-agent config event.
-    ///
-    /// Each event describes one installed agent. Upserts the `AgentConfig` into
-    /// the bucket for `backend_pubkey` (keyed by agent pubkey within the bucket).
-    fn handle_agent_config_event_value(&mut self, event: &serde_json::Value) {
-        let Some(config) = AgentConfig::from_value(event) else {
-            crate::nostr::worker::log_to_file("34011", "parse failed — AgentConfig::from_value returned None");
+    fn handle_installed_agent_list_event_value(&mut self, event: &serde_json::Value) {
+        let Some((backend_pubkey, installed_agents)) = InstalledAgent::from_value(event) else {
             return;
         };
 
-        let bpk_short = config.backend_pubkey[..8.min(config.backend_pubkey.len())].to_string();
-        let apk_short = config.pubkey[..8.min(config.pubkey.len())].to_string();
-        crate::nostr::worker::log_to_file(
-            "34011",
-            &format!(
-                "parsing ok: backend={} agent={} slug={} models={} skills={}",
-                bpk_short, apk_short, config.slug,
-                config.models.len(), config.skills.len()
-            ),
-        );
-
-        if self.trust.is_blocked(&config.backend_pubkey) {
-            crate::nostr::worker::log_to_file("34011", &format!("backend={} is BLOCKED — dropping", bpk_short));
+        if self.trust.is_blocked(&backend_pubkey) {
             return;
         }
 
-        if !self.trust.is_approved(&config.backend_pubkey) {
-            crate::nostr::worker::log_to_file("34011", &format!("backend={} NOT approved — queuing pending", bpk_short));
-            let pending = self
-                .pending_agent_configs
-                .entry(config.backend_pubkey.clone())
-                .or_default();
-            if let Some(existing) = pending.iter_mut().find(|c| c.pubkey == config.pubkey) {
-                if config.created_at >= existing.created_at {
-                    *existing = config;
-                }
-            } else {
-                pending.push(config);
-            }
-            return;
+        if self.trust.is_approved(&backend_pubkey) {
+            self.installed_agents_by_backend
+                .insert(backend_pubkey, installed_agents);
         }
-
-        crate::nostr::worker::log_to_file("34011", &format!("backend={} approved — storing agent={}", bpk_short, apk_short));
-
-        let entry = self
-            .agent_configs_by_backend
-            .entry(config.backend_pubkey.clone())
-            .or_default();
-
-        if let Some(existing) = entry.iter_mut().find(|c| c.pubkey == config.pubkey) {
-            // Only accept newer events (protects against out-of-order delivery).
-            if config.created_at >= existing.created_at {
-                *existing = config;
-            }
-        } else {
-            entry.push(config);
-        }
-
-        entry.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
-
-        crate::nostr::worker::log_to_file(
-            "34011",
-            &format!("agent_configs_by_backend[{}] now has {} entries", bpk_short, entry.len()),
-        );
     }
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
@@ -2243,27 +2184,11 @@ impl AppDataStore {
         self.project_statuses.get(a_tag)
     }
 
-    pub fn get_agent_configs(&self, backend_pubkey: &str) -> &[AgentConfig] {
-        self.agent_configs_by_backend
+    pub fn get_installed_agents(&self, backend_pubkey: &str) -> &[InstalledAgent] {
+        self.installed_agents_by_backend
             .get(backend_pubkey)
-            .map(|configs| configs.as_slice())
+            .map(|agents| agents.as_slice())
             .unwrap_or(&[])
-    }
-
-    /// Find the `AgentConfig` for a specific agent under a specific backend.
-    pub fn get_agent_config(&self, backend_pubkey: &str, agent_pubkey: &str) -> Option<&AgentConfig> {
-        self.agent_configs_by_backend
-            .get(backend_pubkey)
-            .and_then(|configs| configs.iter().find(|c| c.pubkey == agent_pubkey))
-    }
-
-    /// Find the `AgentConfig` for an agent by pubkey alone, searching across all backends.
-    /// Use this when the backend pubkey is not known (e.g. agent config modal lookup).
-    pub fn get_agent_config_by_pubkey(&self, agent_pubkey: &str) -> Option<&AgentConfig> {
-        self.agent_configs_by_backend
-            .values()
-            .flat_map(|configs| configs.iter())
-            .find(|c| c.pubkey == agent_pubkey)
     }
 
     /// Get online agents for a project (from ProjectStatus if online)
@@ -3151,25 +3076,9 @@ impl AppDataStore {
 
     pub fn add_approved_backend(&mut self, pubkey: &str) {
         let pending_statuses = self.trust.add_approved(pubkey);
+        // Cross-cutting: apply pending statuses to project_statuses
         for status in pending_statuses {
             self.upsert_project_status(status);
-        }
-        // Replay any 34011 agent config events that arrived before approval.
-        if let Some(pending_configs) = self.pending_agent_configs.remove(pubkey) {
-            let entry = self
-                .agent_configs_by_backend
-                .entry(pubkey.to_string())
-                .or_default();
-            for config in pending_configs {
-                if let Some(existing) = entry.iter_mut().find(|c| c.pubkey == config.pubkey) {
-                    if config.created_at >= existing.created_at {
-                        *existing = config;
-                    }
-                } else {
-                    entry.push(config);
-                }
-            }
-            entry.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
         }
     }
 
@@ -3660,8 +3569,16 @@ mod tests {
                 backend_pubkey: "backend".to_string(),
                 is_pm: true,
                 is_online: true,
+                model: None,
+                tools: vec![],
+                skills: vec![],
+                mcp_servers: vec![],
             }],
             branches: vec![],
+            all_models: vec![],
+            all_tools: vec![],
+            all_skills: vec![],
+            all_mcp_servers: vec![],
             created_at: 0,
             backend_pubkey: "backend".to_string(),
             last_seen_at: 0,
@@ -3760,6 +3677,9 @@ mod tests {
             "tags": [
                 ["a", "31933:user:project"],
                 ["agent", "agentpk1", "agent1", "pm"],
+                ["model", "model-a", "agent1"],
+                ["tool", "tool-a", "agent1"],
+                ["skill", "skill-a", "agent1"],
                 ["branch", "main"]
             ]
         }"#;
@@ -3771,6 +3691,10 @@ mod tests {
             "tags": [
                 ["a", "31933:user:project"],
                 ["agent", "agentpk2", "agent2"],
+                ["model", "model-b", "agent2"],
+                ["tool", "tool-b", "agent2"],
+                ["skill", "skill-b", "agent2"],
+                ["mcp", "mcp-b", "agent2"],
                 ["branch", "feature"]
             ]
         }"#;
@@ -3801,8 +3725,13 @@ mod tests {
                 .backend_pubkey,
             "backend2"
         );
-        assert!(status.branches.contains(&"main".to_string()));
-        assert!(status.branches.contains(&"feature".to_string()));
+        assert!(status.models().contains(&"model-a"));
+        assert!(status.models().contains(&"model-b"));
+        assert!(status.all_tools().contains(&"tool-a"));
+        assert!(status.all_tools().contains(&"tool-b"));
+        assert!(status.all_skills().contains(&"skill-a"));
+        assert!(status.all_skills().contains(&"skill-b"));
+        assert!(status.all_mcp_servers().contains(&"mcp-b"));
         assert_eq!(
             store
                 .project_statuses_by_backend
@@ -5626,6 +5555,10 @@ mod tests {
                 project_coordinate: "31933:pk:proj1".to_string(),
                 agents: vec![],
                 branches: vec![],
+                all_models: vec![],
+                all_tools: vec![],
+                all_skills: vec![],
+                all_mcp_servers: vec![],
                 created_at: 100,
                 backend_pubkey: "pk1".to_string(),
                 last_seen_at: 100,
@@ -5661,6 +5594,10 @@ mod tests {
                     project_coordinate: "proj1".to_string(),
                     agents: vec![],
                     branches: vec![],
+                    all_models: vec![],
+                    all_tools: vec![],
+                    all_skills: vec![],
+                    all_mcp_servers: vec![],
                     created_at: 100,
                     backend_pubkey: "pk1".to_string(),
                     last_seen_at: 100,
@@ -5690,6 +5627,10 @@ mod tests {
                     project_coordinate: "31933:pk:proj1".to_string(),
                     agents: vec![],
                     branches: vec![],
+                    all_models: vec![],
+                    all_tools: vec![],
+                    all_skills: vec![],
+                    all_mcp_servers: vec![],
                     created_at: 100,
                     backend_pubkey: "pk1".to_string(),
                     last_seen_at: 100,
@@ -5722,6 +5663,10 @@ mod tests {
                     project_coordinate: "proj".to_string(),
                     agents: vec![],
                     branches: vec![],
+                    all_models: vec![],
+                    all_tools: vec![],
+                    all_skills: vec![],
+                    all_mcp_servers: vec![],
                     created_at: 100,
                     backend_pubkey: "pk3".to_string(),
                     last_seen_at: 100,

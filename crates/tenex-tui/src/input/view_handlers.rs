@@ -841,7 +841,7 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
 
             let agent_name = {
                 let ds = app.data_store.borrow();
-                ds.get_agent_configs(state.backend_pubkey.as_deref().unwrap_or(""))
+                ds.get_installed_agents(state.backend_pubkey.as_deref().unwrap_or(""))
                     .iter()
                     .find(|agent| agent.pubkey == agent_pubkey)
                     .map(|agent| agent.slug.clone())
@@ -919,7 +919,7 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                         );
                     }
                 } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-                    app.set_warning_status("Waiting for backend 34011 inventory");
+                    app.set_warning_status("Waiting for backend 24011 inventory");
                 } else {
                     state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
                     state.add_filter.clear();
@@ -1562,7 +1562,7 @@ fn install_selected_agent_definition_to_backend(app: &mut App) {
     let Some(backend_pubkey) = app.install_target_backend_pubkey() else {
         let install_backends = app.available_install_backends();
         if install_backends.is_empty() {
-            app.set_warning_status("No approved online backend publishing 34011");
+            app.set_warning_status("No approved online backend publishing 24011");
         } else {
             app.set_warning_status(
                 "Multiple live backends available; install from a project-backed flow",

@@ -65,10 +65,8 @@ pub mod kinds {
     pub const BOOT_REQUEST: u16 = 24000;
     /// Project status
     pub const PROJECT_STATUS: u16 = 24010;
-    /// Per-agent configuration broadcast (backend-signed, one event per installed agent, NIP-33 addressable)
-    pub const AGENT_CONFIG: u16 = 34011;
-    /// Agent config update (client → backend)
-    pub const AGENT_CONFIG_UPDATE: u16 = 24020;
+    /// Agent config update
+    pub const AGENT_CONFIG: u16 = 24020;
     /// Operations status
     pub const OPERATIONS_STATUS: u16 = 24133;
     /// Stop operations command

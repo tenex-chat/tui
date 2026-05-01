@@ -268,9 +268,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     ui::modal::SettingsTab::Bunker => {
                         // Bunker tab uses action rows (no edit mode)
                     }
-                    ui::modal::SettingsTab::Backends => {
-                        // Backends tab uses action hotkeys (no edit mode)
-                    }
                 }
                 app.modal_state = ModalState::AppSettings(state);
             } else {
@@ -467,9 +464,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     ui::modal::SettingsTab::Bunker => {
                         state.stop_editing();
                     }
-                    ui::modal::SettingsTab::Backends => {
-                        state.stop_editing();
-                    }
                 }
             } else {
                 // Handle toggle/cycle settings that don't require edit mode
@@ -615,25 +609,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         }
                         None => {}
                     }
-                } else if state.current_tab == ui::modal::SettingsTab::Backends {
-                    // Backends tab has no Enter action - handled via 'b'/'u' hotkeys
                 } else {
                     state.start_editing();
                 }
-            }
-        }
-        KeyCode::Char('b') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
-            if let Some(pubkey) = state.backends.selected_approved_pubkey().map(|s| s.to_string()) {
-                app.block_backend(&pubkey);
-                state.backends.move_selected_to_blocked();
-                app.set_warning_status(&format!("Backend blocked: {}…{}", &pubkey[..8.min(pubkey.len())], &pubkey[pubkey.len().saturating_sub(8)..]));
-            }
-        }
-        KeyCode::Char('u') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
-            if let Some(pubkey) = state.backends.selected_blocked_pubkey().map(|s| s.to_string()) {
-                app.approve_backend(&pubkey);
-                state.backends.move_selected_to_approved();
-                app.set_warning_status(&format!("Backend approved: {}…{}", &pubkey[..8.min(pubkey.len())], &pubkey[pubkey.len().saturating_sub(8)..]));
             }
         }
         KeyCode::Char(c) if state.editing => {
@@ -675,9 +653,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 ui::modal::SettingsTab::Bunker => {
                     // Bunker settings don't have text editing
                 }
-                ui::modal::SettingsTab::Backends => {
-                    // Backends settings don't have text editing
-                }
             }
         }
         KeyCode::Backspace if state.editing => {
@@ -718,9 +693,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 }
                 ui::modal::SettingsTab::Bunker => {
                     // Bunker settings don't have text editing
-                }
-                ui::modal::SettingsTab::Backends => {
-                    // Backends settings don't have text editing
                 }
             }
         }

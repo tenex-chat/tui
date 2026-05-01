@@ -382,20 +382,13 @@ pub(crate) fn handle_agent_command(
                 return output;
             }
             output.push(format!("{WHITE_BOLD}Online agents:{RESET}"));
-            let backend = store_ref
-                .get_project_status(a_tag)
-                .map(|s| s.backend_pubkey.clone());
             for (i, agent) in agents.iter().enumerate() {
                 let marker = if state.current_agent.as_deref() == Some(&agent.pubkey) {
                     format!("{GREEN}*{RESET} ")
                 } else {
                     "  ".to_string()
                 };
-                let model = backend
-                    .as_deref()
-                    .and_then(|bp| store_ref.get_agent_config(bp, &agent.pubkey))
-                    .and_then(|c| c.active_model.clone())
-                    .unwrap_or_else(|| "unknown model".to_string());
+                let model = agent.model.as_deref().unwrap_or("unknown model");
                 let pm_badge = if agent.is_pm { " [PM]" } else { "" };
                 output.push(format!(
                     "  {marker}{}: {}{pm_badge} ({DIM}{model}{RESET})",
@@ -1162,6 +1155,7 @@ pub(crate) fn handle_config_command(
 
     let mut open_model = false;
     let mut is_set_pm = false;
+    let mut is_global = false;
     let mut agent_filter = String::new();
     let mut open_agent_select = false;
 
@@ -1169,9 +1163,7 @@ pub(crate) fn handle_config_command(
         match part {
             "--model" => open_model = true,
             "--set-pm" => is_set_pm = true,
-            "--global" => {
-                // Compatibility: kind:24020 config is always shared now.
-            }
+            "--global" => is_global = true,
             _ if part.starts_with('@') => {
                 let name = &part[1..];
                 if name.is_empty() {
@@ -1200,25 +1192,36 @@ pub(crate) fn handle_config_command(
         }
     };
 
-    let initial_is_pm = {
-        let store = runtime.data_store();
-        let store_ref = store.borrow();
-        store_ref
-            .get_project_status(&a_tag)
-            .and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey))
-            .map(|a| a.is_pm)
-            .unwrap_or(false)
-    };
+    // Load tools for the resolved agent
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    let status = store_ref.get_project_status(&a_tag);
+    let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
+    panel.tools_items = status
+        .map(|s| s.all_tools().iter().map(|t| t.to_string()).collect())
+        .unwrap_or_default();
+    panel.tools_selected = agent
+        .map(|a| a.tools.iter().cloned().collect())
+        .unwrap_or_default();
     panel.pending_model = None;
-    panel.is_set_pm = is_set_pm || initial_is_pm;
+    panel.is_set_pm = is_set_pm || agent.map(|a| a.is_pm).unwrap_or(false);
     panel.filter.clear();
     panel.quick_save = false;
+
+    // If no tools available and not opening agent/model select, bail
+    if panel.tools_items.is_empty() && !open_agent_select && !open_model {
+        drop(store_ref);
+        return CommandResult::Lines(vec![print_error_raw("No tools available for this project")]);
+    }
+
+    drop(store_ref);
 
     panel.active = true;
     panel.agent_pubkey = agent_pubkey;
     panel.agent_name = agent_name;
     panel.project_a_tag = a_tag;
+    panel.is_global = is_global;
     panel.cursor = 0;
     panel.scroll_offset = 0;
     panel.origin_command = format!(
@@ -1230,15 +1233,13 @@ pub(crate) fn handle_config_command(
         }
     );
 
-    // Decide initial mode.
+    // Decide initial mode
     if open_agent_select {
         panel.switch_to_agent_select(runtime);
     } else if open_model {
         panel.switch_to_model_select(runtime);
     } else {
-        // With per-agent configs (kind:34011), the default flow is the flag
-        // selector (model / PM). Tool selection was dropped from the protocol.
-        panel.switch_to_flag_select();
+        panel.switch_to_tools();
     }
 
     CommandResult::Lines(vec![])
@@ -1265,25 +1266,29 @@ pub(crate) fn handle_model_command(
             Err(msg) => return CommandResult::Lines(vec![print_error_raw(&msg)]),
         };
 
-    let initial_is_pm = {
-        let store = runtime.data_store();
-        let store_ref = store.borrow();
-        store_ref
-            .get_project_status(&a_tag)
-            .and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey))
-            .map(|a| a.is_pm)
-            .unwrap_or(false)
-    };
+    let store = runtime.data_store();
+    let store_ref = store.borrow();
+    let status = store_ref.get_project_status(&a_tag);
+    let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
+    panel.tools_items = status
+        .map(|s| s.all_tools().iter().map(|t| t.to_string()).collect())
+        .unwrap_or_default();
+    panel.tools_selected = agent
+        .map(|a| a.tools.iter().cloned().collect())
+        .unwrap_or_default();
     panel.pending_model = None;
-    panel.is_set_pm = initial_is_pm;
+    panel.is_set_pm = agent.map(|a| a.is_pm).unwrap_or(false);
     panel.filter.clear();
     panel.quick_save = true;
+
+    drop(store_ref);
 
     panel.active = true;
     panel.agent_pubkey = agent_pubkey;
     panel.agent_name = agent_name;
     panel.project_a_tag = a_tag;
+    panel.is_global = false;
     panel.cursor = 0;
     panel.scroll_offset = 0;
     panel.origin_command = format!(

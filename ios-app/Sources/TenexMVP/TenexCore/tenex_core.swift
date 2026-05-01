@@ -730,18 +730,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func generateKeypair() throws  -> GeneratedKeypair
     
     /**
-     * Get available configuration options for a specific agent.
-     *
-     * Per the current protocol, model/skill/mcp inventories live on the
-     * per-agent kind:34011 event — not on kind:24010. The caller supplies the
-     * `agent_pubkey` and we look up the `AgentConfig` cached under the
-     * project's backend.
-     */
-    func getAgentConfigOptions(projectId: String, agentPubkey: String) throws  -> ProjectConfigOptions
-    
-    func getAgentConfigs(backendPubkey: String) throws  -> [AgentConfig]
-    
-    /**
      * Legacy helper for definition-based project agents.
      *
      * Project membership is now expressed as installed agent pubkeys in the
@@ -899,6 +887,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      */
     func getInbox()  -> [InboxItem]
     
+    func getInstalledAgents(backendPubkey: String) throws  -> [InstalledAgent]
+    
     /**
      * Get messages for a conversation.
      */
@@ -942,6 +932,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getProfilePicture(pubkey: String) throws  -> String?
     
     func getProjectBackendPubkey(projectId: String)  -> String?
+    
+    /**
+     * Get available configuration options for a project.
+     *
+     * Returns all available models and tools from the project status (kind:24010).
+     * Used by iOS to populate the agent config modal with available options.
+     */
+    func getProjectConfigOptions(projectId: String) throws  -> ProjectConfigOptions
     
     /**
      * Get all projects with filter info (visibility, counts).
@@ -1250,12 +1248,19 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func unarchiveConversation(conversationId: String) 
     
     /**
-     * Update an agent's global `default` configuration (model, skills, mcps).
+     * Update an agent's configuration (model and tools).
      *
-     * Publishes a kind:24020 event. Per the current protocol these updates
-     * are always global — there is no project-scoped override concept.
+     * Publishes a kind:24020 event to update the agent's configuration.
+     * The backend will process this event and update the agent's config.
      */
-    func updateAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws 
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
+    
+    /**
+     * Update an agent's configuration globally (all projects).
+     *
+     * Publishes a kind:24020 event without a project a-tag.
+     */
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
      * Update an existing project (kind:31933 replaceable event).
@@ -1614,31 +1619,6 @@ open func generateKeypair()throws  -> GeneratedKeypair  {
 }
     
     /**
-     * Get available configuration options for a specific agent.
-     *
-     * Per the current protocol, model/skill/mcp inventories live on the
-     * per-agent kind:34011 event — not on kind:24010. The caller supplies the
-     * `agent_pubkey` and we look up the `AgentConfig` cached under the
-     * project's backend.
-     */
-open func getAgentConfigOptions(projectId: String, agentPubkey: String)throws  -> ProjectConfigOptions  {
-    return try  FfiConverterTypeProjectConfigOptions_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_get_agent_config_options(self.uniffiClonePointer(),
-        FfiConverterString.lower(projectId),
-        FfiConverterString.lower(agentPubkey),$0
-    )
-})
-}
-    
-open func getAgentConfigs(backendPubkey: String)throws  -> [AgentConfig]  {
-    return try  FfiConverterSequenceTypeAgentConfig.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_get_agent_configs(self.uniffiClonePointer(),
-        FfiConverterString.lower(backendPubkey),$0
-    )
-})
-}
-    
-    /**
      * Legacy helper for definition-based project agents.
      *
      * Project membership is now expressed as installed agent pubkeys in the
@@ -1925,6 +1905,14 @@ open func getInbox() -> [InboxItem]  {
 })
 }
     
+open func getInstalledAgents(backendPubkey: String)throws  -> [InstalledAgent]  {
+    return try  FfiConverterSequenceTypeInstalledAgent.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_installed_agents(self.uniffiClonePointer(),
+        FfiConverterString.lower(backendPubkey),$0
+    )
+})
+}
+    
     /**
      * Get messages for a conversation.
      */
@@ -1999,6 +1987,20 @@ open func getProfilePicture(pubkey: String)throws  -> String?  {
 open func getProjectBackendPubkey(projectId: String) -> String?  {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_project_backend_pubkey(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
+    )
+})
+}
+    
+    /**
+     * Get available configuration options for a project.
+     *
+     * Returns all available models and tools from the project status (kind:24010).
+     * Used by iOS to populate the agent config modal with available options.
+     */
+open func getProjectConfigOptions(projectId: String)throws  -> ProjectConfigOptions  {
+    return try  FfiConverterTypeProjectConfigOptions_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_project_config_options(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),$0
     )
 })
@@ -2585,15 +2587,34 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
 }
     
     /**
-     * Update an agent's global `default` configuration (model, skills, mcps).
+     * Update an agent's configuration (model and tools).
      *
-     * Publishes a kind:24020 event. Per the current protocol these updates
-     * are always global — there is no project-scoped override concept.
+     * Publishes a kind:24020 event to update the agent's configuration.
+     * The backend will process this event and update the agent's config.
      */
-open func updateAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_agent_config(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),
         FfiConverterString.lower(agentPubkey),
         FfiConverterOptionString.lower(model),
+        FfiConverterSequenceString.lower(tools),
+        FfiConverterSequenceString.lower(skills),
+        FfiConverterSequenceString.lower(mcpServers),
+        FfiConverterSequenceString.lower(tags),$0
+    )
+}
+}
+    
+    /**
+     * Update an agent's configuration globally (all projects).
+     *
+     * Publishes a kind:24020 event without a project a-tag.
+     */
+open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_update_global_agent_config(self.uniffiClonePointer(),
+        FfiConverterString.lower(agentPubkey),
+        FfiConverterOptionString.lower(model),
+        FfiConverterSequenceString.lower(tools),
         FfiConverterSequenceString.lower(skills),
         FfiConverterSequenceString.lower(mcpServers),
         FfiConverterSequenceString.lower(tags),$0
@@ -2705,203 +2726,6 @@ public func FfiConverterTypeTenexCore_lower(_ value: TenexCore) -> UnsafeMutable
 }
 
 
-
-
-/**
- * Per-agent configuration derived from a kind:34011 event.
- */
-public struct AgentConfig {
-    /**
-     * Hex-encoded public key of the backend that published the event.
-     */
-    public var backendPubkey: String
-    /**
-     * Hex-encoded public key of the agent this event describes.
-     */
-    public var pubkey: String
-    /**
-     * Human-friendly slug for the agent.
-     */
-    public var slug: String
-    /**
-     * Unix timestamp the event was created.
-     */
-    public var createdAt: UInt64
-    /**
-     * Currently-selected model slug, if any model is active.
-     */
-    public var activeModel: String?
-    /**
-     * Every available model slug (includes `active_model`).
-     */
-    public var models: [String]
-    /**
-     * Enabled, non-blocked skill IDs.
-     */
-    public var activeSkills: [String]
-    /**
-     * Every visible skill ID (includes `active_skills`).
-     */
-    public var skills: [String]
-    /**
-     * MCP server slugs currently in `mcpAccess`.
-     */
-    public var activeMcps: [String]
-    /**
-     * Every configured MCP server slug (includes `active_mcps`).
-     */
-    public var mcps: [String]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Hex-encoded public key of the backend that published the event.
-         */backendPubkey: String, 
-        /**
-         * Hex-encoded public key of the agent this event describes.
-         */pubkey: String, 
-        /**
-         * Human-friendly slug for the agent.
-         */slug: String, 
-        /**
-         * Unix timestamp the event was created.
-         */createdAt: UInt64, 
-        /**
-         * Currently-selected model slug, if any model is active.
-         */activeModel: String?, 
-        /**
-         * Every available model slug (includes `active_model`).
-         */models: [String], 
-        /**
-         * Enabled, non-blocked skill IDs.
-         */activeSkills: [String], 
-        /**
-         * Every visible skill ID (includes `active_skills`).
-         */skills: [String], 
-        /**
-         * MCP server slugs currently in `mcpAccess`.
-         */activeMcps: [String], 
-        /**
-         * Every configured MCP server slug (includes `active_mcps`).
-         */mcps: [String]) {
-        self.backendPubkey = backendPubkey
-        self.pubkey = pubkey
-        self.slug = slug
-        self.createdAt = createdAt
-        self.activeModel = activeModel
-        self.models = models
-        self.activeSkills = activeSkills
-        self.skills = skills
-        self.activeMcps = activeMcps
-        self.mcps = mcps
-    }
-}
-
-#if compiler(>=6)
-extension AgentConfig: Sendable {}
-#endif
-
-
-extension AgentConfig: Equatable, Hashable {
-    public static func ==(lhs: AgentConfig, rhs: AgentConfig) -> Bool {
-        if lhs.backendPubkey != rhs.backendPubkey {
-            return false
-        }
-        if lhs.pubkey != rhs.pubkey {
-            return false
-        }
-        if lhs.slug != rhs.slug {
-            return false
-        }
-        if lhs.createdAt != rhs.createdAt {
-            return false
-        }
-        if lhs.activeModel != rhs.activeModel {
-            return false
-        }
-        if lhs.models != rhs.models {
-            return false
-        }
-        if lhs.activeSkills != rhs.activeSkills {
-            return false
-        }
-        if lhs.skills != rhs.skills {
-            return false
-        }
-        if lhs.activeMcps != rhs.activeMcps {
-            return false
-        }
-        if lhs.mcps != rhs.mcps {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(backendPubkey)
-        hasher.combine(pubkey)
-        hasher.combine(slug)
-        hasher.combine(createdAt)
-        hasher.combine(activeModel)
-        hasher.combine(models)
-        hasher.combine(activeSkills)
-        hasher.combine(skills)
-        hasher.combine(activeMcps)
-        hasher.combine(mcps)
-    }
-}
-
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAgentConfig: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentConfig {
-        return
-            try AgentConfig(
-                backendPubkey: FfiConverterString.read(from: &buf), 
-                pubkey: FfiConverterString.read(from: &buf), 
-                slug: FfiConverterString.read(from: &buf), 
-                createdAt: FfiConverterUInt64.read(from: &buf), 
-                activeModel: FfiConverterOptionString.read(from: &buf), 
-                models: FfiConverterSequenceString.read(from: &buf), 
-                activeSkills: FfiConverterSequenceString.read(from: &buf), 
-                skills: FfiConverterSequenceString.read(from: &buf), 
-                activeMcps: FfiConverterSequenceString.read(from: &buf), 
-                mcps: FfiConverterSequenceString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: AgentConfig, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.backendPubkey, into: &buf)
-        FfiConverterString.write(value.pubkey, into: &buf)
-        FfiConverterString.write(value.slug, into: &buf)
-        FfiConverterUInt64.write(value.createdAt, into: &buf)
-        FfiConverterOptionString.write(value.activeModel, into: &buf)
-        FfiConverterSequenceString.write(value.models, into: &buf)
-        FfiConverterSequenceString.write(value.activeSkills, into: &buf)
-        FfiConverterSequenceString.write(value.skills, into: &buf)
-        FfiConverterSequenceString.write(value.activeMcps, into: &buf)
-        FfiConverterSequenceString.write(value.mcps, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAgentConfig_lift(_ buf: RustBuffer) throws -> AgentConfig {
-    return try FfiConverterTypeAgentConfig.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAgentConfig_lower(_ value: AgentConfig) -> RustBuffer {
-    return FfiConverterTypeAgentConfig.lower(value)
-}
 
 
 /**
@@ -5101,6 +4925,95 @@ public func FfiConverterTypeInboxItem_lower(_ value: InboxItem) -> RustBuffer {
 
 
 /**
+ * An agent available for installation from a backend (kind:24011 catalog).
+ */
+public struct InstalledAgent {
+    public var backendPubkey: String
+    public var pubkey: String
+    public var slug: String
+    public var createdAt: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(backendPubkey: String, pubkey: String, slug: String, createdAt: UInt64) {
+        self.backendPubkey = backendPubkey
+        self.pubkey = pubkey
+        self.slug = slug
+        self.createdAt = createdAt
+    }
+}
+
+#if compiler(>=6)
+extension InstalledAgent: Sendable {}
+#endif
+
+
+extension InstalledAgent: Equatable, Hashable {
+    public static func ==(lhs: InstalledAgent, rhs: InstalledAgent) -> Bool {
+        if lhs.backendPubkey != rhs.backendPubkey {
+            return false
+        }
+        if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.slug != rhs.slug {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(backendPubkey)
+        hasher.combine(pubkey)
+        hasher.combine(slug)
+        hasher.combine(createdAt)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeInstalledAgent: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InstalledAgent {
+        return
+            try InstalledAgent(
+                backendPubkey: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: InstalledAgent, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.backendPubkey, into: &buf)
+        FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.slug, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInstalledAgent_lift(_ buf: RustBuffer) throws -> InstalledAgent {
+    return try FfiConverterTypeInstalledAgent.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeInstalledAgent_lower(_ value: InstalledAgent) -> RustBuffer {
+    return FfiConverterTypeInstalledAgent.lower(value)
+}
+
+
+/**
  * Event count for a specific kind
  */
 public struct KindEventCount {
@@ -6414,12 +6327,7 @@ public func FfiConverterTypeProject_lower(_ value: Project) -> RustBuffer {
 
 
 /**
- * Represents an agent listed in a project status event (kind:24010).
- *
- * `is_pm` is set by the store layer based on the agent's position in the
- * kind:31933 project event — the first `p`-tag agent is the PM.
- * Model/skill/mcp/tool configuration lives in per-agent kind:34011
- * events — use `AgentConfig` to retrieve those.
+ * Represents an agent within a project status
  */
 public struct ProjectAgent {
     public var pubkey: String
@@ -6427,15 +6335,23 @@ public struct ProjectAgent {
     public var backendPubkey: String
     public var isPm: Bool
     public var isOnline: Bool
+    public var model: String?
+    public var tools: [String]
+    public var skills: [String]
+    public var mcpServers: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(pubkey: String, name: String, backendPubkey: String, isPm: Bool, isOnline: Bool) {
+    public init(pubkey: String, name: String, backendPubkey: String, isPm: Bool, isOnline: Bool, model: String?, tools: [String], skills: [String], mcpServers: [String]) {
         self.pubkey = pubkey
         self.name = name
         self.backendPubkey = backendPubkey
         self.isPm = isPm
         self.isOnline = isOnline
+        self.model = model
+        self.tools = tools
+        self.skills = skills
+        self.mcpServers = mcpServers
     }
 }
 
@@ -6461,6 +6377,18 @@ extension ProjectAgent: Equatable, Hashable {
         if lhs.isOnline != rhs.isOnline {
             return false
         }
+        if lhs.model != rhs.model {
+            return false
+        }
+        if lhs.tools != rhs.tools {
+            return false
+        }
+        if lhs.skills != rhs.skills {
+            return false
+        }
+        if lhs.mcpServers != rhs.mcpServers {
+            return false
+        }
         return true
     }
 
@@ -6470,6 +6398,10 @@ extension ProjectAgent: Equatable, Hashable {
         hasher.combine(backendPubkey)
         hasher.combine(isPm)
         hasher.combine(isOnline)
+        hasher.combine(model)
+        hasher.combine(tools)
+        hasher.combine(skills)
+        hasher.combine(mcpServers)
     }
 }
 
@@ -6486,7 +6418,11 @@ public struct FfiConverterTypeProjectAgent: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 backendPubkey: FfiConverterString.read(from: &buf), 
                 isPm: FfiConverterBool.read(from: &buf), 
-                isOnline: FfiConverterBool.read(from: &buf)
+                isOnline: FfiConverterBool.read(from: &buf), 
+                model: FfiConverterOptionString.read(from: &buf), 
+                tools: FfiConverterSequenceString.read(from: &buf), 
+                skills: FfiConverterSequenceString.read(from: &buf), 
+                mcpServers: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -6496,6 +6432,10 @@ public struct FfiConverterTypeProjectAgent: FfiConverterRustBuffer {
         FfiConverterString.write(value.backendPubkey, into: &buf)
         FfiConverterBool.write(value.isPm, into: &buf)
         FfiConverterBool.write(value.isOnline, into: &buf)
+        FfiConverterOptionString.write(value.model, into: &buf)
+        FfiConverterSequenceString.write(value.tools, into: &buf)
+        FfiConverterSequenceString.write(value.skills, into: &buf)
+        FfiConverterSequenceString.write(value.mcpServers, into: &buf)
     }
 }
 
@@ -6516,41 +6456,38 @@ public func FfiConverterTypeProjectAgent_lower(_ value: ProjectAgent) -> RustBuf
 
 
 /**
- * Available configuration options derived from a single agent's kind:34011
- * event. Used by iOS to populate the agent config modal.
- *
- * Per the current protocol kind:24010 no longer carries aggregate
- * model/skill/mcp info — those live on each agent's kind:34011 event.
+ * Available configuration options for a project.
+ * Used by iOS to populate the agent config modal.
  */
 public struct ProjectConfigOptions {
     /**
-     * All models visible to this agent.
+     * All available models for the project
      */
     public var allModels: [String]
     /**
-     * All skills visible to this agent.
+     * All available tools for the project
+     */
+    public var allTools: [String]
+    /**
+     * All available skills for the project
      */
     public var allSkills: [String]
-    /**
-     * All MCP servers visible to this agent.
-     */
-    public var allMcpServers: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(
         /**
-         * All models visible to this agent.
+         * All available models for the project
          */allModels: [String], 
         /**
-         * All skills visible to this agent.
-         */allSkills: [String], 
+         * All available tools for the project
+         */allTools: [String], 
         /**
-         * All MCP servers visible to this agent.
-         */allMcpServers: [String]) {
+         * All available skills for the project
+         */allSkills: [String]) {
         self.allModels = allModels
+        self.allTools = allTools
         self.allSkills = allSkills
-        self.allMcpServers = allMcpServers
     }
 }
 
@@ -6564,10 +6501,10 @@ extension ProjectConfigOptions: Equatable, Hashable {
         if lhs.allModels != rhs.allModels {
             return false
         }
-        if lhs.allSkills != rhs.allSkills {
+        if lhs.allTools != rhs.allTools {
             return false
         }
-        if lhs.allMcpServers != rhs.allMcpServers {
+        if lhs.allSkills != rhs.allSkills {
             return false
         }
         return true
@@ -6575,8 +6512,8 @@ extension ProjectConfigOptions: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(allModels)
+        hasher.combine(allTools)
         hasher.combine(allSkills)
-        hasher.combine(allMcpServers)
     }
 }
 
@@ -6590,15 +6527,15 @@ public struct FfiConverterTypeProjectConfigOptions: FfiConverterRustBuffer {
         return
             try ProjectConfigOptions(
                 allModels: FfiConverterSequenceString.read(from: &buf), 
-                allSkills: FfiConverterSequenceString.read(from: &buf), 
-                allMcpServers: FfiConverterSequenceString.read(from: &buf)
+                allTools: FfiConverterSequenceString.read(from: &buf), 
+                allSkills: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
     public static func write(_ value: ProjectConfigOptions, into buf: inout [UInt8]) {
         FfiConverterSequenceString.write(value.allModels, into: &buf)
+        FfiConverterSequenceString.write(value.allTools, into: &buf)
         FfiConverterSequenceString.write(value.allSkills, into: &buf)
-        FfiConverterSequenceString.write(value.allMcpServers, into: &buf)
     }
 }
 
@@ -9172,10 +9109,7 @@ public enum DataChangeType {
      */
     case pendingBackendApproval(backendPubkey: String, projectATag: String
     )
-    /**
-     * A per-agent config event (kind:34011) arrived for an installed agent.
-     */
-    case agentConfigsChanged(backendPubkey: String
+    case installedAgentsChanged(backendPubkey: String
     )
     /**
      * Active conversations updated for a project (kind:24133)
@@ -9260,7 +9194,7 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case 7: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
         )
         
-        case 8: return .agentConfigsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
+        case 8: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
         )
         
         case 9: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
@@ -9335,7 +9269,7 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
             FfiConverterString.write(projectATag, into: &buf)
             
         
-        case let .agentConfigsChanged(backendPubkey):
+        case let .installedAgentsChanged(backendPubkey):
             writeInt(&buf, Int32(8))
             FfiConverterString.write(backendPubkey, into: &buf)
             
@@ -10157,31 +10091,6 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeAgentConfig: FfiConverterRustBuffer {
-    typealias SwiftType = [AgentConfig]
-
-    public static func write(_ value: [AgentConfig], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeAgentConfig.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AgentConfig] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [AgentConfig]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeAgentConfig.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeAgentDefinition: FfiConverterRustBuffer {
     typealias SwiftType = [AgentDefinition]
 
@@ -10424,6 +10333,31 @@ fileprivate struct FfiConverterSequenceTypeInboxItem: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeInboxItem.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeInstalledAgent: FfiConverterRustBuffer {
+    typealias SwiftType = [InstalledAgent]
+
+    public static func write(_ value: [InstalledAgent], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeInstalledAgent.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [InstalledAgent] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [InstalledAgent]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeInstalledAgent.read(from: &buf))
         }
         return seq
     }
@@ -11096,12 +11030,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_generate_keypair() != 2950) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_agent_config_options() != 17004) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_agent_configs() != 9030) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 4301) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11174,6 +11102,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_inbox() != 40776) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_installed_agents() != 44497) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 37498) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11190,6 +11121,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_backend_pubkey() != 6708) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 13106) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
@@ -11330,7 +11264,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 56205) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 37791) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 46781) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 26050) {

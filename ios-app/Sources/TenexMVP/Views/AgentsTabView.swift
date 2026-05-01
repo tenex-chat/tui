@@ -14,6 +14,8 @@ struct AgentInstance: Identifiable, Hashable {
     let pubkey: String
     let name: String
     let isPm: Bool
+    let model: String?
+    let tools: [String]
     let projectId: String
     let projectTitle: String
     let isProjectOnline: Bool
@@ -88,6 +90,8 @@ struct AgentsTabView: View {
                     pubkey: agent.pubkey,
                     name: agent.name,
                     isPm: agent.isPm,
+                    model: agent.model,
+                    tools: agent.tools,
                     projectId: project.id,
                     projectTitle: project.title,
                     isProjectOnline: isOnline,
@@ -115,7 +119,8 @@ struct AgentsTabView: View {
         let query = searchText.lowercased()
         return allAgents.filter {
             $0.name.lowercased().contains(query) ||
-            $0.projectTitle.lowercased().contains(query)
+            $0.projectTitle.lowercased().contains(query) ||
+            ($0.model?.lowercased().contains(query) ?? false)
         }
     }
 
@@ -347,6 +352,25 @@ struct AgentRowView: View {
                 }
 
                 HStack(spacing: 6) {
+                    if let model = agent.model, !model.isEmpty {
+                        Text(model)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if !agent.tools.isEmpty {
+                        HStack(spacing: 2) {
+                            Image(systemName: "wrench")
+                                .font(.caption2)
+                            Text("\(agent.tools.count)")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    }
+                }
+
+                HStack(spacing: 6) {
                     ProjectPill(
                         projectTitle: agent.projectTitle,
                         projectId: agent.projectId,
@@ -406,6 +430,8 @@ struct AgentDetailView: View {
                     pubkey: match.pubkey,
                     name: match.name,
                     isPm: match.isPm,
+                    model: match.model,
+                    tools: match.tools,
                     projectId: project.id,
                     projectTitle: project.title,
                     isProjectOnline: onlineStatus[project.id] ?? false,
@@ -422,6 +448,10 @@ struct AgentDetailView: View {
                 headerSection
                 Divider()
                 projectSection
+                if !agent.tools.isEmpty {
+                    Divider()
+                    toolsSection
+                }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -480,6 +510,15 @@ struct AgentDetailView: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Color.presenceOnline)
                     }
+                }
+
+                if let model = agent.model, !model.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "cpu")
+                        Text(model)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 }
 
                 if let npub = Bech32.hexToNpub(agent.pubkey) {
@@ -567,6 +606,26 @@ struct AgentDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
+    // MARK: - Tools
+
+    private var toolsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Tools")
+                .font(.headline)
+
+            FlowLayout(spacing: 6) {
+                ForEach(agent.tools, id: \.self) { tool in
+                    Text(tool)
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.skillBrandBackground)
+                        .foregroundStyle(Color.skillBrand)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+    }
 }
 
 

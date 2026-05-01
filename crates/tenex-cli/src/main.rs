@@ -11,6 +11,10 @@ use tenex_core::slug::{validate_slug, SlugValidation};
 #[command(name = "tenex-cli")]
 #[command(about = "CLI interface for tenex")]
 struct Cli {
+    /// Start daemon in foreground
+    #[arg(long)]
+    daemon: bool,
+
     /// Pretty-print JSON output
     #[arg(long, short)]
     pretty: bool,
@@ -19,28 +23,20 @@ struct Cli {
     #[arg(long, short = 'd')]
     data_dir: Option<PathBuf>,
 
+    /// Enable HTTP server (OpenAI-compatible API)
+    #[arg(long)]
+    http: bool,
+
+    /// HTTP server bind address (requires --http)
+    #[arg(long, default_value = "127.0.0.1:8080")]
+    http_bind: String,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Run daemon in foreground
-    Daemon {
-        /// Print events to stdout (heartbeats, messages)
-        #[arg(long)]
-        watch: bool,
-        /// Auto-approve all NIP-46 bunker signing requests
-        #[arg(long)]
-        auto_approve: bool,
-        /// Enable HTTP server (OpenAI-compatible API)
-        #[arg(long)]
-        http: bool,
-        /// HTTP server bind address (requires --http)
-        #[arg(long, default_value = "127.0.0.1:8080")]
-        http_bind: String,
-    },
-
     /// List all projects
     ListProjects,
 
@@ -134,6 +130,16 @@ enum Commands {
     /// Shutdown the daemon
     Shutdown,
 
+    /// List all agent definitions (kind:4199 events)
+    ListAgentDefinitions,
+
+    /// List all MCP tools (kind:4200 events)
+    ListMCPTools,
+
+    /// List all skills (kind:4202 events).
+    /// Use `--skill <ID>` with send-message or create-thread to attach skills.
+    ListSkills,
+
     /// Show detailed project information (from kind:24010)
     ShowProject {
         /// Project slug (d-tag)
@@ -177,18 +183,17 @@ enum Commands {
         mcp_tool_ids: Vec<String>,
     },
 
-    /// Set an agent's global `default` config (publishes kind:24020).
-    ///
-    /// Per the current protocol this only updates `model`, `skill`, and `mcp`
-    /// — `tool` tags were dropped from the protocol entirely. Skills and MCP
-    /// servers are preserved from the agent's latest kind:34011 broadcast.
+    /// Set agent settings (publishes kind:24020 event to override model/tools)
     SetAgentSettings {
-        /// Project slug (d-tag) used to find the agent and available backend status
+        /// Project slug (d-tag)
         project_slug: String,
         /// Agent slug (name) within the project
         agent_slug: String,
         /// Model to use for this agent
         model: String,
+        /// Tools to enable for this agent (can be specified multiple times)
+        #[arg(long, short = 't')]
+        tool: Vec<String>,
         /// Wait for project status (24010 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
@@ -265,20 +270,17 @@ fn main() {
     // Load config from data_dir/config.json if exists
     let config = load_config(&data_dir);
 
+    // Run daemon mode
+    if cli.daemon {
+        if let Err(e) = run_daemon(data_dir, config, cli.http, cli.http_bind) {
+            eprintln!("Daemon error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // Convert subcommand to CliCommand
     let command = match cli.command {
-        Some(Commands::Daemon {
-            watch,
-            auto_approve,
-            http,
-            http_bind,
-        }) => {
-            if let Err(e) = run_daemon(data_dir, config, http, http_bind, watch, auto_approve) {
-                eprintln!("Daemon error: {}", e);
-                std::process::exit(1);
-            }
-            return;
-        }
         Some(Commands::ListProjects) => CliCommand::ListProjects,
         Some(Commands::ListThreads { project_slug, wait }) => CliCommand::ListThreads {
             project_slug,
@@ -354,6 +356,9 @@ fn main() {
             CliCommand::Status
         }
         Some(Commands::Shutdown) => CliCommand::Shutdown,
+        Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
+        Some(Commands::ListMCPTools) => CliCommand::ListMCPTools,
+        Some(Commands::ListSkills) => CliCommand::ListSkills,
         Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject {
             project_slug,
             wait_for_project: wait,
@@ -447,12 +452,14 @@ fn main() {
             project_slug,
             agent_slug,
             model,
+            tool,
             wait_for_project,
             wait,
         }) => CliCommand::SetAgentSettings {
             project_slug,
             agent_slug,
             model,
+            tools: tool,
             wait_for_project,
             wait,
         },
