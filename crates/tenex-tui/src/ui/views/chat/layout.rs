@@ -855,13 +855,11 @@ fn render_agent_config_modal(
             } else if agent.is_online {
                 Style::default().fg(theme::TEXT_PRIMARY)
             } else {
-                Style::default().fg(theme::TEXT_MUTED)
+                Style::default().fg(theme::TEXT_DIM)
             };
             let pm_prefix = if agent.is_pm { "[PM] " } else { "" };
-            let offline_suffix = if !agent.is_online { " (offline)" } else { "" };
-            let available_name_width = content_width
-                .saturating_sub(pm_prefix.chars().count())
-                .saturating_sub(offline_suffix.chars().count());
+            let available_name_width =
+                content_width.saturating_sub(pm_prefix.chars().count());
             let name_text = truncate_with_ellipsis(&agent.name, available_name_width.max(1));
             let pm_style = if is_selected {
                 Style::default()
@@ -873,18 +871,10 @@ fn render_agent_config_modal(
                     .fg(theme::ACCENT_WARNING)
                     .add_modifier(Modifier::BOLD)
             };
-            let offline_style = if is_selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(theme::ACCENT_WARNING)
-            } else {
-                Style::default().fg(theme::TEXT_MUTED)
-            };
 
             let line = Line::from(vec![
                 Span::styled(pm_prefix.to_string(), pm_style),
                 Span::styled(name_text, name_style),
-                Span::styled(offline_suffix.to_string(), offline_style),
             ]);
             f.render_widget(Paragraph::new(line), row_area);
         }
@@ -1065,21 +1055,11 @@ fn render_agent_config_modal(
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
-    let global_prefix = if state.save_globally { "[x] " } else { "[ ] " };
-    let global_style = if state.save_globally {
-        Style::default().fg(theme::ACCENT_WARNING)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(format!("{}Set as PM", pm_prefix), pm_style),
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("{}Change all projects", global_prefix),
-                global_style,
-            ),
-        ])),
+        Paragraph::new(Line::from(vec![Span::styled(
+            format!("{}Set as PM", pm_prefix),
+            pm_style,
+        )])),
         toggles_area,
     );
 
@@ -1092,7 +1072,7 @@ fn render_agent_config_modal(
     let hints_text = if state.focus == AgentConfigFocus::Agents {
         "tab switch panes · type to search · a manage project agents · enter save/select · esc"
     } else {
-        "tab switch panes · space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc"
+        "tab switch panes · space toggle · a toggle all · ctrl+m pm · enter save · esc"
     };
     let hints = Paragraph::new(hints_text).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);

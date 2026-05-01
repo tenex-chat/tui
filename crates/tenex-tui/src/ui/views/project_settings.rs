@@ -303,18 +303,8 @@ fn render_agents_list(
     visible_height: usize,
 ) {
     if state.pending_agent_pubkeys.is_empty() {
-        let empty_text = if state.backend_pubkey.is_none() {
-            if app.available_install_backends().is_empty() {
-                "No agents online"
-            } else {
-                "Waiting for live project status to identify this project's backend before assigning agents."
-            }
-        } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-            "Waiting for backend 24011 inventory before assigning agents."
-        } else {
-            "No agents assigned. Press 'a' to add."
-        };
-        let empty_msg = Paragraph::new(empty_text).style(Style::default().fg(theme::TEXT_MUTED));
+        let empty_msg = Paragraph::new("No agents assigned. Press 'a' to add.")
+            .style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(empty_msg, list_area);
     } else {
         let scroll_offset = state.agents_scroll_offset;
@@ -355,7 +345,12 @@ fn render_agents_list(
                 let agent_name = installed_agent
                     .as_ref()
                     .map(|agent| format!("@{}", agent.slug))
-                    .unwrap_or_else(|| short_pubkey(agent_pubkey));
+                    .unwrap_or_else(|| {
+                        app.data_store
+                            .borrow()
+                            .get_profile_name_if_known(agent_pubkey)
+                            .unwrap_or_else(|| short_pubkey(agent_pubkey))
+                    });
                 let name_style = if is_selected {
                     Style::default()
                         .fg(theme::ACCENT_PRIMARY)
@@ -541,24 +536,8 @@ fn render_hints(
         Span::styled("←→", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" switch pane", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(
-            "a",
-            Style::default().fg(if state.backend_pubkey.is_some() {
-                theme::ACCENT_WARNING
-            } else {
-                theme::TEXT_DIM
-            }),
-        ),
-        Span::styled(
-            if state.backend_pubkey.is_some() {
-                " add agent"
-            } else if app.available_install_backends().is_empty() {
-                " add agent (no agents online)"
-            } else {
-                " add agent (waiting for project status)"
-            },
-            Style::default().fg(theme::TEXT_MUTED),
-        ),
+        Span::styled("a", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" add agent", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("t", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" add tool", Style::default().fg(theme::TEXT_MUTED)),
@@ -632,21 +611,23 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
     );
 
     if available_agents.is_empty() {
-        let msg = if state.backend_pubkey.is_none() {
-            if app.available_install_backends().is_empty() {
-                "No agents online"
-            } else {
-                "Waiting for live project status to identify this project's backend."
-            }
-        } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-            "Waiting for backend 24011 inventory."
-        } else if state.add_filter.is_empty() {
-            "No installed agents available."
+        let desc_area = Rect::new(
+            remaining.x,
+            list_area.y + list_area.height,
+            remaining.width,
+            2,
+        );
+        if state.pubkey_input_active {
+            render_pubkey_input(f, desc_area, state);
         } else {
-            "No agents match your search."
-        };
-        let empty_msg = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
-        f.render_widget(empty_msg, list_area);
+            let msg = if state.add_filter.is_empty() {
+                "No agents in catalog. Use ^A to add by pubkey."
+            } else {
+                "No agents match your search."
+            };
+            let empty_msg = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
+            f.render_widget(empty_msg, list_area);
+        }
     } else {
         let visible_height = list_area.height as usize;
         let selected_index = state
@@ -738,14 +719,16 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         let list = List::new(items);
         f.render_widget(list, list_area);
 
-        // Show backend pubkey of selected agent
-        if let Some(agent) = available_agents.get(selected_index) {
-            let desc_area = Rect::new(
-                remaining.x,
-                list_area.y + list_area.height,
-                remaining.width,
-                2,
-            );
+        let desc_area = Rect::new(
+            remaining.x,
+            list_area.y + list_area.height,
+            remaining.width,
+            2,
+        );
+
+        if state.pubkey_input_active {
+            render_pubkey_input(f, desc_area, state);
+        } else if let Some(agent) = available_agents.get(selected_index) {
             let status = if state.pending_agent_pubkeys.contains(&agent.pubkey) {
                 if state
                     .pending_agent_pubkeys
@@ -785,22 +768,80 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         1,
     );
 
-    let hint_spans = vec![
-        Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" done", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
-    ];
+    let hint_spans = if state.pubkey_input_active {
+        vec![
+            Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled(" add pubkey", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
+        ]
+    } else {
+        vec![
+            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("^A", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" add by pubkey", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" done", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
+        ]
+    };
 
     let hints = Paragraph::new(Line::from(hint_spans));
     f.render_widget(hints, hints_area);
+}
+
+fn render_pubkey_input(f: &mut Frame, area: Rect, state: &ProjectSettingsState) {
+    if area.height == 0 {
+        return;
+    }
+
+    let input_line_area = Rect::new(area.x, area.y, area.width, 1);
+    let label = "npub or hex: ";
+    let cursor = if (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        / 500)
+        % 2
+        == 0
+    {
+        "█"
+    } else {
+        " "
+    };
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(label, Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(
+                &state.pubkey_input,
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(cursor, Style::default().fg(theme::ACCENT_PRIMARY)),
+        ])),
+        input_line_area,
+    );
+
+    if area.height >= 2 {
+        let error_area = Rect::new(area.x, area.y + 1, area.width, 1);
+        if let Some(ref error) = state.pubkey_input_error {
+            f.render_widget(
+                Paragraph::new(error.as_str())
+                    .style(Style::default().fg(theme::ACCENT_ERROR)),
+                error_area,
+            );
+        }
+    }
 }
 
 /// Get count of available agents for add mode (for bounds checking)

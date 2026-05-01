@@ -863,13 +863,9 @@ pub(crate) fn render_messages_panel(
                                     .iter()
                                     .find(|m| m.id == *thread_id)
                                     .and_then(|m| m.branch.clone());
-                                // Get the "to" agent name from the thread's p_tags (who was delegated TO)
-                                // If no p_tags, fall back to the thread creator's pubkey
-                                let to_name = if !t.p_tags.is_empty() {
-                                    store.get_profile_name(&t.p_tags[0])
-                                } else {
-                                    store.get_profile_name(&t.pubkey)
-                                };
+                                // t.pubkey is the author of the thread root = the target agent.
+                                // p_tags are just "mentioned pubkeys" (user, delegator, etc.) — not the target.
+                                let to_name = store.get_profile_name(&t.pubkey);
                                 (
                                     title,
                                     from_name,

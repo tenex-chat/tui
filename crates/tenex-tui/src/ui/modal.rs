@@ -813,6 +813,12 @@ pub struct ProjectSettingsState {
     pub add_index: usize,
     /// Cached visible height for list scrolling (computed during render, used by input handlers)
     pub cached_visible_height: usize,
+    /// When true, user is typing a pubkey/npub to add directly
+    pub pubkey_input_active: bool,
+    /// Text being typed for pubkey input
+    pub pubkey_input: String,
+    /// Validation error for pubkey input
+    pub pubkey_input_error: Option<String>,
 }
 
 /// Step in the create project wizard
@@ -1048,6 +1054,9 @@ impl ProjectSettingsState {
             add_filter: String::new(),
             add_index: 0,
             cached_visible_height: DEFAULT_LIST_VISIBLE_HEIGHT,
+            pubkey_input_active: false,
+            pubkey_input: String::new(),
+            pubkey_input_error: None,
         }
     }
 
@@ -1640,8 +1649,6 @@ pub struct AgentConfigState {
     pub original_mcp_servers: std::collections::HashSet<String>,
     /// Original PM marker for change detection
     pub original_is_pm: bool,
-    /// When true, Enter saves config globally (no project a-tag).
-    pub save_globally: bool,
 }
 
 impl AgentConfigState {
@@ -1656,7 +1663,6 @@ impl AgentConfigState {
             original_skills: std::collections::HashSet::new(),
             original_mcp_servers: std::collections::HashSet::new(),
             original_is_pm: false,
-            save_globally: false,
         }
     }
 

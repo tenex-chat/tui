@@ -731,6 +731,22 @@ fn new_conversation_current_project(app: &mut App) {
     }
 }
 
+/// Parse an npub1... or 64-char hex string into a lowercase hex pubkey.
+fn resolve_npub_to_hex(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.to_ascii_lowercase().starts_with("npub1") {
+        use nostr_sdk::prelude::{FromBech32, PublicKey};
+        PublicKey::from_bech32(trimmed).ok().map(|pk: PublicKey| pk.to_hex())
+    } else {
+        let lower = trimmed.to_ascii_lowercase();
+        if lower.len() == 64 && lower.chars().all(|c| c.is_ascii_hexdigit()) {
+            Some(lower)
+        } else {
+            None
+        }
+    }
+}
+
 fn save_project_settings_changes(app: &mut App, state: &ui::modal::ProjectSettingsState) {
     let project_a_tag = state.project_a_tag.clone();
     let agent_pubkeys = state.pending_agent_pubkeys.clone();
@@ -769,6 +785,65 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
     };
 
     if let Some(add_mode) = state.in_add_mode {
+        // Pubkey input mode intercepts all keystrokes first
+        if state.pubkey_input_active {
+            match code {
+                KeyCode::Esc => {
+                    state.pubkey_input_active = false;
+                    state.pubkey_input.clear();
+                    state.pubkey_input_error = None;
+                }
+                KeyCode::Enter => {
+                    let input = state.pubkey_input.clone();
+                    match resolve_npub_to_hex(&input) {
+                        Some(hex) => {
+                            state.add_agent(hex);
+                            state.pubkey_input_active = false;
+                            state.pubkey_input.clear();
+                            state.pubkey_input_error = None;
+                            if state.is_agent_picker_only() {
+                                if state.auto_publish_on_close && state.has_changes() {
+                                    save_project_settings_changes(app, &state);
+                                }
+                                app.modal_state = ModalState::None;
+                                return;
+                            }
+                            state.in_add_mode = None;
+                            state.add_filter.clear();
+                            state.add_index = 0;
+                        }
+                        None => {
+                            state.pubkey_input_error =
+                                Some("Invalid npub or hex pubkey".to_string());
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    state.pubkey_input.pop();
+                    state.pubkey_input_error = None;
+                }
+                KeyCode::Char(c)
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT) =>
+                {
+                    state.pubkey_input.push(c);
+                    state.pubkey_input_error = None;
+                }
+                _ => {}
+            }
+            app.modal_state = ModalState::ProjectSettings(state);
+            return;
+        }
+
+        // Ctrl+A: activate pubkey input mode
+        if code == KeyCode::Char('a') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            state.pubkey_input_active = true;
+            state.pubkey_input.clear();
+            state.pubkey_input_error = None;
+            app.modal_state = ModalState::ProjectSettings(state);
+            return;
+        }
+
         match code {
             KeyCode::Up => {
                 if state.add_index > 0 {
@@ -910,21 +985,12 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Char('a') => {
-                if state.backend_pubkey.is_none() {
-                    if app.available_install_backends().is_empty() {
-                        app.set_warning_status("No agents online");
-                    } else {
-                        app.set_warning_status(
-                            "Waiting for live project status to identify the project backend",
-                        );
-                    }
-                } else if !app.has_installed_agent_inventory(state.backend_pubkey.as_deref()) {
-                    app.set_warning_status("Waiting for backend 24011 inventory");
-                } else {
-                    state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
-                    state.add_filter.clear();
-                    state.add_index = 0;
-                }
+                state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
+                state.add_filter.clear();
+                state.add_index = 0;
+                state.pubkey_input_active = false;
+                state.pubkey_input.clear();
+                state.pubkey_input_error = None;
             }
             KeyCode::Char('t') => {
                 state.in_add_mode = Some(ProjectSettingsAddMode::McpTool);
