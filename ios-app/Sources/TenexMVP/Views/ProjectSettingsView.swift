@@ -70,10 +70,6 @@ struct ProjectSettingsView: View {
         }
     }
 
-    private var canAddAgents: Bool {
-        true
-    }
-
     var body: some View {
         Form {
             if let project {
@@ -322,7 +318,7 @@ struct ProjectSettingsView: View {
                 Label("Add Agent", systemImage: "plus")
             }
             .adaptiveGlassButtonStyle()
-            .disabled(!canAddAgents || isSavingAgents || isDeleting)
+            .disabled(isSavingAgents || isDeleting)
 
             HStack(spacing: 12) {
                 Button("Cancel") {
@@ -345,11 +341,7 @@ struct ProjectSettingsView: View {
         } header: {
             Text("Agents")
         } footer: {
-            Text(
-                projectBackendPubkey == nil
-                    ? "Agent assignment requires the project backend to be online and publishing installed agents."
-                    : "The first agent pubkey is treated as the default PM."
-            )
+            Text("The first agent pubkey is treated as the default PM. You can add agents by npub or hex pubkey even when the backend is offline.")
         }
     }
 
