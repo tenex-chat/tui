@@ -26,6 +26,8 @@ struct ProjectSettingsView: View {
     @State private var showDeleteDialog = false
 
     @State private var agentSearch = ""
+    @State private var manualPubkeyInput: String = ""
+    @State private var manualPubkeyError: String? = nil
 
     @State private var isSavingGeneral = false
     @State private var isSavingAgents = false
@@ -69,7 +71,7 @@ struct ProjectSettingsView: View {
     }
 
     private var canAddAgents: Bool {
-        projectBackendPubkey != nil
+        true
     }
 
     var body: some View {
@@ -382,33 +384,57 @@ struct ProjectSettingsView: View {
 
     private var addAgentSheet: some View {
         NavigationStack {
-            List(filteredAvailableAgents, id: \.pubkey) { agent in
-                Button {
-                    addAgent(agentPubkey: agent.pubkey)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(agent.slug)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
-                        Text(shortPubkey(agent.pubkey))
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+            List {
+                Section("Add by Key") {
+                    TextField("npub or hex pubkey", text: $manualPubkeyInput)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.asciiCapable)
+                        #endif
+
+                    if let error = manualPubkeyError {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button("Add") {
+                        addManualAgent()
+                    }
+                    .disabled(manualPubkeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .buttonStyle(.plain)
-            }
-            .overlay {
-                if filteredAvailableAgents.isEmpty {
-                    ContentUnavailableView(
-                        projectBackendPubkey == nil ? "Backend Offline" : "No Installed Agents",
-                        systemImage: "person.crop.circle.badge.exclamationmark",
-                        description: Text(
-                            projectBackendPubkey == nil
-                                ? "Wait for the project backend to come online before assigning agents."
-                                : "Install an agent into this backend before assigning it to the project."
+
+                Section("Installed Agents") {
+                    if filteredAvailableAgents.isEmpty {
+                        ContentUnavailableView(
+                            projectBackendPubkey == nil ? "Backend Offline" : "No Installed Agents",
+                            systemImage: "person.crop.circle.badge.exclamationmark",
+                            description: Text(
+                                projectBackendPubkey == nil
+                                    ? "Wait for the project backend to come online before assigning agents."
+                                    : "Install an agent into this backend before assigning it to the project."
+                            )
                         )
-                    )
+                    } else {
+                        ForEach(filteredAvailableAgents, id: \.pubkey) { agent in
+                            Button {
+                                addAgent(agentPubkey: agent.pubkey)
+                                showAddAgentSheet = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(agent.slug)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                    Text(shortPubkey(agent.pubkey))
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
             }
             .searchable(text: $agentSearch, prompt: "Search installed agents")
@@ -418,6 +444,8 @@ struct ProjectSettingsView: View {
                     Button("Done") {
                         showAddAgentSheet = false
                         agentSearch = ""
+                        manualPubkeyInput = ""
+                        manualPubkeyError = nil
                     }
                 }
             }
@@ -534,6 +562,27 @@ struct ProjectSettingsView: View {
     private func addAgent(agentPubkey: String) {
         guard !pendingAgentPubkeys.contains(agentPubkey) else { return }
         pendingAgentPubkeys.append(agentPubkey)
+    }
+
+    private func resolveToHexPubkey(_ input: String) -> String? {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.lowercased().hasPrefix("npub1") {
+            return Bech32.npubToHex(trimmed)
+        }
+        let lower = trimmed.lowercased()
+        guard lower.count == 64, lower.allSatisfy({ $0.isHexDigit }) else { return nil }
+        return lower
+    }
+
+    private func addManualAgent() {
+        guard let hex = resolveToHexPubkey(manualPubkeyInput) else {
+            manualPubkeyError = "Enter a valid npub or 64-character hex pubkey."
+            return
+        }
+        manualPubkeyError = nil
+        addAgent(agentPubkey: hex)
+        manualPubkeyInput = ""
+        showAddAgentSheet = false
     }
 
     private func removeAgent(agentPubkey: String) {
