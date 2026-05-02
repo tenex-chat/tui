@@ -228,10 +228,11 @@ pub struct AiAudioSettings {
     /// (API keys stored in OS secure storage, not in JSON)
     #[serde(default)]
     pub selected_voice_ids: Vec<String>,
-    /// OpenRouter model selection for text massaging.
-    /// Legacy format stores a single model ID.
-    /// Multi-select format is encoded as:
-    /// `tenex:openrouter_models:v1:[\"model/id\",\"model/id2\"]`
+    /// OpenRouter model selection.
+    /// Legacy format stores a single model ID, and older multi-select values are encoded as:
+    /// `tenex:openrouter_models:v1:[\"model/id\",\"model/id2\"]`.
+    /// Current role-based values are encoded as:
+    /// `tenex:openrouter_roles:v1:{"audio_notifications":"model/id"}`.
     #[serde(default)]
     pub openrouter_model: Option<String>,
     /// Custom prompt for making text audio-friendly

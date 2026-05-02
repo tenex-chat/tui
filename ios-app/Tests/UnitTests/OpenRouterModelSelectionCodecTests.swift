@@ -83,6 +83,38 @@ final class OpenRouterModelSelectionCodecTests: XCTestCase {
         XCTAssertEqual(result, ["openai/gpt-4"])
     }
 
+    func testDecodeRoleSelectionsFromValidRoleEncoding() {
+        let encoded = "tenex:openrouter_roles:v1:{\"agent_prompt_rewrite\":\"anthropic/claude-3\",\"audio_notifications\":\"openai/gpt-4\",\"response_prediction\":\"google/gemini-pro\"}"
+        let result = OpenRouterModelSelectionCodec.decodeRoleSelections(from: encoded)
+        XCTAssertEqual(result[.audioNotifications], "openai/gpt-4")
+        XCTAssertEqual(result[.agentPromptRewrite], "anthropic/claude-3")
+        XCTAssertEqual(result[.responsePrediction], "google/gemini-pro")
+    }
+
+    func testDecodeRoleSelectionsMigratesLegacySingleModelToAllRoles() {
+        let result = OpenRouterModelSelectionCodec.decodeRoleSelections(from: "openai/gpt-4")
+        XCTAssertEqual(result[.audioNotifications], "openai/gpt-4")
+        XCTAssertEqual(result[.agentPromptRewrite], "openai/gpt-4")
+        XCTAssertEqual(result[.responsePrediction], "openai/gpt-4")
+    }
+
+    func testDecodeRoleSelectionsMigratesLegacyMultiModelToPreferredModel() {
+        let legacy = OpenRouterModelSelectionCodec.encodeSelectedModelIds([
+            "openai/gpt-4",
+            "anthropic/claude-3"
+        ])
+        let result = OpenRouterModelSelectionCodec.decodeRoleSelections(from: legacy)
+        XCTAssertEqual(result[.audioNotifications], "anthropic/claude-3")
+        XCTAssertEqual(result[.agentPromptRewrite], "anthropic/claude-3")
+        XCTAssertEqual(result[.responsePrediction], "anthropic/claude-3")
+    }
+
+    func testDecodeSelectedModelIdsFromRoleEncodingReturnsSelectedRoleValues() {
+        let encoded = "tenex:openrouter_roles:v1:{\"audio_notifications\":\"openai/gpt-4\",\"response_prediction\":\"openai/gpt-4\",\"agent_prompt_rewrite\":\"anthropic/claude-3\"}"
+        let result = OpenRouterModelSelectionCodec.decodeSelectedModelIds(from: encoded)
+        XCTAssertEqual(result, ["openai/gpt-4", "anthropic/claude-3"])
+    }
+
     // MARK: - encodeSelectedModelIds
 
     func testEncodeEmptySet() {
@@ -130,6 +162,37 @@ final class OpenRouterModelSelectionCodecTests: XCTestCase {
         let payload = String(result.dropFirst(OpenRouterModelSelectionCodec.multiModelPrefix.count))
         let decoded = try! JSONSerialization.jsonObject(with: payload.data(using: .utf8)!) as! [String]
         XCTAssertEqual(decoded, ["a-model", "m-model", "z-model"])
+    }
+
+    func testEncodeRoleSelections() {
+        let result = OpenRouterModelSelectionCodec.encodeRoleSelections([
+            .audioNotifications: "openai/gpt-4",
+            .agentPromptRewrite: "anthropic/claude-3",
+            .responsePrediction: "google/gemini-pro"
+        ])!
+        XCTAssertTrue(result.hasPrefix(OpenRouterModelSelectionCodec.roleModelPrefix))
+
+        let payload = String(result.dropFirst(OpenRouterModelSelectionCodec.roleModelPrefix.count))
+        let decoded = try! JSONSerialization.jsonObject(with: payload.data(using: .utf8)!) as! [String: String]
+        XCTAssertEqual(decoded["audio_notifications"], "openai/gpt-4")
+        XCTAssertEqual(decoded["agent_prompt_rewrite"], "anthropic/claude-3")
+        XCTAssertEqual(decoded["response_prediction"], "google/gemini-pro")
+    }
+
+    func testEncodeRoleSelectionsFiltersEmptyValues() {
+        let result = OpenRouterModelSelectionCodec.encodeRoleSelections([
+            .audioNotifications: "  openai/gpt-4  ",
+            .agentPromptRewrite: " ",
+            .responsePrediction: ""
+        ])!
+        let payload = String(result.dropFirst(OpenRouterModelSelectionCodec.roleModelPrefix.count))
+        let decoded = try! JSONSerialization.jsonObject(with: payload.data(using: .utf8)!) as! [String: String]
+        XCTAssertEqual(decoded, ["audio_notifications": "openai/gpt-4"])
+    }
+
+    func testEncodeEmptyRoleSelectionsReturnsNil() {
+        let result = OpenRouterModelSelectionCodec.encodeRoleSelections([:])
+        XCTAssertNil(result)
     }
 
     // MARK: - Round-trip encode/decode
@@ -209,5 +272,27 @@ final class OpenRouterModelSelectionCodecTests: XCTestCase {
         let encoded = OpenRouterModelSelectionCodec.encodeSelectedModelIds(["z-last", "a-first", "m-middle"])
         let preferred = OpenRouterModelSelectionCodec.preferredModel(from: encoded)
         XCTAssertEqual(preferred, "a-first")
+    }
+
+    func testSelectedModelForRoleFromRoleEncoding() {
+        let encoded = OpenRouterModelSelectionCodec.encodeRoleSelections([
+            .audioNotifications: "openai/gpt-4",
+            .agentPromptRewrite: "anthropic/claude-3"
+        ])
+
+        XCTAssertEqual(
+            OpenRouterModelSelectionCodec.selectedModel(for: .agentPromptRewrite, from: encoded),
+            "anthropic/claude-3"
+        )
+        XCTAssertNil(OpenRouterModelSelectionCodec.selectedModel(for: .responsePrediction, from: encoded))
+    }
+
+    func testPreferredModelFromRoleEncodingUsesRoleOrder() {
+        let encoded = OpenRouterModelSelectionCodec.encodeRoleSelections([
+            .responsePrediction: "google/gemini-pro",
+            .agentPromptRewrite: "anthropic/claude-3"
+        ])
+        let preferred = OpenRouterModelSelectionCodec.preferredModel(from: encoded)
+        XCTAssertEqual(preferred, "anthropic/claude-3")
     }
 }

@@ -54,7 +54,7 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var hasOpenRouterKey = false
     @Published var audioEnabled = false
     @Published var audioPrompt = ""
-    @Published var selectedModelIds: Set<String> = []
+    @Published var selectedModelsByRole: [OpenRouterModelRole: String] = [:]
     @Published var selectedVoiceIds: Set<String> = []
     @Published var ttsInactivityThresholdSecs: UInt64 = 120
 
@@ -104,7 +104,7 @@ final class AppSettingsViewModel: ObservableObject {
             let settings = try await coreManager.safeCore.getAiAudioSettings()
             audioEnabled = settings.enabled
             audioPrompt = settings.audioPrompt
-            selectedModelIds = OpenRouterModelSelectionCodec.decodeSelectedModelIds(from: settings.openrouterModel)
+            selectedModelsByRole = OpenRouterModelSelectionCodec.decodeRoleSelections(from: settings.openrouterModel)
             selectedVoiceIds = Set(settings.selectedVoiceIds)
             ttsInactivityThresholdSecs = settings.ttsInactivityThresholdSecs
         } catch {
@@ -296,36 +296,43 @@ final class AppSettingsViewModel: ObservableObject {
         }
     }
 
-    func toggleSelectedModel(coreManager: TenexCoreManager, modelId: String) async {
-        let previous = selectedModelIds
-        if selectedModelIds.contains(modelId) {
-            selectedModelIds.remove(modelId)
+    func setSelectedModel(
+        coreManager: TenexCoreManager,
+        role: OpenRouterModelRole,
+        modelId: String
+    ) async {
+        let previous = selectedModelsByRole
+        let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            selectedModelsByRole.removeValue(forKey: role)
         } else {
-            selectedModelIds.insert(modelId)
+            selectedModelsByRole[role] = trimmed
         }
 
         await persistSelectedModels(coreManager: coreManager, rollbackTo: previous)
     }
 
-    func clearSelectedModels(coreManager: TenexCoreManager) async {
-        let previous = selectedModelIds
-        selectedModelIds = []
+    func clearSelectedModel(coreManager: TenexCoreManager, role: OpenRouterModelRole) async {
+        let previous = selectedModelsByRole
+        selectedModelsByRole.removeValue(forKey: role)
         await persistSelectedModels(coreManager: coreManager, rollbackTo: previous)
     }
 
-    var selectedModelsSummary: String {
-        guard !selectedModelIds.isEmpty else { return "Not selected" }
-        if selectedModelIds.count == 1, let modelId = selectedModelIds.first {
-            if let model = availableModels.first(where: { $0.id == modelId }) {
-                return model.name ?? modelId
-            }
-            return modelId
-        }
-        return "\(selectedModelIds.count) selected"
+    func selectedModel(for role: OpenRouterModelRole) -> String? {
+        let modelId = selectedModelsByRole[role]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return modelId.isEmpty ? nil : modelId
     }
 
-    func isModelSelected(_ modelId: String) -> Bool {
-        selectedModelIds.contains(modelId)
+    func selectedModelSummary(for role: OpenRouterModelRole) -> String {
+        guard let modelId = selectedModel(for: role) else { return "Not selected" }
+        if let model = availableModels.first(where: { $0.id == modelId }) {
+            return model.name ?? modelId
+        }
+        return modelId
+    }
+
+    func isModel(_ modelId: String, selectedFor role: OpenRouterModelRole) -> Bool {
+        selectedModel(for: role) == modelId
     }
 
     func setAudioEnabled(coreManager: TenexCoreManager, enabled: Bool) async {
@@ -387,12 +394,15 @@ final class AppSettingsViewModel: ObservableObject {
         }
     }
 
-    private func persistSelectedModels(coreManager: TenexCoreManager, rollbackTo previous: Set<String>) async {
+    private func persistSelectedModels(
+        coreManager: TenexCoreManager,
+        rollbackTo previous: [OpenRouterModelRole: String]
+    ) async {
         do {
-            let encoded = OpenRouterModelSelectionCodec.encodeSelectedModelIds(selectedModelIds)
+            let encoded = OpenRouterModelSelectionCodec.encodeRoleSelections(selectedModelsByRole)
             try await coreManager.safeCore.setOpenRouterModel(model: encoded)
         } catch {
-            selectedModelIds = previous
+            selectedModelsByRole = previous
             errorMessage = "Failed to save model selection: \(error.localizedDescription)"
         }
     }

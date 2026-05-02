@@ -746,7 +746,7 @@ private struct AISettingsSectionView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     @ObservedObject var viewModel: AppSettingsViewModel
 
-    @State private var showModelSelector = false
+    @State private var selectedModelRole: OpenRouterModelRole?
     @State private var showCredentialSheet = false
     @State private var selectedProvider = ""
     @State private var credentialInput = ""
@@ -822,29 +822,51 @@ private struct AISettingsSectionView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Model")
+                Text("Roles")
                     .font(.headline)
                     .padding(.horizontal, 16)
 
-                Button {
-                    Task {
-                        if viewModel.availableModels.isEmpty {
-                            await viewModel.fetchModels(coreManager: coreManager)
+                VStack(spacing: 0) {
+                    ForEach(Array(OpenRouterModelRole.allCases.enumerated()), id: \.element.id) { index, role in
+                        Button {
+                            Task {
+                                if viewModel.availableModels.isEmpty {
+                                    await viewModel.fetchModels(coreManager: coreManager)
+                                }
+                                selectedModelRole = role
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: role.systemImage)
+                                    .font(.body)
+                                    .foregroundStyle(Color.agentBrand)
+                                    .frame(width: 24, height: 24)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(role.title)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                    Text(role.description)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 12)
+                                Text(viewModel.selectedModelSummary(for: role))
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(12)
                         }
-                        showModelSelector = true
+                        .buttonStyle(.plain)
+                        .disabled(!viewModel.hasOpenRouterKey)
+
+                        if index < OpenRouterModelRole.allCases.count - 1 {
+                            Divider()
+                        }
                     }
-                } label: {
-                    HStack {
-                        Text("OpenRouter Models")
-                        Spacer()
-                        Text(viewModel.selectedModelsSummary)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .padding(12)
                 }
                 #if os(macOS)
                 .background(Color.systemBackground)
@@ -857,14 +879,13 @@ private struct AISettingsSectionView: View {
                         .stroke(.quaternary, lineWidth: 1)
                 )
                 .padding(.horizontal, 16)
-                .disabled(!viewModel.hasOpenRouterKey)
             }
 
             Spacer(minLength: 0)
         }
         .padding(.top, 16)
-        .sheet(isPresented: $showModelSelector) {
-            ModelSelectorSheet(viewModel: viewModel)
+        .sheet(item: $selectedModelRole) { role in
+            RoleModelSelectorSheet(viewModel: viewModel, role: role)
                 .environment(coreManager)
                 #if os(macOS)
                 .frame(minWidth: 500, idealWidth: 560, minHeight: 420, idealHeight: 560)
@@ -1035,10 +1056,11 @@ private struct AudioSettingsSectionView: View {
     }
 }
 
-private struct ModelSelectorSheet: View {
+private struct RoleModelSelectorSheet: View {
     @Environment(TenexCoreManager.self) private var coreManager
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var viewModel: AppSettingsViewModel
+    let role: OpenRouterModelRole
     @State private var searchText = ""
 
     private var filteredModels: [ModelInfo] {
@@ -1064,8 +1086,9 @@ private struct ModelSelectorSheet: View {
                     List(filteredModels, id: \.id) { model in
                         Button {
                             Task {
-                                await viewModel.toggleSelectedModel(
+                                await viewModel.setSelectedModel(
                                     coreManager: coreManager,
+                                    role: role,
                                     modelId: model.id
                                 )
                             }
@@ -1081,7 +1104,7 @@ private struct ModelSelectorSheet: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                if viewModel.isModelSelected(model.id) {
+                                if viewModel.isModel(model.id, selectedFor: role) {
                                     Image(systemName: "checkmark.circle.fill")
                                         .foregroundStyle(Color.agentBrand)
                                 } else {
@@ -1095,7 +1118,7 @@ private struct ModelSelectorSheet: View {
                 }
             }
             .searchable(text: $searchText, prompt: "Search models")
-            .navigationTitle("OpenRouter Models")
+            .navigationTitle(role.title)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #else
@@ -1108,9 +1131,14 @@ private struct ModelSelectorSheet: View {
                     }
                 }
                 ToolbarItem(placement: .automatic) {
-                    if !viewModel.selectedModelIds.isEmpty {
+                    if viewModel.selectedModel(for: role) != nil {
                         Button("Clear") {
-                            Task { await viewModel.clearSelectedModels(coreManager: coreManager) }
+                            Task {
+                                await viewModel.clearSelectedModel(
+                                    coreManager: coreManager,
+                                    role: role
+                                )
+                            }
                         }
                     }
                 }

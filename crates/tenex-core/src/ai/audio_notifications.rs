@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -10,6 +11,8 @@ use super::openrouter::OpenRouterClient;
 use crate::models::project_draft::AiAudioSettings;
 
 const MULTI_OPENROUTER_MODELS_PREFIX: &str = "tenex:openrouter_models:v1:";
+const ROLE_OPENROUTER_MODELS_PREFIX: &str = "tenex:openrouter_roles:v1:";
+const AUDIO_NOTIFICATION_MODEL_ROLE: &str = "audio_notifications";
 
 /// Represents a generated audio notification
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +188,18 @@ impl AudioNotificationManager {
         };
         let trimmed = stored.trim();
         if trimmed.is_empty() {
+            return Vec::new();
+        }
+
+        if let Some(payload) = trimmed.strip_prefix(ROLE_OPENROUTER_MODELS_PREFIX) {
+            if let Ok(decoded) = serde_json::from_str::<BTreeMap<String, String>>(payload) {
+                if let Some(model) = decoded.get(AUDIO_NOTIFICATION_MODEL_ROLE) {
+                    let model = model.trim();
+                    if !model.is_empty() {
+                        return vec![model.to_string()];
+                    }
+                }
+            }
             return Vec::new();
         }
 
@@ -494,5 +509,25 @@ mod tests {
                 "openai/gpt-5".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn test_decode_openrouter_models_role_encoded_audio_value() {
+        let encoded = format!(
+            "{}{{\"agent_prompt_rewrite\":\"anthropic/claude-sonnet-4\",\"audio_notifications\":\"openai/gpt-5\"}}",
+            ROLE_OPENROUTER_MODELS_PREFIX
+        );
+        let decoded = AudioNotificationManager::decode_openrouter_models(Some(&encoded));
+        assert_eq!(decoded, vec!["openai/gpt-5".to_string()]);
+    }
+
+    #[test]
+    fn test_decode_openrouter_models_role_encoded_missing_audio_value() {
+        let encoded = format!(
+            "{}{{\"agent_prompt_rewrite\":\"anthropic/claude-sonnet-4\"}}",
+            ROLE_OPENROUTER_MODELS_PREFIX
+        );
+        let decoded = AudioNotificationManager::decode_openrouter_models(Some(&encoded));
+        assert!(decoded.is_empty());
     }
 }
