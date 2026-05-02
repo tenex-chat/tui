@@ -52,6 +52,8 @@ final class AppSettingsViewModel: ObservableObject {
 
     @Published var hasElevenLabsKey = false
     @Published var hasOpenRouterKey = false
+    @Published var elevenLabsBYOKInfo: BYOKCredentialInfo?
+    @Published var openRouterBYOKInfo: BYOKCredentialInfo?
     @Published var audioEnabled = false
     @Published var audioPrompt = ""
     @Published var selectedModelsByRole: [OpenRouterModelRole: String] = [:]
@@ -79,6 +81,7 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var isLoadingVoices = false
     @Published var isLoadingModels = false
     @Published var isSavingApiKey = false
+    @Published var isConnectingBYOK = false
     @Published var errorMessage: String?
 
     private static let defaultAudioPrompt = """
@@ -99,6 +102,14 @@ final class AppSettingsViewModel: ObservableObject {
         async let openRouterCheck = hasApiKey(for: .openRouter)
         hasElevenLabsKey = await elevenLabsCheck
         hasOpenRouterKey = await openRouterCheck
+        elevenLabsBYOKInfo = hasElevenLabsKey ? BYOKCredentialMetadataStore.loadInfo(for: .elevenLabs) : nil
+        openRouterBYOKInfo = hasOpenRouterKey ? BYOKCredentialMetadataStore.loadInfo(for: .openRouter) : nil
+        if !hasElevenLabsKey {
+            BYOKCredentialMetadataStore.deleteInfo(for: .elevenLabs)
+        }
+        if !hasOpenRouterKey {
+            BYOKCredentialMetadataStore.deleteInfo(for: .openRouter)
+        }
 
         do {
             let settings = try await coreManager.safeCore.getAiAudioSettings()
@@ -262,6 +273,14 @@ final class AppSettingsViewModel: ObservableObject {
 
     func deleteOpenRouterKey() async {
         await deleteApiKey(for: .openRouter)
+    }
+
+    func connectOpenRouterWithBYOK() async {
+        await connectProviderWithBYOK(.openRouter)
+    }
+
+    func connectElevenLabsWithBYOK() async {
+        await connectProviderWithBYOK(.elevenLabs)
     }
 
     func fetchModels(coreManager: TenexCoreManager) async {
@@ -518,8 +537,12 @@ final class AppSettingsViewModel: ObservableObject {
             switch provider {
             case .elevenLabs:
                 hasElevenLabsKey = true
+                elevenLabsBYOKInfo = nil
+                BYOKCredentialMetadataStore.deleteInfo(for: .elevenLabs)
             case .openRouter:
                 hasOpenRouterKey = true
+                openRouterBYOKInfo = nil
+                BYOKCredentialMetadataStore.deleteInfo(for: .openRouter)
             }
         case .failure(let error):
             errorMessage = "Failed to save \(provider.displayName) key: \(error.localizedDescription)"
@@ -541,9 +564,52 @@ final class AppSettingsViewModel: ObservableObject {
         case .elevenLabs:
             hasElevenLabsKey = false
             availableVoices = []
+            elevenLabsBYOKInfo = nil
+            BYOKCredentialMetadataStore.deleteInfo(for: .elevenLabs)
         case .openRouter:
             hasOpenRouterKey = false
             availableModels = []
+            openRouterBYOKInfo = nil
+            BYOKCredentialMetadataStore.deleteInfo(for: .openRouter)
+        }
+    }
+
+    private func connectProviderWithBYOK(_ byokProvider: BYOKProvider) async {
+        guard !isConnectingBYOK else { return }
+
+        isConnectingBYOK = true
+        defer { isConnectingBYOK = false }
+
+        do {
+            let grant = try await BYOKConnectService.shared.requestKey(for: byokProvider)
+            let result: KeychainResult<Void>
+            switch byokProvider {
+            case .elevenLabs:
+                result = await KeychainService.shared.saveElevenLabsApiKeyAsync(grant.apiKey)
+            case .openRouter:
+                result = await KeychainService.shared.saveOpenRouterApiKeyAsync(grant.apiKey)
+            }
+
+            switch result {
+            case .success:
+                switch byokProvider {
+                case .elevenLabs:
+                    hasElevenLabsKey = true
+                    availableVoices = []
+                    elevenLabsBYOKInfo = grant.credentialInfo
+                case .openRouter:
+                    hasOpenRouterKey = true
+                    availableModels = []
+                    openRouterBYOKInfo = grant.credentialInfo
+                }
+                BYOKCredentialMetadataStore.saveInfo(grant.credentialInfo, for: byokProvider)
+            case .failure(let error):
+                errorMessage = "Failed to save BYOK \(byokProvider.rawValue) key: \(error.localizedDescription)"
+            }
+        } catch BYOKConnectError.authenticationCancelled {
+            // User cancellation is an expected outcome; leave the current credential unchanged.
+        } catch {
+            errorMessage = "BYOK connection failed: \(error.localizedDescription)"
         }
     }
 

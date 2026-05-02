@@ -779,28 +779,16 @@ private struct AISettingsSectionView: View {
                                             .font(.body)
                                     }
                                 }
-                                Text(provider.description)
+                                Text(providerCaption(
+                                    providerID: provider.id,
+                                    defaultDescription: provider.description,
+                                    hasKey: hasKey
+                                ))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button(hasKey ? "Disconnect" : "Connect") {
-                                if hasKey {
-                                    Task {
-                                        if provider.id == "openrouter" {
-                                            await viewModel.deleteOpenRouterKey()
-                                        } else {
-                                            await viewModel.deleteElevenLabsKey()
-                                        }
-                                    }
-                                } else {
-                                    credentialError = nil
-                                    credentialInput = ""
-                                    selectedProvider = provider.id
-                                    showCredentialSheet = true
-                                }
-                            }
-                            .adaptiveGlassButtonStyle()
+                            providerAction(providerID: provider.id, hasKey: hasKey)
                         }
                         .padding(12)
                         if index < providers.count - 1 {
@@ -947,6 +935,97 @@ private struct AISettingsSectionView: View {
         #if os(macOS)
         .frame(width: 420)
         #endif
+    }
+
+    private func providerCaption(providerID: String, defaultDescription: String, hasKey: Bool) -> String {
+        if let info = byokInfo(providerID: providerID) {
+            let label = info.keyLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let label, !label.isEmpty {
+                return "Connected with BYOK - \(label)"
+            }
+            return "Connected with BYOK"
+        }
+
+        if hasKey {
+            return "Manual key stored locally"
+        }
+
+        return defaultDescription
+    }
+
+    @ViewBuilder
+    private func providerAction(providerID: String, hasKey: Bool) -> some View {
+        if hasKey {
+            Button("Disconnect") {
+                Task {
+                    if providerID == "openrouter" {
+                        await viewModel.deleteOpenRouterKey()
+                    } else {
+                        await viewModel.deleteElevenLabsKey()
+                    }
+                }
+            }
+            .adaptiveGlassButtonStyle()
+        } else if supportsBYOK(providerID: providerID) {
+            Menu {
+                Button {
+                    Task {
+                        if providerID == "openrouter" {
+                            await viewModel.connectOpenRouterWithBYOK()
+                        } else if providerID == "elevenlabs" {
+                            await viewModel.connectElevenLabsWithBYOK()
+                        }
+                    }
+                } label: {
+                    Label("Connect with BYOK", systemImage: "key.viewfinder")
+                }
+
+                Button {
+                    beginManualCredentialEntry(providerID: providerID)
+                } label: {
+                    Label("Enter API Key", systemImage: "keyboard")
+                }
+            } label: {
+                if viewModel.isConnectingBYOK {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("Connecting")
+                    }
+                } else {
+                    Label("Connect", systemImage: "link")
+                }
+            }
+            .adaptiveGlassButtonStyle()
+            .disabled(viewModel.isConnectingBYOK)
+        } else {
+            Button("Connect") {
+                beginManualCredentialEntry(providerID: providerID)
+            }
+            .adaptiveGlassButtonStyle()
+        }
+    }
+
+    private func beginManualCredentialEntry(providerID: String) {
+        credentialError = nil
+        credentialInput = ""
+        selectedProvider = providerID
+        showCredentialSheet = true
+    }
+
+    private func byokInfo(providerID: String) -> BYOKCredentialInfo? {
+        switch providerID {
+        case "elevenlabs":
+            return viewModel.elevenLabsBYOKInfo
+        case "openrouter":
+            return viewModel.openRouterBYOKInfo
+        default:
+            return nil
+        }
+    }
+
+    private func supportsBYOK(providerID: String) -> Bool {
+        providerID == "elevenlabs" || providerID == "openrouter"
     }
 }
 
