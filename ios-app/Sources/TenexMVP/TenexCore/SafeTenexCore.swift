@@ -167,6 +167,14 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Get HTML reports (kind:1 events tagged `t:html-report`).
+    /// Pass `""` for `projectId` to return reports across all projects.
+    func getHtmlReports(projectId: String) -> [HtmlReport] {
+        profiler.measureFFI("getHtmlReports") {
+            core.getHtmlReports(projectId: projectId)
+        }
+    }
+
     /// Get project filters with visibility and counts.
     func getProjectFilters() throws -> [ProjectFilterInfo] {
         try profiler.measureFFI("getProjectFilters") {

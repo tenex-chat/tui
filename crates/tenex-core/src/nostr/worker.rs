@@ -2017,6 +2017,24 @@ impl NostrWorker {
             "Subscribed to user's own kind:1 messages for history search"
         );
 
+        // 2e. HTML reports (kind:1 tagged `t:html-report`) - global subscription
+        // so reports authored against any project the user can see are ingested.
+        let html_report_filter = Filter::new()
+            .kind(Kind::from(KIND_TEXT_NOTE))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::T), "html-report");
+        let html_report_filter_json = serde_json::to_string(&html_report_filter).ok();
+        let html_report_output = client.subscribe(html_report_filter.clone(), None).await?;
+        self.subscription_stats.register(
+            html_report_output.val.to_string(),
+            SubscriptionInfo::new("HTML reports".to_string(), vec![KIND_TEXT_NOTE], None)
+                .with_raw_filter(html_report_filter_json.unwrap_or_default()),
+        );
+        tlog!(
+            "CONN",
+            "Subscribed to HTML reports (kind:{} #t=html-report)",
+            KIND_TEXT_NOTE
+        );
+
         // 3. Global definitions/social (kind:34199, 4199, 4200, 4201, 4202, 1111, 7)
         let global_filter = Filter::new().kinds(vec![
             Kind::Custom(KIND_TEAM_PACK),

@@ -883,6 +883,15 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getDocumentThreads(reportATag: String)  -> [Thread]
     
     /**
+     * Get HTML reports (kind:1 events tagged `t:html-report`).
+     *
+     * Pass `""` for `project_id` to return all HTML reports across projects.
+     * Otherwise the result is filtered to events whose `a` tag matches the
+     * project's coordinate (`31933:<pubkey>:<slug>`).
+     */
+    func getHtmlReports(projectId: String)  -> [HtmlReport]
+    
+    /**
      * Get inbox items for the current user.
      */
     func getInbox()  -> [InboxItem]
@@ -1891,6 +1900,21 @@ open func getDocumentThreads(reportATag: String) -> [Thread]  {
     return try!  FfiConverterSequenceTypeThread.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_document_threads(self.uniffiClonePointer(),
         FfiConverterString.lower(reportATag),$0
+    )
+})
+}
+    
+    /**
+     * Get HTML reports (kind:1 events tagged `t:html-report`).
+     *
+     * Pass `""` for `project_id` to return all HTML reports across projects.
+     * Otherwise the result is filtered to events whose `a` tag matches the
+     * project's coordinate (`31933:<pubkey>:<slug>`).
+     */
+open func getHtmlReports(projectId: String) -> [HtmlReport]  {
+    return try!  FfiConverterSequenceTypeHtmlReport.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_html_reports(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
     )
 })
 }
@@ -4778,6 +4802,194 @@ public func FfiConverterTypeHourActivity_lower(_ value: HourActivity) -> RustBuf
 }
 
 
+/**
+ * An HTML report (kind:1 with `["t", "html-report"]`).
+ *
+ * Agents publish kind:1 events tagged `t:html-report` whose `url` tag points to
+ * either a single HTML document or a `.zip` bundle hosted on Blossom. The note
+ * content holds a human-readable description; an optional `title` tag overrides
+ * the default title derived from the content.
+ */
+public struct HtmlReport {
+    /**
+     * Event ID (hex)
+     */
+    public var eventId: String
+    /**
+     * Blossom URL of the report (single `.html` or `.zip` bundle)
+     */
+    public var url: String
+    /**
+     * Display title (from `title` tag, or first 80 chars of content)
+     */
+    public var title: String
+    /**
+     * Description (the kind:1 note content)
+     */
+    public var description: String
+    /**
+     * Author pubkey (hex)
+     */
+    public var authorPubkey: String
+    /**
+     * First `e` tag value referencing the source conversation; empty if none.
+     */
+    public var conversationId: String
+    /**
+     * First `a` tag value matching the project pattern (`31933:...`); empty if none.
+     */
+    public var projectATag: String
+    /**
+     * Creation timestamp (unix seconds)
+     */
+    public var createdAt: UInt64
+    /**
+     * Whether the URL points to a `.zip` bundle
+     */
+    public var isZip: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Event ID (hex)
+         */eventId: String, 
+        /**
+         * Blossom URL of the report (single `.html` or `.zip` bundle)
+         */url: String, 
+        /**
+         * Display title (from `title` tag, or first 80 chars of content)
+         */title: String, 
+        /**
+         * Description (the kind:1 note content)
+         */description: String, 
+        /**
+         * Author pubkey (hex)
+         */authorPubkey: String, 
+        /**
+         * First `e` tag value referencing the source conversation; empty if none.
+         */conversationId: String, 
+        /**
+         * First `a` tag value matching the project pattern (`31933:...`); empty if none.
+         */projectATag: String, 
+        /**
+         * Creation timestamp (unix seconds)
+         */createdAt: UInt64, 
+        /**
+         * Whether the URL points to a `.zip` bundle
+         */isZip: Bool) {
+        self.eventId = eventId
+        self.url = url
+        self.title = title
+        self.description = description
+        self.authorPubkey = authorPubkey
+        self.conversationId = conversationId
+        self.projectATag = projectATag
+        self.createdAt = createdAt
+        self.isZip = isZip
+    }
+}
+
+#if compiler(>=6)
+extension HtmlReport: Sendable {}
+#endif
+
+
+extension HtmlReport: Equatable, Hashable {
+    public static func ==(lhs: HtmlReport, rhs: HtmlReport) -> Bool {
+        if lhs.eventId != rhs.eventId {
+            return false
+        }
+        if lhs.url != rhs.url {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.authorPubkey != rhs.authorPubkey {
+            return false
+        }
+        if lhs.conversationId != rhs.conversationId {
+            return false
+        }
+        if lhs.projectATag != rhs.projectATag {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        if lhs.isZip != rhs.isZip {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(eventId)
+        hasher.combine(url)
+        hasher.combine(title)
+        hasher.combine(description)
+        hasher.combine(authorPubkey)
+        hasher.combine(conversationId)
+        hasher.combine(projectATag)
+        hasher.combine(createdAt)
+        hasher.combine(isZip)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHtmlReport: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HtmlReport {
+        return
+            try HtmlReport(
+                eventId: FfiConverterString.read(from: &buf), 
+                url: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                authorPubkey: FfiConverterString.read(from: &buf), 
+                conversationId: FfiConverterString.read(from: &buf), 
+                projectATag: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                isZip: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HtmlReport, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.eventId, into: &buf)
+        FfiConverterString.write(value.url, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+        FfiConverterString.write(value.authorPubkey, into: &buf)
+        FfiConverterString.write(value.conversationId, into: &buf)
+        FfiConverterString.write(value.projectATag, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+        FfiConverterBool.write(value.isZip, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHtmlReport_lift(_ buf: RustBuffer) throws -> HtmlReport {
+    return try FfiConverterTypeHtmlReport.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHtmlReport_lower(_ value: HtmlReport) -> RustBuffer {
+    return FfiConverterTypeHtmlReport.lower(value)
+}
+
+
 public struct InboxItem {
     public var id: String
     public var eventType: InboxEventType
@@ -6889,11 +7101,11 @@ public struct Report {
      */
     public var author: String
     /**
-     * Document title (from title tag)
+     * Document title (from title tag, frontmatter title, or content fallback)
      */
     public var title: String
     /**
-     * Summary (from summary tag, or first 160 chars of content)
+     * Summary (from summary tag, frontmatter summary/scope, or content fallback)
      */
     public var summary: String
     /**
@@ -6933,10 +7145,10 @@ public struct Report {
          * Author pubkey (hex)
          */author: String, 
         /**
-         * Document title (from title tag)
+         * Document title (from title tag, frontmatter title, or content fallback)
          */title: String, 
         /**
-         * Summary (from summary tag, or first 160 chars of content)
+         * Summary (from summary tag, frontmatter summary/scope, or content fallback)
          */summary: String, 
         /**
          * Full markdown content
@@ -10316,6 +10528,31 @@ fileprivate struct FfiConverterSequenceTypeHourActivity: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeHtmlReport: FfiConverterRustBuffer {
+    typealias SwiftType = [HtmlReport]
+
+    public static func write(_ value: [HtmlReport], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeHtmlReport.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [HtmlReport] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [HtmlReport]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeHtmlReport.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeInboxItem: FfiConverterRustBuffer {
     typealias SwiftType = [InboxItem]
 
@@ -11097,6 +11334,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_document_threads() != 33934) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_html_reports() != 56229) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_inbox() != 40776) {

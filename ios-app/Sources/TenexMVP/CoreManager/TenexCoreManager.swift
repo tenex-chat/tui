@@ -81,6 +81,8 @@ class TenexCoreManager {
     var projects: [Project] = []
     var reports: [Report] = []
     var reportsVersion: UInt64 = 0
+    var htmlReports: [HtmlReport] = []
+    var htmlReportsVersion: UInt64 = 0
 
     func applyReportUpsert(report: Report) {
         if let index = reports.firstIndex(where: { $0.id == report.id }) {

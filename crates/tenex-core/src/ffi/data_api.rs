@@ -271,6 +271,81 @@ impl TenexCore {
             .collect()
     }
 
+    /// Get HTML reports (kind:1 events tagged `t:html-report`).
+    ///
+    /// Pass `""` for `project_id` to return all HTML reports across projects.
+    /// Otherwise the result is filtered to events whose `a` tag matches the
+    /// project's coordinate (`31933:<pubkey>:<slug>`).
+    pub fn get_html_reports(&self, project_id: String) -> Vec<HtmlReport> {
+        let started_at = Instant::now();
+
+        let project_a_tag_filter = if project_id.is_empty() {
+            None
+        } else {
+            let store_guard = match self.store.read() {
+                Ok(g) => g,
+                Err(_) => return Vec::new(),
+            };
+            let store = match store_guard.as_ref() {
+                Some(s) => s,
+                None => return Vec::new(),
+            };
+            match store.get_projects().iter().find(|p| p.id == project_id) {
+                Some(p) => Some(p.a_tag()),
+                None => return Vec::new(),
+            }
+        };
+
+        let _tx_guard = match self.ndb_transaction_lock.lock() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+
+        let ndb = match self.ndb.read() {
+            Ok(g) => g.as_ref().cloned(),
+            Err(_) => None,
+        };
+        let Some(ndb) = ndb else {
+            return Vec::new();
+        };
+
+        let txn = match Transaction::new(ndb.as_ref()) {
+            Ok(txn) => txn,
+            Err(_) => return Vec::new(),
+        };
+
+        let filter = nostrdb::Filter::new()
+            .kinds([1])
+            .tags(["html-report"], 't')
+            .build();
+        let results = match ndb.query(&txn, &[filter], 1000) {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut reports: Vec<HtmlReport> = results
+            .iter()
+            .filter_map(|r| ndb.get_note_by_key(&txn, r.note_key).ok())
+            .filter_map(|note| HtmlReport::from_note(&note))
+            .filter(|report| match &project_a_tag_filter {
+                Some(a_tag) => &report.project_a_tag == a_tag,
+                None => true,
+            })
+            .collect();
+
+        reports.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        tlog!(
+            "PERF",
+            "ffi.get_html_reports projectId={} returned={} elapsedMs={}",
+            project_id,
+            reports.len(),
+            started_at.elapsed().as_millis()
+        );
+
+        reports
+    }
+
     /// Get root threads that reference a report a-tag (`30023:pubkey:slug`).
     pub fn get_document_threads(&self, report_a_tag: String) -> Vec<Thread> {
         let mut store_guard = match self.store.write() {

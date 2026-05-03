@@ -26,6 +26,7 @@ enum ReportEntry: Identifiable {
 struct ReportsTabView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     @State private var selectedReport: Report?
+    @State private var selectedHtmlReport: HtmlReport?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private var useSplitView: Bool { horizontalSizeClass == .regular }
@@ -36,11 +37,13 @@ struct ReportsTabView: View {
     var body: some View {
         if useSplitView {
             NavigationSplitView {
-                NavigationStack {
-                    listContent
-                }
+                NavigationStack { listContent }
             } detail: {
-                if let report = selectedReport {
+                if let htmlReport = selectedHtmlReport {
+                    HtmlReportDetailView(report: htmlReport)
+                        .environment(coreManager)
+                        .id(htmlReport.eventId)
+                } else if let report = selectedReport {
                     ReportDetailView(report: report)
                         .environment(coreManager)
                 } else {
@@ -53,6 +56,19 @@ struct ReportsTabView: View {
         } else {
             NavigationStack {
                 listContent
+                    .sheet(isPresented: Binding(get: { selectedHtmlReport != nil }, set: { if !$0 { selectedHtmlReport = nil } })) {
+                        if let htmlReport = selectedHtmlReport {
+                            NavigationStack {
+                                HtmlReportDetailView(report: htmlReport)
+                                    .environment(coreManager)
+                                    .toolbar {
+                                        ToolbarItem(placement: .confirmationAction) {
+                                            Button("Done") { selectedHtmlReport = nil }
+                                        }
+                                    }
+                            }
+                        }
+                    }
                     .sheet(isPresented: Binding(get: { selectedReport != nil }, set: { if !$0 { selectedReport = nil } })) {
                         if let report = selectedReport {
                             NavigationStack {
@@ -113,35 +129,62 @@ struct ReportsTabView: View {
         return coreManager.projects.first(where: { $0.id == projectId })
     }
 
+    private var sortedHtmlReports: [HtmlReport] {
+        coreManager.htmlReports.sorted { $0.createdAt > $1.createdAt }
+    }
+
     private var listContent: some View {
         Group {
-            if coreManager.reports.isEmpty {
+            if coreManager.reports.isEmpty && coreManager.htmlReports.isEmpty {
                 emptyStateView
             } else {
                 List {
-                    ForEach(reportEntries) { entry in
-                        switch entry {
-                        case .single(let report):
-                            Button {
-                                selectedReport = report
-                            } label: {
-                                ReportRowView(report: report, project: project(for: report.projectATag))
+                    if !sortedHtmlReports.isEmpty {
+                        Section("HTML Reports") {
+                            ForEach(sortedHtmlReports, id: \.eventId) { htmlReport in
+                                Button {
+                                    selectedReport = nil
+                                    selectedHtmlReport = htmlReport
+                                } label: {
+                                    HtmlReportRowView(
+                                        report: htmlReport,
+                                        project: project(for: htmlReport.projectATag)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("html_report_row_\(htmlReport.eventId)")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("report_row_\(report.id)")
+                        }
+                    }
 
-                        case .group(let projectATag, let docTag, let reports):
-                            NavigationLink {
-                                ReportGroupView(
-                                    docTag: docTag,
-                                    reports: reports,
-                                    selectedReport: $selectedReport,
-                                    project: project(for: projectATag)
-                                )
-                            } label: {
-                                ReportGroupRowView(docTag: docTag, count: reports.count, project: project(for: projectATag))
+                    if !reportEntries.isEmpty {
+                        Section(sortedHtmlReports.isEmpty ? "" : "Markdown Reports") {
+                            ForEach(reportEntries) { entry in
+                                switch entry {
+                                case .single(let report):
+                                    Button {
+                                        selectedHtmlReport = nil
+                                        selectedReport = report
+                                    } label: {
+                                        ReportRowView(report: report, project: project(for: report.projectATag))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityIdentifier("report_row_\(report.id)")
+
+                                case .group(let projectATag, let docTag, let reports):
+                                    NavigationLink {
+                                        ReportGroupView(
+                                            docTag: docTag,
+                                            reports: reports,
+                                            selectedReport: $selectedReport,
+                                            project: project(for: projectATag)
+                                        )
+                                    } label: {
+                                        ReportGroupRowView(docTag: docTag, count: reports.count, project: project(for: projectATag))
+                                    }
+                                    .accessibilityIdentifier("report_group_\(projectATag)_\(docTag)")
+                                }
                             }
-                            .accessibilityIdentifier("report_group_\(projectATag)_\(docTag)")
                         }
                     }
                 }
@@ -235,6 +278,58 @@ struct ReportGroupView: View {
     }
 }
 
+// MARK: - HtmlReportRowView
+
+struct HtmlReportRowView: View {
+    let report: HtmlReport
+    let project: Project?
+
+    private var subtitle: String {
+        let trimmed = report.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != report.title else { return "" }
+        return trimmed
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: report.isZip ? "archivebox" : "doc.richtext.fill")
+                .foregroundStyle(.tint)
+                .font(.title3)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(report.title.isEmpty ? "Untitled" : report.title)
+                    .font(.body)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                HStack(spacing: 8) {
+                    if let project {
+                        ProjectBadge(projectTitle: project.title, projectId: project.id)
+                    }
+                    if report.isZip {
+                        Text("Bundle")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Text("HTML")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(Date(timeIntervalSince1970: TimeInterval(report.createdAt)), style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 // MARK: - ReportRowView
 
 struct ReportRowView: View {
@@ -245,14 +340,18 @@ struct ReportRowView: View {
         report.readingTimeMins == 1 ? "1 min read" : "\(report.readingTimeMins) min read"
     }
 
+    private var displaySummary: String {
+        ReportDisplayContent.summary(for: report)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(report.title.isEmpty ? "Untitled" : report.title)
                 .font(.body)
                 .fontWeight(.medium)
                 .lineLimit(2)
-            if !report.summary.isEmpty {
-                Text(report.summary)
+            if !displaySummary.isEmpty {
+                Text(displaySummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -279,9 +378,24 @@ struct ReportDetailView: View {
     let report: Report
     @Environment(TenexCoreManager.self) private var coreManager
     @State private var showingMessageComposer = false
+    @State private var selectedReportSelection: ReportSelectionContext?
+    @State private var reportContentHeight: CGFloat = 120
 
     private var referenceATag: String {
-        "30023:\(report.author):\(report.slug)"
+        ReportReplyFormatter.referenceATag(for: report)
+    }
+
+    private var project: Project? {
+        let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
+        return coreManager.projects.first(where: { $0.id == projectId })
+    }
+
+    private var displaySummary: String {
+        ReportDisplayContent.summary(for: report)
+    }
+
+    private var displayContent: String {
+        ReportDisplayContent.body(for: report)
     }
 
     var body: some View {
@@ -291,8 +405,8 @@ struct ReportDetailView: View {
                     Text(report.title.isEmpty ? "Untitled" : report.title)
                         .font(.title)
                         .fontWeight(.bold)
-                    if !report.summary.isEmpty {
-                        Text(report.summary)
+                    if !displaySummary.isEmpty {
+                        Text(displaySummary)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -309,24 +423,29 @@ struct ReportDetailView: View {
 
                 Divider()
 
-                if !report.content.isEmpty {
-                    MarkdownView(content: report.content)
+                if !displayContent.isEmpty {
+                    #if os(iOS)
+                    SelectableReportTextView(
+                        content: displayContent,
+                        height: $reportContentHeight
+                    ) { selectedText in
+                        selectedReportSelection = ReportSelectionContext(excerpt: selectedText)
+                    }
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: reportContentHeight,
+                        maxHeight: reportContentHeight,
+                        alignment: .leading
+                    )
+                    .accessibilityIdentifier("report_detail_content")
+                    #else
+                    MarkdownView(content: displayContent)
                         .accessibilityIdentifier("report_detail_content")
+                    #endif
                 } else {
                     Text("No content available.")
                         .foregroundStyle(.secondary)
                 }
-
-                Divider()
-
-                Button {
-                    showingMessageComposer = true
-                } label: {
-                    Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("report_open_chat_button")
             }
             .padding()
         }
@@ -336,9 +455,12 @@ struct ReportDetailView: View {
         #else
         .toolbarTitleDisplayMode(.inline)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                openChatButton
+            }
+        }
         .sheet(isPresented: $showingMessageComposer) {
-            let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
-            let project = coreManager.projects.first(where: { $0.id == projectId })
             let contextMessage = ConversationFormatters.generateContextMessage(report: report)
             MessageComposerView(
                 project: project,
@@ -355,5 +477,196 @@ struct ReportDetailView: View {
             .environment(coreManager)
             .tenexModalPresentation(detents: [.large])
         }
+        .sheet(item: $selectedReportSelection) { selection in
+            ReportSelectionReplySheet(
+                report: report,
+                selection: selection,
+                project: project
+            )
+            .environment(coreManager)
+            .tenexModalPresentation(detents: [.medium, .large])
+        }
+    }
+
+    private var openChatButton: some View {
+        Button {
+            showingMessageComposer = true
+        } label: {
+            Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
+        }
+        .adaptiveProminentGlassButtonStyle()
+        .accessibilityIdentifier("report_open_chat_button")
+    }
+}
+
+private enum ReportDisplayContent {
+    static func body(for report: Report) -> String {
+        let body = bodyWithoutFrontmatter(from: report.content)
+        return bodyWithoutDuplicateTitleHeading(body, title: report.title)
+    }
+
+    static func summary(for report: Report) -> String {
+        let rawSummary = report.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = bodySummary(for: report)
+
+        if rawSummary.isEmpty || looksLikeFrontmatterSummary(rawSummary) {
+            return fallback
+        }
+
+        if normalized(rawSummary) == normalized(report.title) {
+            return fallback
+        }
+
+        return rawSummary
+    }
+
+    private static func bodySummary(for report: Report) -> String {
+        if let frontmatterSummary = frontmatterScalar(in: report.content, key: "summary")
+            ?? frontmatterScalar(in: report.content, key: "scope") {
+            return frontmatterSummary
+        }
+
+        let body = body(for: report)
+        let flattened = body
+            .components(separatedBy: .newlines)
+            .map { strippedMarkdownSummaryLine($0) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+
+        guard !flattened.isEmpty else { return "" }
+        return String(flattened.prefix(180))
+    }
+
+    private static func bodyWithoutFrontmatter(from content: String) -> String {
+        let normalizedContent = content
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        guard normalizedContent.hasPrefix("---\n") else { return content }
+        let rest = String(normalizedContent.dropFirst(4))
+        var consumedCharacterCount = 0
+
+        for line in rest.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let lineCharacterCount = line.count + 1
+
+            if trimmed == "---" || trimmed == "..." {
+                let bodyStart = rest.index(rest.startIndex, offsetBy: min(consumedCharacterCount + lineCharacterCount, rest.count))
+                return String(rest[bodyStart...]).trimmingCharacters(in: .newlines)
+            }
+
+            consumedCharacterCount += lineCharacterCount
+        }
+
+        return content
+    }
+
+    private static func bodyWithoutDuplicateTitleHeading(_ content: String, title: String) -> String {
+        var lines = content.components(separatedBy: "\n")
+
+        while let first = lines.first, first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.removeFirst()
+        }
+
+        if let first = lines.first, heading(first, matchesTitle: title) {
+            lines.removeFirst()
+            while let first = lines.first, first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.removeFirst()
+            }
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private static func heading(_ line: String, matchesTitle title: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("#") else { return false }
+
+        let markerCount = trimmed.prefix { $0 == "#" }.count
+        guard markerCount > 0, markerCount <= 6 else { return false }
+
+        let headingText = trimmed
+            .dropFirst(markerCount)
+        let heading = String(headingText)
+            .trimmingCharacters(in: .whitespaces)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "#").union(.whitespaces))
+        return normalized(heading) == normalized(title)
+    }
+
+    private static func frontmatterScalar(in content: String, key: String) -> String? {
+        let normalizedContent = content
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        guard normalizedContent.hasPrefix("---\n") else { return nil }
+        let rest = String(normalizedContent.dropFirst(4))
+
+        for line in rest.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" || trimmed == "..." {
+                return nil
+            }
+
+            let parts = trimmed.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, String(parts[0]).trimmingCharacters(in: .whitespaces) == key else {
+                continue
+            }
+
+            let value = unquotedScalar(String(parts[1]).trimmingCharacters(in: .whitespaces))
+            return value.isEmpty ? nil : value
+        }
+
+        return nil
+    }
+
+    private static func unquotedScalar(_ value: String) -> String {
+        guard value.count >= 2,
+              let first = value.first,
+              let last = value.last,
+              (first == "\"" && last == "\"") || (first == "'" && last == "'")
+        else {
+            return value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func strippedMarkdownSummaryLine(_ line: String) -> String {
+        var text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        while text.hasPrefix(">") {
+            text = String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
+        }
+
+        if text.hasPrefix("#") {
+            let markerCount = text.prefix { $0 == "#" }.count
+            text = String(text.dropFirst(markerCount)).trimmingCharacters(in: .whitespaces)
+        }
+
+        if text.hasPrefix("- [x] ") || text.hasPrefix("- [X] ") || text.hasPrefix("- [ ] ") {
+            text = String(text.dropFirst(6))
+        } else if text.hasPrefix("- ") || text.hasPrefix("* ") {
+            text = String(text.dropFirst(2))
+        }
+
+        return text
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "__", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func looksLikeFrontmatterSummary(_ summary: String) -> Bool {
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("---") ||
+            (trimmed.contains("title:") && (trimmed.contains("date:") || trimmed.contains("scope:")))
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 }

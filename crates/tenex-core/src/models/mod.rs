@@ -3,6 +3,7 @@ pub mod ask_input;
 pub mod bookmark;
 pub mod conversation_metadata;
 pub mod draft;
+pub mod html_report;
 pub mod inbox;
 pub mod installed_agent;
 pub mod lesson;
@@ -29,6 +30,7 @@ pub use draft::{
     NamedDraft, NamedDraftStorage, PendingPublishSnapshot, SendState,
     PUBLISHED_DRAFT_GRACE_PERIOD_SECS,
 };
+pub use html_report::HtmlReport;
 pub use inbox::{AgentChatter, InboxEventType, InboxItem};
 pub use installed_agent::InstalledAgent;
 pub use lesson::Lesson;

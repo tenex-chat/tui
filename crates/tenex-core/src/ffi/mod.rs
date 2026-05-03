@@ -51,7 +51,7 @@ use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction
 
 use crate::models::agent_definition::AgentDefinition;
 use crate::models::{
-    AskEvent, ConversationMetadata, InboxItem, InstalledAgent, MCPTool, Message, Nudge,
+    AskEvent, ConversationMetadata, HtmlReport, InboxItem, InstalledAgent, MCPTool, Message, Nudge,
     OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Skill, TeamPack, Thread,
 };
 use crate::nostr::{set_log_path, DataChange, NostrCommand, NostrWorker};
