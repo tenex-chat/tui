@@ -1,37 +1,40 @@
 //! Per-agent configuration event (Nostr kind:34011, NIP-33 addressable).
 //!
-//! The backend publishes one kind:34011 event per installed agent. Each event
-//! enumerates every model/skill/mcp visible to the agent. The currently-active
-//! selection is marked with `"active"` as the tag's third element; inactive
-//! entries omit the marker.
+//! Each agent publishes its own kind:34011 event, signed by the agent's own
+//! key. The event enumerates every model/skill/mcp visible to the agent;
+//! the currently-active selection is marked with `"active"` as the tag's
+//! third element (inactive entries omit it).
 //!
 //! Example tag order:
 //!
 //! ```text
-//! ["agent", "<agent_pubkey>", "<agent_slug>"]      // subject of this event
-//! ["p", "<whitelisted_owner>"]                     // one per whitelisted owner
+//! ["d", "<agent_slug>"]                            // NIP-33 d-tag = slug
+//! ["p", "<backend_pubkey>"]                        // backend that runs this agent
 //! ["model", "opus", "active"]                      // currently-selected model
 //! ["model", "sonnet"]                              // other available models
-//! ["skill", "read-access", "active"]               // enabled, non-blocked skill
+//! ["skill", "read-access", "active"]               // enabled skill
 //! ["skill", "shell"]                               // visible but inactive skill
 //! ["mcp", "github", "active"]                      // mcp server in mcpAccess
 //! ["mcp", "linear"]                                // configured but inactive mcp
 //! ```
 //!
-//! The agent this event describes is identified by the `agent` tag. Do NOT use
-//! `p` tags for agent identity — those carry whitelisted owners only.
+//! Agent identity = the event's signer (`pubkey` field). Slug = the d-tag.
+//! The first `p` tag carries the backend pubkey that hosts this agent
+//! (traceability only — not identity).
 
 use nostrdb::Note;
 
 /// Per-agent configuration derived from a kind:34011 event.
 #[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {
-    /// Hex-encoded public key of the backend that published the event.
-    pub backend_pubkey: String,
-    /// Hex-encoded public key of the agent this event describes.
+    /// Hex-encoded public key of the agent — the event signer.
     pub pubkey: String,
-    /// Human-friendly slug for the agent.
+    /// Human-friendly slug for the agent (the NIP-33 d-tag).
     pub slug: String,
+    /// Hex-encoded public key of the backend that runs this agent, sourced
+    /// from the first `["p", "<backend_pubkey>"]` tag on the event. Optional
+    /// because the tag may be absent on malformed events.
+    pub backend_pubkey: Option<String>,
     /// Unix timestamp the event was created.
     pub created_at: u64,
     /// Currently-selected model slug, if any model is active.
@@ -52,14 +55,14 @@ impl AgentConfig {
     /// Parse an `AgentConfig` from a JSON event value.
     ///
     /// Returns `None` when the event is not a kind:34011 or when the required
-    /// `agent` tag is missing.
+    /// `d` tag (slug) is missing.
     pub fn from_value(event: &serde_json::Value) -> Option<Self> {
         let kind = event.get("kind")?.as_u64()?;
         if kind != 34011 {
             return None;
         }
 
-        let backend_pubkey = event.get("pubkey")?.as_str()?.to_string();
+        let pubkey = event.get("pubkey")?.as_str()?.to_string();
         let created_at = event.get("created_at")?.as_u64()?;
 
         let tags: Vec<Vec<String>> = event
@@ -75,7 +78,7 @@ impl AgentConfig {
             })
             .collect();
 
-        Self::from_tags(created_at, tags, backend_pubkey)
+        Self::from_tags(created_at, tags, pubkey)
     }
 
     /// Parse an `AgentConfig` from a nostrdb `Note`.
@@ -84,7 +87,7 @@ impl AgentConfig {
             return None;
         }
 
-        let backend_pubkey = hex::encode(note.pubkey());
+        let pubkey = hex::encode(note.pubkey());
         let mut tags: Vec<Vec<String>> = Vec::new();
         for tag in note.tags() {
             let mut parts: Vec<String> = Vec::new();
@@ -100,16 +103,16 @@ impl AgentConfig {
             tags.push(parts);
         }
 
-        Self::from_tags(note.created_at(), tags, backend_pubkey)
+        Self::from_tags(note.created_at(), tags, pubkey)
     }
 
     fn from_tags(
         created_at: u64,
         tags: Vec<Vec<String>>,
-        backend_pubkey: String,
+        pubkey: String,
     ) -> Option<Self> {
-        let mut agent_pubkey: Option<String> = None;
-        let mut agent_slug: Option<String> = None;
+        let mut slug: Option<String> = None;
+        let mut backend_pubkey: Option<String> = None;
         let mut active_model: Option<String> = None;
         let mut models: Vec<String> = Vec::new();
         let mut active_skills: Vec<String> = Vec::new();
@@ -123,10 +126,24 @@ impl AgentConfig {
                 None => continue,
             };
             match name {
-                "agent" => {
-                    if agent_pubkey.is_none() && tag.len() >= 3 {
-                        agent_pubkey = Some(tag[1].clone());
-                        agent_slug = Some(tag[2].clone());
+                "d" => {
+                    if slug.is_none() {
+                        if let Some(s) = tag.get(1) {
+                            if !s.is_empty() {
+                                slug = Some(s.clone());
+                            }
+                        }
+                    }
+                }
+                "p" => {
+                    // First `p` tag carries the backend pubkey that hosts this
+                    // agent. Subsequent `p` tags (if any) are ignored here.
+                    if backend_pubkey.is_none() {
+                        if let Some(pk) = tag.get(1) {
+                            if !pk.is_empty() {
+                                backend_pubkey = Some(pk.clone());
+                            }
+                        }
                     }
                 }
                 "model" => {
@@ -178,9 +195,9 @@ impl AgentConfig {
         mcps.dedup();
 
         Some(AgentConfig {
+            pubkey,
+            slug: slug?,
             backend_pubkey,
-            pubkey: agent_pubkey?,
-            slug: agent_slug?,
             created_at,
             active_model,
             models,
@@ -199,14 +216,16 @@ mod tests {
 
     #[test]
     fn parses_new_per_agent_shape() {
+        // Under the new design the agent signs the event, so `pubkey` ==
+        // agent pubkey. The first `p` tag carries the backend pubkey.
         let event = json!({
             "kind": 34011,
-            "pubkey": "backend_pk",
+            "pubkey": "agent_pk",
             "created_at": 1_700_000_000,
             "tags": [
-                ["agent", "agent_pk", "planner"],
-                ["p", "owner_1_pk"],
-                ["p", "owner_2_pk"],
+                ["d", "planner"],
+                ["p", "backend_pk"],
+                ["p", "extra_pk"],
                 ["model", "opus", "active"],
                 ["model", "sonnet"],
                 ["skill", "read-access", "active"],
@@ -218,9 +237,9 @@ mod tests {
         });
 
         let config = AgentConfig::from_value(&event).expect("should parse");
-        assert_eq!(config.backend_pubkey, "backend_pk");
         assert_eq!(config.pubkey, "agent_pk");
         assert_eq!(config.slug, "planner");
+        assert_eq!(config.backend_pubkey.as_deref(), Some("backend_pk"));
         assert_eq!(config.active_model.as_deref(), Some("opus"));
         assert_eq!(config.models, vec!["opus", "sonnet"]);
         assert_eq!(config.active_skills, vec!["read-access", "write-access"]);
@@ -230,60 +249,58 @@ mod tests {
     }
 
     #[test]
+    fn backend_pubkey_is_none_when_no_p_tag() {
+        let event = json!({
+            "kind": 34011,
+            "pubkey": "agent_pk",
+            "created_at": 1,
+            "tags": [
+                ["d", "planner"],
+                ["model", "opus", "active"],
+            ]
+        });
+        let config = AgentConfig::from_value(&event).expect("should parse");
+        assert_eq!(config.pubkey, "agent_pk");
+        assert!(config.backend_pubkey.is_none());
+    }
+
+    #[test]
     fn ignores_wrong_kind() {
         let event = json!({
             "kind": 24010,
             "pubkey": "backend_pk",
             "created_at": 1,
-            "tags": [["agent", "agent_pk", "planner"]]
+            "tags": [["d", "planner"]]
         });
         assert!(AgentConfig::from_value(&event).is_none());
     }
 
     #[test]
-    fn requires_agent_tag() {
+    fn requires_d_tag() {
         let event = json!({
             "kind": 34011,
-            "pubkey": "backend_pk",
+            "pubkey": "agent_pk",
             "created_at": 1,
-            "tags": [["p", "owner"]]
+            "tags": [["p", "backend_pk"]]
         });
         assert!(AgentConfig::from_value(&event).is_none());
-    }
-
-    #[test]
-    fn ignores_d_tag_for_addressability() {
-        // kind:34011 events carry a ["d", <agent_pubkey>] tag for NIP-33 addressability.
-        // The parser must ignore it — agent identity still comes from the "agent" tag.
-        let event = json!({
-            "kind": 34011,
-            "pubkey": "backend_pk",
-            "created_at": 1_700_000_000,
-            "tags": [
-                ["d", "agent_pk"],
-                ["agent", "agent_pk", "planner"],
-                ["model", "sonnet", "active"],
-            ]
-        });
-        let config = AgentConfig::from_value(&event).expect("should parse");
-        assert_eq!(config.pubkey, "agent_pk");
-        assert_eq!(config.slug, "planner");
-        assert_eq!(config.active_model.as_deref(), Some("sonnet"));
     }
 
     #[test]
     fn does_not_treat_p_tag_as_agent_identity() {
-        // The agent pubkey must come from the `agent` tag, not from a `p` tag.
+        // The agent pubkey must come from the event's `pubkey` field (signer);
+        // the first `p` tag is captured as the backend pubkey.
         let event = json!({
             "kind": 34011,
-            "pubkey": "backend_pk",
+            "pubkey": "real_agent_pk",
             "created_at": 1,
             "tags": [
-                ["p", "owner_pk"],
-                ["agent", "real_agent_pk", "planner"],
+                ["d", "planner"],
+                ["p", "backend_pk"],
             ]
         });
         let config = AgentConfig::from_value(&event).expect("should parse");
         assert_eq!(config.pubkey, "real_agent_pk");
+        assert_eq!(config.backend_pubkey.as_deref(), Some("backend_pk"));
     }
 }

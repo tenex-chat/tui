@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use tenex_core::models::{AgentDefinition, InstalledAgent, MCPTool};
+use tenex_core::models::{AgentConfig, AgentDefinition, InstalledAgent, MCPTool};
 use tenex_core::runtime::CoreHandle;
 use tenex_core::tlog;
 
@@ -416,6 +416,103 @@ pub struct App {
     pub last_esc_time: Option<std::time::Instant>,
     /// Last time an autosave was performed (for periodic crash protection)
     pub last_autosave: std::time::Instant,
+}
+
+/// Pure value-object that holds the merged inputs flowing into
+/// `AgentSettingsState::new` for a given agent.
+///
+/// Computed from a `ProjectAgent` (24010 snapshot of the agent on the project),
+/// the active `ProjectStatus` (project-wide universe of skills/MCPs), and the
+/// per-agent kind:34011 `AgentConfig` when one is available. Extracted for
+/// direct unit-testing of the union/active-merge logic without standing up an
+/// `App`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergedAgentSettingsInputs {
+    pub available_models: Vec<String>,
+    pub all_available_skills: Vec<String>,
+    pub all_available_mcp_servers: Vec<String>,
+    pub current_model: Option<String>,
+    pub current_skills: Vec<String>,
+    pub current_mcp_servers: Vec<String>,
+}
+
+impl MergedAgentSettingsInputs {
+    /// Compute the merge from the data sources for `agent`.
+    ///
+    /// Models source: 34011 only (24010 no longer carries models). Skills/MCP
+    /// sources: union of 34011 + 24010, sorted + deduped. Active markers come
+    /// from 34011 when present, otherwise from `ProjectAgent` (transitional
+    /// fallback for the migration period).
+    pub fn compute(
+        agent: &crate::models::ProjectAgent,
+        project_status: Option<&ProjectStatus>,
+        agent_config: Option<&AgentConfig>,
+    ) -> Self {
+        let project_skills: Vec<String> = project_status
+            .map(|s| s.all_skills().iter().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+        let project_mcps: Vec<String> = project_status
+            .map(|s| s.all_mcp_servers().iter().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+
+        let available_models = agent_config
+            .map(|c| c.models.clone())
+            .unwrap_or_default();
+
+        let mut all_available_skills: Vec<String> = project_skills;
+        if let Some(cfg) = agent_config {
+            all_available_skills.extend(cfg.skills.iter().cloned());
+        }
+        all_available_skills.sort();
+        all_available_skills.dedup();
+
+        let mut all_available_mcp_servers: Vec<String> = project_mcps;
+        if let Some(cfg) = agent_config {
+            all_available_mcp_servers.extend(cfg.mcps.iter().cloned());
+        }
+        all_available_mcp_servers.sort();
+        all_available_mcp_servers.dedup();
+
+        let current_model = agent_config
+            .and_then(|c| c.active_model.clone())
+            .or_else(|| agent.model.clone());
+
+        let current_skills = agent_config
+            .map(|c| c.active_skills.clone())
+            .unwrap_or_else(|| agent.skills.clone());
+
+        let current_mcp_servers = agent_config
+            .map(|c| c.active_mcps.clone())
+            .unwrap_or_else(|| agent.mcp_servers.clone());
+
+        Self {
+            available_models,
+            all_available_skills,
+            all_available_mcp_servers,
+            current_model,
+            current_skills,
+            current_mcp_servers,
+        }
+    }
+
+    /// Build the `AgentSettingsState` for `agent` from these merged inputs.
+    pub fn into_state(
+        self,
+        agent: &crate::models::ProjectAgent,
+    ) -> crate::ui::modal::AgentSettingsState {
+        crate::ui::modal::AgentSettingsState::new(
+            agent.name.clone(),
+            agent.pubkey.clone(),
+            self.current_model,
+            agent.tools.clone(),
+            self.current_skills,
+            self.current_mcp_servers,
+            false,
+            self.available_models,
+            self.all_available_skills,
+            self.all_available_mcp_servers,
+        )
+    }
 }
 
 impl App {
@@ -2066,38 +2163,21 @@ impl App {
         self.filtered_agents_with_filter(filter)
     }
 
-    fn build_agent_settings_for(
+    /// Compute the merged inputs (34011 ∪ 24010) for the agent. Returns
+    /// `None` only when no project is selected. The merge logic itself is
+    /// pure — see `MergedAgentSettingsInputs::compute` for unit tests.
+    fn merged_agent_settings_inputs_for(
         &self,
         agent: &crate::models::ProjectAgent,
-    ) -> Option<crate::ui::modal::AgentSettingsState> {
+    ) -> Option<MergedAgentSettingsInputs> {
         let project = self.selected_project.as_ref()?;
-        let (all_skills, all_mcp_servers, all_models) = self
-            .data_store
-            .borrow()
-            .get_project_status(&project.a_tag())
-            .map(|status| {
-                let skills = status.all_skills().iter().map(|s| s.to_string()).collect();
-                let mcp_servers = status
-                    .all_mcp_servers()
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
-                let models = status.all_models.clone();
-                (skills, mcp_servers, models)
-            })
-            .unwrap_or_default();
-
-        Some(crate::ui::modal::AgentSettingsState::new(
-            agent.name.clone(),
-            agent.pubkey.clone(),
-            agent.model.clone(),
-            agent.tools.clone(),
-            agent.skills.clone(),
-            agent.mcp_servers.clone(),
-            false,
-            all_models,
-            all_skills,
-            all_mcp_servers,
+        let store = self.data_store.borrow();
+        let project_status = store.get_project_status(&project.a_tag());
+        let agent_config = store.get_agent_config(&agent.pubkey).cloned();
+        Some(MergedAgentSettingsInputs::compute(
+            agent,
+            project_status,
+            agent_config.as_ref(),
         ))
     }
 
@@ -2123,14 +2203,32 @@ impl App {
             return;
         }
 
-        let settings = self.build_agent_settings_for(agent);
+        // Compute the merged inputs once so `settings` and the
+        // original-snapshot fed into `load_agent_settings` agree on the data
+        // source (34011 when present, ProjectAgent fallback otherwise). If
+        // they diverge `has_config_changes` would always report a phantom diff.
+        let inputs = self.merged_agent_settings_inputs_for(agent);
+        let original_model = inputs
+            .as_ref()
+            .map(|i| i.current_model.clone())
+            .unwrap_or_else(|| agent.model.clone());
+        let original_skills: HashSet<String> = inputs
+            .as_ref()
+            .map(|i| i.current_skills.iter().cloned().collect())
+            .unwrap_or_else(|| agent.skills.iter().cloned().collect());
+        let original_mcps: HashSet<String> = inputs
+            .as_ref()
+            .map(|i| i.current_mcp_servers.iter().cloned().collect())
+            .unwrap_or_else(|| agent.mcp_servers.iter().cloned().collect());
+        let settings = inputs.map(|i| i.into_state(agent));
+
         state.load_agent_settings(
             Some(agent.pubkey.clone()),
             settings,
-            agent.model.clone(),
+            original_model,
             agent.tools.iter().cloned().collect(),
-            agent.skills.iter().cloned().collect(),
-            agent.mcp_servers.iter().cloned().collect(),
+            original_skills,
+            original_mcps,
             false,
         );
     }
@@ -4922,6 +5020,178 @@ impl NudgeSkillSelectorItem {
 // =============================================================================
 // TESTS
 // =============================================================================
+
+#[cfg(test)]
+mod merged_agent_settings_tests {
+    use super::*;
+    use serde_json::json;
+    use tenex_core::models::AgentConfig;
+
+    fn make_agent() -> ProjectAgent {
+        ProjectAgent {
+            pubkey: "agent-pk".to_string(),
+            name: "planner".to_string(),
+            backend_pubkey: "backend-pk".to_string(),
+            is_pm: false,
+            is_online: true,
+            // Stale 24010 fallback values — should be overridden by 34011 below.
+            model: Some("legacy-model".to_string()),
+            tools: vec!["shell".to_string()],
+            skills: vec!["legacy-skill".to_string()],
+            mcp_servers: vec!["legacy-mcp".to_string()],
+        }
+    }
+
+    fn make_status_with_skills(project_skills: &[&str]) -> ProjectStatus {
+        let mut tags: Vec<Vec<String>> =
+            vec![vec!["a".to_string(), "31933:backend-pk:project".to_string()]];
+        tags.push(vec![
+            "agent".to_string(),
+            "agent-pk".to_string(),
+            "planner".to_string(),
+        ]);
+        for s in project_skills {
+            tags.push(vec!["skill".to_string(), (*s).to_string()]);
+        }
+        let event = json!({
+            "kind": 24010,
+            "pubkey": "backend-pk",
+            "created_at": 1,
+            "tags": tags,
+        });
+        ProjectStatus::from_value(&event).expect("status fixture should parse")
+    }
+
+    fn make_agent_config(
+        models: &[&str],
+        skills: &[&str],
+        active_skills: &[&str],
+        mcps: &[&str],
+        active_mcps: &[&str],
+    ) -> AgentConfig {
+        let mut tags: Vec<Vec<String>> = vec![
+            vec!["d".to_string(), "planner".to_string()],
+            vec!["p".to_string(), "backend-pk".to_string()],
+        ];
+        for m in models {
+            tags.push(vec!["model".to_string(), (*m).to_string()]);
+        }
+        for s in skills {
+            let mut t = vec!["skill".to_string(), (*s).to_string()];
+            if active_skills.contains(s) {
+                t.push("active".to_string());
+            }
+            tags.push(t);
+        }
+        for m in mcps {
+            let mut t = vec!["mcp".to_string(), (*m).to_string()];
+            if active_mcps.contains(m) {
+                t.push("active".to_string());
+            }
+            tags.push(t);
+        }
+        let event = json!({
+            "kind": 34011,
+            "pubkey": "agent-pk",
+            "created_at": 1_000,
+            "tags": tags,
+        });
+        AgentConfig::from_value(&event).expect("agent config fixture should parse")
+    }
+
+    /// Spec from Wave 2 task: project skills [s1, s2], agent_config with
+    /// models=[m1], skills=[s2, s3], active_skills=[s2], mcps=[mcp1],
+    /// active_mcps=[mcp1]. Expected merged inputs:
+    /// available_models=[m1], available_skills=[s1, s2, s3] (sorted+dedup),
+    /// selected_skills={s2}, mcps merged the same way.
+    #[test]
+    fn merges_34011_with_24010_skills_and_mcps() {
+        let agent = make_agent();
+        let status = make_status_with_skills(&["s1", "s2"]);
+        let config = make_agent_config(&["m1"], &["s2", "s3"], &["s2"], &["mcp1"], &["mcp1"]);
+
+        let inputs = MergedAgentSettingsInputs::compute(&agent, Some(&status), Some(&config));
+
+        // Models: 34011 only.
+        assert_eq!(inputs.available_models, vec!["m1".to_string()]);
+        // Skills: union sorted + deduped.
+        assert_eq!(
+            inputs.all_available_skills,
+            vec!["s1".to_string(), "s2".to_string(), "s3".to_string()],
+        );
+        // Active markers from 34011.
+        assert_eq!(inputs.current_skills, vec!["s2".to_string()]);
+        assert_eq!(inputs.all_available_mcp_servers, vec!["mcp1".to_string()]);
+        assert_eq!(inputs.current_mcp_servers, vec!["mcp1".to_string()]);
+
+        // Verify the produced AgentSettingsState honours the same merge.
+        let state = inputs.into_state(&agent);
+        assert_eq!(state.available_models, vec!["m1".to_string()]);
+        assert_eq!(
+            state.available_skills,
+            vec!["s1".to_string(), "s2".to_string(), "s3".to_string()]
+        );
+        let mut selected_skills: Vec<String> = state.selected_skills.iter().cloned().collect();
+        selected_skills.sort();
+        assert_eq!(selected_skills, vec!["s2".to_string()]);
+        assert_eq!(state.available_mcp_servers, vec!["mcp1".to_string()]);
+        let mut selected_mcps: Vec<String> = state.selected_mcp_servers.iter().cloned().collect();
+        selected_mcps.sort();
+        assert_eq!(selected_mcps, vec!["mcp1".to_string()]);
+        // 34011 has no `active` model in this fixture, so `current_model`
+        // falls back to ProjectAgent.model ("legacy-model"). That model is
+        // not in `available_models = [m1]`, so the index resolver in
+        // `AgentSettingsState::new` defaults to position 0 — i.e. "m1".
+        assert_eq!(state.selected_model(), Some("m1"));
+    }
+
+    /// Without an `AgentConfig`, the merge falls back to the legacy
+    /// `ProjectAgent` data — preserves the modal during the migration period.
+    #[test]
+    fn falls_back_to_project_agent_when_no_34011() {
+        let agent = make_agent();
+        let status = make_status_with_skills(&["s1", "s2"]);
+
+        let inputs = MergedAgentSettingsInputs::compute(&agent, Some(&status), None);
+
+        assert!(inputs.available_models.is_empty());
+        assert_eq!(
+            inputs.all_available_skills,
+            vec!["s1".to_string(), "s2".to_string()],
+        );
+        assert_eq!(inputs.current_model.as_deref(), Some("legacy-model"));
+        assert_eq!(inputs.current_skills, vec!["legacy-skill".to_string()]);
+        assert_eq!(inputs.current_mcp_servers, vec!["legacy-mcp".to_string()]);
+    }
+
+    /// 34011 active_model wins over ProjectAgent.model.
+    #[test]
+    fn active_model_from_34011_overrides_project_agent() {
+        let agent = make_agent();
+        let status = make_status_with_skills(&[]);
+        let config = make_agent_config(&["m1", "m2"], &[], &[], &[], &[]);
+        // Manually mark m2 active by rebuilding via tags (helper above doesn't
+        // mark models active — keep things explicit here).
+        let event = json!({
+            "kind": 34011,
+            "pubkey": "agent-pk",
+            "created_at": 2_000,
+            "tags": [
+                ["d", "planner"],
+                ["p", "backend-pk"],
+                ["model", "m1"],
+                ["model", "m2", "active"],
+            ],
+        });
+        let cfg2 = AgentConfig::from_value(&event).expect("parses");
+        // sanity
+        assert_eq!(config.active_model, None);
+        assert_eq!(cfg2.active_model.as_deref(), Some("m2"));
+
+        let inputs = MergedAgentSettingsInputs::compute(&agent, Some(&status), Some(&cfg2));
+        assert_eq!(inputs.current_model.as_deref(), Some("m2"));
+    }
+}
 
 #[cfg(test)]
 mod inbox_48h_cap_tests {

@@ -1,3 +1,4 @@
+pub mod agent_config;
 pub mod agent_definition;
 pub mod ask_input;
 pub mod bookmark;
@@ -21,6 +22,7 @@ pub mod team_pack;
 pub mod thread;
 pub mod time_filter;
 
+pub use agent_config::AgentConfig;
 pub use agent_definition::AgentDefinition;
 pub use ask_input::{Answer, AskInputState, InputMode, QuestionAnswer};
 pub use bookmark::BookmarkList;

@@ -42,6 +42,7 @@ const KIND_AGENT_SNAPSHOT: u16 = 14199;
 const KIND_PROJECT_DRAFT: u16 = 31933;
 const KIND_TEAM_PACK: u16 = 34199;
 const KIND_AGENT_STATUS: u16 = 24133;
+const KIND_AGENT_CONFIG: u16 = 34011;
 const KIND_STREAM_TEXT_DELTA: u16 = crate::constants::kinds::STREAM_TEXT_DELTA;
 
 // Stream delta reassembly limits (defensive against relay reordering/missed packets).
@@ -716,6 +717,74 @@ fn build_project_stream_delta_filter(project_a_tag: &str) -> Filter {
         )
 }
 
+/// Subscribe to kind:34011 events authored by the given agent pubkeys, deduping
+/// against `subscribed_agent_configs` so each agent is only subscribed once
+/// across the worker's lifetime. Agents are sourced from `p` tags on the user's
+/// kind:31933 project events. NIP-33 addressable, so no `since` filter.
+async fn subscribe_agent_configs(
+    client: &Client,
+    subscription_stats: &SharedSubscriptionStats,
+    subscribed_agent_configs: &Arc<RwLock<HashSet<String>>>,
+    agent_pubkeys: Vec<String>,
+) -> Result<()> {
+    let new_pubkeys: Vec<String> = {
+        let mut seen = subscribed_agent_configs.write().await;
+        agent_pubkeys
+            .into_iter()
+            .filter(|pk| seen.insert(pk.clone()))
+            .collect()
+    };
+
+    if new_pubkeys.is_empty() {
+        return Ok(());
+    }
+
+    let authors: Vec<PublicKey> = new_pubkeys
+        .iter()
+        .filter_map(|pk| PublicKey::parse(pk).ok())
+        .collect();
+    if authors.is_empty() {
+        return Ok(());
+    }
+
+    let filter = Filter::new()
+        .kind(Kind::Custom(KIND_AGENT_CONFIG))
+        .authors(authors);
+    let filter_json = serde_json::to_string(&filter).ok();
+    let output = match client.subscribe(filter, None).await {
+        Ok(output) => output,
+        Err(e) => {
+            // Roll back so a retry can re-attempt these pubkeys.
+            let mut seen = subscribed_agent_configs.write().await;
+            for pk in &new_pubkeys {
+                seen.remove(pk);
+            }
+            return Err(e.into());
+        }
+    };
+    subscription_stats.register(
+        output.val.to_string(),
+        SubscriptionInfo::new(
+            format!("Agent configs ({} agent(s))", new_pubkeys.len()),
+            vec![KIND_AGENT_CONFIG],
+            None,
+        )
+        .with_raw_filter(filter_json.unwrap_or_default()),
+    );
+    tlog!(
+        "CONN",
+        "Subscribed to kind:{} for {} agent(s): {}",
+        KIND_AGENT_CONFIG,
+        new_pubkeys.len(),
+        new_pubkeys
+            .iter()
+            .map(|pk| &pk[..8.min(pk.len())])
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    Ok(())
+}
+
 /// Response channel for commands that need to return data (like event IDs)
 pub type EventIdSender = std::sync::mpsc::SyncSender<String>;
 
@@ -1040,6 +1109,9 @@ pub struct NostrWorker {
     /// This prevents duplicate subscriptions when projects are rediscovered
     /// Uses tokio::sync::RwLock to avoid blocking the Tokio runtime
     subscribed_projects: Arc<RwLock<HashSet<String>>>,
+    /// Agent pubkeys for which we've already subscribed to kind:34011 configs.
+    /// Agents are derived from the `p` tags on the user's kind:31933 project events.
+    subscribed_agent_configs: Arc<RwLock<HashSet<String>>>,
     /// Cancellation token sender - signals background tasks to stop on disconnect
     cancel_tx: Option<watch::Sender<bool>>,
     /// NIP-46 bunker service (remote signer)
@@ -1070,6 +1142,7 @@ impl NostrWorker {
             negentropy_stats,
             requested_profiles: Arc::new(RwLock::new(HashSet::new())),
             subscribed_projects: Arc::new(RwLock::new(HashSet::new())),
+            subscribed_agent_configs: Arc::new(RwLock::new(HashSet::new())),
             cancel_tx: None,
             bunker_service: None,
             relay_urls: vec![RELAY_URL.to_string()],
@@ -2090,6 +2163,39 @@ impl NostrWorker {
         // - kind:31933 project events arrive (user discovers/adds project)
         tlog!("CONN", "Skipping bulk project subscriptions - will subscribe to projects on-demand when they come online or are explicitly requested");
 
+        // 5. Bootstrap kind:34011 subscriptions for agents named in cached
+        // kind:31933 project events. Newly arriving 31933 events are handled
+        // in the notification loop; this covers the warm-start case where the
+        // relay short-circuits via RelayMessage::Event (already-saved) instead
+        // of RelayPoolNotification::Event.
+        let cached_agent_pubkeys: Vec<String> = match crate::store::get_projects(&self.ndb) {
+            Ok(projects) => {
+                let mut pks: Vec<String> = projects
+                    .into_iter()
+                    .flat_map(|p| p.agent_pubkeys.into_iter())
+                    .collect();
+                pks.sort();
+                pks.dedup();
+                pks
+            }
+            Err(e) => {
+                tlog!("ERROR", "Failed to enumerate cached projects for 34011 bootstrap: {}", e);
+                Vec::new()
+            }
+        };
+        if !cached_agent_pubkeys.is_empty() {
+            if let Err(e) = subscribe_agent_configs(
+                client,
+                &self.subscription_stats,
+                &self.subscribed_agent_configs,
+                cached_agent_pubkeys,
+            )
+            .await
+            {
+                tlog!("ERROR", "Failed bootstrap kind:34011 subscription: {}", e);
+            }
+        }
+
         tlog!(
             "CONN",
             "All subscriptions set up in {:?}",
@@ -2118,6 +2224,7 @@ impl NostrWorker {
         let data_tx = self.data_tx.clone();
         let requested_profiles = self.requested_profiles.clone();
         let subscribed_projects = self.subscribed_projects.clone();
+        let subscribed_agent_configs = self.subscribed_agent_configs.clone();
         let mut cancel_rx = self
             .cancel_tx
             .as_ref()
@@ -2379,6 +2486,37 @@ impl NostrWorker {
                                                         let project_name = d_tag.split(':').next_back().unwrap_or(d_tag);
                                                         tlog!("ERROR", "Failed to subscribe to project {}: {}", project_name, e);
                                                     }
+                                                }
+                                            }
+
+                                            // Subscribe to kind:34011 configs for the agents (`p` tags)
+                                            // listed on this project event. Dedup is handled by
+                                            // `subscribed_agent_configs` inside the helper.
+                                            let agent_pubkeys: Vec<String> = event
+                                                .tags
+                                                .iter()
+                                                .filter(|t| {
+                                                    t.kind()
+                                                        == TagKind::SingleLetter(SingleLetterTag::lowercase(
+                                                            nostr_sdk::Alphabet::P,
+                                                        ))
+                                                })
+                                                .filter_map(|t| t.content().map(|s| s.to_string()))
+                                                .collect();
+                                            if !agent_pubkeys.is_empty() {
+                                                if let Err(e) = subscribe_agent_configs(
+                                                    &client,
+                                                    &subscription_stats,
+                                                    &subscribed_agent_configs,
+                                                    agent_pubkeys,
+                                                )
+                                                .await
+                                                {
+                                                    tlog!(
+                                                        "ERROR",
+                                                        "Failed to subscribe to agent configs for project: {}",
+                                                        e
+                                                    );
                                                 }
                                             }
                                         }

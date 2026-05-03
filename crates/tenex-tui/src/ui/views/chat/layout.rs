@@ -285,8 +285,18 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Render unified agent configuration modal if showing
     let filtered_agents = app.filtered_agents();
+    let active_backend_name: Option<String> =
+        if let ModalState::AgentConfig(ref state) = app.modal_state {
+            state
+                .active_agent_pubkey
+                .as_deref()
+                .and_then(|pk| filtered_agents.iter().find(|a| a.pubkey == pk))
+                .map(|a| app.backend_display_name(&a.backend_pubkey))
+        } else {
+            None
+        };
     if let ModalState::AgentConfig(ref mut state) = app.modal_state {
-        render_agent_config_modal(f, area, state, &filtered_agents);
+        render_agent_config_modal(f, area, state, &filtered_agents, active_backend_name);
     }
 
     // Render draft navigator modal if showing
@@ -602,6 +612,7 @@ fn render_agent_config_modal(
     area: Rect,
     state: &mut crate::ui::modal::AgentConfigState,
     agents: &[crate::models::ProjectAgent],
+    active_backend_name: Option<String>,
 ) {
     use crate::ui::components::visible_items_in_content_area;
     use crate::ui::modal::AgentConfigFocus;
@@ -1055,11 +1066,31 @@ fn render_agent_config_modal(
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
+    let mut toggles_spans: Vec<Span> = vec![Span::styled(
+        format!("{}Set as PM", pm_prefix),
+        pm_style,
+    )];
+    if state.settings.is_some() {
+        if let Some(backend_name) = active_backend_name.as_deref() {
+            toggles_spans.push(Span::styled(
+                "  ·  ",
+                Style::default().fg(theme::TEXT_DIM),
+            ));
+            toggles_spans.push(Span::styled(
+                "Backend: ",
+                Style::default().fg(theme::TEXT_DIM),
+            ));
+            toggles_spans.push(Span::styled(
+                truncate_with_ellipsis(
+                    backend_name,
+                    toggles_area.width.saturating_sub(24) as usize,
+                ),
+                Style::default().fg(theme::TEXT_PRIMARY),
+            ));
+        }
+    }
     f.render_widget(
-        Paragraph::new(Line::from(vec![Span::styled(
-            format!("{}Set as PM", pm_prefix),
-            pm_style,
-        )])),
+        Paragraph::new(Line::from(toggles_spans)),
         toggles_area,
     );
 

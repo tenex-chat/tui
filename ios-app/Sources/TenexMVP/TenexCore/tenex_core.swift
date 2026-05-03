@@ -2753,6 +2753,207 @@ public func FfiConverterTypeTenexCore_lower(_ value: TenexCore) -> UnsafeMutable
 
 
 /**
+ * Per-agent configuration derived from a kind:34011 event.
+ */
+public struct AgentConfig {
+    /**
+     * Hex-encoded public key of the agent — the event signer.
+     */
+    public var pubkey: String
+    /**
+     * Human-friendly slug for the agent (the NIP-33 d-tag).
+     */
+    public var slug: String
+    /**
+     * Hex-encoded public key of the backend that runs this agent, sourced
+     * from the first `["p", "<backend_pubkey>"]` tag on the event. Optional
+     * because the tag may be absent on malformed events.
+     */
+    public var backendPubkey: String?
+    /**
+     * Unix timestamp the event was created.
+     */
+    public var createdAt: UInt64
+    /**
+     * Currently-selected model slug, if any model is active.
+     */
+    public var activeModel: String?
+    /**
+     * Every available model slug (includes `active_model`).
+     */
+    public var models: [String]
+    /**
+     * Enabled, non-blocked skill IDs.
+     */
+    public var activeSkills: [String]
+    /**
+     * Every visible skill ID (includes `active_skills`).
+     */
+    public var skills: [String]
+    /**
+     * MCP server slugs currently in `mcpAccess`.
+     */
+    public var activeMcps: [String]
+    /**
+     * Every configured MCP server slug (includes `active_mcps`).
+     */
+    public var mcps: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Hex-encoded public key of the agent — the event signer.
+         */pubkey: String, 
+        /**
+         * Human-friendly slug for the agent (the NIP-33 d-tag).
+         */slug: String, 
+        /**
+         * Hex-encoded public key of the backend that runs this agent, sourced
+         * from the first `["p", "<backend_pubkey>"]` tag on the event. Optional
+         * because the tag may be absent on malformed events.
+         */backendPubkey: String?, 
+        /**
+         * Unix timestamp the event was created.
+         */createdAt: UInt64, 
+        /**
+         * Currently-selected model slug, if any model is active.
+         */activeModel: String?, 
+        /**
+         * Every available model slug (includes `active_model`).
+         */models: [String], 
+        /**
+         * Enabled, non-blocked skill IDs.
+         */activeSkills: [String], 
+        /**
+         * Every visible skill ID (includes `active_skills`).
+         */skills: [String], 
+        /**
+         * MCP server slugs currently in `mcpAccess`.
+         */activeMcps: [String], 
+        /**
+         * Every configured MCP server slug (includes `active_mcps`).
+         */mcps: [String]) {
+        self.pubkey = pubkey
+        self.slug = slug
+        self.backendPubkey = backendPubkey
+        self.createdAt = createdAt
+        self.activeModel = activeModel
+        self.models = models
+        self.activeSkills = activeSkills
+        self.skills = skills
+        self.activeMcps = activeMcps
+        self.mcps = mcps
+    }
+}
+
+#if compiler(>=6)
+extension AgentConfig: Sendable {}
+#endif
+
+
+extension AgentConfig: Equatable, Hashable {
+    public static func ==(lhs: AgentConfig, rhs: AgentConfig) -> Bool {
+        if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.slug != rhs.slug {
+            return false
+        }
+        if lhs.backendPubkey != rhs.backendPubkey {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        if lhs.activeModel != rhs.activeModel {
+            return false
+        }
+        if lhs.models != rhs.models {
+            return false
+        }
+        if lhs.activeSkills != rhs.activeSkills {
+            return false
+        }
+        if lhs.skills != rhs.skills {
+            return false
+        }
+        if lhs.activeMcps != rhs.activeMcps {
+            return false
+        }
+        if lhs.mcps != rhs.mcps {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(pubkey)
+        hasher.combine(slug)
+        hasher.combine(backendPubkey)
+        hasher.combine(createdAt)
+        hasher.combine(activeModel)
+        hasher.combine(models)
+        hasher.combine(activeSkills)
+        hasher.combine(skills)
+        hasher.combine(activeMcps)
+        hasher.combine(mcps)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAgentConfig: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentConfig {
+        return
+            try AgentConfig(
+                pubkey: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
+                backendPubkey: FfiConverterOptionString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                activeModel: FfiConverterOptionString.read(from: &buf), 
+                models: FfiConverterSequenceString.read(from: &buf), 
+                activeSkills: FfiConverterSequenceString.read(from: &buf), 
+                skills: FfiConverterSequenceString.read(from: &buf), 
+                activeMcps: FfiConverterSequenceString.read(from: &buf), 
+                mcps: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AgentConfig, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.slug, into: &buf)
+        FfiConverterOptionString.write(value.backendPubkey, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+        FfiConverterOptionString.write(value.activeModel, into: &buf)
+        FfiConverterSequenceString.write(value.models, into: &buf)
+        FfiConverterSequenceString.write(value.activeSkills, into: &buf)
+        FfiConverterSequenceString.write(value.skills, into: &buf)
+        FfiConverterSequenceString.write(value.activeMcps, into: &buf)
+        FfiConverterSequenceString.write(value.mcps, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAgentConfig_lift(_ buf: RustBuffer) throws -> AgentConfig {
+    return try FfiConverterTypeAgentConfig.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAgentConfig_lower(_ value: AgentConfig) -> RustBuffer {
+    return FfiConverterTypeAgentConfig.lower(value)
+}
+
+
+/**
  * Agent Definition - kind:4199 events describing AI agents
  */
 public struct AgentDefinition {

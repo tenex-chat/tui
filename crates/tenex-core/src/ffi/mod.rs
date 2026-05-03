@@ -795,6 +795,15 @@ fn process_data_changes_with_deltas(
                                 });
                             }
                         }
+                        34011 => {
+                            // Per-agent capability config (kind:34011, NIP-33 replaceable).
+                            // The unconditional `handle_status_event_value` call above already
+                            // upserted the config into `agent_configs_by_pubkey` and applied
+                            // the trust check. No DataChangeType variant is emitted yet —
+                            // the TUI rendering layer reads this state on demand. If/when
+                            // iOS/Swift consumers need push notifications, add a dedicated
+                            // variant here without touching the worker.
+                        }
                         _ => {}
                     }
                 }

@@ -1,7 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{
-    AgentChatter, AskEvent, BookmarkList, ConversationMetadata, InboxEventType, InboxItem,
-    InstalledAgent, Message, Project, ProjectAgent, ProjectStatus, Thread,
+    AgentChatter, AgentConfig, AskEvent, BookmarkList, ConversationMetadata, InboxEventType,
+    InboxItem, InstalledAgent, Message, Project, ProjectAgent, ProjectStatus, Thread,
 };
 #[cfg(test)]
 use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, OperationsStatus, Report};
@@ -38,6 +38,9 @@ pub struct AppDataStore {
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
     pub project_statuses_by_backend: HashMap<String, HashMap<String, ProjectStatus>>, // project a_tag -> backend pubkey -> status
     pub installed_agents_by_backend: HashMap<String, Vec<InstalledAgent>>,
+    /// Per-agent capability configs (kind:34011), keyed by agent pubkey hex.
+    /// NIP-33 replaceable: only the latest `created_at` per agent is retained.
+    pub agent_configs_by_pubkey: HashMap<String, AgentConfig>,
     pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
     pub profiles: HashMap<String, String>,                // pubkey -> display name
@@ -91,6 +94,7 @@ impl AppDataStore {
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
             installed_agents_by_backend: HashMap::new(),
+            agent_configs_by_pubkey: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -129,6 +133,7 @@ impl AppDataStore {
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
             installed_agents_by_backend: HashMap::new(),
+            agent_configs_by_pubkey: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
@@ -216,6 +221,7 @@ impl AppDataStore {
         self.project_statuses.clear();
         self.project_statuses_by_backend.clear();
         self.installed_agents_by_backend.clear();
+        self.agent_configs_by_pubkey.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
         self.profiles.clear();
@@ -1365,6 +1371,10 @@ impl AppDataStore {
                 self.operations.handle_operations_status_event(note);
                 None
             }
+            34011 => {
+                self.handle_agent_config_event(note);
+                None
+            }
             30023 => {
                 let known_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
                 self.reports
@@ -1604,6 +1614,7 @@ impl AppDataStore {
                 24010 => self.handle_project_status_event_value(event),
                 24011 => self.handle_installed_agent_list_event_value(event),
                 24133 => self.handle_operations_status_event_value(event),
+                34011 => self.handle_agent_config_event_value(event),
                 _ => {} // Ignore unknown kinds
             }
         }
@@ -1723,6 +1734,22 @@ impl AppDataStore {
         if self.trust.is_approved(&backend_pubkey) {
             self.installed_agents_by_backend
                 .insert(backend_pubkey, installed_agents);
+        }
+    }
+
+    /// Handle a per-agent config event (kind:34011) from pre-parsed JSON value.
+    /// We only subscribe to 34011s authored by agents already p-tagged in the
+    /// user's kind:31933 projects, so any event that reaches us is wanted.
+    fn handle_agent_config_event_value(&mut self, event: &serde_json::Value) {
+        if let Some(config) = AgentConfig::from_value(event) {
+            self.upsert_agent_config(config);
+        }
+    }
+
+    /// Handle a per-agent config event (kind:34011) from a nostrdb Note.
+    fn handle_agent_config_event(&mut self, note: &Note) {
+        if let Some(config) = AgentConfig::from_note(note) {
+            self.upsert_agent_config(config);
         }
     }
 
@@ -2188,6 +2215,26 @@ impl AppDataStore {
 
     pub fn get_project_status(&self, a_tag: &str) -> Option<&ProjectStatus> {
         self.project_statuses.get(a_tag)
+    }
+
+    /// Upsert a per-agent capability config (kind:34011).
+    /// NIP-33 replaceable semantics: keep only the newest `created_at` per
+    /// agent pubkey; older events are ignored when one already exists.
+    pub fn upsert_agent_config(&mut self, config: AgentConfig) {
+        let agent_pubkey = config.pubkey.clone();
+        match self.agent_configs_by_pubkey.get(&agent_pubkey) {
+            Some(existing) if existing.created_at >= config.created_at => {
+                // Older or duplicate event — drop it.
+            }
+            _ => {
+                self.agent_configs_by_pubkey.insert(agent_pubkey, config);
+            }
+        }
+    }
+
+    /// Look up the latest per-agent capability config (kind:34011) for `agent_pubkey`.
+    pub fn get_agent_config(&self, agent_pubkey: &str) -> Option<&AgentConfig> {
+        self.agent_configs_by_pubkey.get(agent_pubkey)
     }
 
     pub fn get_installed_agents(&self, backend_pubkey: &str) -> &[InstalledAgent] {
@@ -6552,4 +6599,90 @@ mod tests {
         let empty = store.get_threads("nonexistent");
         assert!(empty.is_empty());
     }
+
+    /// Two kind:34011 events for the same agent — older arrives first, then a
+    /// newer one. NIP-33 replaceable semantics: only the newer event's data
+    /// must be retained. Then a stale event arrives last and must be ignored.
+    #[test]
+    fn test_handle_status_event_value_kind_34011_keeps_newest() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let older = serde_json::json!({
+            "kind": 34011,
+            "id": "evt-older",
+            "pubkey": "agent-pk",
+            "created_at": 1_000,
+            "tags": [
+                ["d", "planner"],
+                ["p", "backend-pk"],
+                ["model", "sonnet", "active"],
+                ["skill", "shell", "active"],
+                ["mcp", "github", "active"],
+            ],
+        });
+        store.handle_status_event_value(&older);
+
+        let first = store
+            .get_agent_config("agent-pk")
+            .expect("older event should be stored on first ingest");
+        assert_eq!(first.created_at, 1_000);
+        assert_eq!(first.active_model.as_deref(), Some("sonnet"));
+        assert_eq!(first.active_skills, vec!["shell"]);
+        assert_eq!(first.active_mcps, vec!["github"]);
+
+        let newer = serde_json::json!({
+            "kind": 34011,
+            "id": "evt-newer",
+            "pubkey": "agent-pk",
+            "created_at": 2_000,
+            "tags": [
+                ["d", "planner"],
+                ["p", "backend-pk"],
+                ["model", "opus", "active"],
+                ["model", "sonnet"],
+                ["skill", "rag", "active"],
+                ["skill", "shell"],
+                ["mcp", "linear", "active"],
+                ["mcp", "github"],
+            ],
+        });
+        store.handle_status_event_value(&newer);
+
+        let after_newer = store
+            .get_agent_config("agent-pk")
+            .expect("newer event should replace older");
+        assert_eq!(after_newer.created_at, 2_000);
+        assert_eq!(after_newer.active_model.as_deref(), Some("opus"));
+        assert_eq!(after_newer.models, vec!["opus", "sonnet"]);
+        assert_eq!(after_newer.active_skills, vec!["rag"]);
+        assert_eq!(after_newer.skills, vec!["rag", "shell"]);
+        assert_eq!(after_newer.active_mcps, vec!["linear"]);
+        assert_eq!(after_newer.mcps, vec!["github", "linear"]);
+
+        // A stale event arriving out-of-order must be ignored.
+        let stale = serde_json::json!({
+            "kind": 34011,
+            "id": "evt-stale",
+            "pubkey": "agent-pk",
+            "created_at": 1_500,
+            "tags": [
+                ["d", "planner"],
+                ["p", "backend-pk"],
+                ["model", "haiku", "active"],
+            ],
+        });
+        store.handle_status_event_value(&stale);
+
+        let after_stale = store
+            .get_agent_config("agent-pk")
+            .expect("agent config must still exist");
+        assert_eq!(
+            after_stale.created_at, 2_000,
+            "stale event must not overwrite newer state"
+        );
+        assert_eq!(after_stale.active_model.as_deref(), Some("opus"));
+    }
+
 }
