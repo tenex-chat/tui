@@ -7101,11 +7101,11 @@ public struct Report {
      */
     public var author: String
     /**
-     * Document title (from title tag, frontmatter title, or content fallback)
+     * Document title (from title tag)
      */
     public var title: String
     /**
-     * Summary (from summary tag, frontmatter summary/scope, or content fallback)
+     * Summary (from summary tag, or first 160 chars of content)
      */
     public var summary: String
     /**
@@ -7145,10 +7145,10 @@ public struct Report {
          * Author pubkey (hex)
          */author: String, 
         /**
-         * Document title (from title tag, frontmatter title, or content fallback)
+         * Document title (from title tag)
          */title: String, 
         /**
-         * Summary (from summary tag, frontmatter summary/scope, or content fallback)
+         * Summary (from summary tag, or first 160 chars of content)
          */summary: String, 
         /**
          * Full markdown content

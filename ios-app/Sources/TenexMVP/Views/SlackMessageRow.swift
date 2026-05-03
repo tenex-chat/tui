@@ -11,6 +11,8 @@ import SwiftUI
 /// - Tool call rendering via ToolCallRow
 /// - Q-tag handling for delegations and ask events
 struct SlackMessageRow: View, Equatable {
+    @Environment(TenexCoreManager.self) private var coreManager
+
     let message: Message
     let isConsecutive: Bool
     let conversationId: String
@@ -82,6 +84,49 @@ struct SlackMessageRow: View, Equatable {
         #endif
     }
 
+    /// Resolve the report callout kind for tool-publish messages.
+    /// `html_publish` → the message event ID matches the html report's `eventId`.
+    /// `report_publish` → look up the markdown report referenced by q-tags or a-tags.
+    private var reportCalloutKind: InlineReportCalloutView.ReportKind? {
+        switch message.toolName {
+        case "html_publish":
+            if let htmlReport = coreManager.htmlReports.first(where: { $0.eventId == message.id }) {
+                return .html(htmlReport)
+            }
+            return nil
+        case "report_publish":
+            if let report = findMarkdownReport(for: message) {
+                return .markdown(report)
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    /// Locate the markdown report (kind:30023) referenced by a `report_publish` tool-use
+    /// message. Q-tags reference the report's event ID directly. A-tags use the addressable
+    /// `30023:author:slug` coordinate.
+    private func findMarkdownReport(for message: Message) -> Report? {
+        if !message.qTags.isEmpty {
+            let qTagSet = Set(message.qTags)
+            if let match = coreManager.reports.first(where: { qTagSet.contains($0.id) }) {
+                return match
+            }
+        }
+
+        if !message.aTags.isEmpty {
+            let aTagSet = Set(message.aTags)
+            if let match = coreManager.reports.first(where: {
+                aTagSet.contains("30023:\($0.author):\($0.slug)")
+            }) {
+                return match
+            }
+        }
+
+        return nil
+    }
+
     var body: some View {
         Group {
             VStack(alignment: .leading, spacing: 6) {
@@ -133,6 +178,12 @@ struct SlackMessageRow: View, Equatable {
                     )
                 } else if !message.content.isEmpty {
                     collapsibleContent
+                }
+
+                // Inline report callouts for `html_publish` and `report_publish` tool calls.
+                if let calloutKind = reportCalloutKind {
+                    InlineReportCalloutView(kind: calloutKind)
+                        .environment(coreManager)
                 }
 
                 // Inline ask event on the message itself (root ask message).

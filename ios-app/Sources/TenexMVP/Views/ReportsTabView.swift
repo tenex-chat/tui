@@ -378,11 +378,9 @@ struct ReportDetailView: View {
     let report: Report
     @Environment(TenexCoreManager.self) private var coreManager
     @State private var showingMessageComposer = false
-    @State private var selectedReportSelection: ReportSelectionContext?
-    @State private var reportContentHeight: CGFloat = 120
 
     private var referenceATag: String {
-        ReportReplyFormatter.referenceATag(for: report)
+        "30023:\(report.author):\(report.slug)"
     }
 
     private var project: Project? {
@@ -424,24 +422,8 @@ struct ReportDetailView: View {
                 Divider()
 
                 if !displayContent.isEmpty {
-                    #if os(iOS)
-                    SelectableReportTextView(
-                        content: displayContent,
-                        height: $reportContentHeight
-                    ) { selectedText in
-                        selectedReportSelection = ReportSelectionContext(excerpt: selectedText)
-                    }
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: reportContentHeight,
-                        maxHeight: reportContentHeight,
-                        alignment: .leading
-                    )
-                    .accessibilityIdentifier("report_detail_content")
-                    #else
                     MarkdownView(content: displayContent)
                         .accessibilityIdentifier("report_detail_content")
-                    #endif
                 } else {
                     Text("No content available.")
                         .foregroundStyle(.secondary)
@@ -476,15 +458,6 @@ struct ReportDetailView: View {
             )
             .environment(coreManager)
             .tenexModalPresentation(detents: [.large])
-        }
-        .sheet(item: $selectedReportSelection) { selection in
-            ReportSelectionReplySheet(
-                report: report,
-                selection: selection,
-                project: project
-            )
-            .environment(coreManager)
-            .tenexModalPresentation(detents: [.medium, .large])
         }
     }
 
