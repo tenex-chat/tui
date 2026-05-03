@@ -15,7 +15,6 @@ struct ConversationAdaptiveDetailView: View {
     let conversation: ConversationFullInfo
     let onOpenConversationId: ((String) -> Void)?
     let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
-    let showsMetadataInspector: Bool
     @Environment(TenexCoreManager.self) private var coreManager
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -24,20 +23,17 @@ struct ConversationAdaptiveDetailView: View {
     init(
         conversation: ConversationFullInfo,
         onOpenConversationId: ((String) -> Void)? = nil,
-        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
-        showsMetadataInspector: Bool = true
+        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil
     ) {
         self.conversation = conversation
         self.onOpenConversationId = onOpenConversationId
         self.onReferenceConversationRequested = onReferenceConversationRequested
-        self.showsMetadataInspector = showsMetadataInspector
     }
 
     var body: some View {
         #if os(macOS)
         ConversationWorkspaceView(
             source: .existing(conversation: conversation),
-            showsMetadataInspector: showsMetadataInspector,
             onReferenceConversationRequested: onReferenceConversationRequested,
             onOpenConversationId: onOpenConversationId
         )
@@ -46,7 +42,6 @@ struct ConversationAdaptiveDetailView: View {
         if horizontalSizeClass == .regular {
             ConversationWorkspaceView(
                 source: .existing(conversation: conversation),
-                showsMetadataInspector: showsMetadataInspector,
                 onReferenceConversationRequested: onReferenceConversationRequested,
                 onOpenConversationId: onOpenConversationId
             )
@@ -65,7 +60,6 @@ struct ConversationByIdAdaptiveDetailView: View {
     let conversationId: String
     let onOpenConversationId: ((String) -> Void)?
     let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
-    let showsMetadataInspector: Bool
     @Environment(TenexCoreManager.self) private var coreManager
 
     @State private var conversation: ConversationFullInfo?
@@ -74,13 +68,11 @@ struct ConversationByIdAdaptiveDetailView: View {
     init(
         conversationId: String,
         onOpenConversationId: ((String) -> Void)? = nil,
-        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
-        showsMetadataInspector: Bool = true
+        onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil
     ) {
         self.conversationId = conversationId
         self.onOpenConversationId = onOpenConversationId
         self.onReferenceConversationRequested = onReferenceConversationRequested
-        self.showsMetadataInspector = showsMetadataInspector
     }
 
     var body: some View {
@@ -89,8 +81,7 @@ struct ConversationByIdAdaptiveDetailView: View {
                 ConversationAdaptiveDetailView(
                     conversation: conversation,
                     onOpenConversationId: onOpenConversationId,
-                    onReferenceConversationRequested: onReferenceConversationRequested,
-                    showsMetadataInspector: showsMetadataInspector
+                    onReferenceConversationRequested: onReferenceConversationRequested
                 )
                     .environment(coreManager)
             } else if isLoading {
@@ -258,12 +249,10 @@ enum ConversationWorkspaceSource {
     }
 }
 
-/// Native split workspace for a conversation:
-/// - Left: full Slack-style transcript + inline composer
-/// - Right: metadata inspector (status/todos/delegations)
+/// Native workspace for a conversation:
+/// full Slack-style transcript + inline composer.
 struct ConversationWorkspaceView: View {
     let source: ConversationWorkspaceSource
-    let showsMetadataInspector: Bool
     let onThreadCreated: ((String) -> Void)?
     let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
     let onOpenConversationId: ((String) -> Void)?
@@ -272,9 +261,6 @@ struct ConversationWorkspaceView: View {
 
     private let seedConversation: ConversationFullInfo
     @State private var viewModel: ConversationDetailViewModel
-    @State private var inspectorUserPreference = true
-    /// Tracks the workspace width so the inspector auto-hides when space is tight.
-    @State private var workspaceWidth: CGFloat = .infinity
     @State private var selectedDelegationConversation: ConversationFullInfo?
     @State private var visibleMessageWindow: Int = 30
     @State private var transcriptDropProviders: [NSItemProvider]? = nil
@@ -294,13 +280,11 @@ struct ConversationWorkspaceView: View {
 
     init(
         source: ConversationWorkspaceSource,
-        showsMetadataInspector: Bool = true,
         onThreadCreated: ((String) -> Void)? = nil,
         onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
         onOpenConversationId: ((String) -> Void)? = nil
     ) {
         self.source = source
-        self.showsMetadataInspector = showsMetadataInspector
         self.onThreadCreated = onThreadCreated
         self.onReferenceConversationRequested = onReferenceConversationRequested
         self.onOpenConversationId = onOpenConversationId
@@ -310,23 +294,12 @@ struct ConversationWorkspaceView: View {
 
     init(
         conversation: ConversationFullInfo,
-        showsMetadataInspector: Bool = true,
         onOpenConversationId: ((String) -> Void)? = nil
     ) {
         self.init(
             source: .existing(conversation: conversation),
-            showsMetadataInspector: showsMetadataInspector,
             onOpenConversationId: onOpenConversationId
         )
-    }
-
-    /// Minimum workspace width to show both transcript and inspector side-by-side.
-    /// Transcript minWidth (560) + inspector minWidth (320) + some breathing room.
-    private static let inspectorWidthThreshold: CGFloat = 900
-
-    /// Inspector shows only when the user wants it AND there's enough horizontal space.
-    private var inspectorVisible: Bool {
-        showsMetadataInspector && inspectorUserPreference && workspaceWidth >= Self.inspectorWidthThreshold
     }
 
     private var isNewThreadMode: Bool {
@@ -430,23 +403,6 @@ struct ConversationWorkspaceView: View {
         return items
     }
 
-    private var statusText: String {
-        isNewThreadMode ? "draft" : viewModel.currentStatus
-    }
-
-    private var isActiveState: Bool {
-        isNewThreadMode ? false : viewModel.currentIsActive
-    }
-
-    private var currentActivityText: String? {
-        isNewThreadMode ? nil : viewModel.currentActivity
-    }
-
-    private var runtimeText: String {
-        guard !isNewThreadMode else { return "0s" }
-        return viewModel.formattedRuntime.isEmpty ? "0s" : viewModel.formattedRuntime
-    }
-
     private var workspaceBackdropColor: Color {
         #if os(macOS)
         return .conversationWorkspaceBackdropMac
@@ -512,18 +468,12 @@ struct ConversationWorkspaceView: View {
                 }
                 .help(expandAllUntagged ? "Show only directed messages" : "Show all messages")
             }
-            if showsMetadataInspector {
-                ToolbarItem(placement: .automatic) {
-                    inspectorToggleButton
-                }
-            }
         }
         .navigationDestination(item: $selectedDelegationConversation) { delegatedConversation in
             ConversationAdaptiveDetailView(
                 conversation: delegatedConversation,
                 onOpenConversationId: onOpenConversationId,
-                onReferenceConversationRequested: onReferenceConversationRequested,
-                showsMetadataInspector: showsMetadataInspector
+                onReferenceConversationRequested: onReferenceConversationRequested
             )
                 .environment(coreManager)
         }
@@ -569,52 +519,9 @@ struct ConversationWorkspaceView: View {
 
     @ViewBuilder
     private var workspaceLayout: some View {
-        Group {
-            #if os(macOS)
-            HSplitView {
-                transcriptColumn
-                    .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
-
-                if inspectorVisible {
-                    inspectorColumn
-                        .frame(minWidth: 320, idealWidth: 360, maxWidth: 440, maxHeight: .infinity)
-                }
-            }
-            #else
-            HStack(spacing: 0) {
-                transcriptColumn
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if inspectorVisible {
-                    Divider()
-                    inspectorColumn
-                        .frame(width: 360)
-                        .frame(maxHeight: .infinity)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                }
-            }
-            #endif
-        }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(key: WorkspaceWidthKey.self, value: geo.size.width)
-            }
-        )
-        .onPreferenceChange(WorkspaceWidthKey.self) { width in
-            workspaceWidth = width
-        }
-        .background(workspaceBackdropColor)
-    }
-
-    private var inspectorToggleButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                inspectorUserPreference.toggle()
-            }
-        } label: {
-            Image(systemName: "sidebar.right")
-        }
-        .accessibilityLabel(inspectorUserPreference ? "Hide Inspector" : "Show Inspector")
+        transcriptColumn
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(workspaceBackdropColor)
     }
 
     private var transcriptColumn: some View {
@@ -833,104 +740,6 @@ struct ConversationWorkspaceView: View {
         #endif
     }
 
-    private var inspectorColumn: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                inspectorPrimaryMetadata
-                    .padding(.bottom, 6)
-                if viewModel.aggregatedTodoStats.hasTodos {
-                    inspectorTodoSection
-                }
-                if !viewModel.delegations.isEmpty {
-                    inspectorDelegationsSection
-                }
-            }
-            .padding(14)
-        }
-        #if os(macOS)
-        .background(workspaceBackdropColor)
-        #else
-        .background(Color.systemGroupedBackground.opacity(0.32))
-        #endif
-    }
-
-    private var inspectorPrimaryMetadata: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(conversationTitle)
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if let summary = currentConversation.thread.summary, !summary.isEmpty {
-                Text(summary)
-                    .font(.subheadline)
-                    .foregroundStyle(Color.secondary.opacity(0.86))
-                    .padding(.top, 4)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(alignment: .center, spacing: 10) {
-                HStack(spacing: 8) {
-                    StatusBadge(status: statusText, isActive: isActiveState)
-
-                    if let project {
-                        ProjectBadge(projectTitle: project.title, projectId: project.id)
-                    }
-                }
-
-                Text(runtimeText)
-                    .font(.callout.weight(.medium))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.secondary.opacity(0.9))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-
-            if let currentActivity = currentActivityText, !currentActivity.isEmpty {
-                Text(currentActivity)
-                    .font(.caption)
-                    .foregroundStyle(Color.statusWaiting.opacity(0.72))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private var inspectorTodoSection: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            Text("Todos")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.primary.opacity(0.66))
-                .textCase(.uppercase)
-
-            VStack(alignment: .leading, spacing: 12) {
-                TodoProgressView(stats: viewModel.aggregatedTodoStats)
-
-                if !viewModel.todoState.items.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(viewModel.todoState.items) { todo in
-                            TodoRowView(todo: todo)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private var inspectorDelegationsSection: some View {
-        WorkspaceInspectorCard(title: "Delegations (\(viewModel.delegations.count))", tone: .secondary) {
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(viewModel.delegations) { delegation in
-                    let isWorking = viewModel.delegationActivityByConversationId[delegation.conversationId] ?? false
-                    Button {
-                        openDelegation(byId: delegation.conversationId)
-                    } label: {
-                        delegationRowLabel(delegation, isWorking: isWorking)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
     private func initializeWorkspace() async {
         let startedAt = CFAbsoluteTimeGetCurrent()
         visibleMessageWindow = 30
@@ -1097,43 +906,6 @@ struct ConversationWorkspaceView: View {
             selectedDelegationConversation = conversation
         }
     }
-
-    @ViewBuilder
-    private func delegationRowLabel(_ delegation: DelegationItem, isWorking: Bool) -> some View {
-        HStack(spacing: 8) {
-            AgentAvatarView(
-                agentName: delegation.recipient,
-                pubkey: delegation.recipientPubkey,
-                size: 24,
-                fontSize: 9,
-                showBorder: false
-            )
-            .environment(coreManager)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(AgentNameFormatter.format(delegation.recipient))
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(delegation.messagePreview)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            Spacer()
-
-            if isWorking {
-                WorkingActivityBadge()
-            }
-
-            Image(systemName: "chevron.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-    }
 }
 
 private extension View {
@@ -1206,84 +978,6 @@ private struct TranscriptStreamingSection: View {
         withTransaction(transaction) {
             scrollProxy.scrollTo("streaming-row", anchor: .bottom)
         }
-    }
-}
-
-private struct WorkspaceInspectorCard<Content: View>: View {
-    enum Tone {
-        case primary
-        case secondary
-    }
-
-    let title: String?
-    let tone: Tone
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            if let title, !title.isEmpty {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.primary.opacity(0.66))
-                    .textCase(.uppercase)
-            }
-
-            content
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(cardFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(cardBorder, lineWidth: 1)
-                .allowsHitTesting(false)
-        )
-    }
-
-    private var cardFill: Color {
-        #if os(macOS)
-        switch tone {
-        case .primary:
-            return Color.conversationWorkspaceSurfaceMac.opacity(0.95)
-        case .secondary:
-            return Color.conversationWorkspaceSurfaceMac.opacity(0.82)
-        }
-        #else
-        switch tone {
-        case .primary:
-            return Color.systemBackground.opacity(0.9)
-        case .secondary:
-            return Color.systemBackground.opacity(0.78)
-        }
-        #endif
-    }
-
-    private var cardBorder: Color {
-        #if os(macOS)
-        switch tone {
-        case .primary:
-            return Color.conversationWorkspaceBorderMac.opacity(0.92)
-        case .secondary:
-            return Color.conversationWorkspaceBorderMac.opacity(0.74)
-        }
-        #else
-        switch tone {
-        case .primary:
-            return Color.secondary.opacity(0.2)
-        case .secondary:
-            return Color.secondary.opacity(0.14)
-        }
-        #endif
-    }
-}
-
-private struct WorkspaceWidthKey: PreferenceKey {
-    static let defaultValue: CGFloat = .infinity
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
