@@ -478,6 +478,31 @@ impl DeltaSummary {
     }
 }
 
+/// Merge per-agent kind:34011 `AgentConfig` data into `ProjectAgent` records.
+///
+/// This applies the same merge logic the TUI performs in its rendering layer,
+/// so that iOS consumers receive the richest available data from a single
+/// `getOnlineAgents()` or `ProjectStatusChanged` delta.
+fn merge_agent_configs(store: &AppDataStore, agents: Vec<ProjectAgent>) -> Vec<ProjectAgent> {
+    agents
+        .into_iter()
+        .map(|mut agent| {
+            if let Some(cfg) = store.get_agent_config(&agent.pubkey) {
+                if cfg.active_model.is_some() {
+                    agent.model = cfg.active_model.clone();
+                }
+                if !cfg.active_skills.is_empty() || !cfg.skills.is_empty() {
+                    agent.skills = cfg.active_skills.clone();
+                }
+                if !cfg.active_mcps.is_empty() || !cfg.mcps.is_empty() {
+                    agent.mcp_servers = cfg.active_mcps.clone();
+                }
+            }
+            agent
+        })
+        .collect()
+}
+
 fn summarize_deltas(deltas: &[DataChangeType]) -> DeltaSummary {
     let mut summary = DeltaSummary::default();
     for delta in deltas {
@@ -759,10 +784,13 @@ fn process_data_changes_with_deltas(
                                     let project_id = project_id_from_a_tag(store, &project_a_tag)
                                         .unwrap_or_default();
                                     let is_online = store.is_project_online(&project_a_tag);
-                                    let online_agents = store
+                                    let online_agents: Vec<ProjectAgent> = store
                                         .get_online_agents(&project_a_tag)
                                         .map(|agents| agents.iter().cloned().collect())
                                         .unwrap_or_default();
+                                    // Merge per-agent kind:34011 configs so iOS
+                                    // receives the richest available data.
+                                    let online_agents = merge_agent_configs(store, online_agents);
 
                                     deltas.push(DataChangeType::ProjectStatusChanged {
                                         project_id,
@@ -798,11 +826,35 @@ fn process_data_changes_with_deltas(
                         34011 => {
                             // Per-agent capability config (kind:34011, NIP-33 replaceable).
                             // The unconditional `handle_status_event_value` call above already
-                            // upserted the config into `agent_configs_by_pubkey` and applied
-                            // the trust check. No DataChangeType variant is emitted yet —
-                            // the TUI rendering layer reads this state on demand. If/when
-                            // iOS/Swift consumers need push notifications, add a dedicated
-                            // variant here without touching the worker.
+                            // upserted the config into `agent_configs_by_pubkey`.
+                            //
+                            // Emit ProjectStatusChanged for every project that has this
+                            // agent online so iOS refreshes its cached agent list with
+                            // the merged 34011 data (model, skills, mcp).
+                            if let Some(cfg) = crate::models::AgentConfig::from_value(&event) {
+                                for (a_tag, status) in &store.project_statuses {
+                                    if !status.is_online() {
+                                        continue;
+                                    }
+                                    let has_agent = status.agents.iter().any(|a| a.pubkey == cfg.pubkey);
+                                    if has_agent {
+                                        let project_id = project_id_from_a_tag(store, a_tag)
+                                            .unwrap_or_default();
+                                        let online_agents: Vec<ProjectAgent> = status
+                                            .agents
+                                            .iter()
+                                            .cloned()
+                                            .collect();
+                                        let online_agents = merge_agent_configs(store, online_agents);
+                                        deltas.push(DataChangeType::ProjectStatusChanged {
+                                            project_id,
+                                            project_a_tag: a_tag.clone(),
+                                            is_online: true,
+                                            online_agents,
+                                        });
+                                    }
+                                }
+                            }
                         }
                         _ => {}
                     }

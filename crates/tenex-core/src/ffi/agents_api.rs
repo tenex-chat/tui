@@ -642,7 +642,7 @@ impl TenexCore {
             tlog!("FFI", "No status found in project_statuses HashMap");
         }
 
-        let agents = store
+        let agents: Vec<ProjectAgent> = store
             .get_online_agents(&project.a_tag())
             .map(|agents| {
                 tlog!("FFI", "Found {} online agents", agents.len());
@@ -655,6 +655,11 @@ impl TenexCore {
                 tlog!("FFI", "No online agents (status is stale or missing)");
                 Vec::new()
             });
+
+        // Merge per-agent kind:34011 configs into the ProjectAgent data.
+        // The TUI does this in its rendering layer; for iOS we merge here so
+        // that `getOnlineAgents()` always returns the richest available data.
+        let agents = super::merge_agent_configs(store, agents);
 
         tlog!("FFI", "Returning {} agents", agents.len());
         Ok(agents)
