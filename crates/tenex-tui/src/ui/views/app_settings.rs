@@ -372,7 +372,7 @@ fn render_bunker_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsSt
     );
 }
 
-/// Truncate a pubkey hex to a readable short form: first 8 + "…" + last 6.
+/// Truncate a pubkey hex: first 8 chars + "…" + last 6 chars.
 fn short_pubkey(pk: &str) -> String {
     if pk.len() <= 16 {
         return pk.to_string();
@@ -380,8 +380,8 @@ fn short_pubkey(pk: &str) -> String {
     format!("{}…{}", &pk[..8], &pk[pk.len() - 6..])
 }
 
-/// Build the flat selectable item list for the Backends tab.
-/// Order: pending first, then approved (sorted), then blocked (sorted).
+/// A selectable item in the Backends tab flat list.
+/// Order in list: pending first, then approved (sorted), then blocked (sorted).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendListItem {
     Pending(String),
@@ -389,7 +389,17 @@ pub enum BackendListItem {
     Blocked(String),
 }
 
-pub fn build_backends_list(store: &crate::ui::app::AppDataStore) -> Vec<BackendListItem> {
+impl BackendListItem {
+    pub fn pubkey(&self) -> &str {
+        match self {
+            BackendListItem::Pending(pk)
+            | BackendListItem::Approved(pk)
+            | BackendListItem::Blocked(pk) => pk,
+        }
+    }
+}
+
+pub fn build_backends_list(store: &tenex_core::store::AppDataStore) -> Vec<BackendListItem> {
     let mut items = Vec::new();
     for p in &store.trust.pending_backend_approvals {
         items.push(BackendListItem::Pending(p.backend_pubkey.clone()));
@@ -409,70 +419,72 @@ pub fn build_backends_list(store: &crate::ui::app::AppDataStore) -> Vec<BackendL
 
 /// Render the Backends tab content
 fn render_backends_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {
-    let store = app.data_store.borrow();
-    let items = build_backends_list(&store);
-    drop(store);
+    let items = {
+        let store = app.data_store.borrow();
+        build_backends_list(&store)
+    };
 
     let mut y_offset = area.y;
     let max_y = area.y + area.height;
 
-    // Helper to render one item row
-    let render_item = |f: &mut Frame, y: u16, label: &str, badge: &str, badge_color, is_selected: bool| {
-        if y >= max_y {
-            return;
-        }
-        let row_area = Rect::new(area.x, y, area.width, 1);
-        let border_char = if is_selected { "▌" } else { "│" };
-        let border_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
-
-        let badge_style = Style::default().fg(badge_color);
-        let label_style = if is_selected {
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::TEXT_SECONDARY)
-        };
-
-        let spans = vec![
-            Span::styled(border_char, Style::default().fg(border_color)),
-            Span::styled(format!(" {} ", badge), badge_style),
-            Span::styled(label, label_style),
-        ];
-        f.render_widget(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE)), row_area);
-    };
-
     if items.is_empty() {
         if y_offset < max_y {
-            let msg = Paragraph::new("No backends known yet.")
-                .style(Style::default().fg(theme::TEXT_DIM));
-            f.render_widget(msg, Rect::new(area.x, y_offset, area.width, 1));
+            f.render_widget(
+                Paragraph::new("No backends known yet.")
+                    .style(Style::default().fg(theme::TEXT_DIM)),
+                Rect::new(area.x, y_offset, area.width, 1),
+            );
         }
         return;
     }
 
     let mut item_idx = 0usize;
-    let mut last_kind: Option<&str> = None;
+    let mut last_section = "";
 
     for item in &items {
-        let (section, badge, badge_color, pubkey) = match item {
-            BackendListItem::Pending(pk) => ("Pending", "pending", theme::ACCENT_WARNING, pk),
-            BackendListItem::Approved(pk) => ("Approved", "approved", theme::ACCENT_SUCCESS, pk),
-            BackendListItem::Blocked(pk) => ("Blocked", "blocked", theme::ACCENT_ERROR, pk),
+        let (section, badge, badge_color) = match item {
+            BackendListItem::Pending(_) => ("Pending", "[pending]", theme::ACCENT_WARNING),
+            BackendListItem::Approved(_) => ("Approved", "[approved]", theme::ACCENT_SUCCESS),
+            BackendListItem::Blocked(_) => ("Blocked", "[blocked]", theme::ACCENT_ERROR),
         };
 
-        // Section header
-        if last_kind != Some(section) {
-            if last_kind.is_some() && y_offset < max_y {
-                y_offset += 1; // blank line between sections
+        if section != last_section {
+            if !last_section.is_empty() && y_offset < max_y {
+                y_offset += 1;
             }
             if y_offset < max_y {
                 render_section_header(f, area.x, y_offset, area.width, section);
                 y_offset += 1;
             }
-            last_kind = Some(section);
+            last_section = section;
+        }
+
+        if y_offset >= max_y {
+            break;
         }
 
         let is_selected = state.backends_index == item_idx;
-        render_item(f, y_offset, &short_pubkey(pubkey), badge, badge_color, is_selected);
+        let border_char = if is_selected { "▌" } else { "│" };
+        let border_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
+        let label_style = if is_selected {
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_MUTED)
+        };
+
+        let spans = vec![
+            Span::styled(border_char, Style::default().fg(border_color)),
+            Span::styled(format!(" {} ", badge), Style::default().fg(badge_color)),
+            Span::styled(short_pubkey(item.pubkey()), label_style),
+        ];
+        f.render_widget(
+            Paragraph::new(Line::from(spans))
+                .block(Block::default().borders(Borders::NONE)),
+            Rect::new(area.x, y_offset, area.width, 1),
+        );
+
         y_offset += 1;
         item_idx += 1;
     }

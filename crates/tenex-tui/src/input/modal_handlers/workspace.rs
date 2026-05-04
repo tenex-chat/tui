@@ -6,6 +6,7 @@ use crate::ui::modal::{
     AppearanceSetting, BunkerAuditState, BunkerRulesState, BunkerSetting, GeneralSetting,
     ModelBrowserState, VoiceBrowserState,
 };
+use crate::ui::views::app_settings::{BackendListItem, build_backends_list};
 use crate::ui::{self, App, ModalState};
 
 pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
@@ -268,6 +269,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     ui::modal::SettingsTab::Bunker => {
                         // Bunker tab uses action rows (no edit mode)
                     }
+                    ui::modal::SettingsTab::Backends => {
+                        // Backends tab has no text editing
+                    }
                 }
                 app.modal_state = ModalState::AppSettings(state);
             } else {
@@ -464,6 +468,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     ui::modal::SettingsTab::Bunker => {
                         state.stop_editing();
                     }
+                    ui::modal::SettingsTab::Backends => {
+                        state.stop_editing();
+                    }
                 }
             } else {
                 // Handle toggle/cycle settings that don't require edit mode
@@ -609,6 +616,24 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         }
                         None => {}
                     }
+                } else if state.current_tab == ui::modal::SettingsTab::Backends {
+                    // Enter approves the selected item if it is pending
+                    let items = {
+                        let store = app.data_store.borrow();
+                        build_backends_list(&store)
+                    };
+                    if let Some(item) = items.get(state.backends_index) {
+                        if let BackendListItem::Pending(pk) = item {
+                            let pk = pk.clone();
+                            app.approve_backend(&pk);
+                            app.set_warning_status(&format!("Approved backend {}", &pk[..8.min(pk.len())]));
+                            // Clamp index in case list shrank
+                            let new_len = items.len().saturating_sub(1);
+                            if state.backends_index > new_len {
+                                state.backends_index = new_len;
+                            }
+                        }
+                    }
                 } else {
                     state.start_editing();
                 }
@@ -653,6 +678,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 ui::modal::SettingsTab::Bunker => {
                     // Bunker settings don't have text editing
                 }
+                ui::modal::SettingsTab::Backends => {
+                    // Backends settings don't have text editing
+                }
             }
         }
         KeyCode::Backspace if state.editing => {
@@ -694,13 +722,24 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 ui::modal::SettingsTab::Bunker => {
                     // Bunker settings don't have text editing
                 }
+                ui::modal::SettingsTab::Backends => {
+                    // Backends settings don't have text editing
+                }
             }
         }
         KeyCode::Up if !state.editing => {
             state.move_up();
         }
         KeyCode::Down if !state.editing => {
-            state.move_down();
+            if state.current_tab == ui::modal::SettingsTab::Backends {
+                let count = {
+                    let store = app.data_store.borrow();
+                    build_backends_list(&store).len()
+                };
+                state.move_backends_down(count);
+            } else {
+                state.move_down();
+            }
         }
         KeyCode::Delete if !state.editing => {
             // Delete/clear settings when not editing
@@ -765,6 +804,54 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         }
                     }
                     _ => {}
+                }
+            }
+        }
+        KeyCode::Char('a') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+            let items = {
+                let store = app.data_store.borrow();
+                build_backends_list(&store)
+            };
+            if let Some(BackendListItem::Pending(pk)) = items.get(state.backends_index) {
+                let pk = pk.clone();
+                app.approve_backend(&pk);
+                app.set_warning_status(&format!("Approved backend {}", &pk[..8.min(pk.len())]));
+                let new_len = items.len().saturating_sub(1);
+                if state.backends_index > new_len {
+                    state.backends_index = new_len;
+                }
+            }
+        }
+        KeyCode::Char('d') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+            let items = {
+                let store = app.data_store.borrow();
+                build_backends_list(&store)
+            };
+            match items.get(state.backends_index) {
+                Some(BackendListItem::Pending(pk)) | Some(BackendListItem::Approved(pk)) => {
+                    let pk = pk.clone();
+                    app.block_backend(&pk);
+                    app.set_warning_status(&format!("Blocked backend {}", &pk[..8.min(pk.len())]));
+                    let new_len = items.len().saturating_sub(1);
+                    if state.backends_index > new_len {
+                        state.backends_index = new_len;
+                    }
+                }
+                _ => {}
+            }
+        }
+        KeyCode::Char('u') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+            let items = {
+                let store = app.data_store.borrow();
+                build_backends_list(&store)
+            };
+            if let Some(BackendListItem::Blocked(pk)) = items.get(state.backends_index) {
+                let pk = pk.clone();
+                app.approve_backend(&pk);
+                app.set_warning_status(&format!("Unblocked backend {}", &pk[..8.min(pk.len())]));
+                let new_len = items.len().saturating_sub(1);
+                if state.backends_index > new_len {
+                    state.backends_index = new_len;
                 }
             }
         }
