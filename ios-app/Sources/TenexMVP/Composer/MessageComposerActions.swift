@@ -52,7 +52,7 @@ extension MessageComposerView {
     }
 
     func loadSkills() async {
-        availableSkills = await composerViewModel.loadSkills()
+        availableSkills = await composerViewModel.loadSkills(projectId: selectedProject?.id ?? "")
     }
 
     func refreshComposerContextForSelectedProject() async {

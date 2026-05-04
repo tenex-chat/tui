@@ -463,16 +463,10 @@ struct MessageComposerView: View {
             SkillSelectorSheet(
                 skills: availableSkills,
                 selectedSkillIds: $draft.selectedSkillIds,
-                bookmarkedIds: coreManager.bookmarkedIds,
                 initialSearchQuery: skillSelectorInitialQuery,
                 onDone: {
                     isDirty = true // Mark as dirty when user selects skills
                     persistSelectedSkillIds()
-                },
-                onToggleBookmark: { itemId in
-                    Task {
-                        _ = try? await coreManager.core.toggleBookmark(itemId: itemId)
-                    }
                 }
             )
         }

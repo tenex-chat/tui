@@ -1779,9 +1779,6 @@ impl App {
                 DataChange::BunkerSignRequest { request } => {
                     self.enqueue_bunker_sign_request(request);
                 }
-                DataChange::BookmarkListChanged { bookmarked_ids: _ } => {
-                    // Bookmarks are already updated in the store by the worker
-                }
                 DataChange::NoteKeys(keys) => {
                     if let Some(handle) = self.core_handle.clone() {
                         let events = {
@@ -3716,9 +3713,8 @@ impl App {
     // ===== Skill Selector Methods =====
 
     /// Open the skill selector modal.
-    /// Defaults to BookmarkedOnly filter so users see their curated list first.
     pub fn open_skill_selector(&mut self) {
-        use crate::ui::modal::{BookmarkFilter, SkillSelectorState};
+        use crate::ui::modal::SkillSelectorState;
         use crate::ui::selector::SelectorState;
 
         let current_skills = self
@@ -3730,43 +3726,45 @@ impl App {
         self.modal_state = ModalState::SkillSelector(SkillSelectorState {
             selector: SelectorState::new(),
             selected_skill_ids: current_skills,
-            bookmark_filter: BookmarkFilter::BookmarkedOnly,
         });
     }
 
     /// Get filtered skills for the skill selector.
     ///
-    /// Applies both the text search filter and the bookmark filter:
-    /// - In `BookmarkedOnly` mode, only skills whose IDs are in the user's bookmark list are shown.
-    /// - In `All` mode, all skills are shown (text search still applies).
+    /// Filters by the project's allowed skill d_tags (from kind:24010 / kind:34011) and
+    /// the active text search filter.
     pub fn filtered_skill_selector_items(&self) -> Vec<tenex_core::models::Skill> {
-        use crate::ui::modal::BookmarkFilter;
-
         let filter = self.skill_selector_filter();
-        let bookmark_filter = self.skill_selector_bookmark_filter();
         let store = self.data_store.borrow();
 
-        // Get the user's bookmarked IDs for filtering (if in BookmarkedOnly mode)
-        let bookmarked_ids: Option<std::collections::HashSet<&str>> =
-            if bookmark_filter == BookmarkFilter::BookmarkedOnly {
-                let user_pubkey = store.user_pubkey.as_deref().unwrap_or("");
-                let ids = store
-                    .get_bookmarks(user_pubkey)
-                    .map(|bl| bl.bookmarked_ids.iter().map(|s| s.as_str()).collect())
-                    .unwrap_or_default();
-                Some(ids)
-            } else {
-                None
-            };
+        // Build the union of allowed skill d_tags from 24010 (project status) and 34011
+        // (per-agent configs) for the currently selected project.
+        let allowed_dtags: Option<std::collections::HashSet<String>> = self
+            .selected_project
+            .as_ref()
+            .map(|project| {
+                let mut set: std::collections::HashSet<String> = std::collections::HashSet::new();
+                if let Some(status) = store.get_project_status(&project.a_tag()) {
+                    for s in status.all_skills() {
+                        set.insert(s.to_string());
+                    }
+                }
+                for config in store.agent_configs_by_pubkey.values() {
+                    for s in &config.skills {
+                        set.insert(s.clone());
+                    }
+                }
+                set
+            });
 
         let mut items: Vec<tenex_core::models::Skill> = store
             .content
             .get_skills()
             .into_iter()
             .filter(|s| {
-                // Apply bookmark filter
-                if let Some(ref ids) = bookmarked_ids {
-                    if !ids.contains(s.id.as_str()) {
+                // Restrict to skills whose d_tag is in the project's allowed set.
+                if let Some(ref allowed) = allowed_dtags {
+                    if !allowed.contains(&s.d_tag) {
                         return false;
                     }
                 }
@@ -3791,21 +3789,6 @@ impl App {
             ModalState::SkillSelector(state) => &state.selector.filter,
             _ => "",
         }
-    }
-
-    /// Get the current bookmark filter mode for the skill selector.
-    pub fn skill_selector_bookmark_filter(&self) -> crate::ui::modal::BookmarkFilter {
-        match &self.modal_state {
-            ModalState::SkillSelector(state) => state.bookmark_filter.clone(),
-            _ => crate::ui::modal::BookmarkFilter::All,
-        }
-    }
-
-    /// Check if a skill ID is bookmarked by the current user.
-    pub fn is_bookmarked(&self, item_id: &str) -> bool {
-        let store = self.data_store.borrow();
-        let user_pubkey = store.user_pubkey.as_deref().unwrap_or("");
-        store.is_bookmarked(user_pubkey, item_id)
     }
 
     // ===== History Search Methods (Ctrl+R) =====

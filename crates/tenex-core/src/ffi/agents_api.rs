@@ -495,101 +495,48 @@ impl TenexCore {
         Ok(())
     }
 
-    // MARK: - Bookmark Methods (kind:14202)
-
-    /// Check if a nudge or skill is bookmarked by the current user.
-    pub fn is_bookmarked(&self, item_id: String) -> bool {
-        let user_pubkey = match self.get_current_user() {
-            Some(u) => u.pubkey,
-            None => return false,
-        };
-
-        let store_guard = match self.store.read() {
-            Ok(g) => g,
-            Err(_) => return false,
-        };
-
-        store_guard
-            .as_ref()
-            .map(|s| s.is_bookmarked(&user_pubkey, &item_id))
-            .unwrap_or(false)
-    }
-
-    /// Get all bookmarked nudge/skill IDs for the current user.
-    pub fn get_bookmarked_ids(&self) -> Result<Vec<String>, TenexError> {
-        let user_pubkey = self
-            .get_current_user()
-            .ok_or_else(|| TenexError::Internal {
-                message: "Not logged in".to_string(),
-            })?
-            .pubkey;
-
+    /// Returns skills (kind:4202) whose d_tag appears in the project's 24010 or 34011 skill lists.
+    pub fn get_project_skills(&self, project_id: String) -> Result<Vec<Skill>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
-
         let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
-            message: "Store not initialized - call init() first".to_string(),
+            message: "Store not initialized".to_string(),
         })?;
 
-        Ok(store
-            .get_bookmarks(&user_pubkey)
-            .map(|bl| bl.bookmarked_ids.iter().cloned().collect())
-            .unwrap_or_default())
-    }
+        // Collect allowed skill d_tags from 24010 and 34011
+        let mut allowed_dtags: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
-    /// Toggle bookmark status for a nudge or skill.
-    pub fn toggle_bookmark(&self, item_id: String) -> Result<Vec<String>, TenexError> {
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let user_pubkey = self
-            .get_current_user()
-            .ok_or_else(|| TenexError::Internal {
-                message: "Not logged in".to_string(),
-            })?
-            .pubkey;
-
-        let new_ids: Vec<String> = {
-            let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
-                message: format!("Failed to acquire store lock: {}", e),
-            })?;
-
-            let store = store_guard.as_mut().ok_or_else(|| TenexError::Internal {
-                message: "Store not initialized - call init() first".to_string(),
-            })?;
-
-            let mut bookmarked_ids: std::collections::HashSet<String> = store
-                .get_bookmarks(&user_pubkey)
-                .map(|bl| bl.bookmarked_ids.clone())
-                .unwrap_or_default();
-
-            if bookmarked_ids.contains(&item_id) {
-                bookmarked_ids.remove(&item_id);
-            } else {
-                bookmarked_ids.insert(item_id.clone());
+        let project = store
+            .get_projects()
+            .iter()
+            .find(|p| p.id == project_id)
+            .cloned();
+        if let Some(project) = project {
+            // From 24010
+            if let Some(status) = store.get_project_status(&project.a_tag()) {
+                for s in status.all_skills() {
+                    allowed_dtags.insert(s.to_string());
+                }
             }
+            // From 34011 - all agent configs in the store
+            for config in store.agent_configs_by_pubkey.values() {
+                for s in &config.skills {
+                    allowed_dtags.insert(s.clone());
+                }
+            }
+        }
 
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
+        let skills: Vec<Skill> = store
+            .content
+            .get_skills()
+            .into_iter()
+            .filter(|skill| allowed_dtags.contains(&skill.d_tag))
+            .cloned()
+            .collect();
 
-            let updated_list = crate::models::BookmarkList {
-                pubkey: user_pubkey.clone(),
-                bookmarked_ids: bookmarked_ids.clone(),
-                last_updated: now,
-            };
-            store.set_bookmarks(&user_pubkey, updated_list);
-
-            bookmarked_ids.into_iter().collect()
-        };
-
-        let core_handle = get_core_handle(&self.core_handle)?;
-        let _ = core_handle.send(NostrCommand::PublishBookmarkList {
-            bookmarked_ids: new_ids.clone(),
-        });
-
-        Ok(new_ids)
+        Ok(skills)
     }
 
     /// Get project roster agents for a project.

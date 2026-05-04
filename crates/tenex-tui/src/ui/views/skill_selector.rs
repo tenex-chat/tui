@@ -1,10 +1,10 @@
 use crate::ui::components::{Modal, ModalSize};
 use crate::ui::format::format_relative_time_short;
-use crate::ui::modal::{BookmarkFilter, SkillSelectorState};
+use crate::ui::modal::SkillSelectorState;
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{List, ListItem, Paragraph},
     Frame,
@@ -14,14 +14,10 @@ use tenex_core::models::Skill;
 /// Render the skill selector modal.
 pub fn render_skill_selector(f: &mut Frame, app: &App, area: Rect, state: &SkillSelectorState) {
     let selected_count = state.selected_skill_ids.len();
-    let filter_label = state.bookmark_filter.label();
     let title = if selected_count > 0 {
-        format!(
-            "Select Skills [{}] ({} selected)",
-            filter_label, selected_count
-        )
+        format!("Select Skills ({} selected)", selected_count)
     } else {
-        format!("Select Skills [{}]", filter_label)
+        "Select Skills".to_string()
     };
 
     let (popup_area, content_area) = Modal::new(&title)
@@ -42,12 +38,8 @@ pub fn render_skill_selector(f: &mut Frame, app: &App, area: Rect, state: &Skill
     );
 
     if items.is_empty() {
-        let msg = if state.bookmark_filter == BookmarkFilter::BookmarkedOnly
-            && state.selector.filter.is_empty()
-        {
-            "No bookmarked skills. Press Tab to show all, or 'b' on an item to bookmark."
-        } else if state.selector.filter.is_empty() {
-            "No skills available."
+        let msg = if state.selector.filter.is_empty() {
+            "No skills available for this project."
         } else {
             "No skills match your search."
         };
@@ -98,10 +90,9 @@ pub fn render_skill_selector(f: &mut Frame, app: &App, area: Rect, state: &Skill
 
             let is_cursor = i == selected_index;
             let is_selected = state.selected_skill_ids.iter().any(|id| id == &item.id);
-            let is_bookmarked = app.is_bookmarked(&item.id);
             let border_color = theme::user_color(&item.pubkey);
 
-            // -- Line 1: checkbox, bookmark, border, title, [files:N], author, time --
+            // -- Line 1: checkbox, border, title, [files:N], author, time --
             let mut line1 = Vec::new();
 
             let checkbox = if is_selected { "[x] " } else { "[ ] " };
@@ -111,17 +102,6 @@ pub fn render_skill_selector(f: &mut Frame, app: &App, area: Rect, state: &Skill
                 Style::default().fg(theme::TEXT_MUTED)
             };
             line1.push(Span::styled(checkbox, checkbox_style));
-
-            if is_bookmarked {
-                line1.push(Span::styled(
-                    "★ ",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                line1.push(Span::styled("  ", Style::default()));
-            }
 
             if is_cursor {
                 line1.push(Span::styled("▌", Style::default().fg(border_color)));
@@ -161,8 +141,8 @@ pub fn render_skill_selector(f: &mut Frame, app: &App, area: Rect, state: &Skill
 
             // -- Line 2: description (indented to align with title) --
             if !item.description.is_empty() {
-                // "[ ]  ★ ▌" = 4 + 2 + 1 = 7 chars of prefix
-                let indent = "       ";
+                // "[ ] ▌" = 4 + 1 = 5 chars of prefix
+                let indent = "     ";
                 let max_desc = (list_area.width as usize).saturating_sub(indent.len() + 1);
                 let desc = truncate_chars(&item.description, max_desc);
                 lines.push(Line::from(vec![
@@ -203,12 +183,6 @@ pub fn render_skill_selector(f: &mut Frame, app: &App, area: Rect, state: &Skill
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("b", Style::default().fg(Color::Yellow)),
-        Span::styled(" bookmark", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("Tab", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" filter", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS)),
         Span::styled(" confirm", Style::default().fg(theme::TEXT_MUTED)),

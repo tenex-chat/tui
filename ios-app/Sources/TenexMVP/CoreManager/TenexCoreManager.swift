@@ -137,9 +137,6 @@ class TenexCoreManager {
     private(set) var profileNamesVersion: UInt64 = 0
     var streamingBuffers: [String: StreamingBuffer] = [:]
 
-    /// Bookmarked item IDs (kind:14202). Updated reactively when BookmarkListChanged fires.
-    var bookmarkedIds: Set<String> = []
-
     /// Project liveness derived from the kind:24010 heartbeat (45-second staleness window).
     /// Key: project ID, Value: true when at least one approved backend has sent a fresh 24010
     /// for the project. NOT to be confused with kind:24011 inventory presence, which only

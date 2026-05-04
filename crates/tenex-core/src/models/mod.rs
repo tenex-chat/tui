@@ -1,7 +1,6 @@
 pub mod agent_config;
 pub mod agent_definition;
 pub mod ask_input;
-pub mod bookmark;
 pub mod conversation_metadata;
 pub mod draft;
 pub mod html_report;
@@ -25,7 +24,6 @@ pub mod time_filter;
 pub use agent_config::AgentConfig;
 pub use agent_definition::AgentDefinition;
 pub use ask_input::{Answer, AskInputState, InputMode, QuestionAnswer};
-pub use bookmark::BookmarkList;
 pub use conversation_metadata::ConversationMetadata;
 pub use draft::{
     ChatDraft, DraftImageAttachment, DraftPasteAttachment, DraftStorage, DraftStorageError,

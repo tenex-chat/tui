@@ -1,32 +1,22 @@
 import SwiftUI
 
 /// Skill selector sheet for attaching skills to a message draft.
+///
+/// Skills are passed in pre-filtered by the caller (typically the union of skills
+/// from the project's kind:24010 and kind:34011 events).
 struct SkillSelectorSheet: View {
     let skills: [Skill]
     @Binding var selectedSkillIds: Set<String>
-    /// Current bookmark set from TenexCoreManager.bookmarkedIds — used to seed the local copy.
-    var bookmarkedIds: Set<String> = []
     var initialSearchQuery: String = ""
     var onDone: (() -> Void)?
-    /// Called with the base item ID when the user toggles a bookmark. Caller is responsible for
-    /// persisting the change via FFI; this sheet applies the toggle optimistically.
-    var onToggleBookmark: ((String) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
 
     @State private var localSelectedSkillIds: Set<String> = []
-    /// Optimistic local bookmark state — seeded from `bookmarkedIds` on appear.
-    @State private var localBookmarkedIds: Set<String> = []
     @State private var searchText = ""
-    /// When true, only bookmarked items are shown. Defaults to true.
-    @State private var showBookmarkedOnly: Bool = true
 
     private var items: [Skill] {
         var base = skills
-
-        if showBookmarkedOnly {
-            base = base.filter { localBookmarkedIds.contains($0.id) }
-        }
 
         if !searchText.isEmpty {
             let normalized = searchText.lowercased()
@@ -67,22 +57,8 @@ struct SkillSelectorSheet: View {
                             SkillSelectorRow(
                                 skill: skill,
                                 isSelected: localSelectedSkillIds.contains(skill.id),
-                                isBookmarked: localBookmarkedIds.contains(skill.id),
-                                onTap: { toggle(skill: skill) },
-                                onToggleBookmark: { toggleBookmark(skill: skill) }
+                                onTap: { toggle(skill: skill) }
                             )
-                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                let isSkillBookmarked = localBookmarkedIds.contains(skill.id)
-                                Button {
-                                    toggleBookmark(skill: skill)
-                                } label: {
-                                    Label(
-                                        isSkillBookmarked ? "Unbookmark" : "Bookmark",
-                                        systemImage: isSkillBookmarked ? "star.slash" : "star"
-                                    )
-                                }
-                                .tint(isSkillBookmarked ? .orange : .yellow)
-                            }
                         }
                     }
                 }
@@ -115,20 +91,9 @@ struct SkillSelectorSheet: View {
                     .fontWeight(.semibold)
                     .keyboardShortcut(.defaultAction)
                 }
-
-                #if os(iOS)
-                ToolbarItem(placement: .topBarLeading) {
-                    bookmarkFilterButton
-                }
-                #else
-                ToolbarItem(placement: .automatic) {
-                    bookmarkFilterButton
-                }
-                #endif
             }
             .onAppear {
                 localSelectedSkillIds = selectedSkillIds
-                localBookmarkedIds = bookmarkedIds
                 if !initialSearchQuery.isEmpty {
                     searchText = initialSearchQuery
                 }
@@ -139,17 +104,6 @@ struct SkillSelectorSheet: View {
         #else
         .frame(minWidth: 520, idealWidth: 580, minHeight: 460, idealHeight: 560)
         #endif
-    }
-
-    private var bookmarkFilterButton: some View {
-        Button {
-            showBookmarkedOnly.toggle()
-        } label: {
-            Image(systemName: showBookmarkedOnly ? "bookmark.fill" : "bookmark")
-                .symbolEffect(.bounce, value: showBookmarkedOnly)
-        }
-        .help(showBookmarkedOnly ? "Showing bookmarked only — tap to show all" : "Tap to show bookmarked only")
-        .accessibilityLabel(showBookmarkedOnly ? "Show all skills" : "Show bookmarked skills only")
     }
 
     private var selectedItemsBar: some View {
@@ -192,41 +146,22 @@ struct SkillSelectorSheet: View {
 
     private var emptyStateView: some View {
         VStack(spacing: 16) {
-            if showBookmarkedOnly && localBookmarkedIds.isEmpty && searchText.isEmpty {
-                Image(systemName: "star")
-                    .font(.system(.largeTitle))
-                    .foregroundStyle(.secondary)
-                Text("No Bookmarks Yet")
+            Image(systemName: searchText.isEmpty ? "bolt.slash" : "magnifyingglass")
+                .font(.system(.largeTitle))
+                .foregroundStyle(.secondary)
+
+            if searchText.isEmpty {
+                Text("No Skills")
                     .font(.headline)
-                Text("Tap ★ next to any skill to bookmark it.\nBookmarked skills appear here for quick access.")
+                Text("No skills are available for this project.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Button {
-                    showBookmarkedOnly = false
-                } label: {
-                    Label("Show All Skills", systemImage: "list.bullet")
-                }
-                .adaptiveGlassButtonStyle()
-                .padding(.top, 4)
             } else {
-                Image(systemName: searchText.isEmpty ? "bolt.slash" : "magnifyingglass")
-                    .font(.system(.largeTitle))
+                Text("No Results")
+                    .font(.headline)
+                Text("No skills match \"\(searchText)\"")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-
-                if searchText.isEmpty {
-                    Text("No Skills")
-                        .font(.headline)
-                    Text("No skills are available yet.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("No Results")
-                        .font(.headline)
-                    Text("No skills match \"\(searchText)\"")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -242,23 +177,12 @@ struct SkillSelectorSheet: View {
             localSelectedSkillIds.insert(skill.id)
         }
     }
-
-    private func toggleBookmark(skill: Skill) {
-        if localBookmarkedIds.contains(skill.id) {
-            localBookmarkedIds.remove(skill.id)
-        } else {
-            localBookmarkedIds.insert(skill.id)
-        }
-        onToggleBookmark?(skill.id)
-    }
 }
 
 private struct SkillSelectorRow: View {
     let skill: Skill
     let isSelected: Bool
-    let isBookmarked: Bool
     let onTap: () -> Void
-    let onToggleBookmark: () -> Void
 
     var body: some View {
         Button(action: onTap) {
@@ -286,12 +210,6 @@ private struct SkillSelectorRow: View {
                 }
 
                 Spacer(minLength: 12)
-
-                Button(action: onToggleBookmark) {
-                    Image(systemName: isBookmarked ? "star.fill" : "star")
-                        .foregroundStyle(isBookmarked ? .yellow : .secondary)
-                }
-                .buttonStyle(.borderless)
 
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? Color.skillBrand : .secondary)

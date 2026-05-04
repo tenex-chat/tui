@@ -6,7 +6,7 @@ protocol CoreGateway: AnyObject {
     var conversations: [ConversationFullInfo] { get }
     var projectRosterAgents: [String: [ProjectAgent]] { get }
 
-    func getSkills() async throws -> [Skill]
+    func getProjectSkills(projectId: String) async throws -> [Skill]
     func getProfileName(pubkey: String) async -> String
     func sendThread(
         projectId: String,
@@ -93,8 +93,8 @@ struct ComposerDependencies {
 }
 
 extension TenexCoreManager: CoreGateway {
-    func getSkills() async throws -> [Skill] {
-        try await core.getSkills()
+    func getProjectSkills(projectId: String) async throws -> [Skill] {
+        try await core.getProjectSkills(projectId: projectId)
     }
 
     func getProfileName(pubkey: String) async -> String {

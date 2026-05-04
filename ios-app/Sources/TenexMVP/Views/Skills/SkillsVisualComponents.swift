@@ -57,9 +57,6 @@ struct SkillsHeroHeader: View {
 
 struct SkillCatalogCard: View {
     let item: SkillListItem
-    let isBookmarked: Bool
-    let isTogglingBookmark: Bool
-    let onToggleBookmark: () -> Void
 
     private var skill: Skill { item.skill }
 
@@ -126,21 +123,6 @@ struct SkillCatalogCard: View {
             }
 
             Spacer(minLength: 8)
-
-            Button(action: onToggleBookmark) {
-                if isTogglingBookmark {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 24, height: 24)
-                } else {
-                    Image(systemName: isBookmarked ? "minus" : "plus")
-                        .font(.system(size: 22, weight: .regular))
-                        .foregroundStyle(isBookmarked ? Color.skillBrand : .secondary)
-                        .frame(width: 24, height: 24)
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isBookmarked ? "Remove bookmark" : "Add bookmark")
         }
         .padding(18)
         .background(

@@ -469,32 +469,11 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
-    // MARK: - Bookmarks (kind:14202)
-
-    /// Check if a skill is bookmarked by the current user.
-    func isBookmarked(itemId: String) -> Bool {
-        profiler.measureFFI("isBookmarked") {
-            core.isBookmarked(itemId: itemId)
-        }
-    }
-
-    /// Get all bookmarked skill IDs for the current user.
-    func getBookmarkedIds() throws -> [String] {
-        try profiler.measureFFI("getBookmarkedIds") {
+    /// Get skills (kind:4202) whose `d_tag` appears in the project's 24010 or 34011 skill tags.
+    func getProjectSkills(projectId: String) throws -> [Skill] {
+        try profiler.measureFFI("getProjectSkills") {
             do {
-                return try core.getBookmarkedIds()
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
-    /// Toggle bookmark status for a skill.
-    /// Returns the updated list of bookmarked IDs.
-    func toggleBookmark(itemId: String) throws -> [String] {
-        try profiler.measureFFI("toggleBookmark") {
-            do {
-                return try core.toggleBookmark(itemId: itemId)
+                return try core.getProjectSkills(projectId: projectId)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

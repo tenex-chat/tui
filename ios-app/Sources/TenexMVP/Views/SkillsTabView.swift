@@ -22,8 +22,6 @@ struct SkillsTabView: View {
     @State private var hasConfiguredViewModel = false
     @State private var navigationPath: [SkillListItem] = []
     @State private var detailItem: SkillListItem?
-    @State private var localBookmarkedIds: Set<String> = []
-    @State private var togglingBookmarkIds: Set<String> = []
 
     init(
         layoutMode: SkillsLayoutMode = .adaptive,
@@ -52,13 +50,9 @@ struct SkillsTabView: View {
                 hasConfiguredViewModel = true
             }
             await viewModel.loadIfNeeded()
-            localBookmarkedIds = coreManager.bookmarkedIds
         }
         .onChange(of: coreManager.contentCatalogVersion) { _, _ in
             Task { await viewModel.refresh() }
-        }
-        .onChange(of: coreManager.bookmarkedIds) { _, latest in
-            localBookmarkedIds = latest
         }
         .sheet(item: $detailItem) { item in
             SkillDetailView(item: item)
@@ -143,15 +137,10 @@ struct SkillsTabView: View {
                 } else {
                     LazyVGrid(columns: listColumns, spacing: 16) {
                         ForEach(items) { item in
-                            SkillCatalogCard(
-                                item: item,
-                                isBookmarked: localBookmarkedIds.contains(item.id),
-                                isTogglingBookmark: togglingBookmarkIds.contains(item.id),
-                                onToggleBookmark: { toggleBookmark(itemId: item.id) }
-                            )
-                            .onTapGesture {
-                                open(item)
-                            }
+                            SkillCatalogCard(item: item)
+                                .onTapGesture {
+                                    open(item)
+                                }
                         }
                     }
                 }
@@ -196,42 +185,6 @@ struct SkillsTabView: View {
         #else
         navigationPath.append(item)
         #endif
-    }
-
-    private func toggleBookmark(itemId: String) {
-        guard !togglingBookmarkIds.contains(itemId) else { return }
-
-        let wasBookmarked = localBookmarkedIds.contains(itemId)
-        if wasBookmarked {
-            localBookmarkedIds.remove(itemId)
-        } else {
-            localBookmarkedIds.insert(itemId)
-        }
-        togglingBookmarkIds.insert(itemId)
-
-        Task {
-            do {
-                let updated = try await coreManager.core.toggleBookmark(itemId: itemId)
-                let updatedSet = Set(updated)
-                await MainActor.run {
-                    coreManager.bookmarkedIds = updatedSet
-                    localBookmarkedIds = updatedSet
-                }
-            } catch {
-                await MainActor.run {
-                    if wasBookmarked {
-                        localBookmarkedIds.insert(itemId)
-                    } else {
-                        localBookmarkedIds.remove(itemId)
-                    }
-                    viewModel.errorMessage = error.localizedDescription
-                }
-            }
-
-            await MainActor.run {
-                togglingBookmarkIds.remove(itemId)
-            }
-        }
     }
 }
 

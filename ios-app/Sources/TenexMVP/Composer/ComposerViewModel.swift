@@ -195,8 +195,8 @@ final class ComposerViewModel {
         )
     }
 
-    func loadSkills() async -> [Skill] {
-        (try? await dependencies.core.getSkills()) ?? []
+    func loadSkills(projectId: String) async -> [Skill] {
+        (try? await dependencies.core.getProjectSkills(projectId: projectId)) ?? []
     }
 
     func validatedAgentPubkey(

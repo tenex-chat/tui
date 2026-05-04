@@ -95,7 +95,6 @@ extension TenexCoreManager {
         projectOnlineStatus = [:]
         agentInventory = []
         projectRosterAgents = [:]
-        bookmarkedIds = []
         streamingBuffers = [:]
         pendingBunkerRequests = []
         pendingBackendApprovalRequests = []

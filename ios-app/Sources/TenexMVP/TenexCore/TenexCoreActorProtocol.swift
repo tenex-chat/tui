@@ -104,11 +104,7 @@ protocol TenexCoreActorProtocol: Actor {
     func getProjectBackendPubkey(projectId: String) -> String?
 
     func getSkills() throws -> [Skill]
-
-    // MARK: - Bookmarks (kind:14202)
-    func isBookmarked(itemId: String) -> Bool
-    func getBookmarkedIds() throws -> [String]
-    func toggleBookmark(itemId: String) throws -> [String]
+    func getProjectSkills(projectId: String) throws -> [Skill]
 
 
     // MARK: - Backend Trust

@@ -1,6 +1,6 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{
-    AgentChatter, AgentConfig, AgentInventoryBackend, AgentInventoryItem, AskEvent, BookmarkList,
+    AgentChatter, AgentConfig, AgentInventoryBackend, AgentInventoryItem, AskEvent,
     ConversationMetadata, InboxEventType, InboxItem, InstalledAgent, Message, Project,
     ProjectAgent, ProjectStatus, Thread,
 };
@@ -69,9 +69,6 @@ pub struct AppDataStore {
     // Set on logout clear(); consumed by login() to avoid duplicate rebuild work.
     needs_rebuild: bool,
 
-    /// Bookmark lists keyed by user pubkey (kind:14202 replaceable events)
-    pub bookmarks: HashMap<String, BookmarkList>,
-
     /// Directory for the persistent state cache file.
     /// Set to `Some(path)` when the store is created with `new_with_cache()`.
     /// `None` disables caching (used by FFI/iOS callers and tests).
@@ -108,7 +105,6 @@ impl AppDataStore {
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
             needs_rebuild: false,
-            bookmarks: HashMap::new(),
             cache_dir: None,
         };
         store.rebuild_from_ndb();
@@ -147,7 +143,6 @@ impl AppDataStore {
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
             needs_rebuild: false,
-            bookmarks: HashMap::new(),
             cache_dir: Some(cache_dir),
         };
         if !store.try_load_from_cache() {
@@ -183,8 +178,6 @@ impl AppDataStore {
         let started_at = Instant::now();
         let pubkey_changed = self.user_pubkey.as_ref() != Some(&pubkey);
         self.user_pubkey = Some(pubkey.clone());
-        // Load any cached bookmark list from nostrdb
-        self.load_bookmarks();
         // Populate inbox from existing messages
         self.populate_inbox_from_existing(&pubkey);
         // Rebuild message counts if user changed (ensures historical counts are accurate)
@@ -235,7 +228,6 @@ impl AppDataStore {
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
         self.needs_rebuild = true;
-        self.bookmarks.clear();
     }
 
     /// Scan existing messages and populate inbox with those that p-tag the user
@@ -657,7 +649,7 @@ impl AppDataStore {
         // the cache's max_created_at (minus clock-skew window).
         let filter = Filter::new()
             .kinds([
-                31933, 1, 0, 4199, 34199, 4200, 4201, 4202, 4129, 513, 30023, 14202,
+                31933, 1, 0, 4199, 34199, 4200, 4201, 4202, 4129, 513, 30023,
             ])
             .since(since)
             .build();
@@ -1368,10 +1360,6 @@ impl AppDataStore {
                 self.content.handle_skill_event(note);
                 None
             }
-            14202 => {
-                self.handle_bookmark_list_event(note);
-                None
-            }
             24133 => {
                 self.operations.handle_operations_status_event(note);
                 None
@@ -1387,93 +1375,6 @@ impl AppDataStore {
                     .map(crate::events::CoreEvent::ReportUpsert)
             }
             _ => None,
-        }
-    }
-
-    // ===== Bookmark Methods (kind:14202) =====
-
-    /// Handle a kind:14202 bookmark list event.
-    /// Replaces existing bookmark list for the author's pubkey if this event is newer.
-    fn handle_bookmark_list_event(&mut self, note: &Note) {
-        if let Some(bookmark_list) = BookmarkList::from_note(note) {
-            let should_update = self
-                .bookmarks
-                .get(&bookmark_list.pubkey)
-                .map_or(true, |existing| {
-                    bookmark_list.last_updated > existing.last_updated
-                });
-
-            if should_update {
-                self.bookmarks
-                    .insert(bookmark_list.pubkey.clone(), bookmark_list);
-            }
-        }
-    }
-
-    /// Get the bookmark list for a given pubkey.
-    pub fn get_bookmarks(&self, pubkey: &str) -> Option<&BookmarkList> {
-        self.bookmarks.get(pubkey)
-    }
-
-    /// Check whether a given item ID is bookmarked by the specified pubkey.
-    pub fn is_bookmarked(&self, pubkey: &str, item_id: &str) -> bool {
-        self.bookmarks
-            .get(pubkey)
-            .map(|bl| bl.contains(item_id))
-            .unwrap_or(false)
-    }
-
-    /// Store a bookmark list for a given pubkey (used for optimistic updates).
-    pub fn set_bookmarks(&mut self, pubkey: &str, bookmarks: BookmarkList) {
-        self.bookmarks.insert(pubkey.to_string(), bookmarks);
-    }
-
-    /// Load bookmarks from nostrdb for the current user (called after login).
-    pub fn load_bookmarks(&mut self) {
-        let Some(user_pubkey) = self.user_pubkey.clone() else {
-            return;
-        };
-
-        let Ok(txn) = Transaction::new(&self.ndb) else {
-            return;
-        };
-
-        // Decode the user's hex pubkey to a 32-byte array for the nostrdb author filter.
-        // This scopes the DB query to only events authored by the current user,
-        // preventing the 100-result cap from hiding the user's own bookmark event
-        // when other users' kind:14202 events are also stored locally.
-        let pubkey_bytes: [u8; 32] = {
-            let Ok(decoded) = hex::decode(&user_pubkey) else {
-                return;
-            };
-            let Ok(arr) = decoded.try_into() else {
-                return;
-            };
-            arr
-        };
-
-        let filter = nostrdb::Filter::new()
-            .kinds([14202])
-            .authors([&pubkey_bytes])
-            .limit(1)
-            .build();
-        let Ok(results) = self.ndb.query(&txn, &[filter], 1) else {
-            return;
-        };
-
-        let mut all_lists: Vec<BookmarkList> = Vec::new();
-        for result in results {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                if let Some(bl) = BookmarkList::from_note(&note) {
-                    all_lists.push(bl);
-                }
-            }
-        }
-
-        // Keep the most recent bookmark list
-        all_lists.sort_by_key(|bl| bl.last_updated);
-        if let Some(latest) = all_lists.pop() {
-            self.bookmarks.insert(latest.pubkey.clone(), latest);
         }
     }
 

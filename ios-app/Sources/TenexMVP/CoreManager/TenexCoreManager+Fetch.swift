@@ -16,12 +16,10 @@ extension TenexCoreManager {
             async let fetchedProjects = core.getProjects()
             async let fetchedConversations = try fetchConversations(for: filterSnapshot)
             async let fetchedInbox = core.getInbox()
-            async let fetchedBookmarkedIds = try? core.getBookmarkedIds()
             async let fetchedReports = core.getReports(projectId: "")
             async let fetchedHtmlReports = core.getHtmlReports(projectId: "")
 
             let (p, c, i) = try await (fetchedProjects, fetchedConversations, fetchedInbox)
-            let bIds = await fetchedBookmarkedIds
             let r = await fetchedReports
             let hr = await fetchedHtmlReports
             let loadMs = (CFAbsoluteTimeGetCurrent() - loadStartedAt) * 1000
@@ -47,7 +45,6 @@ extension TenexCoreManager {
                 )
             )
             inboxItems = i
-            bookmarkedIds = Set(bIds ?? [])
 
             let validProjectIds = Set(p.map(\.id))
             let prunedProjectIds = appFilterProjectIds.intersection(validProjectIds)

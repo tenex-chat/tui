@@ -804,11 +804,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getBackendTrustSnapshot() throws  -> BackendTrustSnapshot
     
     /**
-     * Get all bookmarked nudge/skill IDs for the current user.
-     */
-    func getBookmarkedIds() throws  -> [String]
-    
-    /**
      * Get the NIP-46 bunker audit log.
      */
     func getBunkerAuditLog() throws  -> [FfiBunkerAuditEntry]
@@ -974,6 +969,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getProjectFilters() throws  -> [ProjectFilterInfo]
     
     /**
+     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or 34011 skill lists.
+     */
+    func getProjectSkills(projectId: String) throws  -> [Skill]
+    
+    /**
      * Get a list of projects.
      *
      * Queries nostrdb for kind 31933 events and returns them as Project.
@@ -1030,11 +1030,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Heavy initialization (relay connection) happens during login.
      */
     func `init`()  -> Bool
-    
-    /**
-     * Check if a nudge or skill is bookmarked by the current user.
-     */
-    func isBookmarked(itemId: String)  -> Bool
     
     /**
      * Check if a conversation is archived.
@@ -1249,11 +1244,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Stop the NIP-46 bunker.
      */
     func stopBunker() throws 
-    
-    /**
-     * Toggle bookmark status for a nudge or skill.
-     */
-    func toggleBookmark(itemId: String) throws  -> [String]
     
     /**
      * Toggle archive status for a conversation.
@@ -1787,16 +1777,6 @@ open func getBackendTrustSnapshot()throws  -> BackendTrustSnapshot  {
 }
     
     /**
-     * Get all bookmarked nudge/skill IDs for the current user.
-     */
-open func getBookmarkedIds()throws  -> [String]  {
-    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_get_bookmarked_ids(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-    /**
      * Get the NIP-46 bunker audit log.
      */
 open func getBunkerAuditLog()throws  -> [FfiBunkerAuditEntry]  {
@@ -2091,6 +2071,17 @@ open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
 }
     
     /**
+     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or 34011 skill lists.
+     */
+open func getProjectSkills(projectId: String)throws  -> [Skill]  {
+    return try  FfiConverterSequenceTypeSkill.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_project_skills(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
+    )
+})
+}
+    
+    /**
      * Get a list of projects.
      *
      * Queries nostrdb for kind 31933 events and returns them as Project.
@@ -2188,17 +2179,6 @@ open func getTodayRuntimeMs() -> UInt64  {
 open func `init`() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_init(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-    /**
-     * Check if a nudge or skill is bookmarked by the current user.
-     */
-open func isBookmarked(itemId: String) -> Bool  {
-    return try!  FfiConverterBool.lift(try! rustCall() {
-    uniffi_tenex_core_fn_method_tenexcore_is_bookmarked(self.uniffiClonePointer(),
-        FfiConverterString.lower(itemId),$0
     )
 })
 }
@@ -2611,17 +2591,6 @@ open func stopBunker()throws   {try rustCallWithError(FfiConverterTypeTenexError
     uniffi_tenex_core_fn_method_tenexcore_stop_bunker(self.uniffiClonePointer(),$0
     )
 }
-}
-    
-    /**
-     * Toggle bookmark status for a nudge or skill.
-     */
-open func toggleBookmark(itemId: String)throws  -> [String]  {
-    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_toggle_bookmark(self.uniffiClonePointer(),
-        FfiConverterString.lower(itemId),$0
-    )
-})
 }
     
     /**
@@ -9827,11 +9796,6 @@ public enum DataChangeType {
      */
     case bunkerSignRequest(request: FfiBunkerSignRequest
     )
-    /**
-     * Bookmark list changed (kind:14202)
-     */
-    case bookmarkListChanged(bookmarkedIds: [String]
-    )
 }
 
 
@@ -9892,9 +9856,6 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case 16: return .general
         
         case 17: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
-        )
-        
-        case 18: return .bookmarkListChanged(bookmarkedIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -9991,11 +9952,6 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case let .bunkerSignRequest(request):
             writeInt(&buf, Int32(17))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
-            
-        
-        case let .bookmarkListChanged(bookmarkedIds):
-            writeInt(&buf, Int32(18))
-            FfiConverterSequenceString.write(bookmarkedIds, into: &buf)
             
         }
     }
@@ -11841,9 +11797,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_backend_trust_snapshot() != 11709) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_bookmarked_ids() != 26583) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_bunker_audit_log() != 42223) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11913,6 +11866,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_skills() != 18855) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 30921) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11935,9 +11891,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_is_bookmarked() != 33558) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_conversation_archived() != 25908) {
@@ -12034,9 +11987,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_stop_bunker() != 36083) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_toggle_bookmark() != 58602) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_toggle_conversation_archived() != 43672) {

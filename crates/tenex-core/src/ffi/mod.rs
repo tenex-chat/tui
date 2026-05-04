@@ -450,7 +450,6 @@ impl DeltaSummary {
             DataChangeType::General => self.general += 1,
             DataChangeType::BunkerSignRequest { .. } => self.bunker_sign_request += 1,
             DataChangeType::InstalledAgentsChanged { .. } => self.installed_agents_changed += 1,
-            DataChangeType::BookmarkListChanged { .. } => {}
         }
     }
 
@@ -905,11 +904,6 @@ fn process_data_changes_with_deltas(
                     },
                 });
             }
-            DataChange::BookmarkListChanged { bookmarked_ids } => {
-                deltas.push(DataChangeType::BookmarkListChanged {
-                    bookmarked_ids: bookmarked_ids.iter().cloned().collect(),
-                });
-            }
             DataChange::BackendHeartbeat { backend_pubkey } => {
                 if !store.trust.is_blocked(backend_pubkey)
                     && !store.trust.is_approved(backend_pubkey)
@@ -980,8 +974,7 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
                 stats_changed = true;
             }
             DataChangeType::StreamChunk { .. }
-            | DataChangeType::BunkerSignRequest { .. }
-            | DataChangeType::BookmarkListChanged { .. } => {}
+            | DataChangeType::BunkerSignRequest { .. } => {}
         }
     }
 
@@ -1813,10 +1806,6 @@ pub enum DataChangeType {
     /// NIP-46 bunker signing request requires user approval
     BunkerSignRequest {
         request: FfiBunkerSignRequest,
-    },
-    /// Bookmark list changed (kind:14202)
-    BookmarkListChanged {
-        bookmarked_ids: Vec<String>,
     },
 }
 
