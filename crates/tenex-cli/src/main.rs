@@ -44,7 +44,7 @@ enum Commands {
     ListThreads {
         /// Project slug (d-tag)
         project_slug: String,
-        /// Wait for project status (24010 event) before proceeding
+        /// Wait for project roster (31933 event) before proceeding
         #[arg(long, short = 'W')]
         wait: bool,
     },
@@ -53,7 +53,7 @@ enum Commands {
     ListAgents {
         /// Project slug (d-tag)
         project_slug: String,
-        /// Wait for project status (24010 event) before proceeding
+        /// Wait for project roster (31933 event) before proceeding
         #[arg(long, short = 'W')]
         wait: bool,
     },
@@ -78,7 +78,7 @@ enum Commands {
         /// Wait for agent reply (max seconds to wait)
         #[arg(long, short)]
         wait: Option<u64>,
-        /// Wait for project status (24010 event) before proceeding
+        /// Wait for project roster (31933 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
         /// Skill event IDs to attach (can be specified multiple times).
@@ -99,7 +99,7 @@ enum Commands {
         /// Wait for agent reply (max seconds to wait)
         #[arg(long, short)]
         wait: Option<u64>,
-        /// Wait for project status (24010 event) before proceeding
+        /// Wait for project roster (31933 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
         /// Skill event IDs to attach (can be specified multiple times).
@@ -140,11 +140,11 @@ enum Commands {
     /// Use `--skill <ID>` with send-message or create-thread to attach skills.
     ListSkills,
 
-    /// Show detailed project information (from kind:24010)
+    /// Show detailed project information (from kind:31933 roster and 34011 config)
     ShowProject {
         /// Project slug (d-tag)
         project_slug: String,
-        /// Wait for project status (24010 event) before proceeding
+        /// Wait for project roster (31933 event) before proceeding
         #[arg(long, short = 'W')]
         wait: bool,
     },
@@ -194,10 +194,10 @@ enum Commands {
         /// Tools to enable for this agent (can be specified multiple times)
         #[arg(long, short = 't')]
         tool: Vec<String>,
-        /// Wait for project status (24010 event) before proceeding
+        /// Wait for project roster (31933 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
-        /// Wait for confirmation via updated kind:24010 event
+        /// Wait for confirmation via updated kind:34011 config
         #[arg(long, short)]
         wait: bool,
     },

@@ -513,9 +513,9 @@ impl CompletionMenu {
                                         continue;
                                     }
                                     let agents = project_roster_agents(&store_ref, &a_tag);
-                                    let has_agent = agents.iter().any(|a| {
-                                        a.name.to_lowercase().contains(&agent_lower)
-                                    });
+                                    let has_agent = agents
+                                        .iter()
+                                        .any(|a| a.name.to_lowercase().contains(&agent_lower));
                                     if !has_agent {
                                         continue;
                                     }
@@ -712,10 +712,8 @@ impl CompletionMenu {
                             if !first.starts_with("--")
                                 || (first.starts_with("--") && rest.is_empty())
                             {
-                                let flags = [
-                                    ("--model", "change model"),
-                                    ("--global", "apply globally"),
-                                ];
+                                let flags =
+                                    [("--model", "change model"), ("--global", "apply globally")];
                                 for (flag, desc) in &flags {
                                     if flag_filter.is_empty() || flag.starts_with(flag_filter) {
                                         items.push(CompletionItem {

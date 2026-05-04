@@ -5,10 +5,7 @@ use tenex_core::store::app_data_store::AppDataStore;
 ///
 /// Replace this with `AppDataStore::get_online_agents` once core returns
 /// 31933-ordered roster semantics backed by 24011 availability.
-pub(super) fn project_roster_agents(
-    store: &AppDataStore,
-    project: &Project,
-) -> Vec<ProjectAgent> {
+pub(super) fn project_roster_agents(store: &AppDataStore, project: &Project) -> Vec<ProjectAgent> {
     let inventory = store.agent_inventory();
 
     project

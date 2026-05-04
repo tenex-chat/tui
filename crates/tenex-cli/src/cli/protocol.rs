@@ -98,7 +98,7 @@ pub enum CliCommand {
     ListMCPTools,
     /// List all skills (kind:4202)
     ListSkills,
-    /// Show detailed project information (kind:24010)
+    /// Show detailed project information (kind:31933 roster and 34011 config)
     ShowProject {
         project_slug: String,
         wait_for_project: bool,

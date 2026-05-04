@@ -12,10 +12,7 @@ pub(crate) fn project_roster_agents(store: &AppDataStore, a_tag: &str) -> Vec<Pr
     roster_agents_for_project(store, project)
 }
 
-pub(crate) fn default_project_agent(
-    store: &AppDataStore,
-    a_tag: &str,
-) -> Option<ProjectAgent> {
+pub(crate) fn default_project_agent(store: &AppDataStore, a_tag: &str) -> Option<ProjectAgent> {
     project_roster_agents(store, a_tag).into_iter().next()
 }
 

@@ -1,6 +1,6 @@
+use crate::roster::project_roster_agents;
 use crate::util::{format_day_label, format_runtime};
 use crate::{CYAN, DIM, GREEN, RESET, WHITE_BOLD};
-use crate::roster::project_roster_agents;
 use std::collections::HashSet;
 use tenex_core::nostr::NostrCommand;
 use tenex_core::runtime::CoreRuntime;
@@ -89,10 +89,7 @@ impl ConfigPanel {
 
     pub(crate) fn rebuild_flag_items(&mut self) {
         let global_marker = if self.is_global { "[x]" } else { "[ ]" };
-        self.items = vec![
-            format!("→  --model"),
-            format!("{global_marker} --global"),
-        ];
+        self.items = vec![format!("→  --model"), format!("{global_marker} --global")];
     }
 
     pub(crate) fn switch_to_model_select(&mut self, runtime: &CoreRuntime) {

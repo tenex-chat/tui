@@ -325,12 +325,7 @@ extension TenexCoreManager {
             let inventoryItem = inventoryByPubkey[pubkey]
             let config = try? await safeCore.getAgentConfig(agentPubkey: pubkey)
             let profileName = await safeCore.getProfileName(pubkey: pubkey)
-            let displayName = Self.displayName(
-                pubkey: pubkey,
-                inventoryItem: inventoryItem,
-                config: config,
-                profileName: profileName
-            )
+            let displayName = Self.displayName(pubkey: pubkey, profileName: profileName)
             let backendPubkey = Self.preferredBackendPubkey(inventoryItem: inventoryItem, config: config)
 
             result.append(ProjectAgent(
@@ -361,18 +356,7 @@ extension TenexCoreManager {
         }
     }
 
-    nonisolated private static func displayName(
-        pubkey: String,
-        inventoryItem: AgentInventoryItem?,
-        config: AgentConfig?,
-        profileName: String
-    ) -> String {
-        if let slug = config?.slug, !slug.isEmpty {
-            return slug
-        }
-        if let slug = inventoryItem?.slug, !slug.isEmpty {
-            return slug
-        }
+    nonisolated private static func displayName(pubkey: String, profileName: String) -> String {
         return AgentDisplayName.text(profileName, fallbackPubkey: pubkey)
     }
 

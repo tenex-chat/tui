@@ -1910,7 +1910,9 @@ fn handle_request(
                                     std::thread::sleep(std::time::Duration::from_millis(500));
 
                                     let store = data_store.lock().unwrap();
-                                    if let Some(config) = store.get_agent_config(&result.agent_pubkey) {
+                                    if let Some(config) =
+                                        store.get_agent_config(&result.agent_pubkey)
+                                    {
                                         if config.created_at > current_config_timestamp
                                             && config.active_model.as_deref()
                                                 == Some(params.model.as_str())

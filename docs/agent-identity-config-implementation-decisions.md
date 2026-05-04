@@ -31,7 +31,7 @@ This document records the product and technical decisions that are now settled. 
 1. Pubkey is the only agent identity key.
 2. Do not key durable maps, aggregation, selections, or commands by display name, slug, or config label.
 3. Display names shown for pubkeys must come from kind:0 only.
-4. Do not use display names as durable identity keys.
+4. Do not display or fall back to the agent slug from 24011, 34011, or installed-agent inventory as the agent name.
 5. `24010` must not be treated as roster membership, PM/default state, availability, or agent configuration.
 6. Current model/tool/skill/MCP state comes from `34011`.
 7. UI config changes publish `24020`; confirmation comes from receiving the updated `34011`.

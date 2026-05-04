@@ -17,9 +17,9 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
+use super::roster::default_agent_pubkey;
 use crate::nostr::{DataChange, NostrCommand};
 use crate::store::AppDataStore;
-use super::roster::default_agent_pubkey;
 use tenex_core::models::Project;
 use tenex_core::runtime::CoreHandle;
 
@@ -330,14 +330,12 @@ async fn responses_handler(
     })?;
 
     // Construct the project a-tag coordinate (format: kind:pubkey:identifier)
-    let project = resolve_project(&state, &project_dtag)
-        .await
-        .map_err(|e| {
-            openai_error_response(
-                StatusCode::NOT_FOUND,
-                OpenAIError::not_found(format!("Project not found: {}", e)),
-            )
-        })?;
+    let project = resolve_project(&state, &project_dtag).await.map_err(|e| {
+        openai_error_response(
+            StatusCode::NOT_FOUND,
+            OpenAIError::not_found(format!("Project not found: {}", e)),
+        )
+    })?;
     let project_a_tag = project.a_tag();
 
     // First 31933 p-tag is the PM/default agent.
