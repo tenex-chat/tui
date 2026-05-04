@@ -2219,6 +2219,16 @@ impl NostrWorker {
             }
         };
         if !cached_agent_pubkeys.is_empty() {
+            // Fetch kind:0 profile metadata for every project-roster agent so the
+            // UI can resolve a real display name (kind:0 is the only allowed
+            // source — slugs/definition titles must not stand in). Dedup is
+            // handled by `request_profile_if_new`.
+            for agent_pubkey in &cached_agent_pubkeys {
+                if let Ok(pk) = PublicKey::parse(agent_pubkey) {
+                    request_profile_if_new(client, &self.requested_profiles, pk).await;
+                }
+            }
+
             if let Err(e) = subscribe_agent_configs(
                 client,
                 &self.subscription_stats,
@@ -2597,6 +2607,20 @@ impl NostrWorker {
                                                 .filter_map(|t| t.content().map(|s| s.to_string()))
                                                 .collect();
                                             if !agent_pubkeys.is_empty() {
+                                                // Fetch kind:0 profile metadata for every newly
+                                                // discovered project-roster agent so the UI can
+                                                // resolve display names from kind:0 only.
+                                                for agent_pubkey in &agent_pubkeys {
+                                                    if let Ok(pk) = PublicKey::parse(agent_pubkey) {
+                                                        request_profile_if_new(
+                                                            &client,
+                                                            &requested_profiles,
+                                                            pk,
+                                                        )
+                                                        .await;
+                                                    }
+                                                }
+
                                                 if let Err(e) = subscribe_agent_configs(
                                                     &client,
                                                     &subscription_stats,
@@ -2636,6 +2660,58 @@ impl NostrWorker {
                                                         if let Ok(note_key) = ndb.get_notekey_by_id(&txn, event.id.as_bytes()) {
                                                             tlog!("EVT", "kind:{} id={} (already-saved, re-routing via NoteKeys)", event.kind.as_u16(), event.id.to_hex());
                                                             let _ = data_tx.send(DataChange::NoteKeys(vec![note_key.as_u64()]));
+                                                        }
+                                                    }
+                                                }
+
+                                                // For already-saved 31933 project events, also
+                                                // ensure we have kind:0 profiles + 34011 config
+                                                // subscriptions for every roster agent. The
+                                                // primary RelayPoolNotification::Event path
+                                                // handles fresh events; this branch covers the
+                                                // warm-cache case where the relay short-circuits
+                                                // and we'd otherwise never set those subscriptions
+                                                // up for newly-added p tags. Dedup is handled
+                                                // inside `request_profile_if_new` and
+                                                // `subscribe_agent_configs`.
+                                                if event.kind.as_u16() == KIND_PROJECT_DRAFT {
+                                                    let agent_pubkeys: Vec<String> = event
+                                                        .tags
+                                                        .iter()
+                                                        .filter(|t| {
+                                                            t.kind()
+                                                                == TagKind::SingleLetter(SingleLetterTag::lowercase(
+                                                                    nostr_sdk::Alphabet::P,
+                                                                ))
+                                                        })
+                                                        .filter_map(|t| t.content().map(|s| s.to_string()))
+                                                        .collect();
+
+                                                    if !agent_pubkeys.is_empty() {
+                                                        for agent_pubkey in &agent_pubkeys {
+                                                            if let Ok(pk) = PublicKey::parse(agent_pubkey) {
+                                                                request_profile_if_new(
+                                                                    &client,
+                                                                    &requested_profiles,
+                                                                    pk,
+                                                                )
+                                                                .await;
+                                                            }
+                                                        }
+
+                                                        if let Err(e) = subscribe_agent_configs(
+                                                            &client,
+                                                            &subscription_stats,
+                                                            &subscribed_agent_configs,
+                                                            agent_pubkeys,
+                                                        )
+                                                        .await
+                                                        {
+                                                            tlog!(
+                                                                "ERROR",
+                                                                "Failed to subscribe to agent configs for already-saved project: {}",
+                                                                e
+                                                            );
                                                         }
                                                     }
                                                 }
