@@ -1631,17 +1631,51 @@ impl AppDataStore {
     }
 
     fn handle_installed_agent_list_event_value(&mut self, event: &serde_json::Value) {
+        let event_id = event
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string();
         let Some((backend_pubkey, installed_agents)) = InstalledAgent::from_value(event) else {
+            crate::tlog!("INV24011", "parse failed for event id={}", event_id);
             return;
         };
 
+        let backend_short = &backend_pubkey[..8.min(backend_pubkey.len())];
+        let slugs: Vec<&str> = installed_agents.iter().map(|a| a.slug.as_str()).collect();
+
         if self.trust.is_blocked(&backend_pubkey) {
+            crate::tlog!(
+                "INV24011",
+                "BLOCKED id={} backend={} count={} slugs={:?}",
+                event_id,
+                backend_short,
+                installed_agents.len(),
+                slugs
+            );
             return;
         }
 
         if self.trust.is_approved(&backend_pubkey) {
+            crate::tlog!(
+                "INV24011",
+                "APPROVED id={} backend={} count={} slugs={:?}",
+                event_id,
+                backend_short,
+                installed_agents.len(),
+                slugs
+            );
             self.installed_agents_by_backend
                 .insert(backend_pubkey, installed_agents);
+        } else {
+            crate::tlog!(
+                "INV24011",
+                "NOT_APPROVED id={} backend={} count={} slugs={:?}",
+                event_id,
+                backend_short,
+                installed_agents.len(),
+                slugs
+            );
         }
     }
 
@@ -2197,6 +2231,25 @@ impl AppDataStore {
     pub fn agent_inventory(&self) -> Vec<AgentInventoryItem> {
         let mut by_agent: HashMap<String, Vec<AgentInventoryBackend>> = HashMap::new();
 
+        let backend_summary: Vec<(String, usize, Vec<String>, bool)> = self
+            .installed_agents_by_backend
+            .iter()
+            .map(|(b, agents)| {
+                (
+                    b[..8.min(b.len())].to_string(),
+                    agents.len(),
+                    agents.iter().map(|a| a.slug.clone()).collect(),
+                    self.trust.is_approved(b),
+                )
+            })
+            .collect();
+        crate::tlog!(
+            "INV24011",
+            "agent_inventory() called: backends_in_map={} summary={:?}",
+            self.installed_agents_by_backend.len(),
+            backend_summary
+        );
+
         for (backend_pubkey, agents) in &self.installed_agents_by_backend {
             if !self.trust.is_approved(backend_pubkey) {
                 continue;
@@ -2236,6 +2289,13 @@ impl AppDataStore {
             .collect();
 
         items.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
+        let returned_slugs: Vec<&str> = items.iter().map(|i| i.slug.as_str()).collect();
+        crate::tlog!(
+            "INV24011",
+            "agent_inventory() returning count={} slugs={:?}",
+            items.len(),
+            returned_slugs
+        );
         items
     }
 
