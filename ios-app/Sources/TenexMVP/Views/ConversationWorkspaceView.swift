@@ -693,6 +693,7 @@ struct ConversationWorkspaceView: View {
                 onReferenceConversationRequested: isNewThreadMode ? nil : handleReferenceConversationRequested
             )
             .environment(coreManager)
+            #if os(macOS)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(workspaceComposerShellColor)
@@ -702,20 +703,15 @@ struct ConversationWorkspaceView: View {
                     )
             )
             .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-            #if os(macOS)
             .shadow(color: .black.opacity(0.24), radius: 12, x: 0, y: 4)
-            #endif
             .padding(.horizontal, 14)
             .padding(.top, 8)
             .padding(.bottom, 8)
-            #if os(macOS)
             .frame(maxWidth: 800, alignment: .leading)
             #endif
         }
         #if os(macOS)
         .background(workspaceBackdropColor)
-        #else
-        .background(.ultraThinMaterial)
         #endif
     }
 

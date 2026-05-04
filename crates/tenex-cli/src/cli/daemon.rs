@@ -1868,13 +1868,11 @@ fn handle_request(
 
             let store = data_store.lock().unwrap();
             let lookup = find_agent_in_project(&store, &params.project_slug, &params.agent_slug);
-
-            // Get the current status timestamp for wait comparison
-            let current_timestamp = store
-                .get_project_status(
-                    &find_project_a_tag_by_slug(&store, &params.project_slug).unwrap_or_default(),
-                )
-                .map(|s| s.created_at)
+            let current_config_timestamp = lookup
+                .as_ref()
+                .ok()
+                .and_then(|result| store.get_agent_config(&result.agent_pubkey))
+                .map(|config| config.created_at)
                 .unwrap_or(0);
             drop(store);
 
@@ -1912,23 +1910,18 @@ fn handle_request(
                                     std::thread::sleep(std::time::Duration::from_millis(500));
 
                                     let store = data_store.lock().unwrap();
-                                    if let Some(status) =
-                                        store.get_project_status(&result.project_a_tag)
-                                    {
-                                        if status.created_at > current_timestamp {
-                                            // New status received - check if settings were applied
-                                            let agent_updated = status.agents.iter().any(|a| {
-                                                a.pubkey == result.agent_pubkey
-                                                    && a.model.as_deref() == Some(&params.model)
-                                            });
-
+                                    if let Some(config) = store.get_agent_config(&result.agent_pubkey) {
+                                        if config.created_at > current_config_timestamp
+                                            && config.active_model.as_deref()
+                                                == Some(params.model.as_str())
+                                        {
                                             return (
                                                 Response::success(
                                                     id,
                                                     serde_json::json!({
                                                         "status": "confirmed",
-                                                        "agent_updated": agent_updated,
-                                                        "new_timestamp": status.created_at
+                                                        "agent_updated": true,
+                                                        "new_timestamp": config.created_at
                                                     }),
                                                 ),
                                                 false,

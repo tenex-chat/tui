@@ -19,6 +19,8 @@ use tower_http::cors::CorsLayer;
 
 use crate::nostr::{DataChange, NostrCommand};
 use crate::store::AppDataStore;
+use super::roster::default_agent_pubkey;
+use tenex_core::models::Project;
 use tenex_core::runtime::CoreHandle;
 
 // ============================================================================
@@ -328,7 +330,7 @@ async fn responses_handler(
     })?;
 
     // Construct the project a-tag coordinate (format: kind:pubkey:identifier)
-    let project_a_tag = resolve_project_coordinate(&state, &project_dtag)
+    let project = resolve_project(&state, &project_dtag)
         .await
         .map_err(|e| {
             openai_error_response(
@@ -336,16 +338,15 @@ async fn responses_handler(
                 OpenAIError::not_found(format!("Project not found: {}", e)),
             )
         })?;
+    let project_a_tag = project.a_tag();
 
-    // Get the PM agent pubkey from the project status
-    let agent_pubkey = get_pm_agent_pubkey(&state, &project_a_tag)
-        .await
-        .map_err(|e| {
-            openai_error_response(
-                StatusCode::SERVICE_UNAVAILABLE,
-                OpenAIError::server_error(format!("Agent not available: {}", e)),
-            )
-        })?;
+    // First 31933 p-tag is the PM/default agent.
+    let Some(agent_pubkey) = default_agent_pubkey(&project) else {
+        return Err(openai_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            OpenAIError::server_error("Project has no roster agents".to_string()),
+        ));
+    };
 
     // Create a title from the user message (first 50 chars, safely handling UTF-8)
     let title: String = if user_content.chars().count() > 50 {
@@ -789,49 +790,16 @@ fn create_responses_sse_stream(
     stream
 }
 
-/// Resolve project dtag to full coordinate.
+/// Resolve project dtag to the latest project roster.
 /// Queries nostrdb directly to get fresh data, bypassing the in-memory cache
 /// which doesn't receive project discovery events in the HTTP server context.
-async fn resolve_project_coordinate(state: &HTTPServerState, project_dtag: &str) -> Result<String> {
+async fn resolve_project(state: &HTTPServerState, project_dtag: &str) -> Result<Project> {
     let store = state.data_store.lock().unwrap();
     store
-        .find_project_a_tag_by_dtag_from_ndb(project_dtag)
+        .query_projects_from_ndb()
+        .into_iter()
+        .find(|project| project.id == project_dtag)
         .ok_or_else(|| anyhow::anyhow!("Project with dtag '{}' not found", project_dtag))
-}
-
-/// Default timeout for waiting for project status (30 seconds)
-const WAIT_FOR_STATUS_TIMEOUT_SECS: u64 = 30;
-
-/// Get the PM agent pubkey from project status, waiting for status to appear if needed.
-/// This addresses timing issues where HTTP requests arrive before project status is synced.
-async fn get_pm_agent_pubkey(state: &HTTPServerState, project_a_tag: &str) -> Result<String> {
-    let start = tokio::time::Instant::now();
-    let timeout = tokio::time::Duration::from_secs(WAIT_FOR_STATUS_TIMEOUT_SECS);
-
-    loop {
-        // Check for timeout
-        if start.elapsed() > timeout {
-            return Err(anyhow::anyhow!(
-                "Timeout waiting for project status. Project may not be booted."
-            ));
-        }
-
-        // Try to get the status
-        {
-            let store = state.data_store.lock().unwrap();
-
-            if let Some(status) = store.get_project_status(project_a_tag) {
-                if let Some(pm_agent) = status.pm_agent() {
-                    return Ok(pm_agent.pubkey.clone());
-                }
-                // Status exists but no PM agent - this is a real error, don't wait
-                return Err(anyhow::anyhow!("No PM agent found in project status"));
-            }
-        }
-
-        // Status not found yet, wait a bit before retrying (async sleep)
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    }
 }
 
 #[cfg(test)]

@@ -163,7 +163,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","status":"complet
 ## How It Works
 
 1. **Project Resolution**: The server looks up your project by its d-tag identifier
-2. **Agent Selection**: Automatically uses the PM (project manager) agent from the project status
+2. **Agent Selection**: Automatically uses the PM/default agent from the project's first kind:31933 `p` tag
 3. **Message Publishing**: Creates a kind:1 Nostr event p-tagging the selected agent
 4. **Real-time Streaming**: Forwards agent responses via SSE as they arrive
 5. **OpenAI Format**: Converts TENEX streaming format to OpenAI Responses API format
@@ -215,9 +215,9 @@ The primary use case is integrating ElevenLabs conversational AI with TENEX agen
 
 ### "Agent not available" Error
 
-- Project status event must include at least one agent
-- The PM agent must be online (recent kind:24010 event)
-- Check project status in the diagnostics view
+- The project kind:31933 event must include at least one agent `p` tag
+- The PM/default agent is the first project `p` tag and must be advertised by approved kind:24011 backend inventory
+- Check backend inventory and project roster state in diagnostics
 
 ### Connection Issues
 

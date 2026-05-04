@@ -195,7 +195,13 @@ struct MessageComposerView: View {
     }
 
     var usesWorkspaceInlineLayout: Bool {
-        isInlineComposer && inlineLayoutStyle == .workspace
+        #if os(iOS)
+        // iOS always uses the telegram-style row; the workspace layout (large
+        // editor + colored project chip) is a macOS-only treatment.
+        return false
+        #else
+        return isInlineComposer && inlineLayoutStyle == .workspace
+        #endif
     }
 
     var workspaceComposerShellColor: Color {

@@ -108,7 +108,7 @@ User hears response
    ```
 4. **TENEX Processing**:
    - Resolves project by d-tag
-   - Gets PM agent from project status
+   - Gets the PM/default agent from the first kind:31933 project `p` tag
    - Creates kind:1 Nostr event
    - P-tags the agent
 5. **Agent Response**: Agent processes and streams response
@@ -153,9 +153,9 @@ ElevenLabs may send a `model` field. TENEX accepts but ignores this field.
 **Problem**: ElevenLabs receives 503 error
 
 **Solutions**:
-- Check project status has online agents
-- Verify kind:24010 events are being received
-- Check agent is not stale (STALENESS_THRESHOLD_SECS)
+- Check the project kind:31933 event has an ordered agent `p` tag roster
+- Verify approved kind:24011 backend inventory advertises the PM/default agent
+- Check backend inventory and roster diagnostics
 
 ### Slow Response Times
 

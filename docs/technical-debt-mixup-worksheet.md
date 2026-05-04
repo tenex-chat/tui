@@ -14,6 +14,7 @@ The codebase has several concepts that changed direction over time but were not 
 
 - Agent identity is a Nostr pubkey. Display name is presentation only.
 - Project agent membership is encoded by agent pubkey `p` tags on the user-signed `31933` project event.
+- Backend inventory and availability are encoded by approved backend-authored `24011` inventory.
 - Durable per-agent configuration state is `34011`.
 - Agent configuration command/request is currently `24020`.
 - MCP server access is agent-level.
@@ -22,7 +23,7 @@ The codebase has several concepts that changed direction over time but were not 
 The remaining highest-risk mixups are:
 
 - Existing code still sometimes treats agent display name as an identity key.
-- Agent configuration behavior is split across `34011`, `24020`, and older code paths that treated `24010` as more than backend/project runtime presence.
+- Agent configuration behavior is split across `34011`, `24020`, and older code paths that treated `24010` as more than runtime status.
 - UI refresh behavior for `34011` appears incomplete or inconsistent.
 - TUI and iOS expose different parts of the same agent configuration surface.
 - "Nudge" remains in code and UI names even though it should be removed.
@@ -39,7 +40,8 @@ Fill this in before implementation. These definitions should become the language
 | Agent identity | A Nostr pubkey. Display name is presentation only. | [x] Yes [ ] No |  |
 | Agent display name | A mutable label from kind:0 profile metadata. Never a key. | [x] Yes [ ] No | No status metadata, installed-agent slug, or config label fallback. |
 | Project agent membership | Agent pubkeys tagged by the user on the user-signed `31933` project event. | [x] Yes [ ] No |  |
-| Project runtime advertisement | `24010`: this project is currently running in this backend. Multiple backends may advertise the same project with different agent sets. | [x] Yes [ ] No | It does not publish agent configuration. |
+| Backend inventory | Approved backend-authored `24011` events advertise which agent pubkeys are available from which backend. | [x] Yes [ ] No | This is availability/online truth for roster UI. |
+| Project runtime status | `24010`: runtime/status traffic only. | [x] Yes [ ] No | It does not publish roster membership, PM/default state, or agent configuration. |
 | Agent config state | Durable per-agent configuration, carried by `34011`. | [x] Yes [ ] No |  |
 | Agent config command | A request to change config, currently represented by `24020`. | [x] Yes [ ] No |  |
 | Skill | A prompt-facing capability that can be attached to a message or enabled for an agent. | [x] Yes [ ] No |  |
@@ -89,7 +91,7 @@ Problem: The code uses multiple event kinds for related ideas:
 
 - `34011`: durable per-agent signed config state.
 - `24020`: currently named `AGENT_CONFIG`, used as a config update command.
-- `24010`: project runtime advertisement, not agent configuration.
+- `24010`: runtime status only; not roster, PM/default, availability, or agent configuration.
 
 Confirmed:
 
@@ -111,11 +113,13 @@ Remaining clarifications:
 - Available model/tool/skill catalogs should come from:
   - [x] Agent `34011`.
   - [ ] Backend/provider catalog.
-  - [ ] `24010`, if its clarified role includes catalogs.
+  - [ ] `24010`, if its clarified role includes catalogs. OBSOLETE: 24010 must not carry roster/config catalog truth.
   - [ ] Separate catalog event/API.
   - [ ] Other:
 - Define `24010`:
-  - Answer: This project is currently running in this backend. The same project can be running in multiple backends; backend A may provide agents 1, 2, and 3 while backend B provides agents 4 and 5.
+  - Answer: Runtime/status traffic only. It must not create roster agents, mark PM, select defaults, gate roster lookup, or provide agent configuration.
+- Define `24011`:
+  - Answer: Approved backend inventory. It determines whether roster agents are available and which backend advertises them.
 
 Decision notes:
 
@@ -295,11 +299,11 @@ This order keeps identity and data flow fixes ahead of UI cleanup.
 - Is `24020` still part of the desired protocol, or should clients write `34011` directly?
   - Answer: `24020` is confirmed as the agent config command/request; clarify whether clients publish it directly and wait for `34011`.
 - What is the exact definition of `24010` now?
-  - Answer:
+  - Answer: Runtime/status traffic only; not roster, PM/default, availability, or config truth.
 - Should `24010` carry available model/tool/skill catalogs?
-  - Answer:
+  - Answer: No. Use `34011` for per-agent config/catalog state and `24011` for backend inventory availability.
 - For agent config changes, should UI confirmation come from updated `34011`, updated `24010`, or optimistic local state?
-  - Answer:
+  - Answer: Updated `34011`.
 - Should iOS/Mac match all TUI agent configuration controls, or intentionally expose a smaller surface?
   - Answer:
 - Should old events without pubkeys be migrated, hidden, or displayed as read-only legacy data?
