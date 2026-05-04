@@ -98,18 +98,6 @@ pub fn is_within_48h_cap(created_at: u64, now: u64) -> bool {
     created_at >= cutoff
 }
 
-fn clear_selected_nudge_modal(modal_state: &mut ModalState, nudge_id: &str) {
-    let should_clear = match modal_state {
-        ModalState::NudgeDetail(state) => state.nudge_id == nudge_id,
-        ModalState::NudgeDeleteConfirm(state) => state.nudge_id == nudge_id,
-        _ => false,
-    };
-
-    if should_clear {
-        *modal_state = ModalState::NudgeList(crate::ui::modal::NudgeListState::new());
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
@@ -178,7 +166,7 @@ pub enum InputContextFocus {
     /// Project selector is selected (only available for new conversations/draft tabs)
     Project,
     /// Skill selector is selected
-    NudgeSkill,
+    Skill,
 }
 
 impl InputContextFocus {
@@ -186,7 +174,7 @@ impl InputContextFocus {
         match self {
             InputContextFocus::Agent => InputContextFocus::Agent,
             InputContextFocus::Project => InputContextFocus::Agent,
-            InputContextFocus::NudgeSkill => {
+            InputContextFocus::Skill => {
                 if is_draft_tab {
                     InputContextFocus::Project
                 } else {
@@ -202,11 +190,11 @@ impl InputContextFocus {
                 if is_draft_tab {
                     InputContextFocus::Project
                 } else {
-                    InputContextFocus::NudgeSkill
+                    InputContextFocus::Skill
                 }
             }
-            InputContextFocus::Project => InputContextFocus::NudgeSkill,
-            InputContextFocus::NudgeSkill => InputContextFocus::NudgeSkill,
+            InputContextFocus::Project => InputContextFocus::Skill,
+            InputContextFocus::Skill => InputContextFocus::Skill,
         }
     }
 }
@@ -779,11 +767,6 @@ impl App {
     #[inline]
     pub fn set_selected_message_index(&mut self, index: usize) {
         self.conversation.selected_message_index = index;
-    }
-
-    /// Clear nudge-specific modal state when a referenced nudge is deleted.
-    pub fn remove_selected_nudge(&mut self, nudge_id: &str) {
-        clear_selected_nudge_modal(&mut self.modal_state, nudge_id);
     }
 
     /// Get the LLM metadata display toggle
@@ -2352,7 +2335,6 @@ impl App {
                 .cloned();
 
             if let Some(project) = project {
-                let a_tag = project.a_tag();
                 self.selected_project = Some(project);
 
                 // Auto-select first 31933 roster agent.
@@ -2405,7 +2387,6 @@ impl App {
                     .cloned();
 
                 if let Some(project) = project {
-                    let a_tag = project.a_tag();
                     self.selected_project = Some(project);
 
                     // Load draft once upfront to check what values it contains
@@ -3733,8 +3714,8 @@ impl App {
 
     /// Open the skill selector modal.
     /// Defaults to BookmarkedOnly filter so users see their curated list first.
-    pub fn open_nudge_skill_selector(&mut self) {
-        use crate::ui::modal::{BookmarkFilter, NudgeSkillSelectorState};
+    pub fn open_skill_selector(&mut self) {
+        use crate::ui::modal::{BookmarkFilter, SkillSelectorState};
         use crate::ui::selector::SelectorState;
 
         let current_skills = self
@@ -3743,23 +3724,23 @@ impl App {
             .map(|t| t.selected_skill_ids.clone())
             .unwrap_or_default();
 
-        self.modal_state = ModalState::NudgeSkillSelector(NudgeSkillSelectorState {
+        self.modal_state = ModalState::SkillSelector(SkillSelectorState {
             selector: SelectorState::new(),
             selected_skill_ids: current_skills,
             bookmark_filter: BookmarkFilter::BookmarkedOnly,
         });
     }
 
-    /// Get filtered items for the skill selector.
+    /// Get filtered skills for the skill selector.
     ///
     /// Applies both the text search filter and the bookmark filter:
-    /// - In `BookmarkedOnly` mode, only items whose IDs are in the user's bookmark list are shown.
-    /// - In `All` mode, all items are shown (text search still applies).
-    pub fn filtered_nudge_skill_items(&self) -> Vec<NudgeSkillSelectorItem> {
+    /// - In `BookmarkedOnly` mode, only skills whose IDs are in the user's bookmark list are shown.
+    /// - In `All` mode, all skills are shown (text search still applies).
+    pub fn filtered_skill_selector_items(&self) -> Vec<tenex_core::models::Skill> {
         use crate::ui::modal::BookmarkFilter;
 
-        let filter = self.nudge_skill_selector_filter();
-        let bookmark_filter = self.nudge_skill_bookmark_filter();
+        let filter = self.skill_selector_filter();
+        let bookmark_filter = self.skill_selector_bookmark_filter();
         let store = self.data_store.borrow();
 
         // Get the user's bookmarked IDs for filtering (if in BookmarkedOnly mode)
@@ -3775,7 +3756,7 @@ impl App {
                 None
             };
 
-        let mut items: Vec<NudgeSkillSelectorItem> = store
+        let mut items: Vec<tenex_core::models::Skill> = store
             .content
             .get_skills()
             .into_iter()
@@ -3790,36 +3771,34 @@ impl App {
                 fuzzy_matches(&s.title, filter) || fuzzy_matches(&s.description, filter)
             })
             .cloned()
-            .map(NudgeSkillSelectorItem::Skill)
             .collect();
 
         items.sort_by(|a, b| {
-            a.title()
+            a.title
                 .to_lowercase()
-                .cmp(&b.title().to_lowercase())
-                .then_with(|| a.kind_order().cmp(&b.kind_order()))
-                .then_with(|| a.id().cmp(b.id()))
+                .cmp(&b.title.to_lowercase())
+                .then_with(|| a.id.cmp(&b.id))
         });
         items
     }
 
-    /// Get unified selector filter text.
-    pub fn nudge_skill_selector_filter(&self) -> &str {
+    /// Get skill selector filter text.
+    pub fn skill_selector_filter(&self) -> &str {
         match &self.modal_state {
-            ModalState::NudgeSkillSelector(state) => &state.selector.filter,
+            ModalState::SkillSelector(state) => &state.selector.filter,
             _ => "",
         }
     }
 
-    /// Get the current bookmark filter mode for the nudge/skill selector.
-    pub fn nudge_skill_bookmark_filter(&self) -> crate::ui::modal::BookmarkFilter {
+    /// Get the current bookmark filter mode for the skill selector.
+    pub fn skill_selector_bookmark_filter(&self) -> crate::ui::modal::BookmarkFilter {
         match &self.modal_state {
-            ModalState::NudgeSkillSelector(state) => state.bookmark_filter.clone(),
+            ModalState::SkillSelector(state) => state.bookmark_filter.clone(),
             _ => crate::ui::modal::BookmarkFilter::All,
         }
     }
 
-    /// Check if a nudge or skill ID is bookmarked by the current user.
+    /// Check if a skill ID is bookmarked by the current user.
     pub fn is_bookmarked(&self, item_id: &str) -> bool {
         let store = self.data_store.borrow();
         let user_pubkey = store.user_pubkey.as_deref().unwrap_or("");
@@ -4846,70 +4825,6 @@ pub enum SearchMatchType {
     Message,
 }
 
-#[derive(Debug, Clone)]
-pub enum NudgeSkillSelectorItem {
-    Nudge(tenex_core::models::Nudge),
-    Skill(tenex_core::models::Skill),
-}
-
-impl NudgeSkillSelectorItem {
-    pub fn id(&self) -> &str {
-        match self {
-            NudgeSkillSelectorItem::Nudge(nudge) => &nudge.id,
-            NudgeSkillSelectorItem::Skill(skill) => &skill.id,
-        }
-    }
-
-    pub fn pubkey(&self) -> &str {
-        match self {
-            NudgeSkillSelectorItem::Nudge(nudge) => &nudge.pubkey,
-            NudgeSkillSelectorItem::Skill(skill) => &skill.pubkey,
-        }
-    }
-
-    pub fn title(&self) -> &str {
-        match self {
-            NudgeSkillSelectorItem::Nudge(nudge) => &nudge.title,
-            NudgeSkillSelectorItem::Skill(skill) => &skill.title,
-        }
-    }
-
-    pub fn description(&self) -> &str {
-        match self {
-            NudgeSkillSelectorItem::Nudge(nudge) => &nudge.description,
-            NudgeSkillSelectorItem::Skill(skill) => &skill.description,
-        }
-    }
-
-    pub fn content_preview(&self, width: usize) -> String {
-        match self {
-            NudgeSkillSelectorItem::Nudge(nudge) => nudge.content_preview(width),
-            NudgeSkillSelectorItem::Skill(skill) => skill.content_preview(width),
-        }
-    }
-
-    pub fn kind_order(&self) -> u8 {
-        match self {
-            NudgeSkillSelectorItem::Nudge(_) => 0,
-            NudgeSkillSelectorItem::Skill(_) => 1,
-        }
-    }
-
-    pub fn skill_file_count(&self) -> usize {
-        match self {
-            NudgeSkillSelectorItem::Nudge(_) => 0,
-            NudgeSkillSelectorItem::Skill(skill) => skill.file_ids.len(),
-        }
-    }
-
-    pub fn created_at(&self) -> u64 {
-        match self {
-            NudgeSkillSelectorItem::Nudge(nudge) => nudge.created_at,
-            NudgeSkillSelectorItem::Skill(skill) => skill.created_at,
-        }
-    }
-}
-
 // =============================================================================
 // TESTS
 // =============================================================================
@@ -5180,10 +5095,10 @@ mod input_context_focus_tests {
     fn non_draft_traversal_skips_project() {
         assert_eq!(
             InputContextFocus::Agent.move_right(false),
-            InputContextFocus::NudgeSkill
+            InputContextFocus::Skill
         );
         assert_eq!(
-            InputContextFocus::NudgeSkill.move_left(false),
+            InputContextFocus::Skill.move_left(false),
             InputContextFocus::Agent
         );
     }
@@ -5196,61 +5111,15 @@ mod input_context_focus_tests {
         );
         assert_eq!(
             InputContextFocus::Project.move_right(true),
-            InputContextFocus::NudgeSkill
+            InputContextFocus::Skill
         );
         assert_eq!(
-            InputContextFocus::NudgeSkill.move_left(true),
+            InputContextFocus::Skill.move_left(true),
             InputContextFocus::Project
         );
         assert_eq!(
             InputContextFocus::Project.move_left(true),
             InputContextFocus::Agent
         );
-    }
-}
-
-#[cfg(test)]
-mod selected_nudge_modal_tests {
-    use super::*;
-    use crate::ui::modal::{NudgeDeleteConfirmState, NudgeDetailState, NudgeListState};
-
-    #[test]
-    fn clears_matching_nudge_detail_modal() {
-        let mut modal_state = ModalState::NudgeDetail(NudgeDetailState::new("nudge-1".to_string()));
-
-        clear_selected_nudge_modal(&mut modal_state, "nudge-1");
-
-        assert!(matches!(modal_state, ModalState::NudgeList(_)));
-    }
-
-    #[test]
-    fn clears_matching_nudge_delete_confirm_modal() {
-        let mut modal_state =
-            ModalState::NudgeDeleteConfirm(NudgeDeleteConfirmState::new("nudge-1".to_string()));
-
-        clear_selected_nudge_modal(&mut modal_state, "nudge-1");
-
-        assert!(matches!(modal_state, ModalState::NudgeList(_)));
-    }
-
-    #[test]
-    fn leaves_other_modal_state_untouched() {
-        let mut modal_state = ModalState::NudgeDetail(NudgeDetailState::new("nudge-1".to_string()));
-
-        clear_selected_nudge_modal(&mut modal_state, "other-nudge");
-
-        match modal_state {
-            ModalState::NudgeDetail(state) => assert_eq!(state.nudge_id, "nudge-1"),
-            other => panic!("unexpected modal state after cleanup: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn leaves_nudge_list_modal_untouched() {
-        let mut modal_state = ModalState::NudgeList(NudgeListState::new());
-
-        clear_selected_nudge_modal(&mut modal_state, "nudge-1");
-
-        assert!(matches!(modal_state, ModalState::NudgeList(_)));
     }
 }

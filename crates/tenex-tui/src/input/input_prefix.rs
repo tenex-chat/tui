@@ -20,7 +20,7 @@ pub enum PrefixTrigger {
     /// `@` - Open agent configuration modal
     AgentConfig,
     /// `/` - Open the skills selector modal
-    NudgeSkillSelector,
+    SkillSelector,
     /// `#` - Open project selector modal
     ProjectSelector,
 }
@@ -33,7 +33,7 @@ impl PrefixTrigger {
     pub fn from_char(c: char) -> Option<Self> {
         match c {
             '@' => Some(PrefixTrigger::AgentConfig),
-            '/' => Some(PrefixTrigger::NudgeSkillSelector),
+            '/' => Some(PrefixTrigger::SkillSelector),
             '#' => Some(PrefixTrigger::ProjectSelector),
             _ => None,
         }
@@ -72,8 +72,8 @@ fn execute_prefix_trigger(app: &mut App, trigger: PrefixTrigger) {
         PrefixTrigger::AgentConfig => {
             app.open_agent_config_modal();
         }
-        PrefixTrigger::NudgeSkillSelector => {
-            app.open_nudge_skill_selector();
+        PrefixTrigger::SkillSelector => {
+            app.open_skill_selector();
         }
         PrefixTrigger::ProjectSelector => {
             // Only allow project switching for new conversations (draft tabs)

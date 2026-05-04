@@ -85,7 +85,7 @@ pub enum HotkeyId {
     InsertNewline,
     CancelEdit,
     HistorySearch,
-    OpenNudgeSkillSelector,
+    OpenSkillSelector,
 
     // === Agent Browser ===
     ViewAgent,
@@ -128,7 +128,7 @@ pub enum HotkeyContext {
     ProjectActionsModal,
     ViewRawEventModal,
     HotkeyHelpModal,
-    NudgeSkillSelectorModal,
+    SkillSelectorModal,
     ProjectSettingsModal,
     CreateProjectModal,
     CreateAgentModal,
@@ -178,7 +178,7 @@ impl HotkeyContext {
             ModalState::ProjectActions(_) => return HotkeyContext::ProjectActionsModal,
             ModalState::ViewRawEvent { .. } => return HotkeyContext::ViewRawEventModal,
             ModalState::HotkeyHelp => return HotkeyContext::HotkeyHelpModal,
-            ModalState::NudgeSkillSelector(_) => return HotkeyContext::NudgeSkillSelectorModal,
+            ModalState::SkillSelector(_) => return HotkeyContext::SkillSelectorModal,
             ModalState::ProjectSettings(_) => return HotkeyContext::ProjectSettingsModal,
             ModalState::CreateProject(_) => return HotkeyContext::CreateProjectModal,
             ModalState::CreateAgent(_) => return HotkeyContext::CreateAgentModal,
@@ -191,10 +191,6 @@ impl HotkeyContext {
             ModalState::DebugStats(_) => return HotkeyContext::AnyModal,
             ModalState::HistorySearch(_) => return HotkeyContext::HistorySearchModal,
             ModalState::WorkspaceManager(_) => return HotkeyContext::WorkspaceManagerModal,
-            ModalState::NudgeList(_) => return HotkeyContext::AnyModal,
-            ModalState::NudgeCreate(_) => return HotkeyContext::AnyModal,
-            ModalState::NudgeDetail(_) => return HotkeyContext::AnyModal,
-            ModalState::NudgeDeleteConfirm(_) => return HotkeyContext::AnyModal,
             ModalState::ProjectDeleteConfirm(_) => return HotkeyContext::AnyModal,
             ModalState::AgentDeletion(_) => return HotkeyContext::AnyModal,
             ModalState::AppSettings(_) => return HotkeyContext::AnyModal,
@@ -596,21 +592,21 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('r'),
         &[HotkeyContext::ChatEditing],
     ),
-    // Unified [/] nudges/skills selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
+    // Skills selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
     // Note: Ctrl+_ is also handled in editor_handlers.rs for terminal compatibility
     // (some terminals report Ctrl+/ as Ctrl+_)
     HotkeyBinding::ctrl(
-        HotkeyId::OpenNudgeSkillSelector,
+        HotkeyId::OpenSkillSelector,
         KeyCode::Char('/'),
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::ctrl(
-        HotkeyId::OpenNudgeSkillSelector,
+        HotkeyId::OpenSkillSelector,
         KeyCode::Char('n'),
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::alt(
-        HotkeyId::OpenNudgeSkillSelector,
+        HotkeyId::OpenSkillSelector,
         KeyCode::Char('k'),
         &[HotkeyContext::ChatEditing],
     ),

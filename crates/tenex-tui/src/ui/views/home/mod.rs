@@ -178,20 +178,6 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
         super::render_debug_stats(f, area, app, state);
     }
 
-    // Nudge CRUD modals
-    if let ModalState::NudgeList(ref state) = app.modal_state {
-        super::render_nudge_list(f, app, area, state);
-    }
-    if let ModalState::NudgeCreate(ref state) = app.modal_state {
-        super::render_nudge_create(f, app, area, state);
-    }
-    if let ModalState::NudgeDetail(ref state) = app.modal_state {
-        super::render_nudge_detail(f, app, area, state);
-    }
-    if let ModalState::NudgeDeleteConfirm(ref state) = app.modal_state {
-        super::render_nudge_delete_confirm(f, app, area, state);
-    }
-
     // Project delete confirmation modal
     if let ModalState::ProjectDeleteConfirm(ref state) = app.modal_state {
         modals::render_project_delete_confirm(f, area, state);

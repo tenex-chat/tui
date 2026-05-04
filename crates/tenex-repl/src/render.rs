@@ -1,7 +1,7 @@
 use crate::completion::CompletionMenu;
 use crate::editor::{AttachmentKind, LineEditor};
 use crate::panels::{
-    ConfigPanel, DelegationEntry, NudgeSkillPanel, PanelMode, StatsPanel, StatsTab, StatusBarNav,
+    ConfigPanel, DelegationEntry, SkillPanel, PanelMode, StatsPanel, StatsTab, StatusBarNav,
     Q_TAG_DELEGATION_DENYLIST,
 };
 use crate::state::ReplState;
@@ -420,7 +420,7 @@ pub(crate) fn redraw_input(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
-    nudge_skill_panel: &NudgeSkillPanel,
+    skill_panel: &SkillPanel,
 ) {
     let width = term_width() as usize;
 
@@ -993,20 +993,20 @@ pub(crate) fn redraw_input(
         .ok();
 
         completion.rendered_lines = (1 + visible_count + 1) as u16;
-    } else if nudge_skill_panel.active {
-        let header = if nudge_skill_panel.filter.is_empty() {
+    } else if skill_panel.active {
+        let header = if skill_panel.filter.is_empty() {
             format!("  {WHITE_BOLD}╸Skills╺{RESET}{BG_INPUT}")
         } else {
             format!(
                 "  {WHITE_BOLD}╸Skills╺{RESET}{BG_INPUT}  filter: {}",
-                nudge_skill_panel.filter
+                skill_panel.filter
             )
         };
         let header_plain = 10
-            + if nudge_skill_panel.filter.is_empty() {
+            + if skill_panel.filter.is_empty() {
                 0
             } else {
-                10 + nudge_skill_panel.filter.len()
+                10 + skill_panel.filter.len()
             };
         let header_pad = width.saturating_sub(header_plain);
         write!(stdout, "\r\n").ok();
@@ -1019,14 +1019,14 @@ pub(crate) fn redraw_input(
         .ok();
 
         // Items list
-        let filtered = nudge_skill_panel.filtered_items();
+        let filtered = skill_panel.filtered_items();
         let max_visible = 15;
-        let visible_end = (nudge_skill_panel.scroll_offset + max_visible).min(filtered.len());
-        let visible_count = visible_end.saturating_sub(nudge_skill_panel.scroll_offset);
+        let visible_end = (skill_panel.scroll_offset + max_visible).min(filtered.len());
+        let visible_count = visible_end.saturating_sub(skill_panel.scroll_offset);
 
-        for fi in nudge_skill_panel.scroll_offset..visible_end {
+        for fi in skill_panel.scroll_offset..visible_end {
             let (_, item) = &filtered[fi];
-            let marker = if nudge_skill_panel.selected_ids.contains(&item.id) {
+            let marker = if skill_panel.selected_ids.contains(&item.id) {
                 "[x] "
             } else {
                 "[ ] "
@@ -1049,7 +1049,7 @@ pub(crate) fn redraw_input(
             let item_pad = width.saturating_sub(text_plain);
             write!(stdout, "\r\n").ok();
             queue!(stdout, terminal::Clear(ClearType::CurrentLine)).ok();
-            if fi == nudge_skill_panel.cursor {
+            if fi == skill_panel.cursor {
                 write!(
                     stdout,
                     "{BG_HIGHLIGHT}{WHITE_BOLD}{text}{}{RESET}",
@@ -1290,7 +1290,7 @@ pub(crate) fn apply_clear_screen(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
-    nudge_skill_panel: &NudgeSkillPanel,
+    skill_panel: &SkillPanel,
 ) {
     state.search_mode = false;
     state.search_all_projects = false;
@@ -1321,7 +1321,7 @@ pub(crate) fn apply_clear_screen(
         panel,
         status_nav,
         stats_panel,
-        nudge_skill_panel,
+        skill_panel,
     );
 }
 
@@ -1336,7 +1336,7 @@ pub(crate) fn print_above_input(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
-    nudge_skill_panel: &NudgeSkillPanel,
+    skill_panel: &SkillPanel,
 ) {
     clear_input_area(stdout, completion);
     completion.input_area_drawn = false;
@@ -1355,6 +1355,6 @@ pub(crate) fn print_above_input(
         panel,
         status_nav,
         stats_panel,
-        nudge_skill_panel,
+        skill_panel,
     );
 }

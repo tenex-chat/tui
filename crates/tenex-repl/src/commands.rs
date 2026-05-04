@@ -5,7 +5,7 @@ use crate::format::{
     print_user_message_raw,
 };
 use crate::panels::{
-    ConfigPanel, ConversationStackEntry, NudgeSkillPanel, StatsPanel, StatusBarNav,
+    ConfigPanel, ConversationStackEntry, SkillPanel, StatsPanel, StatusBarNav,
 };
 use crate::render::{print_above_input, redraw_input};
 use crate::roster::{default_project_agent, project_has_available_agent, project_roster_agents};
@@ -1492,7 +1492,7 @@ pub(crate) fn handle_clipboard_paste(
     panel: &ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
-    nudge_skill_panel: &NudgeSkillPanel,
+    skill_panel: &SkillPanel,
 ) {
     let mut clipboard = match arboard::Clipboard::new() {
         Ok(c) => c,
@@ -1514,7 +1514,7 @@ pub(crate) fn handle_clipboard_paste(
                     panel,
                     status_nav,
                     stats_panel,
-                    nudge_skill_panel,
+                    skill_panel,
                 );
                 return;
             }
@@ -1531,7 +1531,7 @@ pub(crate) fn handle_clipboard_paste(
             panel,
             status_nav,
             stats_panel,
-            nudge_skill_panel,
+            skill_panel,
         );
 
         let keys = keys.clone();
@@ -1556,7 +1556,7 @@ pub(crate) fn handle_clipboard_paste(
                 panel,
                 status_nav,
                 stats_panel,
-                nudge_skill_panel,
+                skill_panel,
             );
         } else {
             let msg = print_system_raw("Uploading image...");
@@ -1570,7 +1570,7 @@ pub(crate) fn handle_clipboard_paste(
                 panel,
                 status_nav,
                 stats_panel,
-                nudge_skill_panel,
+                skill_panel,
             );
         }
     }

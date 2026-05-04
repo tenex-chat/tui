@@ -179,11 +179,11 @@ pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent)
     Ok(())
 }
 
-pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
-    let items = app.filtered_nudge_skill_items();
+pub(super) fn handle_skill_selector_key(app: &mut App, key: KeyEvent) {
+    let items = app.filtered_skill_selector_items();
     let item_count = items.len();
 
-    if let ModalState::NudgeSkillSelector(ref mut state) = app.modal_state {
+    if let ModalState::SkillSelector(ref mut state) = app.modal_state {
         // Clamp index to valid range when filtered list shrinks (e.g., data changed between renders)
         if item_count > 0 {
             state.selector.index = state.selector.index.min(item_count - 1);
@@ -223,7 +223,7 @@ pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('b') if key.modifiers == KeyModifiers::NONE => {
                 // Toggle bookmark for the currently highlighted item
                 if let Some(item) = items.get(state.selector.index) {
-                    let item_id = item.id().to_string();
+                    let item_id = item.id.clone();
 
                     // Get the current user's pubkey
                     let user_pubkey = {
@@ -287,21 +287,16 @@ pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Char(' ') => {
-                if let Some(item) = items.get(state.selector.index) {
-                    match item {
-                        crate::ui::app::NudgeSkillSelectorItem::Skill(skill) => {
-                            let skill_id = skill.id.clone();
-                            if let Some(pos) = state
-                                .selected_skill_ids
-                                .iter()
-                                .position(|id| id == &skill_id)
-                            {
-                                state.selected_skill_ids.remove(pos);
-                            } else {
-                                state.selected_skill_ids.push(skill_id);
-                            }
-                        }
-                        crate::ui::app::NudgeSkillSelectorItem::Nudge(_) => {}
+                if let Some(skill) = items.get(state.selector.index) {
+                    let skill_id = skill.id.clone();
+                    if let Some(pos) = state
+                        .selected_skill_ids
+                        .iter()
+                        .position(|id| id == &skill_id)
+                    {
+                        state.selected_skill_ids.remove(pos);
+                    } else {
+                        state.selected_skill_ids.push(skill_id);
                     }
                 }
             }

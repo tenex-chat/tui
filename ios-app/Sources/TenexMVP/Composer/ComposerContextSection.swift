@@ -454,9 +454,9 @@ extension MessageComposerView {
         }
     }
 
-    var nudgeSkillToken: some View {
+    var skillToken: some View {
         Button {
-            openNudgeSkillSelector(mode: .skills)
+            openSkillSelector()
         } label: {
             HStack(spacing: 4) {
                 Text("/")

@@ -1,5 +1,4 @@
 use crate::ui::ask_input::AskInputState;
-use crate::ui::nudge::NudgeFormState;
 use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
 use tenex_core::models::NamedDraft;
@@ -567,7 +566,7 @@ pub struct AskModalState {
     pub ask_author_pubkey: String,
 }
 
-/// Filter mode for the nudge/skill selector.
+/// Filter mode for the skill selector.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BookmarkFilter {
     /// Show only bookmarked items (default when opened from compose area).
@@ -596,83 +595,11 @@ impl BookmarkFilter {
 
 /// State for the skill selector modal (multi-select for messages)
 #[derive(Debug, Clone)]
-pub struct NudgeSkillSelectorState {
+pub struct SkillSelectorState {
     pub selector: SelectorState,
     pub selected_skill_ids: Vec<String>, // Multi-select
     /// Whether to show only bookmarked items or all items.
     pub bookmark_filter: BookmarkFilter,
-}
-
-/// State for nudge list view (browse/manage nudges)
-#[derive(Debug, Clone)]
-pub struct NudgeListState {
-    pub filter: String,
-    pub selected_index: usize,
-}
-
-impl NudgeListState {
-    pub fn new() -> Self {
-        Self {
-            filter: String::new(),
-            selected_index: 0,
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-        }
-    }
-
-    pub fn move_down(&mut self, max: usize) {
-        if self.selected_index + 1 < max {
-            self.selected_index += 1;
-        }
-    }
-
-    pub fn add_filter_char(&mut self, c: char) {
-        self.filter.push(c);
-        self.selected_index = 0;
-    }
-
-    pub fn backspace_filter(&mut self) {
-        self.filter.pop();
-        self.selected_index = 0;
-    }
-}
-
-impl Default for NudgeListState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// State for nudge detail view (read-only view)
-#[derive(Debug, Clone)]
-pub struct NudgeDetailState {
-    pub nudge_id: String,
-    pub scroll_offset: usize,
-}
-
-impl NudgeDetailState {
-    pub fn new(nudge_id: String) -> Self {
-        Self {
-            nudge_id,
-            scroll_offset: 0,
-        }
-    }
-
-    pub fn scroll_up(&mut self) {
-        if self.scroll_offset > 0 {
-            self.scroll_offset -= 1;
-        }
-    }
-
-    pub fn scroll_down(&mut self, max_scroll: usize) {
-        if self.scroll_offset < max_scroll {
-            self.scroll_offset += 1;
-        }
-    }
 }
 
 /// State for project delete confirmation
@@ -697,25 +624,6 @@ impl ProjectDeleteConfirmState {
     }
 }
 
-/// State for nudge delete confirmation
-#[derive(Debug, Clone)]
-pub struct NudgeDeleteConfirmState {
-    pub nudge_id: String,
-    pub selected_index: usize, // 0 = Cancel, 1 = Delete
-}
-
-impl NudgeDeleteConfirmState {
-    pub fn new(nudge_id: String) -> Self {
-        Self {
-            nudge_id,
-            selected_index: 0, // Default to Cancel
-        }
-    }
-
-    pub fn toggle(&mut self) {
-        self.selected_index = 1 - self.selected_index;
-    }
-}
 
 /// Scope of agent deletion (project-only or global)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2333,8 +2241,8 @@ pub enum ModalState {
     ProjectSettings(ProjectSettingsState),
     /// Create new project wizard
     CreateProject(CreateProjectState),
-    /// Unified nudge/skill selector for adding context to messages
-    NudgeSkillSelector(NudgeSkillSelectorState),
+    /// Skill selector for adding skills to messages
+    SkillSelector(SkillSelectorState),
     /// Conversation action menu in Home view - shows actions for selected conversation (via Ctrl+T)
     #[allow(dead_code)]
     ConversationActions(ConversationActionsState),
@@ -2370,14 +2278,6 @@ pub enum ModalState {
     DebugStats(DebugStatsState),
     /// History search modal (Ctrl+R) - search through previous messages sent by user
     HistorySearch(HistorySearchState),
-    /// Nudge list view - browse and manage nudges
-    NudgeList(NudgeListState),
-    /// Nudge create form - multi-step wizard for creating nudges (also used for copy)
-    NudgeCreate(NudgeFormState),
-    /// Nudge detail view - read-only view of a nudge
-    NudgeDetail(NudgeDetailState),
-    /// Nudge delete confirmation - confirm deletion of a nudge
-    NudgeDeleteConfirm(NudgeDeleteConfirmState),
     /// Project delete confirmation - confirm tombstone deletion of a project
     ProjectDeleteConfirm(ProjectDeleteConfirmState),
     /// Agent deletion confirmation - confirm publishing kind:24030 deletion event

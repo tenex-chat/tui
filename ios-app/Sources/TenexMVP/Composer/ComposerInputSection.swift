@@ -261,7 +261,7 @@ extension MessageComposerView {
         guard !isProgrammaticUpdate else { return }
         guard newValue.count >= previousValue.count else { return }
         guard selectedProject != nil else { return }
-        guard !showAgentSelector && !showNudgeSkillSelector else { return }
+        guard !showAgentSelector && !showSkillSelector else { return }
 
         triggerDetectionTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(120))
@@ -274,7 +274,7 @@ extension MessageComposerView {
             case .agent:
                 openAgentSelector(initialQuery: trigger.query)
             case .skill:
-                openNudgeSkillSelector(mode: .skills, initialQuery: trigger.query)
+                openSkillSelector(initialQuery: trigger.query)
             }
         }
     }
@@ -374,11 +374,11 @@ extension MessageComposerView {
         }
     }
 
-    /// Toolbar button that opens the nudge/skill selector sheet.
-    /// Shows a [/] glyph with a count badge when items are selected.
-    var nudgeSkillToolbarButton: some View {
+    /// Toolbar button that opens the skill selector sheet.
+    /// Shows a [/] glyph with a count badge when skills are selected.
+    var skillToolbarButton: some View {
         Button {
-            openNudgeSkillSelector(mode: .skills)
+            openSkillSelector()
         } label: {
             HStack(spacing: 3) {
                 Text("/")
@@ -396,7 +396,7 @@ extension MessageComposerView {
         }
         .buttonStyle(.borderless)
         .disabled(selectedProject == nil)
-        .help("Nudges & Skills")
+        .help("Skills")
     }
 
     var pinnedPromptsToolbarButton: some View {
@@ -499,10 +499,9 @@ extension MessageComposerView {
         }
     }
 
-    func openNudgeSkillSelector(mode: NudgeSkillSelectorMode, initialQuery: String = "") {
-        nudgeSkillSelectorInitialMode = mode
-        nudgeSkillSelectorInitialQuery = initialQuery
-        showNudgeSkillSelector = true
+    func openSkillSelector(initialQuery: String = "") {
+        skillSelectorInitialQuery = initialQuery
+        showSkillSelector = true
     }
 
     func openAgentSelector(initialQuery: String = "") {

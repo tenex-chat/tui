@@ -497,13 +497,6 @@ private final class MockDraftStore: DraftPersisting {
         drafts[key] = draft
     }
 
-    func updateNudgeIds(_ nudgeIds: Set<String>, conversationId: String?, projectId: String) async {
-        let key = Draft.storageKey(for: conversationId, projectId: projectId)
-        var draft = drafts[key] ?? (conversationId.map { Draft(conversationId: $0, projectId: projectId) } ?? Draft(projectId: projectId))
-        draft.selectedNudgeIds = nudgeIds
-        drafts[key] = draft
-    }
-
     func updateSkillIds(_ skillIds: Set<String>, conversationId: String?, projectId: String) async {
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
         var draft = drafts[key] ?? (conversationId.map { Draft(conversationId: $0, projectId: projectId) } ?? Draft(projectId: projectId))

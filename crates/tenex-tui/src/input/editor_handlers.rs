@@ -108,11 +108,11 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         // registry because they only apply during text editing and need to be
         // processed before regular character input.
         KeyCode::Char('n') | KeyCode::Char('/') | KeyCode::Char('_') if has_ctrl => {
-            app.open_nudge_skill_selector();
+            app.open_skill_selector();
         }
         // Alt+K = open skill selector (Alt+S conflicts with global audio stop)
         KeyCode::Char('k') if has_alt => {
-            app.open_nudge_skill_selector();
+            app.open_skill_selector();
         }
         // Ctrl+R = open history search
         KeyCode::Char('r') if has_ctrl => {
@@ -287,7 +287,7 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle key events when context line is focused (agent/project/nudge+skill selection)
+/// Handle key events when context line is focused (agent/project/skill selection)
 fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
     let focus = match app.input_context_focus {
         Some(f) => f,
@@ -302,11 +302,11 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up | KeyCode::Esc => {
             app.input_context_focus = None;
         }
-        // Left = move to previous item (NudgeSkill -> Project -> Agent)
+        // Left = move to previous item (Skill -> Project -> Agent)
         KeyCode::Left => {
             app.input_context_focus = Some(focus.move_left(is_draft_tab));
         }
-        // Right = move to next item (Agent -> Project -> NudgeSkill)
+        // Right = move to next item (Agent -> Project -> Skill)
         KeyCode::Right => {
             app.input_context_focus = Some(focus.move_right(is_draft_tab));
         }
@@ -323,9 +323,9 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                     app.open_composer_project_selector();
                 }
             }
-            InputContextFocus::NudgeSkill => {
+            InputContextFocus::Skill => {
                 app.input_context_focus = None;
-                app.open_nudge_skill_selector();
+                app.open_skill_selector();
             }
         },
         _ => {}

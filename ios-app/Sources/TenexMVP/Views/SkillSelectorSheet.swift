@@ -1,22 +1,11 @@
 import SwiftUI
 
-enum NudgeSkillSelectorMode: String, CaseIterable, Identifiable {
-    case skills
-
-    var id: String { rawValue }
-
-    var title: String {
-        "Skills"
-    }
-}
-
-/// Skill-only selector sheet for attaching skills to a message draft.
-struct NudgeSkillSelectorSheet: View {
+/// Skill selector sheet for attaching skills to a message draft.
+struct SkillSelectorSheet: View {
     let skills: [Skill]
     @Binding var selectedSkillIds: Set<String>
     /// Current bookmark set from TenexCoreManager.bookmarkedIds — used to seed the local copy.
     var bookmarkedIds: Set<String> = []
-    var initialMode: NudgeSkillSelectorMode = .skills
     var initialSearchQuery: String = ""
     var onDone: (() -> Void)?
     /// Called with the base item ID when the user toggles a bookmark. Caller is responsible for

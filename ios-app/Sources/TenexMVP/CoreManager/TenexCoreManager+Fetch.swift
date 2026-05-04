@@ -137,25 +137,11 @@ extension TenexCoreManager {
         var rosterUpdates: [String: [ProjectAgent]] = [:]
 
         // Build one ordered roster per project. The returned row order is exactly the 31933 p-tag order.
-        await withTaskGroup(of: (String, Bool, [ProjectAgent]).self) { group in
-            for project in projects {
-                group.addTask {
-                    if Task.isCancelled {
-                        return (project.id, false, [])
-                    }
-
-                    let roster = await self.rosterAgents(for: project, inventoryByPubkey: inventoryByPubkey)
-                    let isAvailable = roster.contains { $0.isOnline }
-                    return (project.id, isAvailable, roster)
-                }
-            }
-
-            // Collect results off-main, then publish once to avoid N UI invalidations.
-            for await (projectId, isAvailable, roster) in group {
-                if Task.isCancelled { continue }
-                statusUpdates[projectId] = isAvailable
-                rosterUpdates[projectId] = roster
-            }
+        for project in projects {
+            if Task.isCancelled { break }
+            let roster = await rosterAgents(for: project, inventoryByPubkey: inventoryByPubkey)
+            statusUpdates[project.id] = roster.contains { $0.isOnline }
+            rosterUpdates[project.id] = roster
         }
 
         if !Task.isCancelled {

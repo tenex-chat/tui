@@ -43,7 +43,7 @@ final class ComposerViewModel {
         if scheduledFilter != .showAll {
             candidates = candidates.filter { scheduledFilter.allows(isScheduled: $0.thread.isScheduled) }
         }
-        if interventionReviewFilter != .defaultValue {
+        if interventionReviewFilter != .showAll {
             candidates = candidates.filter {
                 interventionReviewFilter.allows(isInterventionReview: $0.thread.isInterventionReview)
             }

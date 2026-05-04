@@ -341,7 +341,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
                 .map(|s| format!("skill/{}", s.title))
         })
         .collect();
-    let nudge_skill_display = if selected_labels.is_empty() {
+    let skill_display = if selected_labels.is_empty() {
         "[/]".to_string()
     } else {
         format!("[{}]", selected_labels.join(", "))
@@ -368,11 +368,11 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Calculate context string for padding (use unicode width for proper display width with emoji)
-    let nudge_skill_str = format!(" {}", nudge_skill_display);
+    let skill_str = format!(" {}", skill_display);
     let project_str = format!(" {}", project_display);
     let context_str = format!(
         "{}{}{}{}",
-        agent_chip_display, project_str, nudge_skill_str, scroll_indicator
+        agent_chip_display, project_str, skill_str, scroll_indicator
     );
     let context_pad = area
         .width
@@ -408,12 +408,12 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Skill display (highlighted if focused) - always shown
     context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
-    let nudge_skill_style = if context_focus == Some(InputContextFocus::NudgeSkill) {
+    let skill_style = if context_focus == Some(InputContextFocus::Skill) {
         focused_style(theme::ACCENT_WARNING)
     } else {
         Style::default().fg(theme::ACCENT_WARNING).bg(input_bg)
     };
-    context_spans.push(Span::styled(nudge_skill_display, nudge_skill_style));
+    context_spans.push(Span::styled(skill_display, skill_style));
 
     // Add scroll indicator if scrolling
     if !scroll_indicator.is_empty() {

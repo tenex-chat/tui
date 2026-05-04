@@ -597,7 +597,7 @@ pub static COMMANDS: &[Command] = &[
         section: "Input",
         available: |app| app.view == View::Chat,
         execute: |app| {
-            app.open_nudge_skill_selector();
+            app.open_skill_selector();
         },
     },
     // =========================================================================

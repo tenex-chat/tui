@@ -73,9 +73,8 @@ struct MessageComposerView: View {
     @State var showAgentSelector = false
     @State var replyTargetAgentName: String?  // Agent name for reply target (resolved from initialAgentPubkey)
     @State var availableSkills: [Skill] = []
-    @State var showNudgeSkillSelector = false
-    @State var nudgeSkillSelectorInitialMode: NudgeSkillSelectorMode = .skills
-    @State var nudgeSkillSelectorInitialQuery: String = ""
+    @State var showSkillSelector = false
+    @State var skillSelectorInitialQuery: String = ""
     @State var agentSelectorInitialQuery: String = ""
     @State var isSending = false
     @State var sendError: String?
@@ -460,13 +459,12 @@ struct MessageComposerView: View {
             AgentConfigSheet(agent: agent, projectId: selectedProject?.id ?? "")
                 .environment(coreManager)
         }
-        .sheet(isPresented: $showNudgeSkillSelector) {
-            NudgeSkillSelectorSheet(
+        .sheet(isPresented: $showSkillSelector) {
+            SkillSelectorSheet(
                 skills: availableSkills,
                 selectedSkillIds: $draft.selectedSkillIds,
                 bookmarkedIds: coreManager.bookmarkedIds,
-                initialMode: nudgeSkillSelectorInitialMode,
-                initialSearchQuery: nudgeSkillSelectorInitialQuery,
+                initialSearchQuery: skillSelectorInitialQuery,
                 onDone: {
                     isDirty = true // Mark as dirty when user selects skills
                     persistSelectedSkillIds()

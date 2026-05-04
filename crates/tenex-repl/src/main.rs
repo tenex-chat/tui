@@ -67,7 +67,7 @@ use commands::{
 use completion::CompletionMenu;
 use editor::LineEditor;
 use format::{print_error_raw, print_help_raw, print_separator_raw, print_system_raw};
-use panels::{ConfigPanel, NudgeSkillPanel, PanelMode, StatsPanel, StatusBarAction, StatusBarNav};
+use panels::{ConfigPanel, SkillPanel, PanelMode, StatsPanel, StatusBarAction, StatusBarNav};
 use render::{
     apply_clear_screen, clear_input_area, print_above_input, redraw_input, update_delegation_bar,
 };
@@ -216,7 +216,7 @@ async fn run_repl(
     let mut panel = ConfigPanel::new();
     let mut status_nav = StatusBarNav::new();
     let mut stats_panel = StatsPanel::new();
-    let mut nudge_skill_panel = NudgeSkillPanel::new();
+    let mut skill_panel = SkillPanel::new();
     let mut events = EventStream::new();
     let (upload_tx, mut upload_rx) = tokio::sync::mpsc::channel::<UploadResult>(8);
     let history_store = history::HistoryStore::open(&CoreConfig::default_data_dir())
@@ -242,7 +242,7 @@ async fn run_repl(
         &panel,
         &status_nav,
         &stats_panel,
-        &nudge_skill_panel,
+        &skill_panel,
     );
 
     let mut tick =
@@ -260,14 +260,14 @@ async fn run_repl(
                     Event::Paste(text) => {
                         if try_upload_image_file(&text, keys, upload_tx.clone()) {
                             let msg = print_system_raw("Uploading image...");
-                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         } else {
                             editor.handle_paste(&text);
                             if editor.has_attachments() {
                                 let msg = format!("{DIM}(pasted as text attachment){RESET}");
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             } else {
-                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             }
                         }
                         continue;
@@ -293,7 +293,7 @@ async fn run_repl(
                                 store_ref.save_cache();
                                 drop(store_ref);
                                 let msg = print_system_raw(&format!("Approved backend: {}", name));
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                 continue;
                             }
                             KeyCode::Char('b') | KeyCode::Char('n') => {
@@ -303,7 +303,7 @@ async fn run_repl(
                                 store_ref.save_cache();
                                 drop(store_ref);
                                 let msg = print_system_raw(&format!("Blocked backend: {}", name));
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                 continue;
                             }
                             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
@@ -328,7 +328,7 @@ async fn run_repl(
                                     approved: true,
                                 });
                                 let msg = print_system_raw("Bunker request approved");
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             }
                             continue;
                         }
@@ -343,7 +343,7 @@ async fn run_repl(
                                     event_kind: req.event_kind,
                                 });
                                 let msg = print_system_raw("Bunker request approved + auto-approve rule added");
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             }
                             continue;
                         }
@@ -354,7 +354,7 @@ async fn run_repl(
                                     approved: false,
                                 });
                                 let msg = print_system_raw("Bunker request rejected");
-                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             }
                             continue;
                         }
@@ -437,7 +437,7 @@ async fn run_repl(
                                             response_tx: None,
                                         });
                                         let msg = print_system_raw("Response submitted");
-                                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                     }
                                 }
                             }
@@ -472,7 +472,7 @@ async fn run_repl(
                         }
                         _ => {}
                     }
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     continue;
                 }
 
@@ -486,7 +486,7 @@ async fn run_repl(
                             KeyCode::Enter => {
                                 let msg = panel.save(runtime);
                                 panel.deactivate();
-                                print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                 continue;
                             }
                             KeyCode::Char('@') => panel.switch_to_agent_select(runtime),
@@ -564,7 +564,7 @@ async fn run_repl(
                                     if panel.quick_save {
                                         let msg = panel.save_model_only(runtime);
                                         panel.deactivate();
-                                        print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        print_above_input(&mut stdout, &print_system_raw(&msg), state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                         continue;
                                     } else {
                                         panel.rebuild_origin_command();
@@ -605,31 +605,31 @@ async fn run_repl(
                             _ => {}
                         },
                     }
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     continue;
                 }
 
                 // ── Skill panel keyboard intercept ──
-                if nudge_skill_panel.active {
+                if skill_panel.active {
                     match code {
-                        KeyCode::Up => nudge_skill_panel.move_up(),
-                        KeyCode::Down => nudge_skill_panel.move_down(),
-                        KeyCode::Char(' ') => nudge_skill_panel.toggle_current(),
+                        KeyCode::Up => skill_panel.move_up(),
+                        KeyCode::Down => skill_panel.move_down(),
+                        KeyCode::Char(' ') => skill_panel.toggle_current(),
                         KeyCode::Enter => {
-                            state.selected_skill_ids = nudge_skill_panel.commit_selections(runtime);
-                            nudge_skill_panel.deactivate();
+                            state.selected_skill_ids = skill_panel.commit_selections(runtime);
+                            skill_panel.deactivate();
                         }
                         KeyCode::Esc => {
-                            nudge_skill_panel.deactivate();
+                            skill_panel.deactivate();
                             editor.insert_char('$');
                         }
                         KeyCode::Backspace => {
-                            if nudge_skill_panel.filter.is_empty() {
-                                nudge_skill_panel.deactivate();
+                            if skill_panel.filter.is_empty() {
+                                skill_panel.deactivate();
                             } else {
-                                nudge_skill_panel.filter.pop();
-                                nudge_skill_panel.cursor = 0;
-                                nudge_skill_panel.scroll_offset = 0;
+                                skill_panel.filter.pop();
+                                skill_panel.cursor = 0;
+                                skill_panel.scroll_offset = 0;
                             }
                         }
                         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
@@ -638,13 +638,13 @@ async fn run_repl(
                             return Ok(());
                         }
                         KeyCode::Char(c) => {
-                            nudge_skill_panel.filter.push(c);
-                            nudge_skill_panel.cursor = 0;
-                            nudge_skill_panel.scroll_offset = 0;
+                            skill_panel.filter.push(c);
+                            skill_panel.cursor = 0;
+                            skill_panel.scroll_offset = 0;
                         }
                         _ => {}
                     }
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     continue;
                 }
 
@@ -673,7 +673,7 @@ async fn run_repl(
                         }
                         _ => {}
                     }
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     continue;
                 }
 
@@ -689,20 +689,20 @@ async fn run_repl(
                                 StatusBarAction::ShowCompletion(buf) => {
                                     editor.set_buffer(&buf);
                                     completion.update_from_buffer(&editor.buffer, state, runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                     continue;
                                 }
                                 StatusBarAction::OpenConversation { thread_id, project_a_tag } => {
                                     if let CommandResult::ClearScreen(lines) = handle_status_bar_open(state, runtime, &thread_id, project_a_tag) {
-                                        apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                         maybe_open_ask_modal(state, runtime);
-                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                     }
                                     continue;
                                 }
                                 StatusBarAction::OpenStats => {
                                     stats_panel.activate(runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                     continue;
                                 }
                             }
@@ -715,14 +715,14 @@ async fn run_repl(
                         }
                     }
                     if status_nav.active {
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         continue;
                     }
                     if code == KeyCode::Esc {
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         continue;
                     }
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                 }
 
                 if state.search_mode {
@@ -802,7 +802,7 @@ async fn run_repl(
                         }
                         _ => {}
                     }
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     continue;
                 }
 
@@ -826,7 +826,7 @@ async fn run_repl(
                         completion.items.clear();
                         completion.visible = false;
                         completion.selected = 0;
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+J fallback for terminals that send it for Shift+Enter (e.g. iTerm/macOS).
@@ -837,7 +837,7 @@ async fn run_repl(
                         editor.selected_attachment = None;
                         editor.insert_char('\n');
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Enter / Shift+Enter / Cmd+Enter
@@ -848,9 +848,9 @@ async fn run_repl(
                             if let Some(thread_id) = target {
                                 let result = navigate_to_delegation(state, runtime, &thread_id);
                                 if let CommandResult::ClearScreen(lines) = result {
-                                    apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                     maybe_open_ask_modal(state, runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                 }
                             }
                             continue;
@@ -867,7 +867,7 @@ async fn run_repl(
                             editor.selected_attachment = None;
                             editor.insert_char('\n');
                             completion.update_from_buffer(&editor.buffer, state, runtime);
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             continue;
                         }
 
@@ -877,7 +877,7 @@ async fn run_repl(
                             editor.selected_attachment = None;
                             editor.insert_char('\n');
                             completion.update_from_buffer(&editor.buffer, state, runtime);
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             continue;
                         }
 
@@ -896,7 +896,7 @@ async fn run_repl(
                             raw_println!();
 
                             if line.trim().is_empty() {
-                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                 continue;
                             }
 
@@ -951,18 +951,18 @@ async fn run_repl(
                                         raw_println!("{}", l);
                                     }
                                     if !state.streaming_in_progress {
-                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                     }
                                 }
                                 CommandResult::ShowCompletion(buf) => {
                                     editor.set_buffer(&buf);
                                     completion.update_from_buffer(&editor.buffer, state, runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                 }
                                 CommandResult::ClearScreen(lines) => {
-                                    apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                     maybe_open_ask_modal(state, runtime);
-                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                 }
                             }
                         }
@@ -987,7 +987,7 @@ async fn run_repl(
                                 completion.select_next();
                             }
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Shift+Tab → prev completion
@@ -995,7 +995,7 @@ async fn run_repl(
                         if completion.visible && !completion.items.is_empty() {
                             completion.select_prev();
                             editor.set_buffer(&completion.items[completion.selected].fill);
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         }
                     }
 
@@ -1003,16 +1003,16 @@ async fn run_repl(
                     (KeyCode::Esc, _) => {
                         if state.delegation_bar.focused {
                             state.delegation_bar.unfocus();
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         } else if editor.selected_attachment.is_some() {
                             editor.selected_attachment = None;
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         } else if completion.visible {
                             if let Some(ref saved) = completion.pre_completion_buffer {
                                 editor.set_buffer(saved);
                             }
                             completion.hide();
-                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         } else if state.is_current_conversation_busy(runtime) {
                             if state.consume_stop_confirmation_if_active() {
                                 match send_stop_for_current_conversation(state, runtime) {
@@ -1028,7 +1028,7 @@ async fn run_repl(
                                             &panel,
                                             &status_nav,
                                             &stats_panel,
-                                            &nudge_skill_panel,
+                                            &skill_panel,
                                         );
                                     }
                                     Err(err) => {
@@ -1043,7 +1043,7 @@ async fn run_repl(
                                             &panel,
                                             &status_nav,
                                             &stats_panel,
-                                            &nudge_skill_panel,
+                                            &skill_panel,
                                         );
                                     }
                                 }
@@ -1058,7 +1058,7 @@ async fn run_repl(
                                     &panel,
                                     &status_nav,
                                     &stats_panel,
-                                    &nudge_skill_panel,
+                                    &skill_panel,
                                 );
                             }
                         } else {
@@ -1078,7 +1078,7 @@ async fn run_repl(
                                         &panel,
                                         &status_nav,
                                         &stats_panel,
-                                        &nudge_skill_panel,
+                                        &skill_panel,
                                     );
                                     maybe_open_ask_modal(state, runtime);
                                     redraw_input(
@@ -1090,7 +1090,7 @@ async fn run_repl(
                                         &panel,
                                         &status_nav,
                                         &stats_panel,
-                                        &nudge_skill_panel,
+                                        &skill_panel,
                                     );
                                 }
                             } else if had_confirmation {
@@ -1103,7 +1103,7 @@ async fn run_repl(
                                     &panel,
                                     &status_nav,
                                     &stats_panel,
-                                    &nudge_skill_panel,
+                                    &skill_panel,
                                 );
                             }
                         }
@@ -1122,7 +1122,7 @@ async fn run_repl(
                         } else {
                             editor.history_up();
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Down arrow
@@ -1144,7 +1144,7 @@ async fn run_repl(
                         } else {
                             editor.history_down();
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Backspace
@@ -1157,7 +1157,7 @@ async fn run_repl(
                             editor.delete_back();
                         }
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Delete
@@ -1168,7 +1168,7 @@ async fn run_repl(
                             editor.delete_forward();
                         }
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Left
@@ -1180,7 +1180,7 @@ async fn run_repl(
                         } else {
                             editor.move_left();
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Right
@@ -1193,48 +1193,48 @@ async fn run_repl(
                         } else {
                             editor.move_right();
                         }
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Home / Ctrl+A
                     (KeyCode::Home, _) => {
                         editor.move_home();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
                     (KeyCode::Char('a'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_home();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // End / Ctrl+E
                     (KeyCode::End, _) => {
                         editor.move_end();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
                     (KeyCode::Char('e'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_end();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+W → delete word back
                     (KeyCode::Char('w'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.delete_word_back();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+U → clear line
                     (KeyCode::Char('u'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.set_buffer("");
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+K → kill to end of line
                     (KeyCode::Char('k'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.kill_to_end();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+D → delete forward (or quit on empty)
@@ -1246,19 +1246,19 @@ async fn run_repl(
                         }
                         editor.delete_forward();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+B → move left
                     (KeyCode::Char('b'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_left();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+F → move right
                     (KeyCode::Char('f'), m) if m.contains(KeyModifiers::CONTROL) => {
                         editor.move_right();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+L → clear screen
@@ -1267,52 +1267,52 @@ async fn run_repl(
                         completion.input_area_drawn = false;
                         let (_, rows) = terminal::size().unwrap_or((80, 24));
                         execute!(stdout, cursor::MoveTo(0, rows.saturating_sub(5))).ok();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Alt+B / Alt+Left → word left
                     (KeyCode::Char('b'), m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_left();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
                     (KeyCode::Left, m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_left();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Alt+F / Alt+Right → word right
                     (KeyCode::Char('f'), m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_right();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
                     (KeyCode::Right, m) if m.contains(KeyModifiers::ALT) => {
                         editor.move_word_right();
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Alt+D → delete word forward
                     (KeyCode::Char('d'), m) if m.contains(KeyModifiers::ALT) => {
                         editor.delete_word_forward();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Alt+Backspace → delete word back
                     (KeyCode::Backspace, m) if m.contains(KeyModifiers::ALT) => {
                         editor.delete_word_back();
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // $ → open skill selector
                     (KeyCode::Char('$'), m) if !m.contains(KeyModifiers::CONTROL) && !m.contains(KeyModifiers::ALT) => {
                         state.delegation_bar.unfocus();
                         editor.selected_attachment = None;
-                        nudge_skill_panel.activate(
+                        skill_panel.activate(
                             runtime,
                             &state.selected_skill_ids,
                         );
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Regular character
@@ -1321,12 +1321,12 @@ async fn run_repl(
                         editor.selected_attachment = None;
                         editor.insert_char(c);
                         completion.update_from_buffer(&editor.buffer, state, runtime);
-                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     // Ctrl+V → clipboard paste (image or text)
                     (KeyCode::Char('v'), m) if m.contains(KeyModifiers::CONTROL) => {
-                        handle_clipboard_paste(&mut editor, keys, upload_tx.clone(), &mut stdout, state, runtime, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        handle_clipboard_paste(&mut editor, keys, upload_tx.clone(), &mut stdout, state, runtime, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
 
                     _ => {}
@@ -1334,7 +1334,7 @@ async fn run_repl(
                 } // end Event::Key
                     Event::Resize(_, _) => {
                         let lines = rebuild_conversation_view(state, runtime);
-                        apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        apply_clear_screen(&mut stdout, &lines, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
                     _ => {}
                 } // end match event
@@ -1346,11 +1346,11 @@ async fn run_repl(
                     UploadResult::Success(url) => {
                         let id = editor.add_image_attachment(url);
                         let msg = print_system_raw(&format!("Image uploaded → [Image #{}]", id));
-                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
                     UploadResult::Error(err) => {
                         let msg = print_error_raw(&format!("Image upload failed: {}", err));
-                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                        print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                     }
                 }
             }
@@ -1366,7 +1366,7 @@ async fn run_repl(
                                         if state.streaming_in_progress {
                                             raw_println!("{}", text);
                                         } else {
-                                            print_above_input(&mut stdout, &text, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                            print_above_input(&mut stdout, &text, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                         }
                                     }
                                     CoreEventUiAction::RefreshConversation => {
@@ -1381,10 +1381,10 @@ async fn run_repl(
                                             &panel,
                                             &status_nav,
                                             &stats_panel,
-                                            &nudge_skill_panel,
+                                            &skill_panel,
                                         );
                                         maybe_open_ask_modal(state, runtime);
-                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                        redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                                         refreshed_conversation = true;
                                     }
                                     CoreEventUiAction::None => {}
@@ -1393,19 +1393,19 @@ async fn run_repl(
                             // Auto-open ask modal if a new ask event arrived
                             if !events.is_empty() && !refreshed_conversation {
                                 maybe_open_ask_modal(state, runtime);
-                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                                redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                             }
                         }
                         Err(e) => {
                             let msg = print_error_raw(&format!("Event processing error: {e}"));
-                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                            print_above_input(&mut stdout, &msg, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                         }
                     }
                 }
             }
 
             _ = tick.tick() => {
-                drain_data_changes(data_rx, state, runtime, &mut stdout, &editor, &mut completion, &mut panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                drain_data_changes(data_rx, state, runtime, &mut stdout, &editor, &mut completion, &mut panel, &status_nav, &stats_panel, &skill_panel);
                 state.wave_frame = state.wave_frame.wrapping_add(1);
                 update_delegation_bar(state, runtime);
                 let stop_confirm_expired = state.expire_stop_confirmation_if_needed();
@@ -1437,7 +1437,7 @@ async fn run_repl(
                     || state.delegation_bar.has_content())
                     && !state.streaming_in_progress
                 {
-                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &nudge_skill_panel);
+                    redraw_input(&mut stdout, state, runtime, &editor, &mut completion, &panel, &status_nav, &stats_panel, &skill_panel);
                 }
             }
         }
@@ -1456,7 +1456,7 @@ fn drain_data_changes(
     panel: &mut ConfigPanel,
     status_nav: &StatusBarNav,
     stats_panel: &StatsPanel,
-    nudge_skill_panel: &NudgeSkillPanel,
+    skill_panel: &SkillPanel,
 ) {
     loop {
         match data_rx.try_recv() {
@@ -1523,7 +1523,7 @@ fn drain_data_changes(
                         panel,
                         status_nav,
                         stats_panel,
-                        nudge_skill_panel,
+                        skill_panel,
                     );
                 }
             }
@@ -1555,7 +1555,7 @@ fn drain_data_changes(
                         panel,
                         status_nav,
                         stats_panel,
-                        nudge_skill_panel,
+                        skill_panel,
                     );
                 }
             }
@@ -1575,7 +1575,7 @@ fn drain_data_changes(
                         panel,
                         status_nav,
                         stats_panel,
-                        nudge_skill_panel,
+                        skill_panel,
                     );
                 }
             }
@@ -1591,7 +1591,7 @@ fn drain_data_changes(
                         panel,
                         status_nav,
                         stats_panel,
-                        nudge_skill_panel,
+                        skill_panel,
                     );
                 }
             }

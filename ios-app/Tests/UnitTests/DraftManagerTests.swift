@@ -22,7 +22,6 @@ final class DraftManagerTests: XCTestCase {
             title: "My Title",
             content: "Hello world",
             agentPubkey: "agent-abc",
-            selectedNudgeIds: ["n1", "n2"],
             selectedSkillIds: ["s1"],
             referenceConversationId: "conv-ref"
         )
@@ -40,7 +39,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(decoded.title, "My Title")
         XCTAssertEqual(decoded.content, "Hello world")
         XCTAssertEqual(decoded.agentPubkey, "agent-abc")
-        XCTAssertEqual(decoded.selectedNudgeIds, ["n1", "n2"])
         XCTAssertEqual(decoded.selectedSkillIds, ["s1"])
         XCTAssertTrue(decoded.isNewConversation)
         XCTAssertEqual(decoded.referenceConversationId, "conv-ref")
@@ -58,7 +56,6 @@ final class DraftManagerTests: XCTestCase {
             projectId: "proj-2",
             content: "Reply text",
             agentPubkey: nil,
-            selectedNudgeIds: [],
             selectedSkillIds: ["s1", "s2"]
         )
 
@@ -107,23 +104,6 @@ final class DraftManagerTests: XCTestCase {
 
         XCTAssertEqual(draft.projectId, "")
         XCTAssertEqual(draft.content, "Hello")
-    }
-
-    func testDecodingWithoutSelectedNudgeIdsDefaultsToEmptySet() throws {
-        let json = """
-        {
-            "id": "draft-2",
-            "projectId": "proj-1",
-            "title": "Test",
-            "content": "",
-            "isNewConversation": true,
-            "lastEdited": 0
-        }
-        """
-        let data = Data(json.utf8)
-        let draft = try decoder.decode(Draft.self, from: data)
-
-        XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
     }
 
     func testDecodingWithoutSelectedSkillIdsDefaultsToEmptySet() throws {
@@ -214,7 +194,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(draft.projectId, "")
         XCTAssertNil(draft.conversationId)
         XCTAssertNil(draft.agentPubkey)
-        XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
@@ -266,17 +245,6 @@ final class DraftManagerTests: XCTestCase {
         draft.clearAgent()
 
         XCTAssertNil(draft.agentPubkey)
-        XCTAssertGreaterThan(draft.lastEdited, before)
-    }
-
-    func testClearNudgesResetsAllNudgesAndUpdatesTimestamp() {
-        var draft = Draft(projectId: "p", selectedNudgeIds: ["n1", "n2", "n3"])
-        let before = draft.lastEdited
-
-        Thread.sleep(forTimeInterval: 0.01)
-        draft.clearNudges()
-
-        XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertGreaterThan(draft.lastEdited, before)
     }
 
@@ -565,7 +533,6 @@ final class DraftManagerTests: XCTestCase {
             title: "Title",
             content: "Content",
             agentPubkey: "agent",
-            selectedNudgeIds: ["n1"],
             selectedSkillIds: ["s1"],
             referenceConversationId: "ref-conv"
         )
@@ -574,14 +541,12 @@ final class DraftManagerTests: XCTestCase {
         draft.updateContent("New content")
         XCTAssertEqual(draft.title, "Title")
         XCTAssertEqual(draft.agentPubkey, "agent")
-        XCTAssertEqual(draft.selectedNudgeIds, ["n1"])
         XCTAssertEqual(draft.selectedSkillIds, ["s1"])
         XCTAssertEqual(draft.referenceConversationId, "ref-conv")
 
         // Clear agent should NOT affect other fields
         draft.clearAgent()
         XCTAssertEqual(draft.content, "New content")
-        XCTAssertEqual(draft.selectedNudgeIds, ["n1"])
         XCTAssertEqual(draft.referenceConversationId, "ref-conv")
     }
 
@@ -591,7 +556,6 @@ final class DraftManagerTests: XCTestCase {
             title: "T",
             content: "C",
             agentPubkey: "a",
-            selectedNudgeIds: ["n"],
             selectedSkillIds: ["s"],
             referenceConversationId: "ref"
         )
@@ -604,7 +568,6 @@ final class DraftManagerTests: XCTestCase {
         XCTAssertEqual(draft.title, "")
         XCTAssertEqual(draft.content, "")
         XCTAssertNil(draft.agentPubkey)
-        XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
@@ -613,7 +576,6 @@ final class DraftManagerTests: XCTestCase {
         // Should be rebuildable from scratch
         draft.updateContent("Rebuilt")
         draft.setAgent("new-agent")
-        draft.addNudge("new-nudge")
         draft.addSkill("new-skill")
         draft.setReferenceConversation("new-ref")
         _ = draft.addImageAttachment(url: "https://example.com/rebuilt.png")
@@ -621,7 +583,6 @@ final class DraftManagerTests: XCTestCase {
 
         XCTAssertEqual(draft.content, "Rebuilt")
         XCTAssertEqual(draft.agentPubkey, "new-agent")
-        XCTAssertEqual(draft.selectedNudgeIds, ["new-nudge"])
         XCTAssertEqual(draft.selectedSkillIds, ["new-skill"])
         XCTAssertEqual(draft.referenceConversationId, "new-ref")
         XCTAssertEqual(draft.imageAttachments.count, 1)

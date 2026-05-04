@@ -239,9 +239,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         actions::render_hotkey_help_modal(f, area);
     }
 
-    // Render unified nudges/skills selector modal if showing
-    if let ModalState::NudgeSkillSelector(ref state) = app.modal_state {
-        super::super::render_nudge_skill_selector(f, app, area, state);
+    // Render skill selector modal if showing
+    if let ModalState::SkillSelector(ref state) = app.modal_state {
+        super::super::render_skill_selector(f, app, area, state);
     }
 
     // Render project settings / project agent picker modal if showing

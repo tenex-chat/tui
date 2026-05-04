@@ -640,33 +640,26 @@ impl DelegationBar {
 
 // ─── Skill Selector Panel ───────────────────────────────────────────────────
 
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum NudgeSkillMode {
-    Skills,
-}
-
 /// Item in the skill selector: (id, title, description)
-pub(crate) struct NudgeSkillItem {
+pub(crate) struct SkillItem {
     pub(crate) id: String,
     pub(crate) title: String,
     pub(crate) description: String,
 }
 
-pub(crate) struct NudgeSkillPanel {
+pub(crate) struct SkillPanel {
     pub(crate) active: bool,
-    pub(crate) mode: NudgeSkillMode,
-    pub(crate) items: Vec<NudgeSkillItem>,
+    pub(crate) items: Vec<SkillItem>,
     pub(crate) cursor: usize,
     pub(crate) scroll_offset: usize,
     pub(crate) filter: String,
     pub(crate) selected_ids: HashSet<String>,
 }
 
-impl NudgeSkillPanel {
+impl SkillPanel {
     pub(crate) fn new() -> Self {
         Self {
             active: false,
-            mode: NudgeSkillMode::Skills,
             items: Vec::new(),
             cursor: 0,
             scroll_offset: 0,
@@ -677,7 +670,6 @@ impl NudgeSkillPanel {
 
     pub(crate) fn activate(&mut self, runtime: &CoreRuntime, state_skill_ids: &[String]) {
         self.active = true;
-        self.mode = NudgeSkillMode::Skills;
         self.filter.clear();
         self.cursor = 0;
         self.scroll_offset = 0;
@@ -698,7 +690,7 @@ impl NudgeSkillPanel {
             .content
             .get_skills()
             .into_iter()
-            .map(|s| NudgeSkillItem {
+            .map(|s| SkillItem {
                 id: s.id.clone(),
                 title: s.title.clone(),
                 description: s.description.clone(),
@@ -714,7 +706,7 @@ impl NudgeSkillPanel {
         self.scroll_offset = 0;
     }
 
-    pub(crate) fn filtered_items(&self) -> Vec<(usize, &NudgeSkillItem)> {
+    pub(crate) fn filtered_items(&self) -> Vec<(usize, &SkillItem)> {
         if self.filter.is_empty() {
             return self.items.iter().enumerate().collect();
         }

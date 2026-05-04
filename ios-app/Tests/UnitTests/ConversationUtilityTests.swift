@@ -336,7 +336,6 @@ final class LastAgentFinderTests: XCTestCase {
             messages: messages,
             currentUserPubkey: "user-1"
         )
-        )
         XCTAssertEqual(result, "agent-2")
     }
 

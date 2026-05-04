@@ -1,7 +1,6 @@
-use crate::ui::app::NudgeSkillSelectorItem;
 use crate::ui::components::{Modal, ModalSize};
 use crate::ui::format::format_relative_time_short;
-use crate::ui::modal::{BookmarkFilter, NudgeSkillSelectorState};
+use crate::ui::modal::{BookmarkFilter, SkillSelectorState};
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -10,14 +9,10 @@ use ratatui::{
     widgets::{List, ListItem, Paragraph},
     Frame,
 };
+use tenex_core::models::Skill;
 
 /// Render the skill selector modal.
-pub fn render_nudge_skill_selector(
-    f: &mut Frame,
-    app: &App,
-    area: Rect,
-    state: &NudgeSkillSelectorState,
-) {
+pub fn render_skill_selector(f: &mut Frame, app: &App, area: Rect, state: &SkillSelectorState) {
     let selected_count = state.selected_skill_ids.len();
     let filter_label = state.bookmark_filter.label();
     let title = if selected_count > 0 {
@@ -37,7 +32,7 @@ pub fn render_nudge_skill_selector(
         .search(&state.selector.filter, "Search skills...")
         .render_frame(f, area);
 
-    let items = app.filtered_nudge_skill_items();
+    let items = app.filtered_skill_selector_items();
 
     let list_area = Rect::new(
         content_area.x,
@@ -63,8 +58,8 @@ pub fn render_nudge_skill_selector(
         let selected_index = state.selector.index.min(items.len().saturating_sub(1));
 
         // Each item is 1 line (no description) or 2 lines (with description).
-        let item_height = |item: &NudgeSkillSelectorItem| -> usize {
-            if item.description().is_empty() {
+        let item_height = |item: &Skill| -> usize {
+            if item.description.is_empty() {
                 1
             } else {
                 2
@@ -102,9 +97,9 @@ pub fn render_nudge_skill_selector(
             lines_used += h;
 
             let is_cursor = i == selected_index;
-            let is_selected = is_item_selected(state, item);
-            let is_bookmarked = app.is_bookmarked(item.id());
-            let border_color = theme::user_color(item.pubkey());
+            let is_selected = state.selected_skill_ids.iter().any(|id| id == &item.id);
+            let is_bookmarked = app.is_bookmarked(&item.id);
+            let border_color = theme::user_color(&item.pubkey);
 
             // -- Line 1: checkbox, bookmark, border, title, [files:N], author, time --
             let mut line1 = Vec::new();
@@ -144,21 +139,19 @@ pub fn render_nudge_skill_selector(
                 Style::default().fg(theme::TEXT_PRIMARY)
             };
 
-            let label = format!("skill/{}", item.title());
+            let label = format!("skill/{}", item.title);
             line1.push(Span::styled(label, title_style));
 
-            if let NudgeSkillSelectorItem::Skill(_) = item {
-                let file_count = item.skill_file_count();
-                if file_count > 0 {
-                    line1.push(Span::styled(
-                        format!(" [files:{}]", file_count),
-                        Style::default().fg(theme::ACCENT_WARNING),
-                    ));
-                }
+            let file_count = item.file_ids.len();
+            if file_count > 0 {
+                line1.push(Span::styled(
+                    format!(" [files:{}]", file_count),
+                    Style::default().fg(theme::ACCENT_WARNING),
+                ));
             }
 
-            let author_name = app.data_store.borrow().get_profile_name(item.pubkey());
-            let time = format_relative_time_short(item.created_at());
+            let author_name = app.data_store.borrow().get_profile_name(&item.pubkey);
+            let time = format_relative_time_short(item.created_at);
             line1.push(Span::styled(
                 format!(" · {} · {}", author_name, time),
                 Style::default().fg(theme::TEXT_DIM),
@@ -167,11 +160,11 @@ pub fn render_nudge_skill_selector(
             let mut lines = vec![Line::from(line1)];
 
             // -- Line 2: description (indented to align with title) --
-            if !item.description().is_empty() {
+            if !item.description.is_empty() {
                 // "[ ]  ★ ▌" = 4 + 2 + 1 = 7 chars of prefix
                 let indent = "       ";
                 let max_desc = (list_area.width as usize).saturating_sub(indent.len() + 1);
-                let desc = truncate_chars(item.description(), max_desc);
+                let desc = truncate_chars(&item.description, max_desc);
                 lines.push(Line::from(vec![
                     Span::raw(indent),
                     Span::styled(desc, Style::default().fg(theme::TEXT_MUTED)),
@@ -225,15 +218,6 @@ pub fn render_nudge_skill_selector(
     ];
 
     f.render_widget(Paragraph::new(Line::from(hint_spans)), hints_area);
-}
-
-fn is_item_selected(state: &NudgeSkillSelectorState, item: &NudgeSkillSelectorItem) -> bool {
-    match item {
-        NudgeSkillSelectorItem::Nudge(_) => false,
-        NudgeSkillSelectorItem::Skill(skill) => {
-            state.selected_skill_ids.iter().any(|id| id == &skill.id)
-        }
-    }
 }
 
 fn truncate_chars(input: &str, max_chars: usize) -> String {

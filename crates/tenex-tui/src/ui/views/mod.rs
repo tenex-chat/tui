@@ -14,9 +14,8 @@ mod home_helpers;
 pub mod inline_ask;
 pub mod lesson_viewer;
 pub mod login;
-pub mod nudge_crud;
-pub mod nudge_skill_selector;
 pub mod project_settings;
+pub mod skill_selector;
 pub mod reports;
 pub mod stats;
 pub mod tts_control;
@@ -37,14 +36,11 @@ pub use history_search::render_history_search;
 pub use home::{render_composer_project_selector, render_home, render_projects_modal};
 pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
-pub use nudge_crud::{
-    render_nudge_create, render_nudge_delete_confirm, render_nudge_detail, render_nudge_list,
-};
-pub use nudge_skill_selector::render_nudge_skill_selector;
 pub use project_settings::{
     available_agent_count, available_mcp_tool_count, get_agent_id_at_index,
     get_mcp_tool_id_at_index, render_agent_deletion_confirm, render_project_settings,
 };
+pub use skill_selector::render_skill_selector;
 pub use stats::render_stats;
 pub use tts_control::render_tts_control;
 pub use workspace_modal::render_workspace_manager;

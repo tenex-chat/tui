@@ -9,7 +9,7 @@ pub mod layout;
 pub mod markdown;
 pub mod modal;
 pub mod notifications;
-pub mod nudge;
+pub mod roster;
 pub mod search;
 pub mod selector;
 pub mod services;

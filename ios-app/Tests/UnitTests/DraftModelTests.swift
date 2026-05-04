@@ -14,7 +14,6 @@ final class DraftModelTests: XCTestCase {
         XCTAssertNil(draft.conversationId)
         XCTAssertTrue(draft.isNewConversation)
         XCTAssertNil(draft.agentPubkey)
-        XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertTrue(draft.imageAttachments.isEmpty)
         XCTAssertTrue(draft.textAttachments.isEmpty)
@@ -73,39 +72,6 @@ final class DraftModelTests: XCTestCase {
 
         draft.setAgent(nil)
         XCTAssertNil(draft.agentPubkey)
-    }
-
-    // MARK: - addNudge / removeNudge
-
-    func testAddNudgeInsertsId() {
-        var draft = Draft(projectId: "p")
-        draft.addNudge("nudge-1")
-        draft.addNudge("nudge-2")
-
-        XCTAssertEqual(draft.selectedNudgeIds, ["nudge-1", "nudge-2"])
-    }
-
-    func testAddNudgeIsIdempotent() {
-        var draft = Draft(projectId: "p")
-        draft.addNudge("nudge-1")
-        draft.addNudge("nudge-1")
-
-        XCTAssertEqual(draft.selectedNudgeIds.count, 1)
-    }
-
-    func testRemoveNudgeRemovesId() {
-        var draft = Draft(projectId: "p", selectedNudgeIds: ["nudge-1", "nudge-2"])
-        draft.removeNudge("nudge-1")
-
-        XCTAssertEqual(draft.selectedNudgeIds, ["nudge-2"])
-    }
-
-    func testRemoveNudgeForNonexistentIdIsNoOp() {
-        var draft = Draft(projectId: "p", selectedNudgeIds: ["nudge-1"])
-        let before = draft.selectedNudgeIds
-        draft.removeNudge("nonexistent")
-
-        XCTAssertEqual(draft.selectedNudgeIds, before)
     }
 
     // MARK: - addSkill / removeSkill
@@ -306,7 +272,7 @@ final class DraftModelTests: XCTestCase {
 
     func testClearResetsAllFields() {
         var draft = Draft(projectId: "p", title: "T", content: "C", agentPubkey: "agent",
-                          selectedNudgeIds: ["n"], selectedSkillIds: ["s"],
+                          selectedSkillIds: ["s"],
                           referenceConversationId: "ref")
         _ = draft.addImageAttachment(url: "https://example.com/img.png")
         _ = draft.addTextAttachment(content: "context payload")
@@ -316,7 +282,6 @@ final class DraftModelTests: XCTestCase {
         XCTAssertEqual(draft.title, "")
         XCTAssertEqual(draft.content, "")
         XCTAssertNil(draft.agentPubkey)
-        XCTAssertTrue(draft.selectedNudgeIds.isEmpty)
         XCTAssertTrue(draft.selectedSkillIds.isEmpty)
         XCTAssertNil(draft.referenceConversationId)
         XCTAssertTrue(draft.imageAttachments.isEmpty)

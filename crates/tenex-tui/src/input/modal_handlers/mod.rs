@@ -11,7 +11,6 @@ mod bunker;
 mod command_palette;
 mod drafts;
 mod helpers;
-mod nudge;
 mod search;
 mod selectors;
 mod view;
@@ -100,9 +99,9 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle unified nudge/skill selector modal when open
-    if matches!(app.modal_state, ModalState::NudgeSkillSelector(_)) {
-        selectors::handle_nudge_skill_selector_key(app, key);
+    // Handle skill selector modal when open
+    if matches!(app.modal_state, ModalState::SkillSelector(_)) {
+        selectors::handle_skill_selector_key(app, key);
         return Ok(true);
     }
 
@@ -181,30 +180,6 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle history search modal when open
     if matches!(app.modal_state, ModalState::HistorySearch(_)) {
         search::handle_history_search_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle nudge list modal when open
-    if matches!(app.modal_state, ModalState::NudgeList(_)) {
-        nudge::handle_nudge_list_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle nudge create form when open (also handles copy/pre-populated form)
-    if matches!(app.modal_state, ModalState::NudgeCreate(_)) {
-        nudge::handle_nudge_form_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle nudge detail view when open
-    if matches!(app.modal_state, ModalState::NudgeDetail(_)) {
-        nudge::handle_nudge_detail_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle nudge delete confirmation when open
-    if matches!(app.modal_state, ModalState::NudgeDeleteConfirm(_)) {
-        nudge::handle_nudge_delete_confirm_key(app, key);
         return Ok(true);
     }
 
