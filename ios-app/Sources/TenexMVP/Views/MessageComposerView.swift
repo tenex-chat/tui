@@ -549,6 +549,11 @@ struct MessageComposerView: View {
                 await loadAgents()
             }
         }
+        .onChange(of: draft.agentPubkey) { _, _ in
+            Task {
+                await loadSkills()
+            }
+        }
         .onChange(of: coreManager.projectRosterAgents) { _, newRosters in
             // Reactively update availableAgents when the 31933/24011-backed roster changes.
             if let projectId = selectedProject?.id {

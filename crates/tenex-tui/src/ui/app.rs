@@ -3732,14 +3732,15 @@ impl App {
 
     /// Get filtered skills for the skill selector.
     ///
-    /// Filters by the project's allowed skill d_tags (from kind:24010 / kind:0
-    /// agent configs) and the active text search filter.
+    /// Filters by the union of kind:24010 (project-scoped skills) and kind:0
+    /// (per-agent: built-in + agent-home + user-global) skill d_tags, plus the
+    /// active text search filter.
     pub fn filtered_skill_selector_items(&self) -> Vec<tenex_core::models::Skill> {
         let filter = self.skill_selector_filter();
         let store = self.data_store.borrow();
 
-        // Build the union of allowed skill d_tags from 24010 (project status) and
-        // kind:0 (per-agent configs) for the currently selected project.
+        // Build the union of allowed skill d_tags: kind:24010 (project-scoped)
+        // and kind:0 (per-agent: built-in + agent-home + user-global).
         let allowed_dtags: Option<std::collections::HashSet<String>> = self
             .selected_project
             .as_ref()
@@ -3750,9 +3751,17 @@ impl App {
                         set.insert(s.to_string());
                     }
                 }
-                for config in store.agent_configs_by_pubkey.values() {
-                    for s in &config.skills {
-                        set.insert(s.clone());
+                if let Some(agent) = self.selected_agent() {
+                    if let Some(config) = store.agent_configs_by_pubkey.get(&agent.pubkey) {
+                        for s in &config.skills {
+                            set.insert(s.clone());
+                        }
+                    }
+                } else {
+                    for config in store.agent_configs_by_pubkey.values() {
+                        for s in &config.skills {
+                            set.insert(s.clone());
+                        }
                     }
                 }
                 set

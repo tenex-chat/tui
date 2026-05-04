@@ -535,19 +535,9 @@ struct AgentConfigSheet: View {
                 return
             }
 
-            // Skills available to agents in this project come from the 24010
-            // project-status event. The agent's own kind:0 may list a subset,
-            // so we use the project catalog as the authoritative source and fall
-            // back to the agent's own list when no project status exists.
-            let projectOptions = try? await coreManager.core.getProjectConfigOptions(projectId: projectId)
-            let projectSkills = projectOptions?.allSkills ?? []
-            let mergedSkills = projectSkills.isEmpty
-                ? config.skills
-                : Array(Set(projectSkills + config.skills)).sorted()
-
             allModels = config.models
             toolGroups = ToolGroup.buildGroups(from: config.tools)
-            allSkills = mergedSkills
+            allSkills = config.skills
 
             if let currentModel = config.activeModel,
                let modelIndex = allModels.firstIndex(of: currentModel) {

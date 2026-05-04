@@ -495,8 +495,9 @@ impl TenexCore {
         Ok(())
     }
 
-    /// Returns skills (kind:4202) whose d_tag appears in the project's 24010 or
-    /// kind:0 agent-config skill lists.
+    /// Returns skills (kind:4202) whose d_tag appears in the project's kind:24010
+    /// (project-scoped skills) or any kind:0 agent-config skill list (built-in,
+    /// agent-home, and user-global skills — backend-specific, per-agent).
     pub fn get_project_skills(&self, project_id: String) -> Result<Vec<Skill>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
@@ -505,7 +506,8 @@ impl TenexCore {
             message: "Store not initialized".to_string(),
         })?;
 
-        // Collect allowed skill d_tags from 24010 and kind:0 agent configs
+        // Collect allowed skill d_tags from kind:24010 (project-scoped) and
+        // kind:0 (per-agent: built-in + agent-home + user-global)
         let mut allowed_dtags: std::collections::HashSet<String> =
             std::collections::HashSet::new();
 
@@ -523,6 +525,52 @@ impl TenexCore {
             }
             // From kind:0 — all agent configs in the store
             for config in store.agent_configs_by_pubkey.values() {
+                for s in &config.skills {
+                    allowed_dtags.insert(s.clone());
+                }
+            }
+        }
+
+        let skills: Vec<Skill> = store
+            .content
+            .get_skills()
+            .into_iter()
+            .filter(|skill| allowed_dtags.contains(&skill.d_tag))
+            .cloned()
+            .collect();
+
+        Ok(skills)
+    }
+
+    /// Returns skills available to a specific agent: kind:24010 project-scoped
+    /// skills union that agent's kind:0 skills.
+    pub fn get_skills_for_agent(
+        &self,
+        project_id: String,
+        agent_pubkey: String,
+    ) -> Result<Vec<Skill>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized".to_string(),
+        })?;
+
+        let mut allowed_dtags: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
+        let project = store
+            .get_projects()
+            .iter()
+            .find(|p| p.id == project_id)
+            .cloned();
+        if let Some(project) = project {
+            if let Some(status) = store.get_project_status(&project.a_tag()) {
+                for s in status.all_skills() {
+                    allowed_dtags.insert(s.to_string());
+                }
+            }
+            if let Some(config) = store.get_agent_config(&agent_pubkey) {
                 for s in &config.skills {
                     allowed_dtags.insert(s.clone());
                 }

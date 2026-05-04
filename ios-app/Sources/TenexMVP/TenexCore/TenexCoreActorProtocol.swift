@@ -105,6 +105,7 @@ protocol TenexCoreActorProtocol: Actor {
 
     func getSkills() throws -> [Skill]
     func getProjectSkills(projectId: String) throws -> [Skill]
+    func getSkillsForAgent(projectId: String, agentPubkey: String) throws -> [Skill]
 
 
     // MARK: - Backend Trust

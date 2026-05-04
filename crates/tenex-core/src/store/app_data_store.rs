@@ -2398,6 +2398,18 @@ impl AppDataStore {
         let fallback = crate::agent_display::fallback_pubkey_name(pubkey);
         let name = crate::store::get_profile_name(&self.ndb, pubkey);
 
+        if pubkey.starts_with("a84ca311") {
+            let kind0 = crate::agent_display::kind0_display_name(&self.ndb, pubkey);
+            crate::tlog!(
+                "INV24011",
+                "get_profile_name(a84ca311…) profiles_cache={:?} ndb_kind0={:?} returning={:?} fallback_match={}",
+                self.profiles.get(pubkey),
+                kind0,
+                name,
+                name == fallback
+            );
+        }
+
         let elapsed_ms = lookup_started_at.elapsed().as_millis();
         if elapsed_ms >= 2 {
             crate::tlog!(
