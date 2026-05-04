@@ -74,7 +74,10 @@ impl ConfigPanel {
         let mut agent_items = Vec::new();
         if let Some(status) = store_ref.get_project_status(&self.project_a_tag) {
             for agent in &status.agents {
-                let model = agent.model.as_deref().unwrap_or("unknown");
+                let model = store_ref
+                    .get_agent_config(&agent.pubkey)
+                    .and_then(|cfg| cfg.active_model.as_deref())
+                    .unwrap_or("unknown");
                 let pm = if agent.is_pm { " [PM]" } else { "" };
                 agent_items.push(format!("{}{pm} ({model})", agent.name));
             }
@@ -109,8 +112,8 @@ impl ConfigPanel {
         let store = runtime.data_store();
         let store_ref = store.borrow();
         self.items = store_ref
-            .get_project_status(&self.project_a_tag)
-            .map(|s| s.models().iter().map(|m| m.to_string()).collect())
+            .get_agent_config(&self.agent_pubkey)
+            .map(|cfg| cfg.models.clone())
             .unwrap_or_default();
     }
 
@@ -208,13 +211,22 @@ impl ConfigPanel {
             }
         };
 
-        // Model: use pending_model if set, otherwise keep agent's current
-        let model = self.pending_model.clone().or_else(|| agent.model.clone());
+        let config = store_ref.get_agent_config(&self.agent_pubkey);
+
+        // Model: use pending_model if set, otherwise keep the agent's 34011 current model.
+        let model = self
+            .pending_model
+            .clone()
+            .or_else(|| config.and_then(|cfg| cfg.active_model.clone()));
 
         // Tools: from accumulated tools_selected
         let tools: Vec<String> = self.tools_selected.iter().cloned().collect();
-        let skills = agent.skills.clone();
-        let mcp_servers = agent.mcp_servers.clone();
+        let skills = config
+            .map(|cfg| cfg.active_skills.clone())
+            .unwrap_or_default();
+        let mcp_servers = config
+            .map(|cfg| cfg.active_mcps.clone())
+            .unwrap_or_default();
 
         // Tags: include "pm" if is_set_pm flag is on, or agent was already PM
         let tags: Vec<String> = if self.is_set_pm || agent.is_pm {
@@ -289,10 +301,17 @@ impl ConfigPanel {
             }
         };
 
+        let config = store_ref.get_agent_config(&self.agent_pubkey);
         let model = self.pending_model.clone();
-        let tools = agent.tools.clone();
-        let skills = agent.skills.clone();
-        let mcp_servers = agent.mcp_servers.clone();
+        let tools = config
+            .map(|cfg| cfg.active_tools.clone())
+            .unwrap_or_default();
+        let skills = config
+            .map(|cfg| cfg.active_skills.clone())
+            .unwrap_or_default();
+        let mcp_servers = config
+            .map(|cfg| cfg.active_mcps.clone())
+            .unwrap_or_default();
         let tags: Vec<String> = if agent.is_pm {
             vec!["pm".to_string()]
         } else {
@@ -347,9 +366,14 @@ impl ConfigPanel {
         self.agent_pubkey = agent.pubkey.clone();
         self.agent_name = agent.name.clone();
 
-        // Reload tools for this agent
-        self.tools_items = status.all_tools().iter().map(|t| t.to_string()).collect();
-        self.tools_selected = agent.tools.iter().cloned().collect();
+        // Reload current config from the agent-published 34011 event.
+        if let Some(config) = store_ref.get_agent_config(&agent.pubkey) {
+            self.tools_items = config.tools.clone();
+            self.tools_selected = config.active_tools.iter().cloned().collect();
+        } else {
+            self.tools_items.clear();
+            self.tools_selected.clear();
+        }
 
         // Reset pending model — new agent, fresh state
         self.pending_model = None;

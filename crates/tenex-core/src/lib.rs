@@ -1,6 +1,7 @@
 // UniFFI scaffolding for generating Swift/Kotlin bindings
 uniffi::setup_scaffolding!();
 
+pub mod agent_display;
 pub mod ai;
 pub mod config;
 pub mod constants;

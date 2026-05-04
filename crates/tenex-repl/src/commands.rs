@@ -388,7 +388,10 @@ pub(crate) fn handle_agent_command(
                 } else {
                     "  ".to_string()
                 };
-                let model = agent.model.as_deref().unwrap_or("unknown model");
+                let model = store_ref
+                    .get_agent_config(&agent.pubkey)
+                    .and_then(|cfg| cfg.active_model.as_deref())
+                    .unwrap_or("unknown model");
                 let pm_badge = if agent.is_pm { " [PM]" } else { "" };
                 output.push(format!(
                     "  {marker}{}: {}{pm_badge} ({DIM}{model}{RESET})",
@@ -1198,11 +1201,10 @@ pub(crate) fn handle_config_command(
     let status = store_ref.get_project_status(&a_tag);
     let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
-    panel.tools_items = status
-        .map(|s| s.all_tools().iter().map(|t| t.to_string()).collect())
-        .unwrap_or_default();
-    panel.tools_selected = agent
-        .map(|a| a.tools.iter().cloned().collect())
+    let config = store_ref.get_agent_config(&agent_pubkey);
+    panel.tools_items = config.map(|cfg| cfg.tools.clone()).unwrap_or_default();
+    panel.tools_selected = config
+        .map(|cfg| cfg.active_tools.iter().cloned().collect())
         .unwrap_or_default();
     panel.pending_model = None;
     panel.is_set_pm = is_set_pm || agent.map(|a| a.is_pm).unwrap_or(false);
@@ -1212,7 +1214,9 @@ pub(crate) fn handle_config_command(
     // If no tools available and not opening agent/model select, bail
     if panel.tools_items.is_empty() && !open_agent_select && !open_model {
         drop(store_ref);
-        return CommandResult::Lines(vec![print_error_raw("No tools available for this project")]);
+        return CommandResult::Lines(vec![print_error_raw(
+            "No kind:34011 tool config available for this agent",
+        )]);
     }
 
     drop(store_ref);
@@ -1271,11 +1275,10 @@ pub(crate) fn handle_model_command(
     let status = store_ref.get_project_status(&a_tag);
     let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
-    panel.tools_items = status
-        .map(|s| s.all_tools().iter().map(|t| t.to_string()).collect())
-        .unwrap_or_default();
-    panel.tools_selected = agent
-        .map(|a| a.tools.iter().cloned().collect())
+    let config = store_ref.get_agent_config(&agent_pubkey);
+    panel.tools_items = config.map(|cfg| cfg.tools.clone()).unwrap_or_default();
+    panel.tools_selected = config
+        .map(|cfg| cfg.active_tools.iter().cloned().collect())
         .unwrap_or_default();
     panel.pending_model = None;
     panel.is_set_pm = agent.map(|a| a.is_pm).unwrap_or(false);

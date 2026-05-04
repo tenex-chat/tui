@@ -388,6 +388,26 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    func getAgentInventory() throws -> [AgentInventoryItem] {
+        try profiler.measureFFI("getAgentInventory") {
+            do {
+                return try core.getAgentInventory()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func getAgentConfig(agentPubkey: String) throws -> AgentConfig? {
+        try profiler.measureFFI("getAgentConfig") {
+            do {
+                return try core.getAgentConfig(agentPubkey: agentPubkey)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     func createBackendAgent(
         backendPubkey: String,
         definitionEventId: String,

@@ -133,6 +133,7 @@ class TenexCoreManager {
     private(set) var statsVersion: UInt64 = 0
     private(set) var teamsVersion: UInt64 = 0
     private(set) var contentCatalogVersion: UInt64 = 0
+    private(set) var agentInventoryVersion: UInt64 = 0
     private(set) var diagnosticsVersion: UInt64 = 0
     var streamingBuffers: [String: StreamingBuffer] = [:]
 
@@ -364,6 +365,11 @@ class TenexCoreManager {
     @MainActor
     func bumpContentCatalogVersion() {
         contentCatalogVersion &+= 1
+    }
+
+    @MainActor
+    func bumpAgentInventoryVersion() {
+        agentInventoryVersion &+= 1
     }
 
     @MainActor

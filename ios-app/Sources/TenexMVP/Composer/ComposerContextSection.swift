@@ -649,14 +649,14 @@ struct OnlineAgentChipView: View {
         Button(action: onChange) {
             HStack(spacing: 6) {
                 AgentAvatarView(
-                    agentName: agent.name,
+                    agentName: AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager),
                     pubkey: agent.pubkey,
                     size: 24,
                     showBorder: false
                 )
                 .environment(coreManager)
 
-                Text("@\(agent.name)")
+                Text("@\(AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager))")
                     .font(.subheadline)
                     .fontWeight(.medium)
                     .foregroundStyle(Color.primary)
@@ -687,11 +687,25 @@ struct WorkspaceAgentPopoverContent: View {
     private var filteredAgents: [ProjectAgent] {
         let list = searchText.isEmpty
             ? agents
-            : agents.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+            : agents.filter {
+                AgentDisplayName.matches(
+                    pubkey: $0.pubkey,
+                    query: searchText,
+                    coreManager: coreManager
+                )
+            }
         return list.sorted { a, b in
             if a.isPm != b.isPm { return a.isPm }
             if a.isOnline != b.isOnline { return a.isOnline && !b.isOnline }
-            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+            let nameComparison = AgentDisplayName
+                .resolve(pubkey: a.pubkey, coreManager: coreManager)
+                .localizedCaseInsensitiveCompare(
+                    AgentDisplayName.resolve(pubkey: b.pubkey, coreManager: coreManager)
+                )
+            if nameComparison != .orderedSame {
+                return nameComparison == .orderedAscending
+            }
+            return a.pubkey < b.pubkey
         }
     }
 
@@ -757,7 +771,7 @@ struct WorkspaceAgentPopoverContent: View {
         } label: {
             HStack(spacing: 8) {
                 AgentAvatarView(
-                    agentName: agent.name,
+                    agentName: AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager),
                     pubkey: agent.pubkey,
                     size: 28,
                     showBorder: false,
@@ -767,7 +781,7 @@ struct WorkspaceAgentPopoverContent: View {
 
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
-                        Text(agent.name)
+                        Text(AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager))
                             .font(.subheadline)
                             .fontWeight(.medium)
                             .foregroundStyle(.primary)

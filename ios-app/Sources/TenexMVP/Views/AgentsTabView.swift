@@ -88,7 +88,7 @@ struct AgentsTabView: View {
             for agent in agents {
                 allInstances.append(AgentInstance(
                     pubkey: agent.pubkey,
-                    name: agent.name,
+                    name: AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager),
                     isPm: agent.isPm,
                     model: agent.model,
                     tools: agent.tools,
@@ -103,7 +103,11 @@ struct AgentsTabView: View {
         let sorted = allInstances.sorted { a, b in
             if a.isProjectOnline != b.isProjectOnline { return a.isProjectOnline }
             if a.isPm != b.isPm { return a.isPm }
-            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+            let comparison = a.name.localizedCaseInsensitiveCompare(b.name)
+            if comparison != .orderedSame {
+                return comparison == .orderedAscending
+            }
+            return a.pubkey < b.pubkey
         }
 
         var seen = Set<String>()
@@ -428,7 +432,7 @@ struct AgentDetailView: View {
             if let match = agents.first(where: { $0.pubkey == agent.pubkey }) {
                 result.append(AgentInstance(
                     pubkey: match.pubkey,
-                    name: match.name,
+                    name: AgentDisplayName.resolve(pubkey: match.pubkey, coreManager: coreManager),
                     isPm: match.isPm,
                     model: match.model,
                     tools: match.tools,

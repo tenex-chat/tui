@@ -329,9 +329,6 @@ extension TenexCoreManager {
                 if lhs.isPm != rhs.isPm {
                     return lhs.isPm && !rhs.isPm
                 }
-                if lhs.name != rhs.name {
-                    return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
-                }
                 if lhs.pubkey != rhs.pubkey {
                     return lhs.pubkey < rhs.pubkey
                 }

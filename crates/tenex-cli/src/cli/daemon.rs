@@ -2129,11 +2129,16 @@ fn find_agent_in_project(
 
     for agent in agents {
         if agent.name == agent_name {
+            let config = store.get_agent_config(&agent.pubkey);
             return Ok(AgentLookupResult {
                 project_a_tag,
                 agent_pubkey: agent.pubkey.clone(),
-                skills: agent.skills.clone(),
-                mcp_servers: agent.mcp_servers.clone(),
+                skills: config
+                    .map(|cfg| cfg.active_skills.clone())
+                    .unwrap_or_default(),
+                mcp_servers: config
+                    .map(|cfg| cfg.active_mcps.clone())
+                    .unwrap_or_default(),
             });
         }
     }

@@ -108,34 +108,10 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 let store = app.data_store.borrow();
                 let agent_pubkeys = store.operations.get_working_agents(&thread.id);
 
-                // Get project a_tag for potential fallback to project status
-                let project_a_tag = store.find_project_for_thread(&thread.id);
-
-                // Resolve pubkeys to agent names
-                // Priority: 1) kind:0 profile, 2) agent slug from project status, 3) short pubkey
+                // Resolve pubkeys to agent names from kind:0 profile metadata only.
                 agent_pubkeys
                     .iter()
-                    .map(|pubkey| {
-                        // Primary: Use kind:0 profile name
-                        let profile_name = store.get_profile_name(pubkey);
-
-                        // If profile name is just short pubkey, try project status as fallback
-                        if profile_name.ends_with("...") {
-                            project_a_tag
-                                .as_ref()
-                                .and_then(|a_tag| store.get_project_status(a_tag))
-                                .and_then(|status| {
-                                    status
-                                        .agents
-                                        .iter()
-                                        .find(|a| a.pubkey == *pubkey)
-                                        .map(|a| a.name.clone())
-                                })
-                                .unwrap_or(profile_name)
-                        } else {
-                            profile_name
-                        }
-                    })
+                    .map(|pubkey| store.get_profile_name(pubkey))
                     .collect()
             };
             // Normalize summary: treat empty/whitespace-only as None
@@ -285,6 +261,10 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Render unified agent configuration modal if showing
     let filtered_agents = app.filtered_agents();
+    let filtered_agent_names: Vec<String> = filtered_agents
+        .iter()
+        .map(|agent| app.agent_display_name(&agent.pubkey))
+        .collect();
     let active_backend_name: Option<String> =
         if let ModalState::AgentConfig(ref state) = app.modal_state {
             state
@@ -296,7 +276,14 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             None
         };
     if let ModalState::AgentConfig(ref mut state) = app.modal_state {
-        render_agent_config_modal(f, area, state, &filtered_agents, active_backend_name);
+        render_agent_config_modal(
+            f,
+            area,
+            state,
+            &filtered_agents,
+            &filtered_agent_names,
+            active_backend_name,
+        );
     }
 
     // Render draft navigator modal if showing
@@ -612,6 +599,7 @@ fn render_agent_config_modal(
     area: Rect,
     state: &mut crate::ui::modal::AgentConfigState,
     agents: &[crate::models::ProjectAgent],
+    agent_display_names: &[String],
     active_backend_name: Option<String>,
 ) {
     use crate::ui::components::visible_items_in_content_area;
@@ -869,9 +857,12 @@ fn render_agent_config_modal(
                 Style::default().fg(theme::TEXT_DIM)
             };
             let pm_prefix = if agent.is_pm { "[PM] " } else { "" };
-            let available_name_width =
-                content_width.saturating_sub(pm_prefix.chars().count());
-            let name_text = truncate_with_ellipsis(&agent.name, available_name_width.max(1));
+            let available_name_width = content_width.saturating_sub(pm_prefix.chars().count());
+            let display_name = agent_display_names
+                .get(idx)
+                .map(String::as_str)
+                .unwrap_or(agent.pubkey.as_str());
+            let name_text = truncate_with_ellipsis(display_name, available_name_width.max(1));
             let pm_style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
@@ -1066,16 +1057,11 @@ fn render_agent_config_modal(
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
-    let mut toggles_spans: Vec<Span> = vec![Span::styled(
-        format!("{}Set as PM", pm_prefix),
-        pm_style,
-    )];
+    let mut toggles_spans: Vec<Span> =
+        vec![Span::styled(format!("{}Set as PM", pm_prefix), pm_style)];
     if state.settings.is_some() {
         if let Some(backend_name) = active_backend_name.as_deref() {
-            toggles_spans.push(Span::styled(
-                "  ·  ",
-                Style::default().fg(theme::TEXT_DIM),
-            ));
+            toggles_spans.push(Span::styled("  ·  ", Style::default().fg(theme::TEXT_DIM)));
             toggles_spans.push(Span::styled(
                 "Backend: ",
                 Style::default().fg(theme::TEXT_DIM),
@@ -1089,10 +1075,7 @@ fn render_agent_config_modal(
             ));
         }
     }
-    f.render_widget(
-        Paragraph::new(Line::from(toggles_spans)),
-        toggles_area,
-    );
+    f.render_widget(Paragraph::new(Line::from(toggles_spans)), toggles_area);
 
     let hints_area = Rect::new(
         popup_area.x + 1,

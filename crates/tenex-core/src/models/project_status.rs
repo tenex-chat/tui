@@ -18,8 +18,8 @@ pub struct ProjectAgent {
     pub mcp_servers: Vec<String>,
 }
 
-/// Represents a TENEX project status (Nostr kind:24010)
-/// Contains online agents with their models and tools
+/// Represents a TENEX project status (Nostr kind:24010).
+/// Contains online project agents; current per-agent config is kind:34011.
 #[derive(Debug, Clone)]
 pub struct ProjectStatus {
     pub project_coordinate: String,
@@ -27,8 +27,8 @@ pub struct ProjectStatus {
     pub branches: Vec<String>,
     /// All available models from model tags (including unassigned ones)
     pub all_models: Vec<String>,
-    /// All available tools from tool tags (including unassigned ones).
-    /// Use `all_tools()` or `agent_assigned_tools()` methods instead of direct access.
+    /// All project-level tools from tool tags.
+    /// Current per-agent tools are sourced from kind:34011.
     pub(crate) all_tools: Vec<String>,
     /// All available skills from skill tags (including unassigned ones).
     pub(crate) all_skills: Vec<String>,
@@ -43,9 +43,6 @@ pub struct ProjectStatus {
 
 impl ProjectStatus {
     fn agent_aggregation_key(agent: &ProjectAgent) -> String {
-        if !agent.name.is_empty() {
-            return agent.name.clone();
-        }
         agent.pubkey.clone()
     }
 
@@ -145,7 +142,7 @@ impl ProjectStatus {
                             skills: Vec::new(),
                             mcp_servers: Vec::new(),
                         };
-                        agent_map.insert(tag[2].clone(), agent);
+                        agent_map.insert(tag[1].clone(), agent);
                     }
                 }
                 "branch" => {
@@ -191,56 +188,9 @@ impl ProjectStatus {
         all_mcp_servers.sort();
         all_mcp_servers.dedup();
 
-        // Second pass: apply model, tool, skill, and mcp tags to agents
-        for tag in &tags {
-            if tag.is_empty() {
-                continue;
-            }
-
-            match tag[0].as_str() {
-                "model" => {
-                    if tag.len() >= 3 {
-                        let model = &tag[1];
-                        for agent_name in &tag[2..] {
-                            if let Some(agent) = agent_map.get_mut(agent_name) {
-                                agent.model = Some(model.clone());
-                            }
-                        }
-                    }
-                }
-                "tool" => {
-                    if tag.len() >= 3 {
-                        let tool = &tag[1];
-                        for agent_name in &tag[2..] {
-                            if let Some(agent) = agent_map.get_mut(agent_name) {
-                                agent.tools.push(tool.clone());
-                            }
-                        }
-                    }
-                }
-                "skill" => {
-                    if tag.len() >= 3 {
-                        let skill = &tag[1];
-                        for agent_name in &tag[2..] {
-                            if let Some(agent) = agent_map.get_mut(agent_name) {
-                                agent.skills.push(skill.clone());
-                            }
-                        }
-                    }
-                }
-                "mcp" => {
-                    if tag.len() >= 3 {
-                        let server = &tag[1];
-                        for agent_name in &tag[2..] {
-                            if let Some(agent) = agent_map.get_mut(agent_name) {
-                                agent.mcp_servers.push(server.clone());
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+        // Agent current configuration is not derived from 24010. The heartbeat
+        // only identifies which agents a backend is running in this project;
+        // per-agent model/tool/skill/MCP state comes from the agent's 34011.
 
         let project_coordinate = project_coordinate?;
         let agents = agent_map.into_values().collect();
@@ -275,18 +225,14 @@ impl ProjectStatus {
 
     /// Returns all available tools (including unassigned tools).
     ///
-    /// **⚠️ DEPRECATED**: Use `all_tools()` or `agent_assigned_tools()` directly.
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use `all_tools()` or `agent_assigned_tools()` instead"
-    )]
+    /// **⚠️ DEPRECATED**: Use `all_tools()` directly.
+    #[deprecated(since = "0.1.0", note = "Use `all_tools()` instead")]
     pub fn tools(&self) -> Vec<&str> {
         self.all_tools()
     }
 
-    /// Returns tools assigned to at least one agent (excludes unassigned tools).
-    ///
-    /// **Warning**: For UI display, use `all_tools()` instead to show all available tools.
+    /// Returns current tools carried on ProjectAgent records.
+    /// 24010 parsing leaves this empty; 34011 merge fills it for FFI consumers.
     pub fn agent_assigned_tools(&self) -> Vec<&str> {
         let mut tools: Vec<&str> = self
             .agents
@@ -305,12 +251,13 @@ impl ProjectStatus {
         self.all_tools.iter().map(|s| s.as_str()).collect()
     }
 
-    /// Returns all available skills (including both assigned and unassigned skills).
+    /// Returns all project-level skills mentioned by the heartbeat.
     pub fn all_skills(&self) -> Vec<&str> {
         self.all_skills.iter().map(|s| s.as_str()).collect()
     }
 
-    /// Returns skills assigned to at least one agent (excludes unassigned skills).
+    /// Returns current skills carried on ProjectAgent records.
+    /// 24010 parsing leaves this empty; 34011 merge fills it for FFI consumers.
     pub fn agent_assigned_skills(&self) -> Vec<&str> {
         let mut skills: Vec<&str> = self
             .agents
@@ -519,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn test_aggregate_deduplicates_agents_by_slug_and_prefers_fresher_backend() {
+    fn test_aggregate_deduplicates_agents_by_pubkey_and_prefers_fresher_backend() {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -527,8 +474,8 @@ mod tests {
         let older_status = ProjectStatus {
             project_coordinate: "31933:user:project".to_string(),
             agents: vec![ProjectAgent {
-                pubkey: "".to_string(),
-                name: "agent1".to_string(),
+                pubkey: "agent1-pubkey".to_string(),
+                name: "old-status-name".to_string(),
                 backend_pubkey: "backend-old".to_string(),
                 is_pm: false,
                 is_online: true,
@@ -550,7 +497,7 @@ mod tests {
             project_coordinate: "31933:user:project".to_string(),
             agents: vec![ProjectAgent {
                 pubkey: "agent1-pubkey".to_string(),
-                name: "agent1".to_string(),
+                name: "new-status-name".to_string(),
                 backend_pubkey: "backend-fresh".to_string(),
                 is_pm: false,
                 is_online: true,
@@ -577,7 +524,64 @@ mod tests {
 
         assert_eq!(aggregate.agents.len(), 1);
         assert_eq!(aggregate.agents[0].pubkey, "agent1-pubkey");
+        assert_eq!(aggregate.agents[0].name, "new-status-name");
         assert_eq!(aggregate.agents[0].backend_pubkey, "backend-fresh");
+    }
+
+    #[test]
+    fn test_aggregate_keeps_same_name_distinct_pubkeys() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let status = ProjectStatus {
+            project_coordinate: "31933:user:project".to_string(),
+            agents: vec![
+                ProjectAgent {
+                    pubkey: "agent-a-pubkey".to_string(),
+                    name: "same-name".to_string(),
+                    backend_pubkey: "backend".to_string(),
+                    is_pm: false,
+                    is_online: true,
+                    model: None,
+                    tools: Vec::new(),
+                    skills: Vec::new(),
+                    mcp_servers: Vec::new(),
+                },
+                ProjectAgent {
+                    pubkey: "agent-b-pubkey".to_string(),
+                    name: "same-name".to_string(),
+                    backend_pubkey: "backend".to_string(),
+                    is_pm: false,
+                    is_online: true,
+                    model: None,
+                    tools: Vec::new(),
+                    skills: Vec::new(),
+                    mcp_servers: Vec::new(),
+                },
+            ],
+            branches: Vec::new(),
+            all_models: Vec::new(),
+            all_tools: Vec::new(),
+            all_skills: Vec::new(),
+            all_mcp_servers: Vec::new(),
+            created_at: now,
+            backend_pubkey: "backend".to_string(),
+            last_seen_at: now,
+        };
+
+        let aggregate = ProjectStatus::aggregate("31933:user:project".to_string(), [&status])
+            .expect("expected aggregate status");
+
+        assert_eq!(aggregate.agents.len(), 2);
+        assert!(aggregate
+            .agents
+            .iter()
+            .any(|agent| agent.pubkey == "agent-a-pubkey"));
+        assert!(aggregate
+            .agents
+            .iter()
+            .any(|agent| agent.pubkey == "agent-b-pubkey"));
     }
 
     #[test]
@@ -732,10 +736,10 @@ mod tests {
         );
     }
 
-    /// Test that verifies the difference between agent_assigned_tools() and all_tools()
-    /// This is the core test to prevent the tool visibility bug from recurring
+    /// 24010 exposes project-level tool availability, but does not define
+    /// current per-agent tool configuration. Per-agent config comes from 34011.
     #[test]
-    fn test_agent_assigned_tools_vs_all_tools() {
+    fn test_24010_tools_are_project_level_only() {
         let json = r#"{
             "kind": 24010,
             "pubkey": "backend_pubkey",
@@ -754,12 +758,12 @@ mod tests {
 
         let status = ProjectStatus::from_json(json).unwrap();
 
-        // agent_assigned_tools() should only return tools assigned to agents
+        // 24010 assignments are not interpreted as current per-agent config.
         let assigned = status.agent_assigned_tools();
-        assert_eq!(assigned.len(), 3, "Should have 3 assigned tools");
-        assert!(assigned.contains(&"Read"));
-        assert!(assigned.contains(&"Write"));
-        assert!(assigned.contains(&"Bash"));
+        assert!(
+            assigned.is_empty(),
+            "24010 must not set current agent tools"
+        );
 
         // all_tools() should return ALL tools (assigned + unassigned)
         let all = status.all_tools();
@@ -771,7 +775,8 @@ mod tests {
         assert!(all.contains(&"rag_query"));
         assert!(all.contains(&"schedule_task"));
 
-        // Critical assertion: all_tools() MUST contain more than agent_assigned_tools()
+        // Critical assertion: all_tools() still exposes every tool mentioned by
+        // the heartbeat for legacy/project-level availability surfaces.
         assert!(
             all.len() > assigned.len(),
             "all_tools() must include unassigned tools"
@@ -838,10 +843,8 @@ mod tests {
 
         assert_eq!(ui_tools.len(), 10, "UI should display all 10 tools");
 
-        // Demonstrate what happens if UI mistakenly uses agent_assigned_tools()
-        let wrong_ui_tools = status.agent_assigned_tools();
-        assert_eq!(wrong_ui_tools.len(), 3);
-        assert!(!wrong_ui_tools.contains(&"rag_create_collection"));
+        // 24010 no longer feeds per-agent current tool config.
+        assert!(status.agent_assigned_tools().is_empty());
     }
 
     /// Test that verifies both assigned and unassigned tools are handled correctly
@@ -870,14 +873,16 @@ mod tests {
         let all = status.all_tools();
         assert_eq!(all.len(), 6, "Should have 6 total tools");
 
-        // Test agent_assigned_tools() only returns assigned ones
+        // 24010 assignments are intentionally not treated as current
+        // per-agent config.
         let assigned = status.agent_assigned_tools();
-        assert_eq!(assigned.len(), 3, "Should have 3 assigned tools");
-        assert!(assigned.contains(&"Read"));
-        assert!(assigned.contains(&"Write"));
-        assert!(assigned.contains(&"Bash"));
+        assert!(
+            assigned.is_empty(),
+            "24010 must not set current agent tools"
+        );
 
-        // Verify unassigned tools are in all_tools but not in agent_assigned_tools
+        // Verify all tools stay visible at project level while no current
+        // per-agent tools are inferred.
         assert!(all.contains(&"unassigned_tool_1"));
         assert!(all.contains(&"unassigned_tool_2"));
         assert!(all.contains(&"unassigned_tool_3"));
@@ -1072,29 +1077,23 @@ mod tests {
         assert!(all.contains(&"testing"));
         assert!(all.contains(&"deployment"));
 
-        // agent_assigned_skills() returns only skills assigned to agents
+        // 24010 assignments are not interpreted as current per-agent config.
         let assigned = status.agent_assigned_skills();
-        assert_eq!(assigned.len(), 2);
-        assert!(assigned.contains(&"code-review"));
-        assert!(assigned.contains(&"testing"));
-        assert!(!assigned.contains(&"deployment"));
+        assert!(assigned.is_empty());
 
-        // Verify per-agent skill assignment
+        // Verify 24010 did not set per-agent skill config.
         let claude = status
             .agents
             .iter()
             .find(|a| a.name == "claude-code")
             .unwrap();
-        assert_eq!(claude.skills.len(), 2);
-        assert!(claude.skills.contains(&"code-review".to_string()));
-        assert!(claude.skills.contains(&"testing".to_string()));
+        assert!(claude.skills.is_empty());
 
         let architect = status
             .agents
             .iter()
             .find(|a| a.name == "architect")
             .unwrap();
-        assert_eq!(architect.skills.len(), 1);
-        assert!(architect.skills.contains(&"testing".to_string()));
+        assert!(architect.skills.is_empty());
     }
 }

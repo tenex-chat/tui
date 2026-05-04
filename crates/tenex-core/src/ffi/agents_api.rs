@@ -49,6 +49,33 @@ impl TenexCore {
         Ok(store.get_installed_agents(&backend_pubkey).to_vec())
     }
 
+    pub fn get_agent_inventory(&self) -> Result<Vec<AgentInventoryItem>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store.agent_inventory())
+    }
+
+    pub fn get_agent_config(
+        &self,
+        agent_pubkey: String,
+    ) -> Result<Option<AgentConfig>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store.get_agent_config(&agent_pubkey).cloned())
+    }
+
     pub fn create_backend_agent(
         &self,
         backend_pubkey: String,

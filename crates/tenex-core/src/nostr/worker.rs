@@ -17,7 +17,7 @@ use tokio::sync::watch;
 use tokio::sync::RwLock;
 
 use crate::constants::RELAY_URL;
-use crate::models::ProjectStatus;
+use crate::models::{InstalledAgent, ProjectStatus};
 use crate::stats::{
     SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo,
 };
@@ -717,10 +717,41 @@ fn build_project_stream_delta_filter(project_a_tag: &str) -> Filter {
         )
 }
 
+/// Subscribe to kind:0 (profile metadata) for `pubkey` if we haven't already
+/// requested it. Atomic check+insert against `requested_profiles`; rolls the set
+/// back on subscription failure so a future call can retry.
+async fn request_profile_if_new(
+    client: &Client,
+    requested_profiles: &Arc<RwLock<HashSet<String>>>,
+    pubkey: PublicKey,
+) {
+    let pubkey_hex = pubkey.to_hex();
+    let is_new = requested_profiles.write().await.insert(pubkey_hex.clone());
+    if !is_new {
+        return;
+    }
+    let profile_filter = Filter::new().kind(Kind::Metadata).author(pubkey);
+    if let Err(e) = client.subscribe(profile_filter, None).await {
+        requested_profiles.write().await.remove(&pubkey_hex);
+        tlog!(
+            "ERROR",
+            "Failed to subscribe to profile for {}: {}",
+            &pubkey_hex[..8.min(pubkey_hex.len())],
+            e
+        );
+    } else {
+        debug_log(&format!(
+            "Subscribed to profile for {}",
+            &pubkey_hex[..8.min(pubkey_hex.len())]
+        ));
+    }
+}
+
 /// Subscribe to kind:34011 events authored by the given agent pubkeys, deduping
 /// against `subscribed_agent_configs` so each agent is only subscribed once
 /// across the worker's lifetime. Agents are sourced from `p` tags on the user's
-/// kind:31933 project events. NIP-33 addressable, so no `since` filter.
+/// kind:31933 project events and approved 24011 backend inventories. NIP-33
+/// addressable, so no `since` filter.
 async fn subscribe_agent_configs(
     client: &Client,
     subscription_stats: &SharedSubscriptionStats,
@@ -2179,7 +2210,11 @@ impl NostrWorker {
                 pks
             }
             Err(e) => {
-                tlog!("ERROR", "Failed to enumerate cached projects for 34011 bootstrap: {}", e);
+                tlog!(
+                    "ERROR",
+                    "Failed to enumerate cached projects for 34011 bootstrap: {}",
+                    e
+                );
                 Vec::new()
             }
         };
@@ -2391,6 +2426,11 @@ impl NostrWorker {
                                         || kind == KIND_INSTALLED_AGENT_LIST
                                         || kind == KIND_AGENT_STATUS
                                     {
+                                        // The signer of 24010/24011 is the backend itself; fetch its
+                                        // kind:0 so the UI can show a name instead of a pubkey.
+                                        if kind == KIND_PROJECT_STATUS || kind == KIND_INSTALLED_AGENT_LIST {
+                                            request_profile_if_new(&client, &requested_profiles, event.pubkey).await;
+                                        }
                                         if let Ok(json) = serde_json::to_string(&*event) {
                                             let data_change = if kind == KIND_INSTALLED_AGENT_LIST {
                                                 DataChange::InstalledAgentList { json: json.clone() }
@@ -2403,6 +2443,55 @@ impl NostrWorker {
                                                     "Failed to send ephemeral status data change: {}",
                                                     e
                                                 ));
+                                            }
+
+                                            // For kind:24011 (agent inventory), fetch agent
+                                            // profiles and subscribe to each agent's 34011
+                                            // configuration. Inventory tells us the available
+                                            // agent pubkeys; 34011 tells us current config.
+                                            if kind == KIND_INSTALLED_AGENT_LIST {
+                                                if let Ok(value) =
+                                                    serde_json::from_str::<serde_json::Value>(&json)
+                                                {
+                                                    if let Some((_backend, agents)) =
+                                                        InstalledAgent::from_value(&value)
+                                                    {
+                                                        let agent_pubkeys: Vec<String> = agents
+                                                            .iter()
+                                                            .map(|agent| agent.pubkey.clone())
+                                                            .collect();
+
+                                                        for agent_pubkey in &agent_pubkeys {
+                                                            if let Ok(pk) =
+                                                                PublicKey::parse(agent_pubkey)
+                                                            {
+                                                                request_profile_if_new(
+                                                                    &client,
+                                                                    &requested_profiles,
+                                                                    pk,
+                                                                )
+                                                                .await;
+                                                            }
+                                                        }
+
+                                                        if !agent_pubkeys.is_empty() {
+                                                            if let Err(e) = subscribe_agent_configs(
+                                                                &client,
+                                                                &subscription_stats,
+                                                                &subscribed_agent_configs,
+                                                                agent_pubkeys,
+                                                            )
+                                                            .await
+                                                            {
+                                                                tlog!(
+                                                                    "ERROR",
+                                                                    "Failed to subscribe to agent configs for inventory: {}",
+                                                                    e
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
 
                                             // For kind:24010 (project status), subscribe to project if it's newly online
@@ -2443,23 +2532,27 @@ impl NostrWorker {
                                             tlog!("ERROR", "Failed to handle event: {}", e);
                                         }
 
-                                        // For kind:1 messages, request author's profile if we haven't already
-                                        // Use atomic check+insert pattern: insert returns true if value was newly inserted
-                                        if kind == 1 {
-                                            let author_hex = event.pubkey.to_hex();
-                                            // Atomic check+insert: if insert returns true, we're the first to claim this profile
-                                            let is_new = requested_profiles.write().await.insert(author_hex.clone());
-                                            if is_new {
-                                                // Subscribe to kind:0 for this author
-                                                let profile_filter = Filter::new()
-                                                    .kind(Kind::Metadata)
-                                                    .author(event.pubkey);
-                                                if let Err(e) = client.subscribe(profile_filter, None).await {
-                                                    // Subscription failed - remove from set so we can retry later
-                                                    requested_profiles.write().await.remove(&author_hex);
-                                                    tlog!("ERROR", "Failed to subscribe to profile for {}: {}", &author_hex[..8], e);
-                                                } else {
-                                                    debug_log(&format!("Subscribed to profile for author {}", &author_hex[..8]));
+                                        // Request kind:0 profile for the author of various event types.
+                                        // - kind:1   → conversation participants
+                                        // - kind:34011 → the agent itself, plus its backend (first `p` tag)
+                                        if kind == KIND_TEXT_NOTE {
+                                            request_profile_if_new(&client, &requested_profiles, event.pubkey).await;
+                                        }
+                                        if kind == KIND_AGENT_CONFIG {
+                                            request_profile_if_new(&client, &requested_profiles, event.pubkey).await;
+                                            if let Some(backend_hex) = event
+                                                .tags
+                                                .iter()
+                                                .find(|t| {
+                                                    t.kind()
+                                                        == TagKind::SingleLetter(SingleLetterTag::lowercase(
+                                                            nostr_sdk::Alphabet::P,
+                                                        ))
+                                                })
+                                                .and_then(|t| t.content())
+                                            {
+                                                if let Ok(backend_pk) = PublicKey::parse(backend_hex) {
+                                                    request_profile_if_new(&client, &requested_profiles, backend_pk).await;
                                                 }
                                             }
                                         }

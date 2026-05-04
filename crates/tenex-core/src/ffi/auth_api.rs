@@ -222,7 +222,7 @@ impl TenexCore {
     }
 
     /// Get the display name for a pubkey.
-    /// Returns the profile name if available, otherwise formats the pubkey as npub.
+    /// Returns the kind:0 profile name if available, otherwise a shortened pubkey.
     pub fn get_profile_name(&self, pubkey: String) -> String {
         let store_guard = match self.store.read() {
             Ok(g) => g,

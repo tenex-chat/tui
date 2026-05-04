@@ -736,7 +736,9 @@ fn resolve_npub_to_hex(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.to_ascii_lowercase().starts_with("npub1") {
         use nostr_sdk::prelude::{FromBech32, PublicKey};
-        PublicKey::from_bech32(trimmed).ok().map(|pk: PublicKey| pk.to_hex())
+        PublicKey::from_bech32(trimmed)
+            .ok()
+            .map(|pk: PublicKey| pk.to_hex())
     } else {
         let lower = trimmed.to_ascii_lowercase();
         if lower.len() == 64 && lower.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -916,11 +918,7 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
 
             let agent_name = {
                 let ds = app.data_store.borrow();
-                ds.get_installed_agents(state.backend_pubkey.as_deref().unwrap_or(""))
-                    .iter()
-                    .find(|agent| agent.pubkey == agent_pubkey)
-                    .map(|agent| agent.slug.clone())
-                    .unwrap_or_else(|| agent_pubkey[..16.min(agent_pubkey.len())].to_string())
+                ds.get_profile_name(&agent_pubkey)
             };
 
             app.modal_state = ModalState::AgentDeletion(AgentDeletionState::new(

@@ -34,7 +34,7 @@ pub use draft::{
 };
 pub use html_report::HtmlReport;
 pub use inbox::{AgentChatter, InboxEventType, InboxItem};
-pub use installed_agent::InstalledAgent;
+pub use installed_agent::{AgentInventoryBackend, AgentInventoryItem, InstalledAgent};
 pub use lesson::Lesson;
 pub use mcp_tool::MCPTool;
 pub use message::{AskEvent, AskQuestion, Message};

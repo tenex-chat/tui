@@ -19,8 +19,7 @@ struct ProjectSettingsView: View {
     @State private var pendingAgentPubkeys: [String] = []
     @State private var baselineAgentPubkeys: [String] = []
 
-    @State private var installedAgents: [InstalledAgent] = []
-    @State private var projectBackendPubkey: String?
+    @State private var agentInventory: [AgentInventoryItem] = []
 
     @State private var showAddAgentSheet = false
     @State private var showDeleteDialog = false
@@ -57,16 +56,19 @@ struct ProjectSettingsView: View {
         coreManager.onlineAgents[projectId]?.count ?? 0
     }
 
-    private var filteredAvailableAgents: [InstalledAgent] {
-        let remaining = installedAgents.filter { !pendingAgentPubkeys.contains($0.pubkey) }
+    private var filteredAvailableAgents: [AgentInventoryItem] {
+        let remaining = agentInventory.filter { !pendingAgentPubkeys.contains($0.pubkey) }
         guard !agentSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return remaining
         }
 
         let query = agentSearch.lowercased()
         return remaining.filter { agent in
-            agent.slug.lowercased().contains(query)
+            AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager)
+                .lowercased()
+                .contains(query)
                 || agent.pubkey.lowercased().contains(query)
+                || agent.backends.contains { $0.backendPubkey.lowercased().contains(query) }
         }
     }
 
@@ -97,6 +99,9 @@ struct ProjectSettingsView: View {
             syncDraftsFromProject()
         }
         .onChange(of: coreManager.projectOnlineStatus[projectId] ?? false) { _, _ in
+            Task { await reloadSelectionData() }
+        }
+        .onChange(of: coreManager.agentInventoryVersion) { _, _ in
             Task { await reloadSelectionData() }
         }
         .sheet(isPresented: $showAddAgentSheet) {
@@ -265,11 +270,7 @@ struct ProjectSettingsView: View {
                 ContentUnavailableView(
                     "No Agents Assigned",
                     systemImage: "person.2",
-                    description: Text(
-                        projectBackendPubkey == nil
-                            ? "Bring the project backend online before assigning agents."
-                            : "Assign installed backend agents to this project."
-                    )
+                    description: Text("Assign agents from approved backend inventory.")
                 )
             } else {
                 ForEach(Array(pendingAgentPubkeys.enumerated()), id: \.element) { index, agentPubkey in
@@ -282,6 +283,11 @@ struct ProjectSettingsView: View {
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                            if let inventoryAgent = inventoryAgent(for: agentPubkey), inventoryAgent.isMultiBackend {
+                                Text("Warning: available on \(inventoryAgent.backends.count) backends")
+                                    .font(.caption2)
+                                    .foregroundStyle(.orange)
+                            }
                         }
 
                         Spacer()
@@ -392,13 +398,9 @@ struct ProjectSettingsView: View {
                 Section("Installed Agents") {
                     if filteredAvailableAgents.isEmpty {
                         ContentUnavailableView(
-                            projectBackendPubkey == nil ? "Backend Offline" : "No Installed Agents",
+                            "No Agent Inventory",
                             systemImage: "person.crop.circle.badge.exclamationmark",
-                            description: Text(
-                                projectBackendPubkey == nil
-                                    ? "Wait for the project backend to come online before assigning agents."
-                                    : "Install an agent into this backend before assigning it to the project."
-                            )
+                            description: Text("Approve a backend publishing kind:24011 inventory before assigning agents.")
                         )
                     } else {
                         ForEach(filteredAvailableAgents, id: \.pubkey) { agent in
@@ -407,12 +409,15 @@ struct ProjectSettingsView: View {
                                 showAddAgentSheet = false
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(agent.slug)
+                                    Text(AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager))
                                         .font(.body.weight(.medium))
                                         .foregroundStyle(.primary)
                                     Text(shortPubkey(agent.pubkey))
                                         .font(.caption.monospaced())
                                         .foregroundStyle(.secondary)
+                                    Text(agentBackendSummary(agent))
+                                        .font(.caption2)
+                                        .foregroundStyle(agent.isMultiBackend ? .orange : .secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -457,20 +462,18 @@ struct ProjectSettingsView: View {
     }
 
     private func reloadSelectionData() async {
-        let backendPubkey = coreManager.safeCore.getProjectBackendPubkey(projectId: projectId)
-
         do {
-            let installedAgents: [InstalledAgent]
-            if let backendPubkey {
-                installedAgents = try await coreManager.safeCore.getInstalledAgents(backendPubkey: backendPubkey)
-            } else {
-                installedAgents = []
-            }
+            let inventory = try await coreManager.safeCore.getAgentInventory()
 
             await MainActor.run {
-                projectBackendPubkey = backendPubkey
-                self.installedAgents = installedAgents.sorted {
-                    $0.slug.localizedCaseInsensitiveCompare($1.slug) == .orderedAscending
+                self.agentInventory = inventory.sorted {
+                    let lhsName = AgentDisplayName.resolve(pubkey: $0.pubkey, coreManager: coreManager)
+                    let rhsName = AgentDisplayName.resolve(pubkey: $1.pubkey, coreManager: coreManager)
+                    let comparison = lhsName.localizedCaseInsensitiveCompare(rhsName)
+                    if comparison != .orderedSame {
+                        return comparison == .orderedAscending
+                    }
+                    return $0.pubkey < $1.pubkey
                 }
             }
         } catch {
@@ -580,11 +583,24 @@ struct ProjectSettingsView: View {
     }
 
     private func agentName(for pubkey: String) -> String {
-        if let slug = installedAgents.first(where: { $0.pubkey == pubkey })?.slug {
-            return slug
+        if let agent = inventoryAgent(for: pubkey) {
+            return AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager)
         }
-        let name = coreManager.displayName(for: pubkey)
-        return name.isEmpty ? shortPubkey(pubkey) : name
+        return AgentDisplayName.resolve(pubkey: pubkey, coreManager: coreManager)
+    }
+
+    private func inventoryAgent(for pubkey: String) -> AgentInventoryItem? {
+        agentInventory.first { $0.pubkey == pubkey }
+    }
+
+    private func agentBackendSummary(_ agent: AgentInventoryItem) -> String {
+        if agent.isMultiBackend {
+            return "Warning: available on \(agent.backends.count) backends"
+        }
+        guard let backend = agent.backends.first else {
+            return "Backend: unknown"
+        }
+        return "Backend: \(AgentDisplayName.resolve(pubkey: backend.backendPubkey, coreManager: coreManager))"
     }
 
     private func shortPubkey(_ pubkey: String) -> String {

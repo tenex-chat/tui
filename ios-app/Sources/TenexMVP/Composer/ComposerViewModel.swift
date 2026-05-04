@@ -295,19 +295,12 @@ final class ComposerViewModel {
         return merged.sorted { lhs, rhs in
             if lhs.isPm != rhs.isPm { return lhs.isPm && !rhs.isPm }
             if lhs.isOnline != rhs.isOnline { return lhs.isOnline && !rhs.isOnline }
-            let nameComparison = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-            if nameComparison != .orderedSame { return nameComparison == .orderedAscending }
             return lhs.pubkey < rhs.pubkey
         }
     }
 
     nonisolated static func agentDisplayName(_ name: String, fallbackPubkey pubkey: String) -> String {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedName.isEmpty {
-            return trimmedName
-        }
-        guard pubkey.count > 16 else { return pubkey }
-        return "\(pubkey.prefix(8))...\(pubkey.suffix(8))"
+        AgentDisplayName.text(name, fallbackPubkey: pubkey)
     }
 
     private func agentsFromProjectPubkeys(_ pubkeys: [String], excluding excludedPubkeys: Set<String> = []) async -> [ProjectAgent] {

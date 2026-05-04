@@ -35,6 +35,7 @@ struct AgentConfigSheet: View {
     @State private var selectedModelIndex: Int = 0
     @State private var selectedTools: Set<String> = []
     @State private var selectedSkills: Set<String> = []
+    @State private var selectedMcpServers: [String] = []
     @State private var allSkills: [String] = []
     @State private var isPm: Bool = false
     @State private var saveGlobally: Bool = false
@@ -48,7 +49,7 @@ struct AgentConfigSheet: View {
                 content
             }
             .background(backgroundView)
-            .navigationTitle("Configure \(agent.name)")
+            .navigationTitle("Configure \(agentDisplayName)")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -339,7 +340,7 @@ struct AgentConfigSheet: View {
             subtitle: "Configure model, tools, and role scope."
         ) {
             HStack(spacing: 10) {
-                statPill(label: "Name", value: agent.name)
+                statPill(label: "Name", value: agentDisplayName)
                 statPill(label: "Model", value: selectedModelLabel)
                 statPill(label: "Tools", value: "\(selectedTools.count)")
             }
@@ -475,6 +476,10 @@ struct AgentConfigSheet: View {
         .buttonStyle(.plain)
     }
 
+    private var agentDisplayName: String {
+        AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager)
+    }
+
     // MARK: - Display Helpers
 
     private func groupSelectionIcon(for group: ToolGroup) -> String {
@@ -520,18 +525,34 @@ struct AgentConfigSheet: View {
         saveError = nil
 
         do {
-            let options = try await coreManager.safeCore.getProjectConfigOptions(projectId: projectId)
-            allModels = options.allModels
-            toolGroups = ToolGroup.buildGroups(from: options.allTools)
-            allSkills = options.allSkills
+            guard let config = try await coreManager.safeCore.getAgentConfig(agentPubkey: agent.pubkey) else {
+                allModels = []
+                toolGroups = []
+                allSkills = []
+                selectedTools = []
+                selectedSkills = []
+                selectedMcpServers = []
+                selectedModelIndex = 0
+                isPm = agent.isPm
+                toolSearchText = ""
+                loadError = "No kind:34011 configuration has been received for this agent yet."
+                isLoading = false
+                return
+            }
 
-            // Set initial selections from agent
-            if let currentModel = agent.model,
+            allModels = config.models
+            toolGroups = ToolGroup.buildGroups(from: config.tools)
+            allSkills = config.skills
+
+            if let currentModel = config.activeModel,
                let modelIndex = allModels.firstIndex(of: currentModel) {
                 selectedModelIndex = modelIndex
+            } else {
+                selectedModelIndex = 0
             }
-            selectedTools = Set(agent.tools)
-            selectedSkills = Set(agent.skills)
+            selectedTools = Set(config.activeTools)
+            selectedSkills = Set(config.activeSkills)
+            selectedMcpServers = config.activeMcps
             isPm = agent.isPm
             toolSearchText = ""
 
@@ -556,7 +577,7 @@ struct AgentConfigSheet: View {
                     model: selectedModel,
                     tools: Array(selectedTools),
                     skills: Array(selectedSkills),
-                    mcpServers: agent.mcpServers,
+                    mcpServers: selectedMcpServers,
                     tags: tags
                 )
             } else {
@@ -566,7 +587,7 @@ struct AgentConfigSheet: View {
                     model: selectedModel,
                     tools: Array(selectedTools),
                     skills: Array(selectedSkills),
-                    mcpServers: agent.mcpServers,
+                    mcpServers: selectedMcpServers,
                     tags: tags
                 )
             }

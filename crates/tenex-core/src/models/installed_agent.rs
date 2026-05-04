@@ -7,6 +7,23 @@ pub struct InstalledAgent {
     pub created_at: u64,
 }
 
+/// One backend entry for an agent in the approved kind:24011 inventory.
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AgentInventoryBackend {
+    pub backend_pubkey: String,
+    pub slug: String,
+    pub created_at: u64,
+}
+
+/// Grouped agent inventory across approved backends, preserving provenance.
+#[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AgentInventoryItem {
+    pub pubkey: String,
+    pub slug: String,
+    pub backends: Vec<AgentInventoryBackend>,
+    pub is_multi_backend: bool,
+}
+
 impl InstalledAgent {
     /// Parse a kind:24011 catalog event.
     ///

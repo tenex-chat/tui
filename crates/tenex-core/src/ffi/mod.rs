@@ -51,8 +51,9 @@ use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction
 
 use crate::models::agent_definition::AgentDefinition;
 use crate::models::{
-    AskEvent, ConversationMetadata, HtmlReport, InboxItem, InstalledAgent, MCPTool, Message, Nudge,
-    OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Skill, TeamPack, Thread,
+    AgentConfig, AgentInventoryItem, AskEvent, ConversationMetadata, HtmlReport, InboxItem,
+    InstalledAgent, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent,
+    ProjectStatus, Report, Skill, TeamPack, Thread,
 };
 use crate::nostr::{set_log_path, DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
@@ -478,25 +479,19 @@ impl DeltaSummary {
     }
 }
 
-/// Merge per-agent kind:34011 `AgentConfig` data into `ProjectAgent` records.
+/// Apply per-agent kind:34011 `AgentConfig` data into `ProjectAgent` records.
 ///
-/// This applies the same merge logic the TUI performs in its rendering layer,
-/// so that iOS consumers receive the richest available data from a single
-/// `getOnlineAgents()` or `ProjectStatusChanged` delta.
+/// Agent current configuration is sourced exclusively from 34011. The 24010
+/// project heartbeat only tells us which agent pubkeys are live in a project.
 fn merge_agent_configs(store: &AppDataStore, agents: Vec<ProjectAgent>) -> Vec<ProjectAgent> {
     agents
         .into_iter()
         .map(|mut agent| {
             if let Some(cfg) = store.get_agent_config(&agent.pubkey) {
-                if cfg.active_model.is_some() {
-                    agent.model = cfg.active_model.clone();
-                }
-                if !cfg.active_skills.is_empty() || !cfg.skills.is_empty() {
-                    agent.skills = cfg.active_skills.clone();
-                }
-                if !cfg.active_mcps.is_empty() || !cfg.mcps.is_empty() {
-                    agent.mcp_servers = cfg.active_mcps.clone();
-                }
+                agent.model = cfg.active_model.clone();
+                agent.tools = cfg.active_tools.clone();
+                agent.skills = cfg.active_skills.clone();
+                agent.mcp_servers = cfg.active_mcps.clone();
             }
             agent
         })
@@ -836,16 +831,15 @@ fn process_data_changes_with_deltas(
                                     if !status.is_online() {
                                         continue;
                                     }
-                                    let has_agent = status.agents.iter().any(|a| a.pubkey == cfg.pubkey);
+                                    let has_agent =
+                                        status.agents.iter().any(|a| a.pubkey == cfg.pubkey);
                                     if has_agent {
-                                        let project_id = project_id_from_a_tag(store, a_tag)
-                                            .unwrap_or_default();
-                                        let online_agents: Vec<ProjectAgent> = status
-                                            .agents
-                                            .iter()
-                                            .cloned()
-                                            .collect();
-                                        let online_agents = merge_agent_configs(store, online_agents);
+                                        let project_id =
+                                            project_id_from_a_tag(store, a_tag).unwrap_or_default();
+                                        let online_agents: Vec<ProjectAgent> =
+                                            status.agents.iter().cloned().collect();
+                                        let online_agents =
+                                            merge_agent_configs(store, online_agents);
                                         deltas.push(DataChangeType::ProjectStatusChanged {
                                             project_id,
                                             project_a_tag: a_tag.clone(),

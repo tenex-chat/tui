@@ -12,6 +12,8 @@
 //! ["p", "<backend_pubkey>"]                        // backend that runs this agent
 //! ["model", "opus", "active"]                      // currently-selected model
 //! ["model", "sonnet"]                              // other available models
+//! ["tool", "shell", "active"]                       // enabled tool
+//! ["tool", "web-search"]                            // visible but inactive tool
 //! ["skill", "read-access", "active"]               // enabled skill
 //! ["skill", "shell"]                               // visible but inactive skill
 //! ["mcp", "github", "active"]                      // mcp server in mcpAccess
@@ -41,6 +43,10 @@ pub struct AgentConfig {
     pub active_model: Option<String>,
     /// Every available model slug (includes `active_model`).
     pub models: Vec<String>,
+    /// Enabled tool IDs.
+    pub active_tools: Vec<String>,
+    /// Every visible tool ID (includes `active_tools`).
+    pub tools: Vec<String>,
     /// Enabled, non-blocked skill IDs.
     pub active_skills: Vec<String>,
     /// Every visible skill ID (includes `active_skills`).
@@ -106,15 +112,13 @@ impl AgentConfig {
         Self::from_tags(note.created_at(), tags, pubkey)
     }
 
-    fn from_tags(
-        created_at: u64,
-        tags: Vec<Vec<String>>,
-        pubkey: String,
-    ) -> Option<Self> {
+    fn from_tags(created_at: u64, tags: Vec<Vec<String>>, pubkey: String) -> Option<Self> {
         let mut slug: Option<String> = None;
         let mut backend_pubkey: Option<String> = None;
         let mut active_model: Option<String> = None;
         let mut models: Vec<String> = Vec::new();
+        let mut active_tools: Vec<String> = Vec::new();
+        let mut tools: Vec<String> = Vec::new();
         let mut active_skills: Vec<String> = Vec::new();
         let mut skills: Vec<String> = Vec::new();
         let mut active_mcps: Vec<String> = Vec::new();
@@ -157,6 +161,17 @@ impl AgentConfig {
                         }
                     }
                 }
+                "tool" => {
+                    if let Some(id) = tag.get(1) {
+                        if !id.is_empty() {
+                            let is_active = tag.get(2).map(String::as_str) == Some("active");
+                            if is_active {
+                                active_tools.push(id.clone());
+                            }
+                            tools.push(id.clone());
+                        }
+                    }
+                }
                 "skill" => {
                     if let Some(id) = tag.get(1) {
                         if !id.is_empty() {
@@ -185,6 +200,10 @@ impl AgentConfig {
 
         models.sort();
         models.dedup();
+        active_tools.sort();
+        active_tools.dedup();
+        tools.sort();
+        tools.dedup();
         active_skills.sort();
         active_skills.dedup();
         skills.sort();
@@ -201,6 +220,8 @@ impl AgentConfig {
             created_at,
             active_model,
             models,
+            active_tools,
+            tools,
             active_skills,
             skills,
             active_mcps,
@@ -228,6 +249,8 @@ mod tests {
                 ["p", "extra_pk"],
                 ["model", "opus", "active"],
                 ["model", "sonnet"],
+                ["tool", "shell", "active"],
+                ["tool", "web-search"],
                 ["skill", "read-access", "active"],
                 ["skill", "shell"],
                 ["skill", "write-access", "active"],
@@ -242,6 +265,8 @@ mod tests {
         assert_eq!(config.backend_pubkey.as_deref(), Some("backend_pk"));
         assert_eq!(config.active_model.as_deref(), Some("opus"));
         assert_eq!(config.models, vec!["opus", "sonnet"]);
+        assert_eq!(config.active_tools, vec!["shell"]);
+        assert_eq!(config.tools, vec!["shell", "web-search"]);
         assert_eq!(config.active_skills, vec!["read-access", "write-access"]);
         assert_eq!(config.skills, vec!["read-access", "shell", "write-access"]);
         assert_eq!(config.active_mcps, vec!["github"]);

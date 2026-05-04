@@ -426,37 +426,7 @@ pub fn get_metadata_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Option<Conv
 }
 
 pub fn get_profile_name(ndb: &Ndb, pubkey: &str) -> String {
-    let pubkey_bytes = match hex::decode(pubkey) {
-        Ok(bytes) if bytes.len() == 32 => {
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&bytes);
-            arr
-        }
-        _ => return format!("{}...", &pubkey[..8.min(pubkey.len())]),
-    };
-
-    let txn = match Transaction::new(ndb) {
-        Ok(t) => t,
-        Err(_) => return format!("{}...", &pubkey[..8.min(pubkey.len())]),
-    };
-
-    if let Ok(profile) = ndb.get_profile_by_pubkey(&txn, &pubkey_bytes) {
-        let record = profile.record();
-        if let Some(profile_data) = record.profile() {
-            if let Some(name) = profile_data.display_name() {
-                if !name.is_empty() {
-                    return name.to_string();
-                }
-            }
-            if let Some(name) = profile_data.name() {
-                if !name.is_empty() {
-                    return name.to_string();
-                }
-            }
-        }
-    }
-
-    format!("{}...", &pubkey[..8.min(pubkey.len())])
+    crate::agent_display::display_name(ndb, pubkey)
 }
 
 /// Get profile picture URL for a pubkey

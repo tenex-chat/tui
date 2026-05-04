@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
-use tenex_core::models::InstalledAgent;
+use tenex_core::models::AgentInventoryItem;
 
 /// Render the project settings modal
 pub fn render_project_settings(
@@ -43,21 +43,11 @@ fn short_pubkey(pubkey: &str) -> String {
     }
 }
 
-fn installed_agent_for_pubkey(
-    app: &App,
-    backend_pubkey: Option<&str>,
-    agent_pubkey: &str,
-) -> Option<InstalledAgent> {
-    let backend_pubkey = backend_pubkey?;
-    app.data_store
-        .borrow()
-        .get_installed_agents(backend_pubkey)
-        .iter()
-        .find(|agent| agent.pubkey == agent_pubkey)
-        .cloned()
+fn inventory_agent_for_pubkey(app: &App, agent_pubkey: &str) -> Option<AgentInventoryItem> {
+    app.agent_inventory_item(agent_pubkey)
 }
 
-fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<InstalledAgent> {
+fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<AgentInventoryItem> {
     let filter = &state.add_filter;
     let pending_positions: HashMap<&str, usize> = state
         .pending_agent_pubkeys
@@ -66,21 +56,22 @@ fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<InstalledAgen
         .map(|(index, pubkey)| (pubkey.as_str(), index))
         .collect();
 
-    let mut agents = app.installed_agents_filtered_by(state.backend_pubkey.as_deref(), filter);
+    let mut agents = app.agent_inventory_filtered_by(filter);
     agents.sort_by(|left, right| {
         let left_pending = pending_positions.get(left.pubkey.as_str()).copied();
         let right_pending = pending_positions.get(right.pubkey.as_str()).copied();
+        let left_name = app.agent_display_name(&left.pubkey);
+        let right_name = app.agent_display_name(&right.pubkey);
 
         match (left_pending, right_pending) {
             (Some(left_index), Some(right_index)) => left_index
                 .cmp(&right_index)
-                .then_with(|| left.slug.cmp(&right.slug))
+                .then_with(|| left_name.cmp(&right_name))
                 .then_with(|| left.pubkey.cmp(&right.pubkey)),
             (Some(_), None) => std::cmp::Ordering::Less,
             (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => left
-                .slug
-                .cmp(&right.slug)
+            (None, None) => left_name
+                .cmp(&right_name)
                 .then_with(|| left.pubkey.cmp(&right.pubkey)),
         }
     });
@@ -317,8 +308,7 @@ fn render_agents_list(
             .map(|(i, agent_pubkey)| {
                 let is_selected = show_selection && i == state.selector_index;
                 let is_pm = i == 0;
-                let installed_agent =
-                    installed_agent_for_pubkey(app, state.backend_pubkey.as_deref(), agent_pubkey);
+                let inventory_agent = inventory_agent_for_pubkey(app, agent_pubkey);
 
                 let mut spans = vec![];
 
@@ -342,15 +332,10 @@ fn render_agents_list(
                     spans.push(Span::styled("     ", Style::default()));
                 }
 
-                let agent_name = installed_agent
+                let agent_name = inventory_agent
                     .as_ref()
-                    .map(|agent| format!("@{}", agent.slug))
-                    .unwrap_or_else(|| {
-                        app.data_store
-                            .borrow()
-                            .get_profile_name_if_known(agent_pubkey)
-                            .unwrap_or_else(|| short_pubkey(agent_pubkey))
-                    });
+                    .map(|agent| app.agent_display_name(&agent.pubkey))
+                    .unwrap_or_else(|| app.agent_display_name(agent_pubkey));
                 let name_style = if is_selected {
                     Style::default()
                         .fg(theme::ACCENT_PRIMARY)
@@ -365,6 +350,15 @@ fn render_agents_list(
                     role_display,
                     Style::default().fg(theme::ACCENT_SPECIAL),
                 ));
+
+                if let Some(agent) = &inventory_agent {
+                    if agent.is_multi_backend {
+                        spans.push(Span::styled(
+                            format!(" [⚠ {} backends]", agent.backends.len()),
+                            Style::default().fg(theme::ACCENT_ERROR),
+                        ));
+                    }
+                }
 
                 ListItem::new(Line::from(spans))
             })
@@ -518,7 +512,7 @@ fn render_tools_items(
 /// Render the hints bar at the bottom
 fn render_hints(
     f: &mut Frame,
-    app: &App,
+    _app: &App,
     popup_area: Rect,
     state: &ProjectSettingsState,
     agents_focused: bool,
@@ -691,16 +685,19 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                 } else {
                     Style::default().fg(theme::TEXT_MUTED)
                 };
-                spans.push(Span::styled(format!("@{}", agent.slug), name_style));
-                let backend_count = app.agent_backend_count(&agent.pubkey);
-                let (backend_label, backend_label_style) = if backend_count > 1 {
+                spans.push(Span::styled(
+                    app.agent_display_name(&agent.pubkey),
+                    name_style,
+                ));
+                let backend_count = agent.backends.len();
+                let (backend_label, backend_label_style) = if agent.is_multi_backend {
                     (
                         format!(" [⚠ {} backends]", backend_count),
                         Style::default().fg(theme::ACCENT_ERROR),
                     )
                 } else {
                     (
-                        format!(" [{}]", app.backend_display_name(&agent.backend_pubkey)),
+                        format!(" [{}]", app.agent_inventory_backend_label(agent)),
                         Style::default().fg(theme::TEXT_MUTED),
                     )
                 };
@@ -742,13 +739,13 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
             } else {
                 "Not selected"
             };
-            let backend_count = app.agent_backend_count(&agent.pubkey);
-            let backend_info = if backend_count > 1 {
+            let backend_count = agent.backends.len();
+            let backend_info = if agent.is_multi_backend {
                 format!("⚠ {} backends have this agent", backend_count)
             } else {
-                format!("Backend: {}", app.backend_display_name(&agent.backend_pubkey))
+                format!("Backend: {}", app.agent_inventory_backend_label(agent))
             };
-            let desc_style = if backend_count > 1 {
+            let desc_style = if agent.is_multi_backend {
                 Style::default().fg(theme::ACCENT_ERROR)
             } else {
                 Style::default().fg(theme::TEXT_DIM)
@@ -836,8 +833,7 @@ fn render_pubkey_input(f: &mut Frame, area: Rect, state: &ProjectSettingsState) 
         let error_area = Rect::new(area.x, area.y + 1, area.width, 1);
         if let Some(ref error) = state.pubkey_input_error {
             f.render_widget(
-                Paragraph::new(error.as_str())
-                    .style(Style::default().fg(theme::ACCENT_ERROR)),
+                Paragraph::new(error.as_str()).style(Style::default().fg(theme::ACCENT_ERROR)),
                 error_area,
             );
         }

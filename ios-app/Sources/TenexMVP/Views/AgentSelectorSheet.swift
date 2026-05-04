@@ -40,7 +40,11 @@ struct AgentSelectorSheet: View {
         } else {
             // Use locale-aware filtering for correct international matching
             filtered = agents.filter { agent in
-                agent.name.localizedCaseInsensitiveContains(searchText)
+                AgentDisplayName.matches(
+                    pubkey: agent.pubkey,
+                    query: searchText,
+                    coreManager: coreManager
+                )
             }
         }
 
@@ -52,7 +56,11 @@ struct AgentSelectorSheet: View {
             if a.isOnline != b.isOnline {
                 return a.isOnline && !b.isOnline
             }
-            let nameComparison = a.name.localizedCaseInsensitiveCompare(b.name)
+            let nameComparison = AgentDisplayName
+                .resolve(pubkey: a.pubkey, coreManager: coreManager)
+                .localizedCaseInsensitiveCompare(
+                    AgentDisplayName.resolve(pubkey: b.pubkey, coreManager: coreManager)
+                )
             if nameComparison != .orderedSame {
                 return nameComparison == .orderedAscending
             }
@@ -200,7 +208,7 @@ struct OnlineAgentRowView: View {
         HStack(spacing: 10) {
             // Agent avatar - uses actual agent pubkey for profile lookup
             AgentAvatarView(
-                agentName: agent.name,
+                agentName: AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager),
                 pubkey: agent.pubkey,
                 size: 36,
                 showBorder: false,
@@ -211,7 +219,7 @@ struct OnlineAgentRowView: View {
             // Agent info
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(agent.name)
+                    Text(AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager))
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundStyle(Color.primary)
@@ -334,7 +342,7 @@ struct AgentDeletionSheet: View {
                 Section {
                     HStack(spacing: 12) {
                         AgentAvatarView(
-                            agentName: agent.name,
+                            agentName: AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager),
                             pubkey: agent.pubkey,
                             size: 44,
                             showBorder: false,
@@ -343,9 +351,9 @@ struct AgentDeletionSheet: View {
                         .environment(coreManager)
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(agent.name)
+                            Text(AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager))
                                 .font(.body.weight(.medium))
-                            Text("@\(agent.name)")
+                            Text(AgentDisplayName.shortPubkey(agent.pubkey))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

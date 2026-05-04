@@ -709,19 +709,6 @@ enum RuntimeFormatter {
     }
 }
 
-// MARK: - Agent Name Formatter
-
-/// Utility for formatting agent names consistently across the app
-enum AgentNameFormatter {
-    /// Formats an agent name from kebab-case to Title Case
-    /// e.g., "claude-code" -> "Claude Code"
-    static func format(_ name: String) -> String {
-        name.split(separator: "-")
-            .map { $0.capitalized }
-            .joined(separator: " ")
-    }
-}
-
 // MARK: - Text Utilities
 
 /// Utility for text truncation

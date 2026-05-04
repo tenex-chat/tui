@@ -1,7 +1,8 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{
-    AgentChatter, AgentConfig, AskEvent, BookmarkList, ConversationMetadata, InboxEventType,
-    InboxItem, InstalledAgent, Message, Project, ProjectAgent, ProjectStatus, Thread,
+    AgentChatter, AgentConfig, AgentInventoryBackend, AgentInventoryItem, AskEvent, BookmarkList,
+    ConversationMetadata, InboxEventType, InboxItem, InstalledAgent, Message, Project,
+    ProjectAgent, ProjectStatus, Thread,
 };
 #[cfg(test)]
 use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, OperationsStatus, Report};
@@ -723,7 +724,11 @@ impl AppDataStore {
         let since = saved_at.saturating_sub(RECONCILE_WINDOW_SECS);
 
         let a_tag_strs: Vec<&str> = a_tags.iter().map(|s| s.as_str()).collect();
-        let filter = Filter::new().kinds([1]).tags(a_tag_strs, 'a').since(since).build();
+        let filter = Filter::new()
+            .kinds([1])
+            .tags(a_tag_strs, 'a')
+            .since(since)
+            .build();
         let results = match ndb.query(&txn, &[filter], 500_000) {
             Ok(r) => r,
             Err(e) => {
@@ -1738,8 +1743,8 @@ impl AppDataStore {
     }
 
     /// Handle a per-agent config event (kind:34011) from pre-parsed JSON value.
-    /// We only subscribe to 34011s authored by agents already p-tagged in the
-    /// user's kind:31933 projects, so any event that reaches us is wanted.
+    /// We subscribe to 34011s authored by agents named in the user's 31933
+    /// projects or approved 24011 backend inventories.
     fn handle_agent_config_event_value(&mut self, event: &serde_json::Value) {
         if let Some(config) = AgentConfig::from_value(event) {
             self.upsert_agent_config(config);
@@ -2244,6 +2249,62 @@ impl AppDataStore {
             .unwrap_or(&[])
     }
 
+    pub fn available_install_backends(&self) -> Vec<String> {
+        let mut backends: Vec<String> = self
+            .installed_agents_by_backend
+            .keys()
+            .filter(|backend_pubkey| self.trust.is_approved(backend_pubkey))
+            .cloned()
+            .collect();
+        backends.sort();
+        backends
+    }
+
+    pub fn agent_inventory(&self) -> Vec<AgentInventoryItem> {
+        let mut by_agent: HashMap<String, Vec<AgentInventoryBackend>> = HashMap::new();
+
+        for (backend_pubkey, agents) in &self.installed_agents_by_backend {
+            if !self.trust.is_approved(backend_pubkey) {
+                continue;
+            }
+
+            for agent in agents {
+                by_agent
+                    .entry(agent.pubkey.clone())
+                    .or_default()
+                    .push(AgentInventoryBackend {
+                        backend_pubkey: backend_pubkey.clone(),
+                        slug: agent.slug.clone(),
+                        created_at: agent.created_at,
+                    });
+            }
+        }
+
+        let mut items: Vec<AgentInventoryItem> = by_agent
+            .into_iter()
+            .map(|(pubkey, mut backends)| {
+                backends.sort_by(|a, b| {
+                    a.backend_pubkey
+                        .cmp(&b.backend_pubkey)
+                        .then_with(|| a.slug.cmp(&b.slug))
+                });
+                let slug = backends
+                    .first()
+                    .map(|backend| backend.slug.clone())
+                    .unwrap_or_else(|| pubkey[..16.min(pubkey.len())].to_string());
+                AgentInventoryItem {
+                    pubkey,
+                    slug,
+                    is_multi_backend: backends.len() > 1,
+                    backends,
+                }
+            })
+            .collect();
+
+        items.sort_by(|a, b| a.slug.cmp(&b.slug).then_with(|| a.pubkey.cmp(&b.pubkey)));
+        items
+    }
+
     /// Get online agents for a project (from ProjectStatus if online)
     pub fn get_online_agents(&self, a_tag: &str) -> Option<&[ProjectAgent]> {
         self.project_statuses
@@ -2283,32 +2344,14 @@ impl AppDataStore {
             .unwrap_or(&[])
     }
 
-    fn get_agent_slug_from_status(&self, pubkey: &str) -> Option<String> {
-        self.project_statuses
-            .values()
-            .flat_map(|status| status.agents.iter())
-            .find(|agent| agent.pubkey == pubkey)
-            .map(|agent| agent.name.clone())
-            .filter(|name| !name.is_empty())
-    }
-
     /// Returns the resolved display name for a pubkey only if a real name is known
-    /// (from kind:0 profile or kind:24010 agent slug). Returns None if only the
-    /// pubkey-truncation fallback would be used.
+    /// from kind:0 profile metadata. Returns None if only the pubkey-truncation
+    /// fallback would be used.
     pub fn get_profile_name_if_known(&self, pubkey: &str) -> Option<String> {
         if let Some(name) = self.profiles.get(pubkey) {
             return Some(name.clone());
         }
-        if let Some(slug) = self.get_agent_slug_from_status(pubkey) {
-            return Some(slug);
-        }
-        let fallback = format!("{}...", &pubkey[..8.min(pubkey.len())]);
-        let name = crate::store::get_profile_name(&self.ndb, pubkey);
-        if name == fallback {
-            None
-        } else {
-            Some(name)
-        }
+        crate::agent_display::kind0_display_name(&self.ndb, pubkey)
     }
 
     pub fn get_profile_name(&self, pubkey: &str) -> String {
@@ -2317,20 +2360,8 @@ impl AppDataStore {
         }
 
         let lookup_started_at = Instant::now();
-        let fallback = format!("{}...", &pubkey[..8.min(pubkey.len())]);
+        let fallback = crate::agent_display::fallback_pubkey_name(pubkey);
         let name = crate::store::get_profile_name(&self.ndb, pubkey);
-
-        if name == fallback {
-            if let Some(slug) = self.get_agent_slug_from_status(pubkey) {
-                crate::tlog!(
-                    "PERF",
-                    "AppDataStore::get_profile_name cacheMiss pubkey={} source=agentStatus elapsedMs={}",
-                    &pubkey[..12.min(pubkey.len())],
-                    lookup_started_at.elapsed().as_millis()
-                );
-                return slug;
-            }
-        }
 
         let elapsed_ms = lookup_started_at.elapsed().as_millis();
         if elapsed_ms >= 2 {
@@ -3606,7 +3637,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_profile_name_falls_back_to_project_status_slug() {
+    fn test_get_profile_name_ignores_project_status_slug() {
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
@@ -3642,7 +3673,8 @@ mod tests {
             .insert(status.project_coordinate.clone(), status);
 
         let name = store.get_profile_name(pubkey);
-        assert_eq!(name, slug);
+        assert_eq!(name, "aaaaaaaa...");
+        assert_eq!(store.get_profile_name_if_known(pubkey), None);
     }
 
     // ===== Agent Tracking Integration Tests =====
@@ -6684,5 +6716,4 @@ mod tests {
         );
         assert_eq!(after_stale.active_model.as_deref(), Some("opus"));
     }
-
 }

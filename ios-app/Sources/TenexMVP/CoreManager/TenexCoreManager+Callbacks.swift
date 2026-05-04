@@ -374,6 +374,12 @@ extension TenexCoreManager {
         bumpContentCatalogVersion()
     }
 
+    @MainActor
+    func applyInstalledAgentsChanged() {
+        bumpAgentInventoryVersion()
+        signalDiagnosticsUpdate()
+    }
+
     /// Signal that messages for a specific conversation have been updated.
     /// This triggers a refresh of the conversation's messages.
     @MainActor

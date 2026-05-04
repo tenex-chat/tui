@@ -133,22 +133,14 @@ fn execute_project_action(
                     app.set_selected_agent(Some(pm));
                 } else if let Some(first_pubkey) = project_agent_pubkeys.first() {
                     // Project is offline: construct a minimal agent from kind:31933 agent pubkeys.
-                    // Look up in installed agent inventory to get the slug/name if available.
+                    // Use kind:0 profile metadata for display; installed-agent slugs
+                    // are protocol labels, not UI names.
                     let fallback_agent = {
                         let store = app.data_store.borrow();
                         let backend_pubkey = store
                             .get_project_status(&a_tag)
                             .map(|s| s.backend_pubkey.clone());
-                        let name = backend_pubkey
-                            .as_deref()
-                            .and_then(|bp| {
-                                store
-                                    .get_installed_agents(&bp)
-                                    .iter()
-                                    .find(|a| a.pubkey == *first_pubkey)
-                                    .map(|a| a.slug.clone())
-                            })
-                            .unwrap_or_else(|| first_pubkey[..8].to_string());
+                        let name = store.get_profile_name(first_pubkey);
                         crate::models::ProjectAgent {
                             pubkey: first_pubkey.clone(),
                             name,
