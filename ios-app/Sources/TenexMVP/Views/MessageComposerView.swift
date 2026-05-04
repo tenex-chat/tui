@@ -119,6 +119,8 @@ struct MessageComposerView: View {
     @State var triggerDetectionTask: Task<Void, Never>?
     @State var workspaceAgentToConfig: ProjectAgent?
     @State var showWorkspaceAgentPopover = false
+    /// True once the user has explicitly tapped an agent in the inline selector for a new conversation.
+    @State var hasPickedAgentInlineSelector: Bool = false
     @FocusState var composerFieldFocused: Bool
 
     // Workspace inline layout metrics
@@ -592,6 +594,7 @@ struct MessageComposerView: View {
                 contentEditorView
                 workspaceInlineControlRow
             } else {
+                inlineAgentSelectorSection
                 Divider()
                 telegramStyleComposerRow
             }

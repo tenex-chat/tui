@@ -192,6 +192,67 @@ extension MessageComposerView {
         .background(.bar)
     }
 
+    // MARK: - Inline Agent Selector (new conversations)
+
+    /// Shown above the text field when starting a new conversation and no agent is selected yet.
+    @ViewBuilder
+    var inlineAgentSelectorSection: some View {
+        if isNewConversation,
+           selectedProject != nil,
+           !hasPickedAgentInlineSelector,
+           !availableAgents.isEmpty
+        {
+            Divider()
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(availableAgents, id: \.pubkey) { agent in
+                        VStack(spacing: 0) {
+                            HStack(spacing: 0) {
+                                RosterAgentRowView(
+                                    agent: agent,
+                                    onTap: { selectAgentInline(agent) },
+                                    onConfig: { workspaceAgentToConfig = agent }
+                                )
+                                .environment(coreManager)
+
+                                if draft.agentPubkey == agent.pubkey {
+                                    Image(systemName: "checkmark")
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(Color.accentColor)
+                                        .padding(.trailing, 4)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+
+                            if agent.pubkey != availableAgents.last?.pubkey {
+                                Divider().padding(.leading, 62)
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(maxHeight: 240)
+            .background(.bar)
+        }
+    }
+
+    func selectAgentInline(_ agent: ProjectAgent) {
+        draft.setAgent(agent.pubkey)
+        isDirty = true
+        hasPickedAgentInlineSelector = true
+        if let projectId = selectedProject?.id {
+            Task {
+                await draftManager.updateAgent(agent.pubkey, conversationId: conversationId, projectId: projectId)
+                await loadSkills()
+            }
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(100))
+            composerFieldFocused = true
+        }
+    }
+
     var workspaceInlineControlRow: some View {
         HStack(spacing: 12) {
             workspaceAccessoryButton
