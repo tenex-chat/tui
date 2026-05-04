@@ -123,8 +123,9 @@ extension TenexCoreManager {
     }
 
     /// Refresh the ordered project roster cache.
-    /// Membership and PM/default ordering come from kind:31933 `p` tags. Availability comes from
-    /// approved kind:24011 inventory, and displayed config metadata comes from kind:34011 when cached.
+    /// Membership and PM/default ordering come from kind:31933 `p` tags. Project online status
+    /// comes from the kind:24010 heartbeat (45s staleness). Roster row metadata (display name,
+    /// agent capability) comes from kind:24011 inventory and kind:34011 configs.
     /// - Parameter projects: Array of projects to rebuild roster rows for.
     func refreshProjectRosterState(for projects: [Project]? = nil) async {
         let startedAt = CFAbsoluteTimeGetCurrent()
@@ -140,7 +141,10 @@ extension TenexCoreManager {
         for project in projects {
             if Task.isCancelled { break }
             let roster = await rosterAgents(for: project, inventoryByPubkey: inventoryByPubkey)
-            statusUpdates[project.id] = roster.contains { $0.isOnline }
+            // Project online ⇔ a backend has sent a fresh kind:24010 heartbeat. Do NOT use the
+            // per-agent isOnline flag — that reflects 24011 inventory presence (capability), not
+            // liveness, and a backend can publish 24011 once and never run the project.
+            statusUpdates[project.id] = await core.isProjectOnline(projectId: project.id)
             rosterUpdates[project.id] = roster
         }
 

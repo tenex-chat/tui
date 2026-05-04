@@ -16,10 +16,11 @@ pub(crate) fn default_project_agent(store: &AppDataStore, a_tag: &str) -> Option
     project_roster_agents(store, a_tag).into_iter().next()
 }
 
+/// Whether the project is currently online — fresh kind:24010 heartbeat from
+/// any approved backend. Do NOT use `ProjectAgent.is_online`, which only
+/// reflects 24011 inventory presence (capability, not liveness).
 pub(crate) fn project_has_available_agent(store: &AppDataStore, a_tag: &str) -> bool {
-    project_roster_agents(store, a_tag)
-        .iter()
-        .any(|agent| agent.is_online)
+    store.is_project_online(a_tag)
 }
 
 fn roster_agents_for_project(store: &AppDataStore, project: &Project) -> Vec<ProjectAgent> {

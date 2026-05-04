@@ -22,6 +22,7 @@ impl TenexCore {
                 mcp_tool_ids,
                 client: Some("tenex-ios".to_string()),
                 is_private,
+                repo_url: None,
             })
             .map_err(|e| TenexError::Internal {
                 message: format!("Failed to send create project command: {}", e),
@@ -83,12 +84,13 @@ impl TenexCore {
         Ok(())
     }
 
-    /// Check if a project has at least one available roster agent.
+    /// Whether the project is currently online — i.e. has a fresh kind:24010
+    /// heartbeat from any approved backend (within the 45-second staleness
+    /// window).
     ///
-    /// A project is considered online if one of its kind:31933 roster agents is
-    /// present in an approved kind:24011 backend inventory.
-    ///
-    /// Returns true if the project is online, false otherwise.
+    /// Note: kind:24011 (installed-agent inventory) is *not* a liveness signal.
+    /// A backend can publish 24011 once and then never run the project, so
+    /// inventory presence does not imply the project is running.
     pub fn is_project_online(&self, project_id: String) -> bool {
         let store_guard = match self.store.read() {
             Ok(g) => g,
@@ -109,15 +111,15 @@ impl TenexCore {
         store.is_project_online(&project.a_tag())
     }
 
+    /// Return the pubkey of a backend currently running the project — i.e.
+    /// one whose kind:24010 heartbeat is fresh. Use this when sending a
+    /// command (e.g. chat message) that should reach an actively running
+    /// backend. Returns `None` if no backend is currently running the project.
     pub fn get_project_backend_pubkey(&self, project_id: String) -> Option<String> {
         let store_guard = self.store.read().ok()?;
         let store = store_guard.as_ref()?;
         let project = store.get_projects().iter().find(|p| p.id == project_id)?;
-        store
-            .get_online_agents(&project.a_tag())?
-            .into_iter()
-            .find(|agent| agent.is_online)
-            .map(|agent| agent.backend_pubkey)
+        store.first_online_backend_for_project(&project.a_tag())
     }
 
     /// Boot/start a project (sends kind:24000 event).

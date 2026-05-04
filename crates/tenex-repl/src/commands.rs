@@ -383,7 +383,7 @@ pub(crate) fn handle_agent_command(
                 };
                 let model = agent.model.as_deref().unwrap_or("unknown model");
                 let pm_badge = if agent.is_pm { " [PM]" } else { "" };
-                let availability = if agent.is_online { "online" } else { "offline" };
+                let availability = if agent.is_online { "installed" } else { "uninstalled" };
                 output.push(format!(
                     "  {marker}{}: {}{pm_badge} ({DIM}{model}, {availability}{RESET})",
                     i + 1,

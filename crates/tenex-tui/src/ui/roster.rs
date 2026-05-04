@@ -27,20 +27,22 @@ pub(crate) fn default_project_agent(
     project_roster_agents(store, project).into_iter().next()
 }
 
+/// Whether the project is currently online — i.e. has a fresh kind:24010
+/// heartbeat. Do NOT confuse with `ProjectAgent.is_online`, which only reflects
+/// kind:24011 inventory presence (agent installed in some backend) and is not a
+/// liveness signal.
 pub(crate) fn project_has_available_agent(store: &AppDataStore, project: &Project) -> bool {
-    project_roster_agents(store, project)
-        .iter()
-        .any(|agent| agent.is_online)
+    store.is_project_online(&project.a_tag())
 }
 
+/// Pubkey of a backend currently running the project (fresh kind:24010
+/// heartbeat). Use this when routing commands to a live backend. Falls back to
+/// `None` if no backend is running.
 pub(crate) fn first_available_backend_for_project(
     store: &AppDataStore,
     project: &Project,
 ) -> Option<String> {
-    project_roster_agents(store, project)
-        .into_iter()
-        .find(|agent| agent.is_online && !agent.backend_pubkey.is_empty())
-        .map(|agent| agent.backend_pubkey)
+    store.first_online_backend_for_project(&project.a_tag())
 }
 
 pub(crate) fn resolve_selected_agent_from_roster(

@@ -658,7 +658,7 @@ fn handle_request(
                     let mut obj = serde_json::json!({
                         "slug": p.id,
                         "name": p.title,
-                        "booted": agents.iter().any(|agent| agent.is_online),
+                        "booted": store.is_project_online(&p.a_tag()),
                     });
                     obj["participants"] =
                         serde_json::json!(agents.iter().map(agent_to_json).collect::<Vec<_>>());
@@ -1710,10 +1710,7 @@ fn handle_request(
                     .iter()
                     .flat_map(|agent| agent.tools.clone())
                     .collect::<Vec<_>>(),
-                "backend_pubkey": agents
-                    .iter()
-                    .find(|agent| agent.is_online && !agent.backend_pubkey.is_empty())
-                    .map(|agent| agent.backend_pubkey.clone()),
+                "backend_pubkey": store.first_online_backend_for_project(&a_tag),
                 "created_at": status.map(|s| s.created_at),
             });
 
@@ -1813,6 +1810,7 @@ fn handle_request(
                     mcp_tool_ids: params.mcp_tool_ids,
                     client: Some(client_tag),
                     is_private: false,
+                    repo_url: None,
                 })
                 .is_ok()
             {

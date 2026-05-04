@@ -139,8 +139,10 @@ class TenexCoreManager {
     /// Bookmarked item IDs (kind:14202). Updated reactively when BookmarkListChanged fires.
     var bookmarkedIds: Set<String> = []
 
-    /// Project availability derived from kind:24011 backend inventory for the project's kind:31933 roster.
-    /// Key: project ID, Value: true when at least one roster agent is present in inventory.
+    /// Project liveness derived from the kind:24010 heartbeat (45-second staleness window).
+    /// Key: project ID, Value: true when at least one approved backend has sent a fresh 24010
+    /// for the project. NOT to be confused with kind:24011 inventory presence, which only
+    /// indicates that a backend has the agent installed (capability, not liveness).
     var projectOnlineStatus: [String: Bool] = [:]
 
     /// Approved backend inventory from kind:24011, grouped by agent pubkey.

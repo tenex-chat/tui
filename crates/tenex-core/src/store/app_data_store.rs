@@ -2222,6 +2222,37 @@ impl AppDataStore {
         self.project_statuses.get(a_tag)
     }
 
+    /// Pubkeys of backends currently running this project — i.e. those whose
+    /// most recent kind:24010 heartbeat for `a_tag` is fresh (within the
+    /// 45-second staleness window). Use this when you need a backend to send a
+    /// command to a *running* project. For "any backend that has the agent
+    /// installed" (e.g. for boot routing), consult kind:24011 inventory
+    /// instead.
+    pub fn online_backend_pubkeys_for_project(&self, a_tag: &str) -> Vec<String> {
+        self.project_statuses_by_backend
+            .get(a_tag)
+            .map(|by_backend| {
+                by_backend
+                    .iter()
+                    .filter(|(_, status)| status.is_online())
+                    .map(|(backend_pubkey, _)| backend_pubkey.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Pick a backend currently running this project. Returns `None` if no
+    /// backend has a fresh kind:24010 heartbeat. Prefers the backend with the
+    /// most recent `last_seen_at`.
+    pub fn first_online_backend_for_project(&self, a_tag: &str) -> Option<String> {
+        let by_backend = self.project_statuses_by_backend.get(a_tag)?;
+        by_backend
+            .iter()
+            .filter(|(_, status)| status.is_online())
+            .max_by_key(|(_, status)| status.last_seen_at)
+            .map(|(backend_pubkey, _)| backend_pubkey.clone())
+    }
+
     /// Upsert a per-agent capability config (kind:34011).
     /// NIP-33 replaceable semantics: keep only the newest `created_at` per
     /// agent pubkey; older events are ignored when one already exists.
@@ -2331,9 +2362,13 @@ impl AppDataStore {
         self.get_project_roster(a_tag)
     }
 
+    /// Whether the project has a fresh kind:24010 heartbeat from any approved
+    /// backend. 24010 is the project-liveness signal; 24011 (agent inventory)
+    /// is *not* — a backend can publish 24011 once and never run the project.
     pub fn is_project_online(&self, a_tag: &str) -> bool {
-        self.get_project_roster(a_tag)
-            .map(|agents| agents.iter().any(|agent| agent.is_online))
+        self.project_statuses
+            .get(a_tag)
+            .map(|status| status.is_online())
             .unwrap_or(false)
     }
 
@@ -3912,7 +3947,67 @@ mod tests {
         assert_eq!(roster[0].name, "available-a");
         assert_eq!(roster[0].backend_pubkey, "backend1");
         assert!(!roster[1].is_online);
-        assert!(store.is_project_online("31933:owner:project"));
+        // 24011 inventory marks per-agent capability ("agent is installed in
+        // an approved backend"). It is NOT a project-liveness signal, so
+        // `is_project_online` (which gates on the kind:24010 heartbeat) must
+        // remain false until a 24010 arrives.
+        assert!(!store.is_project_online("31933:owner:project"));
+    }
+
+    /// `is_project_online` must reflect kind:24010 heartbeat freshness, not
+    /// 24011 inventory presence. A fresh 24010 from an approved backend marks
+    /// the project online; once stale, it goes offline regardless of 24011.
+    #[test]
+    fn test_is_project_online_uses_24010_heartbeat_not_24011_inventory() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store
+            .projects
+            .push(make_test_project(vec!["agent-a"]));
+        store.add_approved_backend("backend1");
+
+        // 24011 alone (inventory present) must NOT mark the project online.
+        let inventory_json = r#"{
+            "kind": 24011,
+            "id": "inventory1",
+            "pubkey": "backend1",
+            "created_at": 1000,
+            "tags": [
+                ["agent", "agent-a", "available-a"]
+            ]
+        }"#;
+        store.handle_status_event_json(inventory_json);
+        assert!(
+            !store.is_project_online("31933:owner:project"),
+            "24011 inventory must not gate project liveness"
+        );
+
+        // A fresh 24010 marks the project online.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let status_json = format!(
+            r#"{{
+                "kind": 24010,
+                "id": "status1",
+                "pubkey": "backend1",
+                "created_at": {now},
+                "tags": [["a", "31933:owner:project"]]
+            }}"#
+        );
+        store.handle_status_event_json(&status_json);
+        assert!(
+            store.is_project_online("31933:owner:project"),
+            "fresh 24010 must mark project online"
+        );
+
+        // first_online_backend_for_project should resolve to the heartbeat sender.
+        assert_eq!(
+            store.first_online_backend_for_project("31933:owner:project"),
+            Some("backend1".to_string())
+        );
     }
 
     #[test]
