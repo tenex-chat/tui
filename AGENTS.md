@@ -39,6 +39,7 @@ cd ios-app && tuist generate
 
 - **Rust:** rustfmt, explicit error types in library code
 - **Swift:** SwiftUI + MVVM, async/await for FFI, platform conditionals for iOS vs macOS
+- **File size:** Keep hand-authored files under 300 LOC where practical. Treat 500 LOC as a hard ceiling unless the file is generated, vendored, or has an explicit local justification.
 - **Git:** Worktrees in `.worktrees/`, main branch is `master`
 
 ## Key References
