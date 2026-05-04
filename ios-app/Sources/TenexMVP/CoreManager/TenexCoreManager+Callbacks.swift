@@ -196,7 +196,7 @@ extension TenexCoreManager {
         if project.isDeleted {
             projects.removeAll { $0.id == project.id }
             projectOnlineStatus.removeValue(forKey: project.id)
-            onlineAgents.removeValue(forKey: project.id)
+            projectRosterAgents.removeValue(forKey: project.id)
             if appFilterProjectIds.contains(project.id) {
                 appFilterProjectIds.remove(project.id)
                 persistAppFilter()
@@ -214,6 +214,9 @@ extension TenexCoreManager {
             updated.insert(project, at: 0)
         }
         projects = updated
+        Task {
+            await refreshProjectRosterState(for: updated)
+        }
     }
 
     @MainActor
@@ -252,28 +255,12 @@ extension TenexCoreManager {
 
         guard !resolvedProjectId.isEmpty else { return }
 
-        let normalizedAgents = Self.canonicalOnlineAgents(onlineAgents)
-        let previousStatus = projectOnlineStatus[resolvedProjectId]
-        let previousAgents = self.onlineAgents[resolvedProjectId]
-        let statusChanged = previousStatus != isOnline
-        let agentsChanged = previousAgents != normalizedAgents
-
-        if statusChanged {
-            setProjectOnlineStatus(isOnline, for: resolvedProjectId)
-        }
-        if agentsChanged {
-            setOnlineAgentsCache(normalizedAgents, for: resolvedProjectId)
-        }
-
-        if statusChanged || agentsChanged {
-            signalDiagnosticsUpdate()
-        }
-
         profiler.logEvent(
-            "applyProjectStatusChanged projectId=\(resolvedProjectId) statusChanged=\(statusChanged) agentsChanged=\(agentsChanged) isOnline=\(isOnline) agentCount=\(normalizedAgents.count)",
+            "applyProjectStatusChanged ignoredRosterPayload projectId=\(resolvedProjectId) isOnline=\(isOnline) agentCount=\(onlineAgents.count)",
             category: .general,
-            level: (statusChanged || agentsChanged) ? .info : .debug
+            level: .debug
         )
+        signalDiagnosticsUpdate()
     }
 
     @MainActor
@@ -377,6 +364,9 @@ extension TenexCoreManager {
     @MainActor
     func applyInstalledAgentsChanged() {
         bumpAgentInventoryVersion()
+        Task {
+            await refreshProjectRosterState()
+        }
         signalDiagnosticsUpdate()
     }
 

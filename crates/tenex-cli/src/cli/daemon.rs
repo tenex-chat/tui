@@ -23,6 +23,7 @@ use tenex_core::slug::{validate_slug, SlugValidation};
 
 use super::config::CliConfig;
 use super::protocol::{Request, Response};
+use super::roster::{project_has_available_agent, project_roster_agents};
 
 const SOCKET_NAME: &str = "tenex-cli.sock";
 const PID_FILE: &str = "daemon.pid";
@@ -254,6 +255,11 @@ pub async fn run_daemon(
             match daemon_rx.try_recv() {
                 Ok(data_change) => {
                     if let DataChange::ProjectStatus { json } = &data_change {
+                        shared_data_store
+                            .lock()
+                            .unwrap()
+                            .handle_status_event_json(json);
+                    } else if let DataChange::InstalledAgentList { json } = &data_change {
                         shared_data_store
                             .lock()
                             .unwrap()
@@ -648,17 +654,14 @@ fn handle_request(
                 .get_projects()
                 .iter()
                 .map(|p| {
-                    let a_tag = p.a_tag();
-                    let online_agents = store.get_online_agents(&a_tag);
+                    let agents = project_roster_agents(&store, p);
                     let mut obj = serde_json::json!({
                         "slug": p.id,
                         "name": p.title,
-                        "booted": online_agents.is_some(),
+                        "booted": agents.iter().any(|agent| agent.is_online),
                     });
-                    if let Some(agents) = online_agents {
-                        obj["participants"] =
-                            serde_json::json!(agents.iter().map(agent_to_json).collect::<Vec<_>>());
-                    }
+                    obj["participants"] =
+                        serde_json::json!(agents.iter().map(agent_to_json).collect::<Vec<_>>());
                     obj
                 })
                 .collect();
@@ -671,9 +674,9 @@ fn handle_request(
                 .as_bool()
                 .unwrap_or(false);
 
-            // If wait_for_project is true, wait for the 24010 event first
+            // If wait_for_project is true, wait for the project roster to appear.
             if wait_for_project {
-                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                if let Err(err_response) = wait_for_project_roster(data_store, project_slug, id) {
                     return err_response;
                 }
             }
@@ -715,9 +718,9 @@ fn handle_request(
                 .as_bool()
                 .unwrap_or(false);
 
-            // If wait_for_project is true, wait for the 24010 event first
+            // If wait_for_project is true, wait for the project roster to appear.
             if wait_for_project {
-                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                if let Err(err_response) = wait_for_project_roster(data_store, project_slug, id) {
                     return err_response;
                 }
             }
@@ -739,8 +742,15 @@ fn handle_request(
             };
 
             let agents: Vec<_> = store
-                .get_online_agents(&project_a_tag)
-                .map(|agents| agents.iter().map(agent_to_json).collect())
+                .get_projects()
+                .iter()
+                .find(|project| project.a_tag() == project_a_tag)
+                .map(|project| {
+                    project_roster_agents(&store, project)
+                        .iter()
+                        .map(agent_to_json)
+                        .collect()
+                })
                 .unwrap_or_default();
             (Response::success(id, serde_json::json!(agents)), false)
         }
@@ -847,9 +857,9 @@ fn handle_request(
                     }
                 };
 
-            // If wait_for_project is true, wait for the 24010 event first
+            // If wait_for_project is true, wait for the project roster to appear.
             if wait_for_project {
-                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                if let Err(err_response) = wait_for_project_roster(data_store, project_slug, id) {
                     return err_response;
                 }
             }
@@ -979,9 +989,9 @@ fn handle_request(
                     }
                 };
 
-            // If wait_for_project is true, wait for the 24010 event first
+            // If wait_for_project is true, wait for the project roster to appear
             if wait_for_project {
-                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                if let Err(err_response) = wait_for_project_roster(data_store, project_slug, id) {
                     return err_response;
                 }
             }
@@ -1650,9 +1660,9 @@ fn handle_request(
                 .as_bool()
                 .unwrap_or(false);
 
-            // If wait_for_project is true, wait for the 24010 event first
+            // If wait_for_project is true, wait for the project roster to appear
             if wait_for_project {
-                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                if let Err(err_response) = wait_for_project_roster(data_store, project_slug, id) {
                     return err_response;
                 }
             }
@@ -1680,57 +1690,32 @@ fn handle_request(
                 }
             };
 
+            let agents = project_roster_agents(&store, &project);
+            let booted = project_has_available_agent(&store, &project);
             let a_tag = project.a_tag();
-
-            // Get full project status (kind:24010)
             let status = store.get_project_status(&a_tag);
 
-            let response = match status {
-                Some(status) => {
-                    // Build detailed agents array with models and tools
-                    let agents: Vec<_> = status
-                        .agents
-                        .iter()
-                        .map(|a| {
-                            serde_json::json!({
-                                "name": a.name,
-                                "pubkey": a.pubkey,
-                                "is_pm": a.is_pm,
-                                "model": a.model,
-                                "tools": a.tools,
-                            })
-                        })
-                        .collect();
-
-                    serde_json::json!({
-                        "slug": project.id,
-                        "name": project.title,
-                        "pubkey": project.pubkey,
-                        "booted": status.is_online(),
-                        "agents": agents,
-                        "branches": status.branches,
-                        "all_models": status.all_models,
-                        "all_tools": status.all_tools(),
-                        "backend_pubkey": status.backend_pubkey,
-                        "created_at": status.created_at,
-                    })
-                }
-                None => {
-                    // Project exists but no status event (not booted)
-                    serde_json::json!({
-                        "slug": project.id,
-                        "name": project.title,
-                        "pubkey": project.pubkey,
-                        "booted": false,
-                        "agents": [],
-                        "branches": [],
-                        "all_models": [],
-                        "all_tools": [],
-                        "backend_pubkey": null,
-                        "created_at": null,
-                    })
-                }
-            };
+            let response = serde_json::json!({
+                "slug": project.id,
+                "name": project.title,
+                "pubkey": project.pubkey,
+                "booted": booted,
+                "agents": agents.iter().map(agent_to_json).collect::<Vec<_>>(),
+                "branches": status.map(|s| s.branches.clone()).unwrap_or_default(),
+                "all_models": agents
+                    .iter()
+                    .filter_map(|agent| agent.model.clone())
+                    .collect::<Vec<_>>(),
+                "all_tools": agents
+                    .iter()
+                    .flat_map(|agent| agent.tools.clone())
+                    .collect::<Vec<_>>(),
+                "backend_pubkey": agents
+                    .iter()
+                    .find(|agent| agent.is_online && !agent.backend_pubkey.is_empty())
+                    .map(|agent| agent.backend_pubkey.clone()),
+                "created_at": status.map(|s| s.created_at),
+            });
 
             (Response::success(id, response), false)
         }
@@ -1872,10 +1857,10 @@ fn handle_request(
                     }
                 };
 
-            // If wait_for_project is true, wait for the 24010 event first
+            // If wait_for_project is true, wait for the project roster to appear
             if params.wait_for_project {
                 if let Err(err_response) =
-                    wait_for_project_status(data_store, &params.project_slug, id)
+                    wait_for_project_roster(data_store, &params.project_slug, id)
                 {
                     return err_response;
                 }
@@ -1906,7 +1891,7 @@ fn handle_request(
                     }) {
                         Ok(_) => {
                             if params.wait {
-                                // Wait for a new 24010 event with updated timestamp
+                                // Wait for a new 34011 agent config with the requested model
                                 let start = std::time::Instant::now();
                                 let timeout = std::time::Duration::from_secs(30);
 
@@ -2013,22 +1998,21 @@ fn agent_to_json(a: &tenex_core::models::ProjectAgent) -> serde_json::Value {
         "name": a.name,
         "pubkey": a.pubkey,
         "is_pm": a.is_pm,
+        "is_online": a.is_online,
+        "backend_pubkey": a.backend_pubkey,
         "model": a.model,
     })
 }
 
 /// Resolve an author name from pubkey:
-/// 1. Check if pubkey belongs to an online agent -> return agent name
+/// 1. Check if pubkey belongs to a project roster -> return agent name
 /// 2. Otherwise check profile name from kind:0
 /// 3. Return None if no real name found (don't return truncated pubkey)
 fn resolve_author_name(store: &AppDataStore, pubkey: &str) -> Option<String> {
-    // Check all online agents across all projects
     for project in store.get_projects() {
-        if let Some(agents) = store.get_online_agents(&project.a_tag()) {
-            for agent in agents {
-                if agent.pubkey == pubkey {
-                    return Some(agent.name.clone());
-                }
+        for agent in project_roster_agents(store, project) {
+            if agent.pubkey == pubkey {
+                return Some(agent.name);
             }
         }
     }
@@ -2046,12 +2030,12 @@ fn resolve_author_name(store: &AppDataStore, pubkey: &str) -> Option<String> {
     }
 }
 
-/// Default timeout for waiting for project status (30 seconds)
+/// Default timeout for waiting for project roster (30 seconds)
 const WAIT_FOR_PROJECT_TIMEOUT_SECS: u64 = 30;
 
-/// Wait for a project's 24010 status event to appear.
+/// Wait for a project's 31933 roster to appear.
 /// Returns Ok(a_tag) if found within timeout, or an error response if not found.
-fn wait_for_project_status(
+fn wait_for_project_roster(
     data_store: &Arc<Mutex<AppDataStore>>,
     project_slug: &str,
     id: u64,
@@ -2066,7 +2050,7 @@ fn wait_for_project_status(
                     id,
                     "TIMEOUT",
                     &format!(
-                        "Timeout waiting for project status (24010 event) for '{}'. Project may not be booted.",
+                        "Timeout waiting for project roster (31933 event) for '{}'.",
                         project_slug
                     ),
                 ),
@@ -2076,9 +2060,7 @@ fn wait_for_project_status(
 
         let store = data_store.lock().unwrap();
         if let Some(a_tag) = find_project_a_tag_by_slug(&store, project_slug) {
-            if store.get_project_status(&a_tag).is_some() {
-                return Ok(a_tag);
-            }
+            return Ok(a_tag);
         }
         drop(store);
 
@@ -2111,27 +2093,27 @@ struct AgentLookupResult {
 }
 
 /// Find an agent's pubkey by their name within a specific project (identified by slug).
-/// Uses the online agents from ProjectStatus (kind:24010).
+/// Uses the ordered 31933 roster; 24011 marks availability and 34011 supplies config.
 /// Also returns the project's a_tag to avoid a second lookup.
 fn find_agent_in_project(
     store: &AppDataStore,
     project_slug: &str,
     agent_name: &str,
 ) -> Result<AgentLookupResult, AgentLookupError> {
-    // Find the project by slug to get its a_tag
-    let project_a_tag =
-        find_project_a_tag_by_slug(store, project_slug).ok_or(AgentLookupError::ProjectNotFound)?;
+    let project = store
+        .get_projects()
+        .iter()
+        .find(|p| p.id == project_slug)
+        .ok_or(AgentLookupError::ProjectNotFound)?;
+    let project_a_tag = project.a_tag();
 
-    // Look through the online agents from ProjectStatus
-    let agents = store
-        .get_online_agents(&project_a_tag)
-        .ok_or(AgentLookupError::AgentNotFound)?;
+    let agents = project_roster_agents(store, project);
 
-    for agent in agents {
+    for agent in &agents {
         if agent.name == agent_name {
             let config = store.get_agent_config(&agent.pubkey);
             return Ok(AgentLookupResult {
-                project_a_tag,
+                project_a_tag: project_a_tag.clone(),
                 agent_pubkey: agent.pubkey.clone(),
                 skills: config
                     .map(|cfg| cfg.active_skills.clone())

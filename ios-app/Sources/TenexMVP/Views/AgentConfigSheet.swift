@@ -37,7 +37,6 @@ struct AgentConfigSheet: View {
     @State private var selectedSkills: Set<String> = []
     @State private var selectedMcpServers: [String] = []
     @State private var allSkills: [String] = []
-    @State private var isPm: Bool = false
     @State private var saveGlobally: Bool = false
     @State private var toolSearchText = ""
 
@@ -317,13 +316,10 @@ struct AgentConfigSheet: View {
                 }
 
                 GlassPanel(
-                    title: "Options",
-                    subtitle: "Apply role and scope changes."
+                    title: "Save Scope",
+                    subtitle: "Apply these configuration changes to this agent."
                 ) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Set as Project Manager", isOn: $isPm)
-                        Divider()
-                            .opacity(0.30)
                         Toggle("Change all projects this agent is in", isOn: $saveGlobally)
                     }
                 }
@@ -337,7 +333,7 @@ struct AgentConfigSheet: View {
     private var summaryCard: some View {
         GlassPanel(
             title: "Agent",
-            subtitle: "Configure model, tools, and role scope."
+            subtitle: "Configure model, tools, skills, and MCP access."
         ) {
             HStack(spacing: 10) {
                 statPill(label: "Name", value: agentDisplayName)
@@ -533,7 +529,6 @@ struct AgentConfigSheet: View {
                 selectedSkills = []
                 selectedMcpServers = []
                 selectedModelIndex = 0
-                isPm = agent.isPm
                 toolSearchText = ""
                 loadError = "No kind:34011 configuration has been received for this agent yet."
                 isLoading = false
@@ -553,7 +548,6 @@ struct AgentConfigSheet: View {
             selectedTools = Set(config.activeTools)
             selectedSkills = Set(config.activeSkills)
             selectedMcpServers = config.activeMcps
-            isPm = agent.isPm
             toolSearchText = ""
 
             isLoading = false
@@ -569,7 +563,7 @@ struct AgentConfigSheet: View {
 
         do {
             let selectedModel = allModels.isEmpty ? nil : allModels[selectedModelIndex]
-            let tags: [String] = isPm ? ["pm"] : []
+            let tags: [String] = []
 
             if saveGlobally {
                 try await coreManager.safeCore.updateGlobalAgentConfig(

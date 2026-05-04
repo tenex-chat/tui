@@ -8,9 +8,8 @@ impl TenexCore {
 
     /// Set the trusted backends from preferences.
     ///
-    /// This must be called after login to enable processing of kind:24010 (project status)
-    /// events. Status events from approved backends will populate project_statuses,
-    /// enabling get_online_agents() to return online agents.
+    /// This must be called after login to enable trust-gated backend data.
+    /// Approved kind:24011 inventories mark roster agents online.
     ///
     /// Call this on app startup with stored approved/blocked backend pubkeys.
     pub fn set_trusted_backends(
@@ -40,8 +39,8 @@ impl TenexCore {
 
     /// Add a backend to the approved list.
     ///
-    /// Once approved, kind:24010 events from this backend will be processed,
-    /// populating project_statuses and enabling get_online_agents().
+    /// Once approved, kind:24011 inventories from this backend can mark roster
+    /// agents online.
     pub fn approve_backend(&self, pubkey: String) -> Result<(), TenexError> {
         let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
@@ -69,23 +68,20 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
+        let affected_agent_pubkeys: std::collections::HashSet<String> = store
+            .get_installed_agents(&pubkey)
+            .iter()
+            .map(|agent| agent.pubkey.clone())
+            .collect();
         let updates = store.add_blocked_backend(&pubkey);
-        let deltas: Vec<DataChangeType> = updates
+        let mut affected_project_a_tags =
+            store.project_a_tags_for_agent_pubkeys(&affected_agent_pubkeys);
+        affected_project_a_tags.extend(updates.into_iter().map(|(project_a_tag, _)| project_a_tag));
+        affected_project_a_tags.sort();
+        affected_project_a_tags.dedup();
+        let deltas: Vec<DataChangeType> = affected_project_a_tags
             .into_iter()
-            .map(|(project_a_tag, status)| {
-                let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
-                let (is_online, online_agents) = status
-                    .filter(|status| status.is_online())
-                    .map(|status| (true, status.agents))
-                    .unwrap_or((false, Vec::new()));
-
-                DataChangeType::ProjectStatusChanged {
-                    project_id,
-                    project_a_tag,
-                    is_online,
-                    online_agents,
-                }
-            })
+            .map(|project_a_tag| project_status_changed_delta(store, project_a_tag, true))
             .collect();
         drop(store_guard);
         self.persist_current_trusted_backends()?;

@@ -211,9 +211,11 @@ mod tests {
     #[test]
     fn truncates_long_content_to_80_chars_for_title() {
         let long = "x".repeat(200);
-        let report = parse_html_report_from_builder(EventBuilder::new(Kind::from(1), long.clone())
-            .tag(custom_tag("t", "html-report"))
-            .tag(custom_tag("url", "https://blossom.example/report.html")))
+        let report = parse_html_report_from_builder(
+            EventBuilder::new(Kind::from(1), long.clone())
+                .tag(custom_tag("t", "html-report"))
+                .tag(custom_tag("url", "https://blossom.example/report.html")),
+        )
         .unwrap();
 
         assert_eq!(report.title.chars().count(), 80);

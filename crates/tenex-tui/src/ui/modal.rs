@@ -1415,7 +1415,8 @@ impl AgentConfigFocus {
 pub struct AgentSettingsState {
     pub agent_name: String,
     pub agent_pubkey: String,
-    /// Whether this agent is currently the PM for the project
+    /// Whether this agent is first in the project roster. Informational only;
+    /// PM/default selection is not part of agent config.
     pub is_pm: bool,
     /// Available models to choose from (from project status)
     pub available_models: Vec<String>,
@@ -1647,7 +1648,7 @@ pub struct AgentConfigState {
     pub original_skills: std::collections::HashSet<String>,
     /// Original MCP servers for change detection
     pub original_mcp_servers: std::collections::HashSet<String>,
-    /// Original PM marker for change detection
+    /// Original PM marker for display state only
     pub original_is_pm: bool,
 }
 
@@ -1696,7 +1697,6 @@ impl AgentConfigState {
             || settings.selected_tools != self.original_tools
             || settings.selected_skills != self.original_skills
             || settings.selected_mcp_servers != self.original_mcp_servers
-            || settings.is_pm != self.original_is_pm
     }
 }
 
@@ -2469,12 +2469,12 @@ mod tests {
         }
         assert!(state.has_config_changes());
 
-        // PM change
+        // PM/default membership is roster state, not agent config state.
         if let Some(s) = state.settings.as_mut() {
             s.selected_tools.remove("tool_write");
             s.is_pm = true;
         }
-        assert!(state.has_config_changes());
+        assert!(!state.has_config_changes());
     }
 
     #[test]

@@ -312,12 +312,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // Ctrl+M: toggle PM marker
-        KeyCode::Char('m') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if let Some(settings) = state.settings.as_mut() {
-                settings.is_pm = !settings.is_pm;
-            }
-        }
         KeyCode::Char(c)
             if state.focus == AgentConfigFocus::Agents
                 && !key
@@ -342,11 +336,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     let tools = settings.selected_tools_vec();
                     let skills = settings.selected_skills_vec();
                     let mcp_servers = settings.selected_mcp_servers_vec();
-                    let tags = if settings.is_pm {
-                        vec!["pm".to_string()]
-                    } else {
-                        Vec::new()
-                    };
 
                     if let Some(ref core_handle) = app.core_handle {
                         if let Err(e) = core_handle.send(NostrCommand::UpdateGlobalAgentConfig {
@@ -355,7 +344,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                             tools,
                             skills,
                             mcp_servers,
-                            tags,
+                            tags: Vec::new(),
                         }) {
                             app.set_warning_status(&format!("Failed to save agent config: {}", e));
                         } else {

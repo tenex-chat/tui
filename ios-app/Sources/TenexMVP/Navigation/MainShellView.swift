@@ -41,8 +41,10 @@ struct MainShellView: View {
         ConversationActivityMetrics.activeConversationCount(conversations: coreManager.conversations)
     }
 
-    private var totalOnlineAgentsCount: Int {
-        coreManager.onlineAgents.values.reduce(0) { $0 + $1.count }
+    private var totalAvailableAgentsCount: Int {
+        coreManager.projectRosterAgents.values.reduce(0) { total, agents in
+            total + agents.filter(\.isOnline).count
+        }
     }
 
     var body: some View {
@@ -205,8 +207,8 @@ struct MainShellView: View {
                     .background((projectsOnlineCount > 0 ? Color.presenceOnline : .secondary).opacity(0.16))
                     .foregroundStyle(projectsOnlineCount > 0 ? Color.presenceOnline : .secondary)
                     .clipShape(Capsule())
-            } else if section == .agents, totalOnlineAgentsCount > 0 {
-                Text("\(totalOnlineAgentsCount)")
+            } else if section == .agents, totalAvailableAgentsCount > 0 {
+                Text("\(totalAvailableAgentsCount)")
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)

@@ -8,6 +8,7 @@ use crate::panels::{
     ConfigPanel, ConversationStackEntry, NudgeSkillPanel, StatsPanel, StatusBarNav,
 };
 use crate::render::{print_above_input, redraw_input};
+use crate::roster::{default_project_agent, project_has_available_agent, project_roster_agents};
 use crate::state::{AskModalState, ReplState};
 use crate::util::thread_display_name;
 use crate::{CYAN, DIM, GREEN, RED, RESET, WHITE_BOLD};
@@ -15,7 +16,7 @@ use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 use std::io::{Stdout, Write};
 use tenex_core::events::CoreEvent;
-use tenex_core::models::{AskInputState, Project, ProjectAgent, Thread};
+use tenex_core::models::{AskInputState, Project, Thread};
 use tenex_core::nostr::NostrCommand;
 use tenex_core::runtime::CoreRuntime;
 
@@ -94,7 +95,7 @@ pub(crate) fn handle_project_command(
                 } else {
                     "  ".to_string()
                 };
-                let online = if store_ref.is_project_online(&project.a_tag()) {
+                let online = if project_has_available_agent(&store_ref, &project.a_tag()) {
                     format!(" {GREEN}(online){RESET}")
                 } else {
                     format!(" {DIM}(offline){RESET}")
@@ -272,7 +273,7 @@ pub(crate) fn auto_select_project(state: &mut ReplState, runtime: &CoreRuntime) 
         .get_projects()
         .iter()
         .filter(|p| !p.is_deleted)
-        .find(|p| store_ref.is_project_online(&p.a_tag()))
+        .find(|p| project_has_available_agent(&store_ref, &p.a_tag()))
         .map(|p| (p.a_tag(), p.title.clone()));
     drop(store_ref);
 
@@ -294,12 +295,9 @@ pub(crate) fn auto_select_agent(state: &mut ReplState, runtime: &CoreRuntime) {
     };
     let store = runtime.data_store();
     let store_ref = store.borrow();
-    if let Some(agents) = store_ref.get_online_agents(a_tag) {
-        let agent = agents.iter().find(|a| a.is_pm).or_else(|| agents.first());
-        if let Some(a) = agent {
-            state.current_agent = Some(a.pubkey.clone());
-            state.current_agent_name = Some(a.name.clone());
-        }
+    if let Some(agent) = default_project_agent(&store_ref, a_tag) {
+        state.current_agent = Some(agent.pubkey);
+        state.current_agent_name = Some(agent.name);
     }
 }
 
@@ -368,33 +366,26 @@ pub(crate) fn handle_agent_command(
     };
     let store = runtime.data_store();
     let store_ref = store.borrow();
-    let agents: Vec<&ProjectAgent> = store_ref
-        .get_online_agents(a_tag)
-        .map(|a| a.iter().collect())
-        .unwrap_or_default();
+    let agents = project_roster_agents(&store_ref, a_tag);
 
     match agent_arg {
         None | Some("") => {
             if agents.is_empty() {
-                output.push(print_system_raw(
-                    "No online agents. Is the backend running?",
-                ));
+                output.push(print_system_raw("No project agents in the 31933 roster."));
                 return output;
             }
-            output.push(format!("{WHITE_BOLD}Online agents:{RESET}"));
+            output.push(format!("{WHITE_BOLD}Project agents:{RESET}"));
             for (i, agent) in agents.iter().enumerate() {
                 let marker = if state.current_agent.as_deref() == Some(&agent.pubkey) {
                     format!("{GREEN}*{RESET} ")
                 } else {
                     "  ".to_string()
                 };
-                let model = store_ref
-                    .get_agent_config(&agent.pubkey)
-                    .and_then(|cfg| cfg.active_model.as_deref())
-                    .unwrap_or("unknown model");
+                let model = agent.model.as_deref().unwrap_or("unknown model");
                 let pm_badge = if agent.is_pm { " [PM]" } else { "" };
+                let availability = if agent.is_online { "online" } else { "offline" };
                 output.push(format!(
-                    "  {marker}{}: {}{pm_badge} ({DIM}{model}{RESET})",
+                    "  {marker}{}: {}{pm_badge} ({DIM}{model}, {availability}{RESET})",
                     i + 1,
                     agent.name
                 ));
@@ -402,13 +393,12 @@ pub(crate) fn handle_agent_command(
         }
         Some(name) => {
             let matched = if let Ok(idx) = name.parse::<usize>() {
-                agents.get(idx.saturating_sub(1)).copied()
+                agents.get(idx.saturating_sub(1))
             } else {
                 let lower = name.to_lowercase();
                 agents
                     .iter()
                     .find(|a| a.name.to_lowercase().contains(&lower))
-                    .copied()
             };
 
             match matched {
@@ -691,24 +681,8 @@ pub(crate) fn handle_new_command(
             if let Some(ref a_tag) = state.current_project {
                 let store = runtime.data_store();
                 let store_ref = store.borrow();
-                if let Some(agents) = store_ref.get_online_agents(a_tag) {
-                    let lower = agent_name.to_lowercase();
-                    if let Some(agent) = agents
-                        .iter()
-                        .find(|a| a.name.to_lowercase().contains(&lower))
-                    {
-                        state.current_agent = Some(agent.pubkey.clone());
-                        state.current_agent_name = Some(agent.name.clone());
-                    }
-                }
-            }
-        }
-    } else if !arg.is_empty() {
-        if let Some(ref a_tag) = state.current_project {
-            let store = runtime.data_store();
-            let store_ref = store.borrow();
-            if let Some(agents) = store_ref.get_online_agents(a_tag) {
-                let lower = arg.to_lowercase();
+                let agents = project_roster_agents(&store_ref, a_tag);
+                let lower = agent_name.to_lowercase();
                 if let Some(agent) = agents
                     .iter()
                     .find(|a| a.name.to_lowercase().contains(&lower))
@@ -716,6 +690,20 @@ pub(crate) fn handle_new_command(
                     state.current_agent = Some(agent.pubkey.clone());
                     state.current_agent_name = Some(agent.name.clone());
                 }
+            }
+        }
+    } else if !arg.is_empty() {
+        if let Some(ref a_tag) = state.current_project {
+            let store = runtime.data_store();
+            let store_ref = store.borrow();
+            let agents = project_roster_agents(&store_ref, a_tag);
+            let lower = arg.to_lowercase();
+            if let Some(agent) = agents
+                .iter()
+                .find(|a| a.name.to_lowercase().contains(&lower))
+            {
+                state.current_agent = Some(agent.pubkey.clone());
+                state.current_agent_name = Some(agent.name.clone());
             }
         }
     }
@@ -752,19 +740,17 @@ pub(crate) fn handle_reference_command(
         )]);
     };
 
-    // Auto-select PM agent if none is chosen.
+    // Auto-select the first 31933 roster agent if none is chosen.
     if state.current_agent.is_none() {
-        let pm_agent = {
+        let default_agent = {
             let store = runtime.data_store();
             let store_ref = store.borrow();
-            store_ref
-                .get_project_status(&project_a_tag)
-                .and_then(|status| status.pm_agent())
-                .map(|agent| (agent.pubkey.clone(), agent.name.clone()))
+            default_project_agent(&store_ref, &project_a_tag)
+                .map(|agent| (agent.pubkey, agent.name))
         };
-        if let Some((pm_pubkey, pm_name)) = pm_agent {
-            state.current_agent = Some(pm_pubkey);
-            state.current_agent_name = Some(pm_name);
+        if let Some((pubkey, name)) = default_agent {
+            state.current_agent = Some(pubkey);
+            state.current_agent_name = Some(name);
         }
     }
 
@@ -981,7 +967,7 @@ pub(crate) fn handle_boot_command(arg: Option<&str>, runtime: &CoreRuntime) -> V
         return vec![print_error_raw(&format!("No project matching '{arg}'"))];
     };
 
-    if store_ref.is_project_online(&project.a_tag()) {
+    if project_has_available_agent(&store_ref, &project.a_tag()) {
         return vec![print_system_raw(&format!(
             "{} is already online",
             project.title
@@ -1025,7 +1011,7 @@ pub(crate) fn handle_status_command(state: &ReplState, runtime: &CoreRuntime) ->
     if let Some(ref a_tag) = state.current_project {
         let store = runtime.data_store();
         let store_ref = store.borrow();
-        let online = store_ref.is_project_online(a_tag);
+        let online = project_has_available_agent(&store_ref, a_tag);
         let status = if online {
             format!("{GREEN}online{RESET}")
         } else {
@@ -1115,23 +1101,19 @@ fn resolve_agent_for_config(
     } else {
         let store = runtime.data_store();
         let store_ref = store.borrow();
-        let agents: Vec<&ProjectAgent> = store_ref
-            .get_online_agents(a_tag)
-            .map(|a| a.iter().collect())
-            .unwrap_or_default();
+        let agents = project_roster_agents(&store_ref, a_tag);
 
         let matched = if let Ok(idx) = filter.parse::<usize>() {
             if idx == 0 {
                 None
             } else {
-                agents.get(idx - 1).copied()
+                agents.get(idx - 1)
             }
         } else {
             let lower = filter.to_lowercase();
             agents
                 .iter()
                 .find(|a| a.name.to_lowercase().contains(&lower))
-                .copied()
         };
 
         match matched {
@@ -1157,7 +1139,6 @@ pub(crate) fn handle_config_command(
     let a_tag = a_tag.clone();
 
     let mut open_model = false;
-    let mut is_set_pm = false;
     let mut is_global = false;
     let mut agent_filter = String::new();
     let mut open_agent_select = false;
@@ -1165,7 +1146,6 @@ pub(crate) fn handle_config_command(
     for part in raw.split_whitespace() {
         match part {
             "--model" => open_model = true,
-            "--set-pm" => is_set_pm = true,
             "--global" => is_global = true,
             _ if part.starts_with('@') => {
                 let name = &part[1..];
@@ -1198,8 +1178,6 @@ pub(crate) fn handle_config_command(
     // Load tools for the resolved agent
     let store = runtime.data_store();
     let store_ref = store.borrow();
-    let status = store_ref.get_project_status(&a_tag);
-    let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
     let config = store_ref.get_agent_config(&agent_pubkey);
     panel.tools_items = config.map(|cfg| cfg.tools.clone()).unwrap_or_default();
@@ -1207,7 +1185,6 @@ pub(crate) fn handle_config_command(
         .map(|cfg| cfg.active_tools.iter().cloned().collect())
         .unwrap_or_default();
     panel.pending_model = None;
-    panel.is_set_pm = is_set_pm || agent.map(|a| a.is_pm).unwrap_or(false);
     panel.filter.clear();
     panel.quick_save = false;
 
@@ -1272,8 +1249,6 @@ pub(crate) fn handle_model_command(
 
     let store = runtime.data_store();
     let store_ref = store.borrow();
-    let status = store_ref.get_project_status(&a_tag);
-    let agent = status.and_then(|s| s.agents.iter().find(|a| a.pubkey == agent_pubkey));
 
     let config = store_ref.get_agent_config(&agent_pubkey);
     panel.tools_items = config.map(|cfg| cfg.tools.clone()).unwrap_or_default();
@@ -1281,7 +1256,6 @@ pub(crate) fn handle_model_command(
         .map(|cfg| cfg.active_tools.iter().cloned().collect())
         .unwrap_or_default();
     panel.pending_model = None;
-    panel.is_set_pm = agent.map(|a| a.is_pm).unwrap_or(false);
     panel.filter.clear();
     panel.quick_save = true;
 

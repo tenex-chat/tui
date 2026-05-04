@@ -437,8 +437,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Get online agents from project status (kind:24010).
-    /// These are actual agent instances with their own Nostr keypairs.
+    /// Legacy project-status agent payload from kind:24010.
+    /// UI roster surfaces should use TenexCoreManager.projectRosterAgents instead.
     func getOnlineAgents(projectId: String) throws -> [ProjectAgent] {
         try profiler.measureFFI("getOnlineAgents") {
             do {
@@ -493,8 +493,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Get available configuration options for a project.
-    /// Returns all available models and tools from the project status.
+    /// Legacy project-level configuration options.
+    /// Agent configuration UI should prefer per-agent kind:34011 via getAgentConfig.
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions {
         try profiler.measureFFI("getProjectConfigOptions") {
             do {
@@ -725,8 +725,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     // MARK: - Project Status
 
-    /// Check if a project is online (has a recent kind:24010 status event).
-    /// A project is considered online if it has a non-stale status from an approved backend.
+    /// Legacy project-status online check.
+    /// UI availability is derived from 24011 inventory in TenexCoreManager.
     /// Note: Internal `try!` in FFI - can crash on error.
     func isProjectOnline(projectId: String) -> Bool {
         profiler.measureFFI("isProjectOnline") {
@@ -755,7 +755,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     // MARK: - Backend Trust
 
     /// Set the trusted backends from preferences.
-    /// Must be called after init to enable processing of kind:24010 events.
+    /// Must be called after init to enable processing backend-authored runtime and inventory events.
     func setTrustedBackends(approved: [String], blocked: [String]) throws {
         try profiler.measureFFI("setTrustedBackends") {
             do {

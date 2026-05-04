@@ -50,6 +50,7 @@ mod history;
 mod markdown;
 mod panels;
 mod render;
+mod roster;
 mod state;
 mod util;
 
@@ -539,12 +540,6 @@ async fn run_repl(
                                         panel.switch_to_model_select(runtime);
                                     }
                                     1 => {
-                                        // --set-pm
-                                        panel.is_set_pm = !panel.is_set_pm;
-                                        panel.rebuild_origin_command();
-                                        panel.switch_to_tools();
-                                    }
-                                    2 => {
                                         // --global
                                         panel.is_global = !panel.is_global;
                                         panel.rebuild_origin_command();
@@ -1551,6 +1546,26 @@ fn drain_data_changes(
                 }
 
                 if needs_redraw && !state.streaming_in_progress {
+                    redraw_input(
+                        stdout,
+                        state,
+                        runtime,
+                        editor,
+                        completion,
+                        panel,
+                        status_nav,
+                        stats_panel,
+                        nudge_skill_panel,
+                    );
+                }
+            }
+            Ok(DataChange::InstalledAgentList { json }) => {
+                let store = runtime.data_store();
+                let mut store_ref = store.borrow_mut();
+                store_ref.handle_status_event_json(&json);
+                drop(store_ref);
+
+                if state.current_project.is_none() && auto_select_project(state, runtime) {
                     redraw_input(
                         stdout,
                         state,

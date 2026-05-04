@@ -1,5 +1,6 @@
 use crate::util::{format_day_label, format_runtime};
 use crate::{CYAN, DIM, GREEN, RESET, WHITE_BOLD};
+use crate::roster::project_roster_agents;
 use std::collections::HashSet;
 use tenex_core::nostr::NostrCommand;
 use tenex_core::runtime::CoreRuntime;
@@ -28,7 +29,6 @@ pub(crate) struct ConfigPanel {
     pub(crate) tools_items: Vec<String>,
     pub(crate) tools_selected: HashSet<String>,
     pub(crate) pending_model: Option<String>,
-    pub(crate) is_set_pm: bool,
     pub(crate) filter: String,
     pub(crate) quick_save: bool,
 }
@@ -49,7 +49,6 @@ impl ConfigPanel {
             tools_items: Vec::new(),
             tools_selected: HashSet::new(),
             pending_model: None,
-            is_set_pm: false,
             filter: String::new(),
             quick_save: false,
         }
@@ -72,15 +71,10 @@ impl ConfigPanel {
         let store = runtime.data_store();
         let store_ref = store.borrow();
         let mut agent_items = Vec::new();
-        if let Some(status) = store_ref.get_project_status(&self.project_a_tag) {
-            for agent in &status.agents {
-                let model = store_ref
-                    .get_agent_config(&agent.pubkey)
-                    .and_then(|cfg| cfg.active_model.as_deref())
-                    .unwrap_or("unknown");
-                let pm = if agent.is_pm { " [PM]" } else { "" };
-                agent_items.push(format!("{}{pm} ({model})", agent.name));
-            }
+        for agent in project_roster_agents(&store_ref, &self.project_a_tag) {
+            let model = agent.model.as_deref().unwrap_or("unknown");
+            let pm = if agent.is_pm { " [PM]" } else { "" };
+            agent_items.push(format!("{}{pm} ({model})", agent.name));
         }
         self.items = agent_items;
     }
@@ -95,10 +89,8 @@ impl ConfigPanel {
 
     pub(crate) fn rebuild_flag_items(&mut self) {
         let global_marker = if self.is_global { "[x]" } else { "[ ]" };
-        let pm_marker = if self.is_set_pm { "[x]" } else { "[ ]" };
         self.items = vec![
             format!("→  --model"),
-            format!("{pm_marker} --set-pm"),
             format!("{global_marker} --global"),
         ];
     }
@@ -138,9 +130,6 @@ impl ConfigPanel {
         }
         if self.is_global {
             parts.push("--global".to_string());
-        }
-        if self.is_set_pm {
-            parts.push("--set-pm".to_string());
         }
         if let Some(ref model) = self.pending_model {
             parts.push(format!("--model {model}"));
@@ -187,7 +176,6 @@ impl ConfigPanel {
         self.tools_items.clear();
         self.tools_selected.clear();
         self.pending_model = None;
-        self.is_set_pm = false;
         self.filter.clear();
         self.quick_save = false;
         self.cursor = 0;
@@ -197,19 +185,6 @@ impl ConfigPanel {
     pub(crate) fn save(&self, runtime: &CoreRuntime) -> String {
         let store = runtime.data_store();
         let store_ref = store.borrow();
-
-        let agent = match store_ref
-            .get_project_status(&self.project_a_tag)
-            .and_then(|s| s.agents.iter().find(|a| a.pubkey == self.agent_pubkey))
-        {
-            Some(a) => a,
-            None => {
-                return format!(
-                    "Agent {} no longer found in project status",
-                    self.agent_name
-                );
-            }
-        };
 
         let config = store_ref.get_agent_config(&self.agent_pubkey);
 
@@ -228,13 +203,6 @@ impl ConfigPanel {
             .map(|cfg| cfg.active_mcps.clone())
             .unwrap_or_default();
 
-        // Tags: include "pm" if is_set_pm flag is on, or agent was already PM
-        let tags: Vec<String> = if self.is_set_pm || agent.is_pm {
-            vec!["pm".to_string()]
-        } else {
-            vec![]
-        };
-
         drop(store_ref);
 
         let save_type = if self.is_global { "global" } else { "project" };
@@ -248,7 +216,7 @@ impl ConfigPanel {
                     tools,
                     skills,
                     mcp_servers,
-                    tags,
+                    tags: Vec::new(),
                 });
         } else {
             let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
@@ -258,7 +226,7 @@ impl ConfigPanel {
                 tools,
                 skills,
                 mcp_servers,
-                tags,
+                tags: Vec::new(),
             });
         }
 
@@ -269,9 +237,6 @@ impl ConfigPanel {
                 "model → {}",
                 self.pending_model.as_deref().unwrap_or("?")
             ));
-        }
-        if self.is_set_pm {
-            changes.push("set as PM".to_string());
         }
         changes.push(format!("{} tools", self.tools_selected.len()));
 
@@ -288,19 +253,6 @@ impl ConfigPanel {
         let store = runtime.data_store();
         let store_ref = store.borrow();
 
-        let agent = match store_ref
-            .get_project_status(&self.project_a_tag)
-            .and_then(|s| s.agents.iter().find(|a| a.pubkey == self.agent_pubkey))
-        {
-            Some(a) => a,
-            None => {
-                return format!(
-                    "Agent {} no longer found in project status",
-                    self.agent_name
-                );
-            }
-        };
-
         let config = store_ref.get_agent_config(&self.agent_pubkey);
         let model = self.pending_model.clone();
         let tools = config
@@ -312,12 +264,6 @@ impl ConfigPanel {
         let mcp_servers = config
             .map(|cfg| cfg.active_mcps.clone())
             .unwrap_or_default();
-        let tags: Vec<String> = if agent.is_pm {
-            vec!["pm".to_string()]
-        } else {
-            vec![]
-        };
-
         drop(store_ref);
 
         if self.is_global {
@@ -329,7 +275,7 @@ impl ConfigPanel {
                     tools,
                     skills,
                     mcp_servers,
-                    tags,
+                    tags: Vec::new(),
                 });
         } else {
             let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
@@ -339,7 +285,7 @@ impl ConfigPanel {
                 tools,
                 skills,
                 mcp_servers,
-                tags,
+                tags: Vec::new(),
             });
         }
 
@@ -356,10 +302,8 @@ impl ConfigPanel {
 
         let store = runtime.data_store();
         let store_ref = store.borrow();
-        let Some(status) = store_ref.get_project_status(&self.project_a_tag) else {
-            return false;
-        };
-        let Some(agent) = status.agents.get(orig_idx) else {
+        let agents = project_roster_agents(&store_ref, &self.project_a_tag);
+        let Some(agent) = agents.get(orig_idx) else {
             return false;
         };
 
@@ -377,7 +321,6 @@ impl ConfigPanel {
 
         // Reset pending model — new agent, fresh state
         self.pending_model = None;
-        self.is_set_pm = agent.is_pm;
 
         true
     }

@@ -6,6 +6,7 @@ pub mod events;
 pub mod inbox_store;
 pub mod operations_store;
 pub mod reports_store;
+pub mod roster;
 pub mod runtime_hierarchy;
 pub mod state_cache;
 pub mod statistics_store;

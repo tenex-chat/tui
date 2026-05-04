@@ -636,7 +636,7 @@ fn handle_core_events(
                 if app.selected_project.as_ref().map(|p| p.a_tag())
                     == Some(status.project_coordinate.clone())
                 {
-                    app.refresh_selected_agent_from_project_status();
+                    app.refresh_selected_agent_from_roster();
                 }
             }
             CoreEvent::PendingBackendApproval(pending) => {

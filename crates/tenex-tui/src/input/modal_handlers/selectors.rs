@@ -33,22 +33,11 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
                 let needs_agent = for_new_thread || app.selected_agent().is_none();
                 app.selected_project = Some(project);
 
-                // Auto-select PM agent from status
-                // Extract values before making mutable calls to avoid borrow issues
-                let pm_agent = {
-                    let store = app.data_store.borrow();
-                    if let Some(status) = store.get_project_status(&a_tag) {
-                        if needs_agent {
-                            status.pm_agent().cloned()
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
+                if needs_agent {
+                    let default_agent = app.selected_project_default_agent();
+                    if let Some(agent) = default_agent {
+                        app.set_selected_agent(Some(agent));
                     }
-                };
-                if let Some(pm) = pm_agent {
-                    app.set_selected_agent(Some(pm));
                 }
 
                 app.modal_state = ModalState::None;
@@ -166,18 +155,12 @@ pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent)
                 // Update the selected project (for display and agent lookup)
                 app.selected_project = Some(project);
 
-                // Auto-select PM agent from the new project's status
-                // If no PM agent is found, clear the selected agent to prevent stale selection
-                let pm_agent = {
-                    let store = app.data_store.borrow();
-                    store
-                        .get_project_status(&a_tag)
-                        .and_then(|status| status.pm_agent().cloned())
-                };
-                if let Some(pm) = pm_agent {
-                    app.set_selected_agent(Some(pm));
+                // Auto-select the new project's first 31933 roster agent.
+                let default_agent = app.selected_project_default_agent();
+                if let Some(agent) = default_agent {
+                    app.set_selected_agent(Some(agent));
                 } else {
-                    // Clear stale agent selection when no PM is found for the new project
+                    // Clear stale agent selection when no roster agent is found for the new project.
                     app.set_selected_agent(None);
                     app.user_explicitly_selected_agent = false;
                 }

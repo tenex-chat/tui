@@ -1,11 +1,11 @@
 import SwiftUI
 
 /// A sheet for selecting an agent to p-tag in a message.
-/// Uses ProjectAgent rows from live project status plus p-tagged project agents.
+/// Uses the ordered project roster from kind:31933, annotated with kind:24011 availability.
 struct AgentSelectorSheet: View {
     // MARK: - Properties
 
-    /// Available agents to choose from, including offline p-tagged agents.
+    /// Ordered project roster rows to choose from.
     let agents: [ProjectAgent]
 
     /// Project ID for agent configuration
@@ -48,25 +48,7 @@ struct AgentSelectorSheet: View {
             }
         }
 
-        // Sort PM agents first, then online agents, then alphabetically by name.
-        return filtered.sorted { a, b in
-            if a.isPm != b.isPm {
-                return a.isPm  // PM agents come first
-            }
-            if a.isOnline != b.isOnline {
-                return a.isOnline && !b.isOnline
-            }
-            let nameComparison = AgentDisplayName
-                .resolve(pubkey: a.pubkey, coreManager: coreManager)
-                .localizedCaseInsensitiveCompare(
-                    AgentDisplayName.resolve(pubkey: b.pubkey, coreManager: coreManager)
-                )
-            if nameComparison != .orderedSame {
-                return nameComparison == .orderedAscending
-            }
-            // Tie-breaker: use pubkey for stable sorting when names are equal
-            return a.pubkey < b.pubkey
-        }
+        return filtered
     }
 
     // MARK: - Body
@@ -121,7 +103,7 @@ struct AgentSelectorSheet: View {
                 emptyStateView
             } else {
                 ForEach(filteredAgents, id: \.pubkey) { agent in
-                    OnlineAgentRowView(
+                    RosterAgentRowView(
                         agent: agent,
                         onTap: { selectAgent(agent) },
                         onConfig: { agentToConfig = agent }
@@ -136,7 +118,7 @@ struct AgentSelectorSheet: View {
                 emptyStateView
             } else {
                 ForEach(filteredAgents, id: \.pubkey) { agent in
-                    OnlineAgentRowView(
+                    RosterAgentRowView(
                         agent: agent,
                         onTap: { selectAgent(agent) },
                         onConfig: { agentToConfig = agent }
@@ -196,9 +178,9 @@ extension ProjectAgent: Identifiable {
     public var id: String { pubkey }
 }
 
-// MARK: - Online Agent Row View
+// MARK: - Roster Agent Row View
 
-struct OnlineAgentRowView: View {
+struct RosterAgentRowView: View {
     @Environment(TenexCoreManager.self) var coreManager
     let agent: ProjectAgent
     var onTap: (() -> Void)?
@@ -238,12 +220,9 @@ struct OnlineAgentRowView: View {
                     }
                 }
 
-                let statusText = agent.isOnline ? agent.model : "Offline"
-                if let statusText, !statusText.isEmpty {
-                    Text(statusText)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(agentAvailabilityLabel)
+                    .font(.caption)
+                    .foregroundStyle(agent.isOnline ? Color.presenceOnline : .secondary)
             }
 
             Spacer()
@@ -273,6 +252,14 @@ struct OnlineAgentRowView: View {
                 .buttonStyle(.borderless)
             }
         }
+    }
+
+    private var agentAvailabilityLabel: String {
+        guard agent.isOnline else { return "Unavailable" }
+        if let model = agent.model, !model.isEmpty {
+            return model
+        }
+        return "Available"
     }
 }
 

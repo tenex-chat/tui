@@ -944,11 +944,18 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
 
     private var sortedBackends: [BackendInstallTarget] {
         var backends: [String: Set<String>] = [:]
+        var projectTitlesByBackend: [String: Set<String>] = [:]
 
         for project in coreManager.projects where !project.isDeleted {
-            guard coreManager.projectOnlineStatus[project.id] ?? false else { continue }
-            guard let backendPubkey = coreManager.safeCore.getProjectBackendPubkey(projectId: project.id) else { continue }
-            backends[backendPubkey, default: []].insert(project.title)
+            for agent in coreManager.projectRosterAgents[project.id] ?? [] where !agent.backendPubkey.isEmpty {
+                projectTitlesByBackend[agent.backendPubkey, default: []].insert(project.title)
+            }
+        }
+
+        for item in coreManager.agentInventory {
+            for backend in item.backends {
+                backends[backend.backendPubkey, default: []].formUnion(projectTitlesByBackend[backend.backendPubkey] ?? [])
+            }
         }
 
         return backends
@@ -977,11 +984,11 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
             List {
                 if filteredBackends.isEmpty {
                     ContentUnavailableView(
-                        "No Live Backends",
+                        "No Backend Inventory",
                         systemImage: "bolt.horizontal.circle",
                         description: Text(
                             searchText.isEmpty
-                                ? "Bring a backend online so you can install this agent definition."
+                                ? "Approve a backend publishing kind:24011 inventory before installing this agent definition."
                                 : "No backends match your search."
                         )
                     )
@@ -997,7 +1004,7 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
             #else
             .listStyle(.inset)
             #endif
-            .searchable(text: $searchText, prompt: "Search live backends")
+            .searchable(text: $searchText, prompt: "Search backends")
             .navigationTitle("Install to Backends")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

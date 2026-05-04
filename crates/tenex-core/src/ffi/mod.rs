@@ -61,7 +61,7 @@ use crate::stats::{
     query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats,
 };
 use crate::store::AppDataStore;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Keep UniFFI exports split by domain-specific *_api.rs modules.
 mod agents_api;
@@ -479,23 +479,35 @@ impl DeltaSummary {
     }
 }
 
-/// Apply per-agent kind:34011 `AgentConfig` data into `ProjectAgent` records.
-///
-/// Agent current configuration is sourced exclusively from 34011. The 24010
-/// project heartbeat only tells us which agent pubkeys are live in a project.
-fn merge_agent_configs(store: &AppDataStore, agents: Vec<ProjectAgent>) -> Vec<ProjectAgent> {
-    agents
-        .into_iter()
-        .map(|mut agent| {
-            if let Some(cfg) = store.get_agent_config(&agent.pubkey) {
-                agent.model = cfg.active_model.clone();
-                agent.tools = cfg.active_tools.clone();
-                agent.skills = cfg.active_skills.clone();
-                agent.mcp_servers = cfg.active_mcps.clone();
-            }
-            agent
-        })
-        .collect()
+fn project_status_changed_delta(
+    store: &AppDataStore,
+    project_a_tag: String,
+    include_roster: bool,
+) -> DataChangeType {
+    let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
+    let is_online = store.is_project_online(&project_a_tag);
+    let online_agents = if include_roster {
+        store.get_online_agents(&project_a_tag).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    DataChangeType::ProjectStatusChanged {
+        project_id,
+        project_a_tag,
+        is_online,
+        online_agents,
+    }
+}
+
+fn push_roster_deltas_for_agent_pubkeys(
+    store: &AppDataStore,
+    deltas: &mut Vec<DataChangeType>,
+    agent_pubkeys: &HashSet<String>,
+) {
+    for project_a_tag in store.project_a_tags_for_agent_pubkeys(agent_pubkeys) {
+        deltas.push(project_status_changed_delta(store, project_a_tag, true));
+    }
 }
 
 fn summarize_deltas(deltas: &[DataChangeType]) -> DeltaSummary {
@@ -532,6 +544,7 @@ fn process_note_keys_with_deltas(
     let mut kind_1111 = 0usize;
     let mut kind_31933 = 0usize;
     let mut kind_34199 = 0usize;
+    let mut kind_34011 = 0usize;
     let mut kind_4199 = 0usize;
     let mut kind_4200 = 0usize;
     let mut kind_4201 = 0usize;
@@ -561,6 +574,7 @@ fn process_note_keys_with_deltas(
                     kind_34199 += 1;
                     teams_changed = true;
                 }
+                34011 => kind_34011 += 1,
                 4199 => {
                     kind_4199 += 1;
                     definitions_changed = true;
@@ -590,6 +604,13 @@ fn process_note_keys_with_deltas(
                         deltas.push(DataChangeType::ProjectUpsert {
                             project: project.clone(),
                         });
+                        deltas.push(project_status_changed_delta(store, project.a_tag(), true));
+                    }
+                }
+                34011 => {
+                    if let Some(cfg) = AgentConfig::from_note(&note) {
+                        let affected = HashSet::from([cfg.pubkey]);
+                        push_roster_deltas_for_agent_pubkeys(store, &mut deltas, &affected);
                     }
                 }
                 1 => {
@@ -712,7 +733,7 @@ fn process_note_keys_with_deltas(
     let delta_summary = summarize_deltas(&deltas);
     tlog!(
         "PERF",
-        "process_note_keys_with_deltas noteKeys={} notesFound={} kinds={{1:{} 7:{} 513:{} 1111:{} 31933:{} 34199:{} 4199:{} 4200:{} 4201:{} 4202:{} 30023:{} other:{}}} convUpserts={} inboxUpserts={} pendingProjectSubs={} deltas=[{}] elapsedMs={}",
+        "process_note_keys_with_deltas noteKeys={} notesFound={} kinds={{1:{} 7:{} 513:{} 1111:{} 31933:{} 34199:{} 34011:{} 4199:{} 4200:{} 4201:{} 4202:{} 30023:{} other:{}}} convUpserts={} inboxUpserts={} pendingProjectSubs={} deltas=[{}] elapsedMs={}",
         note_keys.len(),
         notes_found,
         kind_1,
@@ -721,6 +742,7 @@ fn process_note_keys_with_deltas(
         kind_1111,
         kind_31933,
         kind_34199,
+        kind_34011,
         kind_4199,
         kind_4200,
         kind_4201,
@@ -776,23 +798,14 @@ fn process_data_changes_with_deltas(
                                 if store.trust.is_approved(&status.backend_pubkey)
                                     && store.project_statuses.contains_key(&project_a_tag)
                                 {
-                                    let project_id = project_id_from_a_tag(store, &project_a_tag)
-                                        .unwrap_or_default();
-                                    let is_online = store.is_project_online(&project_a_tag);
-                                    let online_agents: Vec<ProjectAgent> = store
-                                        .get_online_agents(&project_a_tag)
-                                        .map(|agents| agents.iter().cloned().collect())
-                                        .unwrap_or_default();
-                                    // Merge per-agent kind:34011 configs so iOS
-                                    // receives the richest available data.
-                                    let online_agents = merge_agent_configs(store, online_agents);
-
-                                    deltas.push(DataChangeType::ProjectStatusChanged {
-                                        project_id,
+                                    // 24010 is no longer a roster source. Keep
+                                    // the status/options signal, but do not carry
+                                    // roster agents on this delta.
+                                    deltas.push(project_status_changed_delta(
+                                        store,
                                         project_a_tag,
-                                        is_online,
-                                        online_agents,
-                                    });
+                                        false,
+                                    ));
                                 } else if !store.trust.is_blocked(&status.backend_pubkey)
                                     && !pending_before
                                 {
@@ -823,31 +836,12 @@ fn process_data_changes_with_deltas(
                             // The unconditional `handle_status_event_value` call above already
                             // upserted the config into `agent_configs_by_pubkey`.
                             //
-                            // Emit ProjectStatusChanged for every project that has this
-                            // agent online so iOS refreshes its cached agent list with
-                            // the merged 34011 data (model, skills, mcp).
+                            // Emit ProjectStatusChanged for every project whose
+                            // 31933 roster contains this agent so clients refresh
+                            // model/tool/skill/MCP data from the shared builder.
                             if let Some(cfg) = crate::models::AgentConfig::from_value(&event) {
-                                for (a_tag, status) in &store.project_statuses {
-                                    if !status.is_online() {
-                                        continue;
-                                    }
-                                    let has_agent =
-                                        status.agents.iter().any(|a| a.pubkey == cfg.pubkey);
-                                    if has_agent {
-                                        let project_id =
-                                            project_id_from_a_tag(store, a_tag).unwrap_or_default();
-                                        let online_agents: Vec<ProjectAgent> =
-                                            status.agents.iter().cloned().collect();
-                                        let online_agents =
-                                            merge_agent_configs(store, online_agents);
-                                        deltas.push(DataChangeType::ProjectStatusChanged {
-                                            project_id,
-                                            project_a_tag: a_tag.clone(),
-                                            is_online: true,
-                                            online_agents,
-                                        });
-                                    }
-                                }
+                                let affected = HashSet::from([cfg.pubkey]);
+                                push_roster_deltas_for_agent_pubkeys(store, &mut deltas, &affected);
                             }
                         }
                         _ => {}
@@ -857,11 +851,28 @@ fn process_data_changes_with_deltas(
             DataChange::InstalledAgentList { json } => {
                 installed_agent_changes += 1;
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
-                    if let Some((backend_pubkey, _)) =
+                    if let Some((backend_pubkey, installed_agents)) =
                         crate::models::InstalledAgent::from_value(&event)
                     {
+                        let mut affected_agent_pubkeys: HashSet<String> = store
+                            .get_installed_agents(&backend_pubkey)
+                            .iter()
+                            .map(|agent| agent.pubkey.clone())
+                            .collect();
+                        affected_agent_pubkeys
+                            .extend(installed_agents.into_iter().map(|agent| agent.pubkey));
+                        let should_refresh_rosters = store.trust.is_approved(&backend_pubkey)
+                            && !store.trust.is_blocked(&backend_pubkey);
+
                         store.handle_status_event_value(&event);
                         deltas.push(DataChangeType::InstalledAgentsChanged { backend_pubkey });
+                        if should_refresh_rosters {
+                            push_roster_deltas_for_agent_pubkeys(
+                                store,
+                                &mut deltas,
+                                &affected_agent_pubkeys,
+                            );
+                        }
                     }
                 }
             }
@@ -1759,7 +1770,7 @@ pub enum DataChangeType {
     ReportUpsert {
         report: Report,
     },
-    /// Project online status updated (kind:24010)
+    /// Project roster/status changed.
     ProjectStatusChanged {
         project_id: String,
         project_a_tag: String,
@@ -1914,6 +1925,22 @@ mod tests {
     use nostr_sdk::{EventBuilder, Keys, Kind, Tag, TagKind};
     use tempfile::tempdir;
 
+    fn make_project(id: &str, agent_pubkeys: Vec<&str>) -> Project {
+        Project {
+            id: id.to_string(),
+            title: id.to_string(),
+            description: None,
+            repo_url: None,
+            picture_url: None,
+            is_deleted: false,
+            pubkey: "owner".to_string(),
+            participants: Vec::new(),
+            agent_pubkeys: agent_pubkeys.into_iter().map(str::to_string).collect(),
+            mcp_tool_ids: Vec::new(),
+            created_at: 1,
+        }
+    }
+
     #[test]
     fn test_ffi_layout_guardrails() {
         let ffi_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ffi");
@@ -1987,6 +2014,148 @@ mod tests {
         // With real nostrdb, starts empty (no data fetched yet)
         // Will have data after login and relay sync
         assert!(projects.is_empty() || !projects.is_empty());
+    }
+
+    #[test]
+    fn test_ffi_24010_delta_does_not_carry_roster_agents() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store
+            .projects
+            .push(make_project("project", vec!["agent-a"]));
+        store.add_approved_backend("backend1");
+
+        let deltas = process_data_changes_with_deltas(
+            &mut store,
+            &[DataChange::ProjectStatus {
+                json: r#"{
+                    "kind": 24010,
+                    "id": "status1",
+                    "pubkey": "backend1",
+                    "created_at": 1000,
+                    "tags": [
+                        ["a", "31933:owner:project"],
+                        ["agent", "agent-x", "contradictory", "pm"]
+                    ]
+                }"#
+                .to_string(),
+            }],
+        );
+
+        let status_delta = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                DataChangeType::ProjectStatusChanged {
+                    project_a_tag,
+                    online_agents,
+                    ..
+                } if project_a_tag == "31933:owner:project" => Some(online_agents),
+                _ => None,
+            })
+            .expect("expected project status delta");
+        assert!(status_delta.is_empty());
+    }
+
+    #[test]
+    fn test_ffi_24011_delta_refreshes_intersecting_rosters() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store
+            .projects
+            .push(make_project("project", vec!["agent-a", "agent-b"]));
+        store.projects.push(make_project("other", vec!["agent-z"]));
+        store.add_approved_backend("backend1");
+
+        let deltas = process_data_changes_with_deltas(
+            &mut store,
+            &[DataChange::InstalledAgentList {
+                json: r#"{
+                    "kind": 24011,
+                    "id": "inventory1",
+                    "pubkey": "backend1",
+                    "created_at": 1000,
+                    "tags": [
+                        ["agent", "agent-b", "available-b"]
+                    ]
+                }"#
+                .to_string(),
+            }],
+        );
+
+        let roster_delta = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                DataChangeType::ProjectStatusChanged {
+                    project_a_tag,
+                    online_agents,
+                    ..
+                } if project_a_tag == "31933:owner:project" => Some(online_agents),
+                _ => None,
+            })
+            .expect("expected roster delta for intersecting project");
+
+        assert_eq!(
+            roster_delta
+                .iter()
+                .map(|agent| (agent.pubkey.as_str(), agent.is_online))
+                .collect::<Vec<_>>(),
+            vec![("agent-a", false), ("agent-b", true)]
+        );
+        assert!(!deltas.iter().any(|delta| matches!(
+        delta,
+        DataChangeType::ProjectStatusChanged { project_a_tag, .. }
+            if project_a_tag == "31933:owner:other"
+        )));
+    }
+
+    #[test]
+    fn test_ffi_34011_delta_refreshes_intersecting_rosters() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store
+            .projects
+            .push(make_project("project", vec!["agent-a"]));
+
+        let deltas = process_data_changes_with_deltas(
+            &mut store,
+            &[DataChange::ProjectStatus {
+                json: r#"{
+                    "kind": 34011,
+                    "id": "config1",
+                    "pubkey": "agent-a",
+                    "created_at": 1000,
+                    "tags": [
+                        ["d", "configured-a"],
+                        ["model", "model-a", "active"],
+                        ["tool", "tool-a", "active"],
+                        ["skill", "skill-a", "active"],
+                        ["mcp", "mcp-a", "active"]
+                    ]
+                }"#
+                .to_string(),
+            }],
+        );
+
+        let roster_delta = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                DataChangeType::ProjectStatusChanged {
+                    project_a_tag,
+                    online_agents,
+                    ..
+                } if project_a_tag == "31933:owner:project" => Some(online_agents),
+                _ => None,
+            })
+            .expect("expected roster delta for configured agent");
+
+        assert_eq!(roster_delta[0].name, "configured-a");
+        assert_eq!(roster_delta[0].model.as_deref(), Some("model-a"));
+        assert_eq!(roster_delta[0].tools, vec!["tool-a"]);
+        assert_eq!(roster_delta[0].skills, vec!["skill-a"]);
+        assert_eq!(roster_delta[0].mcp_servers, vec!["mcp-a"]);
     }
 
     #[test]

@@ -47,3 +47,4 @@ ios-app/Sources/TenexMVP/TenexCoreFFI/tenex_coreFFI.modulemap
 # Screenshots and test artifacts
 *.png
 .playwright-mcp/
+DerivedData-device/

@@ -1,8 +1,9 @@
 use crate::commands::find_project_split;
+use crate::roster::{project_has_available_agent, project_roster_agents};
 use crate::state::ReplState;
 use crate::util::thread_display_name;
 use std::collections::HashSet;
-use tenex_core::models::{Project, ProjectAgent, Thread};
+use tenex_core::models::{Project, Thread};
 use tenex_core::runtime::CoreRuntime;
 use tenex_core::store::app_data_store::AppDataStore;
 
@@ -211,10 +212,7 @@ pub(crate) fn agent_completion_items(
     project_prefix: Option<&str>,
     project_name: &str,
 ) -> Vec<CompletionItem> {
-    let agents: Vec<&ProjectAgent> = store
-        .get_online_agents(a_tag)
-        .map(|a| a.iter().collect())
-        .unwrap_or_default();
+    let agents = project_roster_agents(store, a_tag);
     agents
         .iter()
         .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(filter))
@@ -248,7 +246,7 @@ fn project_picker_items(runtime: &CoreRuntime, filter: &str, cmd: &str) -> Vec<C
         .iter()
         .filter(|p| filter.is_empty() || p.title.to_lowercase().contains(filter))
         .map(|p| {
-            let online = store_ref.is_project_online(&p.a_tag());
+            let online = project_has_available_agent(&store_ref, &p.a_tag());
             let status = if online { "online" } else { "offline" };
             (
                 online,
@@ -373,7 +371,7 @@ impl CompletionMenu {
                                 filter.is_empty() || p.title.to_lowercase().contains(&filter)
                             })
                             .map(|p| {
-                                let online = store_ref.is_project_online(&p.a_tag());
+                                let online = project_has_available_agent(&store_ref, &p.a_tag());
                                 let status = if online { "online" } else { "offline" };
                                 (
                                     online,
@@ -514,18 +512,14 @@ impl CompletionMenu {
                                     {
                                         continue;
                                     }
-                                    let has_agent = store_ref
-                                        .get_online_agents(&a_tag)
-                                        .map(|agents| {
-                                            agents.iter().any(|a| {
-                                                a.name.to_lowercase().contains(&agent_lower)
-                                            })
-                                        })
-                                        .unwrap_or(false);
+                                    let agents = project_roster_agents(&store_ref, &a_tag);
+                                    let has_agent = agents.iter().any(|a| {
+                                        a.name.to_lowercase().contains(&agent_lower)
+                                    });
                                     if !has_agent {
                                         continue;
                                     }
-                                    let online = store_ref.is_project_online(&a_tag);
+                                    let online = project_has_available_agent(&store_ref, &a_tag);
                                     let status = if online { "online" } else { "offline" };
                                     items.push((
                                         online,
@@ -564,42 +558,41 @@ impl CompletionMenu {
                                                 })
                                                 .and_then(|project| {
                                                     let a_tag = project.a_tag();
-                                                    store_ref.get_online_agents(&a_tag).map(
-                                                        |agents| {
-                                                            agents
-                                                                .iter()
-                                                                .filter(|a| {
-                                                                    agent_filter.is_empty()
-                                                                        || a.name
-                                                                            .to_lowercase()
-                                                                            .contains(&agent_filter)
-                                                                })
-                                                                .map(|a| {
-                                                                    let model = a
-                                                                        .model
-                                                                        .as_deref()
-                                                                        .unwrap_or("unknown");
-                                                                    let pm = if a.is_pm {
-                                                                        " [PM]"
-                                                                    } else {
-                                                                        ""
-                                                                    };
-                                                                    CompletionItem {
-                                                                        label: format!(
-                                                                            "{}{pm}",
-                                                                            a.name
-                                                                        ),
-                                                                        description: model
-                                                                            .to_string(),
-                                                                        fill: format!(
-                                                                            "/new {}@{}",
-                                                                            a.name, project_part
-                                                                        ),
-                                                                        completed: false,
-                                                                    }
-                                                                })
-                                                                .collect::<Vec<_>>()
-                                                        },
+                                                    let agents =
+                                                        project_roster_agents(&store_ref, &a_tag);
+                                                    Some(
+                                                        agents
+                                                            .iter()
+                                                            .filter(|a| {
+                                                                agent_filter.is_empty()
+                                                                    || a.name
+                                                                        .to_lowercase()
+                                                                        .contains(&agent_filter)
+                                                            })
+                                                            .map(|a| {
+                                                                let model = a
+                                                                    .model
+                                                                    .as_deref()
+                                                                    .unwrap_or("unknown");
+                                                                let pm = if a.is_pm {
+                                                                    " [PM]"
+                                                                } else {
+                                                                    ""
+                                                                };
+                                                                CompletionItem {
+                                                                    label: format!(
+                                                                        "{}{pm}",
+                                                                        a.name
+                                                                    ),
+                                                                    description: model.to_string(),
+                                                                    fill: format!(
+                                                                        "/new {}@{}",
+                                                                        a.name, project_part
+                                                                    ),
+                                                                    completed: false,
+                                                                }
+                                                            })
+                                                            .collect::<Vec<_>>(),
                                                     )
                                                 })
                                         },
@@ -627,10 +620,7 @@ impl CompletionMenu {
                         } else if let Some(ref a_tag) = state.current_project {
                             let store = runtime.data_store();
                             let store_ref = store.borrow();
-                            let agents: Vec<&ProjectAgent> = store_ref
-                                .get_online_agents(a_tag)
-                                .map(|a| a.iter().collect())
-                                .unwrap_or_default();
+                            let agents = project_roster_agents(&store_ref, a_tag);
                             self.items = agents
                                 .iter()
                                 .filter(|a| {
@@ -662,7 +652,7 @@ impl CompletionMenu {
                         self.items = projects
                             .iter()
                             .filter(|p| {
-                                let online = store_ref.is_project_online(&p.a_tag());
+                                let online = project_has_available_agent(&store_ref, &p.a_tag());
                                 !online
                                     && (filter.is_empty()
                                         || p.title.to_lowercase().contains(&filter))
@@ -724,7 +714,6 @@ impl CompletionMenu {
                             {
                                 let flags = [
                                     ("--model", "change model"),
-                                    ("--set-pm", "set as project manager"),
                                     ("--global", "apply globally"),
                                 ];
                                 for (flag, desc) in &flags {

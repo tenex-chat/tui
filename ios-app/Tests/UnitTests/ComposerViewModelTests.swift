@@ -51,7 +51,7 @@ final class ComposerViewModelTests: XCTestCase {
         )
     }
 
-    func testDetectInlineTriggerParsesAgentAndNudgeTokens() async {
+    func testDetectInlineTriggerParsesAgentAndSkillTokens() async {
         let viewModel = makeViewModel(core: MockCoreGateway(), drafts: MockDraftStore())
 
         let agent = viewModel.detectInlineTrigger(in: "please ping @architect")
@@ -62,9 +62,9 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertEqual(agent?.query, "architect")
 
         let nudge = viewModel.detectInlineTrigger(in: "use /bugfix")
-        if case .nudgeSkill? = nudge?.kind {
+        if case .skill? = nudge?.kind {
         } else {
-            XCTFail("Expected / trigger to resolve as nudge/skill")
+            XCTFail("Expected / trigger to resolve as skill")
         }
         XCTAssertEqual(nudge?.query, "bugfix")
 
@@ -115,7 +115,7 @@ final class ComposerViewModelTests: XCTestCase {
 
     func testLoadAgentContextUsesInitialAgentAndResolvesName() async {
         let core = MockCoreGateway()
-        core.onlineAgents = ["project-a": []]
+        core.projectRosterAgents = ["project-a": []]
         core.profileNamesByPubkey["pubkey-author"] = "Author Name"
         let drafts = MockDraftStore()
 
@@ -132,11 +132,11 @@ final class ComposerViewModelTests: XCTestCase {
         XCTAssertEqual(drafts.updatedAgentPubkeys.last ?? nil, "pubkey-author")
     }
 
-    func testLoadAgentContextIncludesOfflineProjectAgents() async {
+    func testLoadAgentContextUsesOrderedProjectRoster() async {
         let core = MockCoreGateway()
         let namelessPubkey = "1234567890abcdef1234"
         core.projects = [makeProject(id: "project-a", agentPubkeys: ["online", "offline", namelessPubkey])]
-        core.onlineAgents = [
+        core.projectRosterAgents = [
             "project-a": [
                 ProjectAgent(
                     pubkey: "online",
@@ -148,10 +148,31 @@ final class ComposerViewModelTests: XCTestCase {
                     tools: [],
                     skills: [],
                     mcpServers: []
+                ),
+                ProjectAgent(
+                    pubkey: "offline",
+                    name: "Offline",
+                    backendPubkey: "",
+                    isPm: false,
+                    isOnline: false,
+                    model: nil,
+                    tools: [],
+                    skills: [],
+                    mcpServers: []
+                ),
+                ProjectAgent(
+                    pubkey: namelessPubkey,
+                    name: "12345678...cdef1234",
+                    backendPubkey: "",
+                    isPm: false,
+                    isOnline: false,
+                    model: nil,
+                    tools: [],
+                    skills: [],
+                    mcpServers: []
                 )
             ]
         ]
-        core.profileNamesByPubkey["offline"] = "Offline"
 
         let viewModel = makeViewModel(core: core, drafts: MockDraftStore())
         let result = await viewModel.loadAgentContext(
@@ -162,7 +183,7 @@ final class ComposerViewModelTests: XCTestCase {
         )
 
         XCTAssertEqual(result.availableAgents.first?.pubkey, "online")
-        XCTAssertEqual(Set(result.availableAgents.map(\.pubkey)), Set(["online", "offline", namelessPubkey]))
+        XCTAssertEqual(result.availableAgents.map(\.pubkey), ["online", "offline", namelessPubkey])
         XCTAssertEqual(result.availableAgents.first { $0.pubkey == "offline" }?.isOnline, false)
         XCTAssertEqual(result.availableAgents.first { $0.pubkey == namelessPubkey }?.name, "12345678...cdef1234")
     }
@@ -178,7 +199,6 @@ final class ComposerViewModelTests: XCTestCase {
             projectId: "project-a",
             content: "hello",
             agentPubkey: "agent",
-            nudgeIds: ["n1"],
             skillIds: ["s1"],
             referenceConversationId: "conv-ref"
         )
@@ -200,7 +220,6 @@ final class ComposerViewModelTests: XCTestCase {
             projectId: "project-a",
             content: "hello",
             agentPubkey: nil,
-            nudgeIds: [],
             skillIds: [],
             referenceConversationId: nil
         )
@@ -349,7 +368,6 @@ private struct SendInvocation: Equatable {
     let projectId: String
     let content: String
     let agentPubkey: String?
-    let nudgeIds: [String]
     let skillIds: [String]
     let referenceConversationId: String?
 }
@@ -358,7 +376,7 @@ private struct SendInvocation: Equatable {
 private final class MockCoreGateway: CoreGateway {
     var projects: [Project] = []
     var conversations: [ConversationFullInfo] = []
-    var onlineAgents: [String: [ProjectAgent]] = [:]
+    var projectRosterAgents: [String: [ProjectAgent]] = [:]
 
     var nudges: [Nudge] = []
     var skills: [Skill] = []
@@ -386,7 +404,6 @@ private final class MockCoreGateway: CoreGateway {
         title _: String,
         content: String,
         agentPubkey: String?,
-        nudgeIds: [String],
         skillIds: [String],
         referenceConversationId: String?,
         referenceReportATag: String?
@@ -397,7 +414,6 @@ private final class MockCoreGateway: CoreGateway {
                 projectId: projectId,
                 content: content,
                 agentPubkey: agentPubkey,
-                nudgeIds: nudgeIds,
                 skillIds: skillIds,
                 referenceConversationId: referenceConversationId
             )
@@ -410,7 +426,6 @@ private final class MockCoreGateway: CoreGateway {
         projectId: String,
         content: String,
         agentPubkey: String?,
-        nudgeIds: [String],
         skillIds: [String]
     ) async throws -> SendMessageResult {
         sendMessageCalls.append(
@@ -419,7 +434,6 @@ private final class MockCoreGateway: CoreGateway {
                 projectId: projectId,
                 content: content,
                 agentPubkey: agentPubkey,
-                nudgeIds: nudgeIds,
                 skillIds: skillIds,
                 referenceConversationId: nil
             )

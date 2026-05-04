@@ -203,7 +203,7 @@ pub(crate) fn print_help_raw() -> String {
          \x20 /new [agent@project]  Clear screen, new context\n\
          \x20 /reference            New conversation referencing current one\n\
          \x20 /conversations [@proj] Browse and open conversations\n\
-         \x20 /config [@agent] [--set-pm|--global|--model]\n\
+         \x20 /config [@agent] [--global|--model]\n\
          \x20                       Configure agent tools/model/flags\n\
          \x20 /model [agent]        Change agent model (shortcut)\n\
          \x20 /boot [name]          Boot an offline project\n\

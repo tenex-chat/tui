@@ -79,11 +79,10 @@ impl TenexCore {
         Ok(())
     }
 
-    /// Check if a project is online (has a recent kind:24010 status event).
+    /// Check if a project has at least one available roster agent.
     ///
-    /// A project is considered online if:
-    /// 1. It has a status event from an approved backend
-    /// 2. The status event is not stale (within the staleness threshold)
+    /// A project is considered online if one of its kind:31933 roster agents is
+    /// present in an approved kind:24011 backend inventory.
     ///
     /// Returns true if the project is online, false otherwise.
     pub fn is_project_online(&self, project_id: String) -> bool {
@@ -103,11 +102,7 @@ impl TenexCore {
             None => return false,
         };
 
-        // Check if project has a non-stale status
-        store
-            .get_project_status(&project.a_tag())
-            .map(|s| s.is_online())
-            .unwrap_or(false)
+        store.is_project_online(&project.a_tag())
     }
 
     pub fn get_project_backend_pubkey(&self, project_id: String) -> Option<String> {
@@ -115,16 +110,16 @@ impl TenexCore {
         let store = store_guard.as_ref()?;
         let project = store.get_projects().iter().find(|p| p.id == project_id)?;
         store
-            .get_project_status(&project.a_tag())
-            .filter(|status| status.is_online())
-            .map(|status| status.backend_pubkey.clone())
+            .get_online_agents(&project.a_tag())?
+            .into_iter()
+            .find(|agent| agent.is_online)
+            .map(|agent| agent.backend_pubkey)
     }
 
     /// Boot/start a project (sends kind:24000 event).
     ///
     /// This sends a boot request to wake up the project's backend.
-    /// The backend will then start publishing kind:24010 status events,
-    /// making the project "online" and its agents available.
+    /// The backend should publish kind:24011 inventory for available agents.
     ///
     /// Use this when a project is offline and you want to start it.
     pub fn boot_project(&self, project_id: String) -> Result<(), TenexError> {

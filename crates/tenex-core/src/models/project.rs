@@ -232,6 +232,37 @@ mod tests {
     }
 
     #[test]
+    fn test_from_note_preserves_ordered_agent_p_tags() {
+        let keys = Keys::generate();
+        let agent_a = "a".repeat(64);
+        let agent_b = "b".repeat(64);
+        let agent_c = "c".repeat(64);
+
+        let event = EventBuilder::new(Kind::Custom(31933), "Project description")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
+                vec!["proj-roster".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("p")),
+                vec![agent_b.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("p")),
+                vec![agent_a.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("p")),
+                vec![agent_c.clone()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let project = parse_project_from_event(event);
+        assert_eq!(project.agent_pubkeys, vec![agent_b, agent_a, agent_c]);
+    }
+
+    #[test]
     fn test_from_note_parses_deleted_and_image_fallback() {
         let keys = Keys::generate();
         let event = EventBuilder::new(Kind::Custom(31933), "   ")

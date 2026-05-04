@@ -592,13 +592,13 @@ impl TenexCore {
         Ok(new_ids)
     }
 
-    /// Get online agents for a project from the project status (kind:24010).
+    /// Get project roster agents for a project.
     ///
-    /// These are actual agent instances with their own Nostr keypairs.
-    /// Use these for agent selection in the message composer - the pubkeys
-    /// can be used for profile picture lookups and p-tags.
+    /// Membership/order comes from kind:31933. The `is_online` flag comes from
+    /// approved kind:24011 backend inventories, and per-agent config is merged
+    /// from kind:34011.
     ///
-    /// Returns empty if project not found or project is offline.
+    /// Returns empty if the project is not found.
     pub fn get_online_agents(&self, project_id: String) -> Result<Vec<ProjectAgent>, TenexError> {
         use crate::tlog;
         tlog!(
@@ -642,12 +642,8 @@ impl TenexCore {
             }
         };
 
-        // Get agents from project status (kind:24010)
-        tlog!(
-            "FFI",
-            "Looking up project_statuses for a_tag: '{}'",
-            project.a_tag()
-        );
+        // Get agents from the shared roster builder.
+        tlog!("FFI", "Looking up roster for a_tag: '{}'", project.a_tag());
 
         // Check if status exists (even if stale)
         if let Some(status) = store.project_statuses.get(&project.a_tag()) {
@@ -672,21 +668,16 @@ impl TenexCore {
         let agents: Vec<ProjectAgent> = store
             .get_online_agents(&project.a_tag())
             .map(|agents| {
-                tlog!("FFI", "Found {} online agents", agents.len());
-                for agent in agents {
+                tlog!("FFI", "Found {} roster agents", agents.len());
+                for agent in &agents {
                     tlog!("FFI", "  Agent: {} ({})", agent.name, agent.pubkey);
                 }
-                agents.iter().cloned().collect()
+                agents
             })
             .unwrap_or_else(|| {
-                tlog!("FFI", "No online agents (status is stale or missing)");
+                tlog!("FFI", "No roster agents (project missing)");
                 Vec::new()
             });
-
-        // Merge per-agent kind:34011 configs into the ProjectAgent data.
-        // The TUI does this in its rendering layer; for iOS we merge here so
-        // that `getOnlineAgents()` always returns the richest available data.
-        let agents = super::merge_agent_configs(store, agents);
 
         tlog!("FFI", "Returning {} agents", agents.len());
         Ok(agents)

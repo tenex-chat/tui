@@ -140,13 +140,16 @@ class TenexCoreManager {
     /// Bookmarked item IDs (kind:14202). Updated reactively when BookmarkListChanged fires.
     var bookmarkedIds: Set<String> = []
 
-    /// Project online status - updated reactively via event callbacks.
-    /// Key: project ID, Value: true if online.
+    /// Project availability derived from kind:24011 backend inventory for the project's kind:31933 roster.
+    /// Key: project ID, Value: true when at least one roster agent is present in inventory.
     var projectOnlineStatus: [String: Bool] = [:]
 
-    /// Online agents for each project - updated reactively via event callbacks.
-    /// Key: project ID, Value: array of ProjectAgent.
-    var onlineAgents: [String: [ProjectAgent]] = [:]
+    /// Approved backend inventory from kind:24011, grouped by agent pubkey.
+    var agentInventory: [AgentInventoryItem] = []
+
+    /// Ordered project roster rows derived from kind:31933 `p` tags.
+    /// Availability comes from kind:24011 inventory; config fields come from kind:34011 when present.
+    var projectRosterAgents: [String: [ProjectAgent]] = [:]
 
     /// Whether any conversation currently has active agents (24133 events with agents)
     /// Used to highlight the runtime indicator when work is happening

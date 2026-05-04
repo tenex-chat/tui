@@ -119,41 +119,11 @@ fn execute_project_action(
             if let Some(project) = project {
                 let a_tag = project.a_tag();
                 let project_name = state.project_name.clone();
-                let project_agent_pubkeys = project.agent_pubkeys.clone();
                 app.selected_project = Some(project);
 
-                // Auto-select PM agent from live status, or fall back to first agent from kind:31933
-                let pm_agent = {
-                    let store = app.data_store.borrow();
-                    store
-                        .get_project_status(&a_tag)
-                        .and_then(|status| status.pm_agent().cloned())
-                };
-                if let Some(pm) = pm_agent {
-                    app.set_selected_agent(Some(pm));
-                } else if let Some(first_pubkey) = project_agent_pubkeys.first() {
-                    // Project is offline: construct a minimal agent from kind:31933 agent pubkeys.
-                    // Use kind:0 profile metadata for display; installed-agent slugs
-                    // are protocol labels, not UI names.
-                    let fallback_agent = {
-                        let store = app.data_store.borrow();
-                        let backend_pubkey = store
-                            .get_project_status(&a_tag)
-                            .map(|s| s.backend_pubkey.clone());
-                        let name = store.get_profile_name(first_pubkey);
-                        crate::models::ProjectAgent {
-                            pubkey: first_pubkey.clone(),
-                            name,
-                            backend_pubkey: backend_pubkey.unwrap_or_default(),
-                            is_pm: true,
-                            is_online: true,
-                            model: None,
-                            tools: Vec::new(),
-                            skills: Vec::new(),
-                            mcp_servers: Vec::new(),
-                        }
-                    };
-                    app.set_selected_agent(Some(fallback_agent));
+                // Auto-select the first 31933 roster agent.
+                if let Some(default_agent) = app.selected_project_default_agent() {
+                    app.set_selected_agent(Some(default_agent));
                 }
 
                 app.modal_state = ModalState::None;

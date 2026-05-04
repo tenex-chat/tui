@@ -592,12 +592,12 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
  * Note: UniFFI objects are wrapped in Arc, so we use AtomicBool for interior mutability.
  */
 public protocol TenexCoreProtocol: AnyObject, Sendable {
-
+    
     /**
      * Add a bunker auto-approve rule.
      */
-    func addBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?) throws
-
+    func addBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?) throws 
+    
     /**
      * Answer an ask event by sending a formatted response.
      *
@@ -605,7 +605,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * and published as a kind:1 reply to the ask event.
      */
     func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws  -> SendMessageResult
-
+    
     /**
      * Approve all pending backends.
      *
@@ -614,60 +614,59 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns the number of backends that were approved.
      */
     func approveAllPendingBackends() throws  -> UInt32
-
+    
     /**
      * Add a backend to the approved list.
      *
-     * Once approved, kind:24010 events from this backend will be processed,
-     * populating project_statuses and enabling get_online_agents().
+     * Once approved, kind:24011 inventories from this backend can mark roster
+     * agents online.
      */
-    func approveBackend(pubkey: String) throws
-
+    func approveBackend(pubkey: String) throws 
+    
     /**
      * Archive a conversation (hide from default view).
      */
-    func archiveConversation(conversationId: String)
-
+    func archiveConversation(conversationId: String) 
+    
     /**
      * Add a backend to the blocked list.
      *
      * Status events from blocked backends will be silently ignored.
      */
-    func blockBackend(pubkey: String) throws
-
+    func blockBackend(pubkey: String) throws 
+    
     /**
      * Boot/start a project (sends kind:24000 event).
      *
      * This sends a boot request to wake up the project's backend.
-     * The backend will then start publishing kind:24010 status events,
-     * making the project "online" and its agents available.
+     * The backend should publish kind:24011 inventory for available agents.
      *
      * Use this when a project is offline and you want to start it.
      */
-    func bootProject(projectId: String) throws
-
+    func bootProject(projectId: String) throws 
+    
     /**
      * Clear the event callback and stop the listener thread.
      * Call this on logout to clean up resources.
      */
-    func clearEventCallback()
-
+    func clearEventCallback() 
+    
     /**
      * Create a new agent definition (kind:4199).
      *
      * The created definition is published through the Nostr worker and ingested locally.
      */
-    func createAgentDefinition(name: String, description: String, role: String, instructions: String, version: String, sourceId: String?, isFork: Bool) throws
-
-    func createBackendAgent(backendPubkey: String, definitionEventId: String, slugOverride: String?) throws
-
-    func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String]) throws
-
+    func createAgentDefinition(name: String, description: String, role: String, instructions: String, version: String, sourceId: String?, isFork: Bool) throws 
+    
+    func createBackendAgent(backendPubkey: String, definitionEventId: String, slugOverride: String?) throws 
+    
+    func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String]) throws 
+    
     /**
      * Create a new project (kind:31933 replaceable event).
      */
-    func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String]) throws
-
+    func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String]) throws 
+    
     /**
      * Delete an agent from a project or globally by publishing a kind:24030 event.
      *
@@ -677,25 +676,25 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * - `None` → scope is "global", no `a` tag (backend removes agent from all projects).
      * - `reason`: Optional reason text placed in event content.
      */
-    func deleteAgent(agentPubkey: String, projectATag: String?, reason: String?) throws
-
+    func deleteAgent(agentPubkey: String, projectATag: String?, reason: String?) throws 
+    
     /**
      * Delete an agent definition (kind:4199) via NIP-09 kind:5 deletion.
      */
-    func deleteAgentDefinition(agentId: String) throws
-
+    func deleteAgentDefinition(agentId: String) throws 
+    
     /**
      * Delete a nudge (kind:4201) via NIP-09 kind:5 deletion.
      *
      * Only the nudge author can delete it.
      */
-    func deleteNudge(nudgeId: String) throws
-
+    func deleteNudge(nudgeId: String) throws 
+    
     /**
      * Tombstone-delete a project by republishing it with ["deleted"] tag.
      */
-    func deleteProject(projectId: String) throws
-
+    func deleteProject(projectId: String) throws 
+    
     /**
      * Force reconnection to relays and restart all subscriptions.
      *
@@ -712,15 +711,15 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      *
      * Returns an error if not logged in or if reconnection fails.
      */
-    func forceReconnect() throws
-
+    func forceReconnect() throws 
+    
     /**
      * Generate audio notification for a message
      * Note: This is a blocking call that will wait for the async operation to complete
      * API keys are passed directly so iOS can provide them from its native Keychain.
      */
     func generateAudioNotification(agentPubkey: String, conversationTitle: String, messageText: String, elevenlabsApiKey: String, openrouterApiKey: String) throws  -> AudioNotificationInfo
-
+    
     /**
      * Generate a fresh Nostr keypair.
      *
@@ -728,11 +727,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns nsec, npub, and hex pubkey for the caller to store as needed.
      */
     func generateKeypair() throws  -> GeneratedKeypair
-
+    
     func getAgentConfig(agentPubkey: String) throws  -> AgentConfig?
-
+    
     func getAgentInventory() throws  -> [AgentInventoryItem]
-
+    
     /**
      * Legacy helper for definition-based project agents.
      *
@@ -742,12 +741,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * stability and currently returns an empty list.
      */
     func getAgents(projectId: String) throws  -> [AgentDefinition]
-
+    
     /**
      * Get AI audio settings (API keys never exposed - only configuration status)
      */
     func getAiAudioSettings() throws  -> AiAudioSettingsInfo
-
+    
     /**
      * Get all available agents (not filtered by project).
      *
@@ -755,7 +754,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns an error if the store cannot be accessed.
      */
     func getAllAgents() throws  -> [AgentDefinition]
-
+    
     /**
      * Get all conversations across all projects with full info for the Conversations tab.
      * Returns conversations with activity tracking, archive status, and hierarchy data.
@@ -765,14 +764,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns Result to distinguish "no data" from "core error".
      */
     func getAllConversations(filter: ConversationFilter) throws  -> [ConversationFullInfo]
-
+    
     /**
      * Get all MCP tool definitions (kind:4200 events).
      *
      * Returns tools sorted by created_at descending (newest first).
      */
     func getAllMcpTools() throws  -> [McpTool]
-
+    
     /**
      * Get all available team packs (kind:34199), deduped to latest by `pubkey + d_tag`.
      *
@@ -780,61 +779,61 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * matched with dual anchors (`a`/`A` coordinate + `e`/`E` event id).
      */
     func getAllTeams() throws  -> [TeamInfo]
-
+    
     /**
      * Get all archived conversation IDs.
      * Returns Result to distinguish "no data" from "lock error".
      */
     func getArchivedConversationIds() throws  -> [String]
-
+    
     /**
      * Resolve an ask event by event ID.
      * Used for q-tag references that may point to ask events instead of child threads.
      */
     func getAskEventById(eventId: String)  -> AskEventLookupInfo?
-
+    
     /**
      * Get diagnostics about backend approvals and project statuses.
      * Returns JSON with project statuses keys.
      */
     func getBackendDiagnostics() throws  -> String
-
+    
     /**
      * Get approved/blocked/pending backend trust state for settings UI.
      */
     func getBackendTrustSnapshot() throws  -> BackendTrustSnapshot
-
+    
     /**
      * Get all bookmarked nudge/skill IDs for the current user.
      */
     func getBookmarkedIds() throws  -> [String]
-
+    
     /**
      * Get the NIP-46 bunker audit log.
      */
     func getBunkerAuditLog() throws  -> [FfiBunkerAuditEntry]
-
+    
     /**
      * Get all bunker auto-approve rules.
      */
     func getBunkerAutoApproveRules() throws  -> [FfiBunkerAutoApproveRule]
-
+    
     /**
      * Get all collapsed thread IDs.
      */
     func getCollapsedThreadIds() throws  -> [String]
-
+    
     /**
      * Return currently configured relay URLs.
      */
     func getConfiguredRelays()  -> [String]
-
+    
     /**
      * Get the total hierarchical LLM runtime for a conversation (includes all descendants) in milliseconds.
      * Returns 0 if the conversation is not found or has no runtime data.
      */
     func getConversationRuntimeMs(conversationId: String)  -> UInt64
-
+    
     /**
      * Get conversations for a project.
      *
@@ -842,32 +841,32 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Use thread.parent_conversation_id to build nested conversation trees.
      */
     func getConversations(projectId: String)  -> [ConversationFullInfo]
-
+    
     /**
      * Get conversations by their IDs.
      * Returns ConversationFullInfo for each conversation ID that exists.
      * Conversations that don't exist are silently skipped.
      */
     func getConversationsByIds(conversationIds: [String])  -> [ConversationFullInfo]
-
+    
     /**
      * Get information about the currently logged-in user.
      *
      * Returns None if not logged in.
      */
     func getCurrentUser()  -> UserInfo?
-
+    
     /**
      * Get the default audio prompt
      */
     func getDefaultAudioPrompt()  -> String
-
+    
     /**
      * Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
      * Returns empty Vec if no descendants exist or if the conversation is not found.
      */
     func getDescendantConversationIds(conversationId: String)  -> [String]
-
+    
     /**
      * Get a comprehensive diagnostics snapshot for the iOS Diagnostics view.
      * Returns all diagnostic information in a single batched call for efficiency.
@@ -880,12 +879,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * the Database tab is not active.
      */
     func getDiagnosticsSnapshot(includeDatabaseStats: Bool)  -> DiagnosticsSnapshot
-
+    
     /**
      * Get root threads that reference a report a-tag (`30023:pubkey:slug`).
      */
     func getDocumentThreads(reportATag: String)  -> [Thread]
-
+    
     /**
      * Get HTML reports (kind:1 events tagged `t:html-report`).
      *
@@ -894,19 +893,19 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * project's coordinate (`31933:<pubkey>:<slug>`).
      */
     func getHtmlReports(projectId: String)  -> [HtmlReport]
-
+    
     /**
      * Get inbox items for the current user.
      */
     func getInbox()  -> [InboxItem]
-
+    
     func getInstalledAgents(backendPubkey: String) throws  -> [InstalledAgent]
-
+    
     /**
      * Get messages for a conversation.
      */
     func getMessages(conversationId: String)  -> [Message]
-
+    
     /**
      * Get all nudges (kind:4201 events).
      *
@@ -915,24 +914,24 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Used by iOS for nudge selection in new conversations.
      */
     func getNudges() throws  -> [Nudge]
-
+    
     /**
-     * Get online agents for a project from the project status (kind:24010).
+     * Get project roster agents for a project.
      *
-     * These are actual agent instances with their own Nostr keypairs.
-     * Use these for agent selection in the message composer - the pubkeys
-     * can be used for profile picture lookups and p-tags.
+     * Membership/order comes from kind:31933. The `is_online` flag comes from
+     * approved kind:24011 backend inventories, and per-agent config is merged
+     * from kind:34011.
      *
-     * Returns empty if project not found or project is offline.
+     * Returns empty if the project is not found.
      */
     func getOnlineAgents(projectId: String) throws  -> [ProjectAgent]
-
+    
     /**
      * Get the display name for a pubkey.
      * Returns the kind:0 profile name if available, otherwise a shortened pubkey.
      */
     func getProfileName(pubkey: String)  -> String
-
+    
     /**
      * Get profile picture URL for a pubkey from kind:0 metadata.
      *
@@ -943,9 +942,9 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * instead of silently returning nil.
      */
     func getProfilePicture(pubkey: String) throws  -> String?
-
+    
     func getProjectBackendPubkey(projectId: String)  -> String?
-
+    
     /**
      * Get available configuration options for a project.
      *
@@ -953,30 +952,30 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Used by iOS to populate the agent config modal with available options.
      */
     func getProjectConfigOptions(projectId: String) throws  -> ProjectConfigOptions
-
+    
     /**
      * Get all projects with filter info (visibility, counts).
      * Returns Result to distinguish "no data" from "core error".
      */
     func getProjectFilters() throws  -> [ProjectFilterInfo]
-
+    
     /**
      * Get a list of projects.
      *
      * Queries nostrdb for kind 31933 events and returns them as Project.
      */
     func getProjects()  -> [Project]
-
+    
     /**
      * Get raw Nostr event JSON for an event ID.
      */
     func getRawEventJson(eventId: String)  -> String?
-
+    
     /**
      * Get reports for a project.
      */
     func getReports(projectId: String)  -> [Report]
-
+    
     /**
      * Get all skills (kind:4202 events).
      *
@@ -985,7 +984,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Used by iOS/CLI for skill selection in new conversations.
      */
     func getSkills() throws  -> [Skill]
-
+    
     /**
      * Get comprehensive stats snapshot with all data needed for iOS Stats tab.
      * This is a single batched FFI call that returns all stats data pre-computed.
@@ -993,12 +992,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns Result to distinguish "no data" from "core error".
      */
     func getStatsSnapshot() throws  -> StatsSnapshot
-
+    
     /**
      * Get team comments (kind:1111) for one team using dual-anchor matching.
      */
     func getTeamComments(teamCoordinate: String, teamEventId: String) throws  -> [TeamCommentInfo]
-
+    
     /**
      * Get today's LLM runtime for statusbar display (in milliseconds).
      * Reads from a lock-free AtomicU64 cache that is updated after refresh()
@@ -1008,7 +1007,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns 0 if no data has been processed yet.
      */
     func getTodayRuntimeMs()  -> UInt64
-
+    
     /**
      * Initialize the core. Must be called before other operations.
      * Returns true if initialization succeeded.
@@ -1017,44 +1016,43 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Heavy initialization (relay connection) happens during login.
      */
     func `init`()  -> Bool
-
+    
     /**
      * Check if a nudge or skill is bookmarked by the current user.
      */
     func isBookmarked(itemId: String)  -> Bool
-
+    
     /**
      * Check if a conversation is archived.
      */
     func isConversationArchived(conversationId: String)  -> Bool
-
+    
     /**
      * Check if the core is initialized.
      */
     func isInitialized()  -> Bool
-
+    
     /**
      * Check if a user is currently logged in.
      * Returns true only if we have stored keys.
      */
     func isLoggedIn()  -> Bool
-
+    
     /**
-     * Check if a project is online (has a recent kind:24010 status event).
+     * Check if a project has at least one available roster agent.
      *
-     * A project is considered online if:
-     * 1. It has a status event from an approved backend
-     * 2. The status event is not stale (within the staleness threshold)
+     * A project is considered online if one of its kind:31933 roster agents is
+     * present in an approved kind:24011 backend inventory.
      *
      * Returns true if the project is online, false otherwise.
      */
     func isProjectOnline(projectId: String)  -> Bool
-
+    
     /**
      * Check if a thread is collapsed.
      */
     func isThreadCollapsed(threadId: String)  -> Bool
-
+    
     /**
      * Login with an nsec (Nostr secret key in bech32 format).
      *
@@ -1063,7 +1061,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Login succeeds immediately even if relays are unreachable.
      */
     func login(nsec: String) throws  -> LoginResult
-
+    
     /**
      * Logout the current user.
      * Disconnects from relays, wipes local Nostr cache files, and resets session state.
@@ -1075,8 +1073,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns an error if the disconnect fails or times out. In that case, the
      * session state is NOT cleared to avoid leaving a zombie relay session.
      */
-    func logout() throws
-
+    func logout() throws 
+    
     /**
      * Convert an npub (bech32) string to a hex pubkey string.
      * Returns None if the input is not a valid npub.
@@ -1084,25 +1082,25 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * format needed by functions like get_profile_name.
      */
     func npubToHex(npub: String)  -> String?
-
+    
     /**
      * Publish a team comment (kind:1111 NIP-22) and return comment event ID.
      */
     func postTeamComment(teamCoordinate: String, teamEventId: String, teamPubkey: String, content: String, parentCommentId: String?, parentCommentPubkey: String?) throws  -> String
-
+    
     /**
      * Publish a kind:0 profile metadata event for the logged-in user.
      *
      * Sets the user's display name and optionally a profile picture URL.
      * Fire-and-forget — does not wait for relay confirmation.
      */
-    func publishProfile(name: String, pictureUrl: String?) throws
-
+    func publishProfile(name: String, pictureUrl: String?) throws 
+    
     /**
      * Publish a team reaction (kind:7 NIP-25) and return reaction event ID.
      */
     func reactToTeam(teamCoordinate: String, teamEventId: String, teamPubkey: String, isLike: Bool) throws  -> String
-
+    
     /**
      * Refresh data from relays.
      * Call this to fetch the latest data from relays.
@@ -1112,29 +1110,29 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * load from rapid successive calls (e.g., multiple views loading simultaneously).
      */
     func refresh()  -> Bool
-
+    
     /**
      * Register or deregister an APNs push-notification token with the backend.
      */
-    func registerApnsToken(deviceToken: String, enable: Bool, backendPubkey: String, deviceId: String) throws
-
+    func registerApnsToken(deviceToken: String, enable: Bool, backendPubkey: String, deviceId: String) throws 
+    
     /**
      * Remove a bunker auto-approve rule.
      */
-    func removeBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?) throws
-
+    func removeBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?) throws 
+    
     /**
      * Respond to a pending bunker signing request.
      */
-    func respondToBunkerRequest(requestId: String, approved: Bool) throws
-
+    func respondToBunkerRequest(requestId: String, approved: Bool) throws 
+    
     /**
      * Full-text search across threads and messages.
      * Uses in-memory store data (same approach as TUI search).
      * Returns search results with content snippets and context.
      */
     func search(query: String, limit: Int32)  -> [SearchResult]
-
+    
     /**
      * Send a message to an existing conversation.
      *
@@ -1142,7 +1140,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns the event ID on success.
      */
     func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws  -> SendMessageResult
-
+    
     /**
      * Send a new conversation (thread) to a project.
      *
@@ -1150,27 +1148,27 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns the event ID on success.
      */
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?, referenceReportATag: String?) throws  -> SendMessageResult
-
+    
     /**
      * Enable or disable audio notifications
      */
-    func setAudioNotificationsEnabled(enabled: Bool) throws
-
+    func setAudioNotificationsEnabled(enabled: Bool) throws 
+    
     /**
      * Set audio prompt
      */
-    func setAudioPrompt(prompt: String) throws
-
+    func setAudioPrompt(prompt: String) throws 
+    
     /**
      * Set collapsed thread IDs (replace all).
      */
-    func setCollapsedThreadIds(threadIds: [String])
-
+    func setCollapsedThreadIds(threadIds: [String]) 
+    
     /**
      * Set ElevenLabs API key (stored in OS secure storage)
      */
-    func setElevenlabsApiKey(key: String?) throws
-
+    func setElevenlabsApiKey(key: String?) throws 
+    
     /**
      * Register a callback to receive event notifications.
      * Call this after login to enable push-based updates.
@@ -1184,104 +1182,103 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Note: Only one callback can be registered at a time.
      * Calling this again will replace the previous callback.
      */
-    func setEventCallback(callback: EventCallback)
-
+    func setEventCallback(callback: EventCallback) 
+    
     /**
      * Set OpenRouter API key (stored in OS secure storage)
      */
-    func setOpenrouterApiKey(key: String?) throws
-
+    func setOpenrouterApiKey(key: String?) throws 
+    
     /**
      * Set OpenRouter model
      */
-    func setOpenrouterModel(model: String?) throws
-
+    func setOpenrouterModel(model: String?) throws 
+    
     /**
      * Set relay URLs at runtime. Takes effect on next connect/reconnect.
      */
-    func setRelayUrls(urls: [String]) throws
-
+    func setRelayUrls(urls: [String]) throws 
+    
     /**
      * Set selected voice IDs
      */
-    func setSelectedVoiceIds(voiceIds: [String]) throws
-
+    func setSelectedVoiceIds(voiceIds: [String]) throws 
+    
     /**
      * Set the trusted backends from preferences.
      *
-     * This must be called after login to enable processing of kind:24010 (project status)
-     * events. Status events from approved backends will populate project_statuses,
-     * enabling get_online_agents() to return online agents.
+     * This must be called after login to enable trust-gated backend data.
+     * Approved kind:24011 inventories mark roster agents online.
      *
      * Call this on app startup with stored approved/blocked backend pubkeys.
      */
-    func setTrustedBackends(approved: [String], blocked: [String]) throws
-
+    func setTrustedBackends(approved: [String], blocked: [String]) throws 
+    
     /**
      * Set TTS inactivity threshold (seconds of inactivity before TTS fires)
      */
-    func setTtsInactivityThreshold(secs: UInt64) throws
-
+    func setTtsInactivityThreshold(secs: UInt64) throws 
+    
     /**
      * Set which projects are visible in the Conversations tab.
      * Pass empty array to show all projects.
      */
-    func setVisibleProjects(projectATags: [String])
-
+    func setVisibleProjects(projectATags: [String]) 
+    
     /**
      * Start the NIP-46 bunker. Returns the bunker:// URI for clients to connect.
      */
     func startBunker() throws  -> String
-
+    
     /**
      * Stop the NIP-46 bunker.
      */
-    func stopBunker() throws
-
+    func stopBunker() throws 
+    
     /**
      * Toggle bookmark status for a nudge or skill.
      */
     func toggleBookmark(itemId: String) throws  -> [String]
-
+    
     /**
      * Toggle archive status for a conversation.
      * Returns true if the conversation is now archived.
      */
     func toggleConversationArchived(conversationId: String)  -> Bool
-
+    
     /**
      * Toggle collapsed state for a thread.
      * Returns true if the thread is now collapsed.
      */
     func toggleThreadCollapsed(threadId: String)  -> Bool
-
+    
     /**
      * Unarchive a conversation (show in default view).
      */
-    func unarchiveConversation(conversationId: String)
-
+    func unarchiveConversation(conversationId: String) 
+    
     /**
      * Update an agent's configuration (model and tools).
      *
      * Publishes a kind:24020 event to update the agent's configuration.
      * The backend will process this event and update the agent's config.
      */
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws
-
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
+    
     /**
      * Update an agent's configuration globally (all projects).
      *
      * Publishes a kind:24020 event without a project a-tag.
      */
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws
-
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
+    
     /**
      * Update an existing project (kind:31933 replaceable event).
      *
      * Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
      */
-    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String]) throws
-
+    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String]) throws 
+    
     /**
      * Upload an image to Blossom and return the URL.
      *
@@ -1296,12 +1293,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * The Blossom URL where the image is stored.
      */
     func uploadImage(data: Data, mimeType: String) throws  -> String
-
+    
     /**
      * Get the version of tenex-core.
      */
     func version()  -> String
-
+    
 }
 /**
  * Core TENEX functionality exposed to foreign languages.
@@ -1369,9 +1366,9 @@ public convenience init() {
         try! rustCall { uniffi_tenex_core_fn_free_tenexcore(pointer, $0) }
     }
 
+    
 
-
-
+    
     /**
      * Add a bunker auto-approve rule.
      */
@@ -1382,7 +1379,7 @@ open func addBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?)t
     )
 }
 }
-
+    
     /**
      * Answer an ask event by sending a formatted response.
      *
@@ -1400,7 +1397,7 @@ open func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId:
     )
 })
 }
-
+    
     /**
      * Approve all pending backends.
      *
@@ -1414,12 +1411,12 @@ open func approveAllPendingBackends()throws  -> UInt32  {
     )
 })
 }
-
+    
     /**
      * Add a backend to the approved list.
      *
-     * Once approved, kind:24010 events from this backend will be processed,
-     * populating project_statuses and enabling get_online_agents().
+     * Once approved, kind:24011 inventories from this backend can mark roster
+     * agents online.
      */
 open func approveBackend(pubkey: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_approve_backend(self.uniffiClonePointer(),
@@ -1427,7 +1424,7 @@ open func approveBackend(pubkey: String)throws   {try rustCallWithError(FfiConve
     )
 }
 }
-
+    
     /**
      * Archive a conversation (hide from default view).
      */
@@ -1437,7 +1434,7 @@ open func archiveConversation(conversationId: String)  {try! rustCall() {
     )
 }
 }
-
+    
     /**
      * Add a backend to the blocked list.
      *
@@ -1449,13 +1446,12 @@ open func blockBackend(pubkey: String)throws   {try rustCallWithError(FfiConvert
     )
 }
 }
-
+    
     /**
      * Boot/start a project (sends kind:24000 event).
      *
      * This sends a boot request to wake up the project's backend.
-     * The backend will then start publishing kind:24010 status events,
-     * making the project "online" and its agents available.
+     * The backend should publish kind:24011 inventory for available agents.
      *
      * Use this when a project is offline and you want to start it.
      */
@@ -1465,7 +1461,7 @@ open func bootProject(projectId: String)throws   {try rustCallWithError(FfiConve
     )
 }
 }
-
+    
     /**
      * Clear the event callback and stop the listener thread.
      * Call this on logout to clean up resources.
@@ -1475,7 +1471,7 @@ open func clearEventCallback()  {try! rustCall() {
     )
 }
 }
-
+    
     /**
      * Create a new agent definition (kind:4199).
      *
@@ -1493,7 +1489,7 @@ open func createAgentDefinition(name: String, description: String, role: String,
     )
 }
 }
-
+    
 open func createBackendAgent(backendPubkey: String, definitionEventId: String, slugOverride: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_create_backend_agent(self.uniffiClonePointer(),
         FfiConverterString.lower(backendPubkey),
@@ -1502,7 +1498,7 @@ open func createBackendAgent(backendPubkey: String, definitionEventId: String, s
     )
 }
 }
-
+    
 open func createNudge(title: String, description: String, content: String, hashtags: [String], allowTools: [String], denyTools: [String], onlyTools: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_create_nudge(self.uniffiClonePointer(),
         FfiConverterString.lower(title),
@@ -1515,7 +1511,7 @@ open func createNudge(title: String, description: String, content: String, hasht
     )
 }
 }
-
+    
     /**
      * Create a new project (kind:31933 replaceable event).
      */
@@ -1528,7 +1524,7 @@ open func createProject(name: String, description: String, agentPubkeys: [String
     )
 }
 }
-
+    
     /**
      * Delete an agent from a project or globally by publishing a kind:24030 event.
      *
@@ -1546,7 +1542,7 @@ open func deleteAgent(agentPubkey: String, projectATag: String?, reason: String?
     )
 }
 }
-
+    
     /**
      * Delete an agent definition (kind:4199) via NIP-09 kind:5 deletion.
      */
@@ -1556,7 +1552,7 @@ open func deleteAgentDefinition(agentId: String)throws   {try rustCallWithError(
     )
 }
 }
-
+    
     /**
      * Delete a nudge (kind:4201) via NIP-09 kind:5 deletion.
      *
@@ -1568,7 +1564,7 @@ open func deleteNudge(nudgeId: String)throws   {try rustCallWithError(FfiConvert
     )
 }
 }
-
+    
     /**
      * Tombstone-delete a project by republishing it with ["deleted"] tag.
      */
@@ -1578,7 +1574,7 @@ open func deleteProject(projectId: String)throws   {try rustCallWithError(FfiCon
     )
 }
 }
-
+    
     /**
      * Force reconnection to relays and restart all subscriptions.
      *
@@ -1600,7 +1596,7 @@ open func forceReconnect()throws   {try rustCallWithError(FfiConverterTypeTenexE
     )
 }
 }
-
+    
     /**
      * Generate audio notification for a message
      * Note: This is a blocking call that will wait for the async operation to complete
@@ -1617,7 +1613,7 @@ open func generateAudioNotification(agentPubkey: String, conversationTitle: Stri
     )
 })
 }
-
+    
     /**
      * Generate a fresh Nostr keypair.
      *
@@ -1630,7 +1626,7 @@ open func generateKeypair()throws  -> GeneratedKeypair  {
     )
 })
 }
-
+    
 open func getAgentConfig(agentPubkey: String)throws  -> AgentConfig?  {
     return try  FfiConverterOptionTypeAgentConfig.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_agent_config(self.uniffiClonePointer(),
@@ -1638,14 +1634,14 @@ open func getAgentConfig(agentPubkey: String)throws  -> AgentConfig?  {
     )
 })
 }
-
+    
 open func getAgentInventory()throws  -> [AgentInventoryItem]  {
     return try  FfiConverterSequenceTypeAgentInventoryItem.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_agent_inventory(self.uniffiClonePointer(),$0
     )
 })
 }
-
+    
     /**
      * Legacy helper for definition-based project agents.
      *
@@ -1661,7 +1657,7 @@ open func getAgents(projectId: String)throws  -> [AgentDefinition]  {
     )
 })
 }
-
+    
     /**
      * Get AI audio settings (API keys never exposed - only configuration status)
      */
@@ -1671,7 +1667,7 @@ open func getAiAudioSettings()throws  -> AiAudioSettingsInfo  {
     )
 })
 }
-
+    
     /**
      * Get all available agents (not filtered by project).
      *
@@ -1684,7 +1680,7 @@ open func getAllAgents()throws  -> [AgentDefinition]  {
     )
 })
 }
-
+    
     /**
      * Get all conversations across all projects with full info for the Conversations tab.
      * Returns conversations with activity tracking, archive status, and hierarchy data.
@@ -1700,7 +1696,7 @@ open func getAllConversations(filter: ConversationFilter)throws  -> [Conversatio
     )
 })
 }
-
+    
     /**
      * Get all MCP tool definitions (kind:4200 events).
      *
@@ -1712,7 +1708,7 @@ open func getAllMcpTools()throws  -> [McpTool]  {
     )
 })
 }
-
+    
     /**
      * Get all available team packs (kind:34199), deduped to latest by `pubkey + d_tag`.
      *
@@ -1725,7 +1721,7 @@ open func getAllTeams()throws  -> [TeamInfo]  {
     )
 })
 }
-
+    
     /**
      * Get all archived conversation IDs.
      * Returns Result to distinguish "no data" from "lock error".
@@ -1736,7 +1732,7 @@ open func getArchivedConversationIds()throws  -> [String]  {
     )
 })
 }
-
+    
     /**
      * Resolve an ask event by event ID.
      * Used for q-tag references that may point to ask events instead of child threads.
@@ -1748,7 +1744,7 @@ open func getAskEventById(eventId: String) -> AskEventLookupInfo?  {
     )
 })
 }
-
+    
     /**
      * Get diagnostics about backend approvals and project statuses.
      * Returns JSON with project statuses keys.
@@ -1759,7 +1755,7 @@ open func getBackendDiagnostics()throws  -> String  {
     )
 })
 }
-
+    
     /**
      * Get approved/blocked/pending backend trust state for settings UI.
      */
@@ -1769,7 +1765,7 @@ open func getBackendTrustSnapshot()throws  -> BackendTrustSnapshot  {
     )
 })
 }
-
+    
     /**
      * Get all bookmarked nudge/skill IDs for the current user.
      */
@@ -1779,7 +1775,7 @@ open func getBookmarkedIds()throws  -> [String]  {
     )
 })
 }
-
+    
     /**
      * Get the NIP-46 bunker audit log.
      */
@@ -1789,7 +1785,7 @@ open func getBunkerAuditLog()throws  -> [FfiBunkerAuditEntry]  {
     )
 })
 }
-
+    
     /**
      * Get all bunker auto-approve rules.
      */
@@ -1799,7 +1795,7 @@ open func getBunkerAutoApproveRules()throws  -> [FfiBunkerAutoApproveRule]  {
     )
 })
 }
-
+    
     /**
      * Get all collapsed thread IDs.
      */
@@ -1809,7 +1805,7 @@ open func getCollapsedThreadIds()throws  -> [String]  {
     )
 })
 }
-
+    
     /**
      * Return currently configured relay URLs.
      */
@@ -1819,7 +1815,7 @@ open func getConfiguredRelays() -> [String]  {
     )
 })
 }
-
+    
     /**
      * Get the total hierarchical LLM runtime for a conversation (includes all descendants) in milliseconds.
      * Returns 0 if the conversation is not found or has no runtime data.
@@ -1831,7 +1827,7 @@ open func getConversationRuntimeMs(conversationId: String) -> UInt64  {
     )
 })
 }
-
+    
     /**
      * Get conversations for a project.
      *
@@ -1845,7 +1841,7 @@ open func getConversations(projectId: String) -> [ConversationFullInfo]  {
     )
 })
 }
-
+    
     /**
      * Get conversations by their IDs.
      * Returns ConversationFullInfo for each conversation ID that exists.
@@ -1858,7 +1854,7 @@ open func getConversationsByIds(conversationIds: [String]) -> [ConversationFullI
     )
 })
 }
-
+    
     /**
      * Get information about the currently logged-in user.
      *
@@ -1870,7 +1866,7 @@ open func getCurrentUser() -> UserInfo?  {
     )
 })
 }
-
+    
     /**
      * Get the default audio prompt
      */
@@ -1880,7 +1876,7 @@ open func getDefaultAudioPrompt() -> String  {
     )
 })
 }
-
+    
     /**
      * Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
      * Returns empty Vec if no descendants exist or if the conversation is not found.
@@ -1892,7 +1888,7 @@ open func getDescendantConversationIds(conversationId: String) -> [String]  {
     )
 })
 }
-
+    
     /**
      * Get a comprehensive diagnostics snapshot for the iOS Diagnostics view.
      * Returns all diagnostic information in a single batched call for efficiency.
@@ -1911,7 +1907,7 @@ open func getDiagnosticsSnapshot(includeDatabaseStats: Bool) -> DiagnosticsSnaps
     )
 })
 }
-
+    
     /**
      * Get root threads that reference a report a-tag (`30023:pubkey:slug`).
      */
@@ -1922,7 +1918,7 @@ open func getDocumentThreads(reportATag: String) -> [Thread]  {
     )
 })
 }
-
+    
     /**
      * Get HTML reports (kind:1 events tagged `t:html-report`).
      *
@@ -1937,7 +1933,7 @@ open func getHtmlReports(projectId: String) -> [HtmlReport]  {
     )
 })
 }
-
+    
     /**
      * Get inbox items for the current user.
      */
@@ -1947,7 +1943,7 @@ open func getInbox() -> [InboxItem]  {
     )
 })
 }
-
+    
 open func getInstalledAgents(backendPubkey: String)throws  -> [InstalledAgent]  {
     return try  FfiConverterSequenceTypeInstalledAgent.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_installed_agents(self.uniffiClonePointer(),
@@ -1955,7 +1951,7 @@ open func getInstalledAgents(backendPubkey: String)throws  -> [InstalledAgent]  
     )
 })
 }
-
+    
     /**
      * Get messages for a conversation.
      */
@@ -1966,7 +1962,7 @@ open func getMessages(conversationId: String) -> [Message]  {
     )
 })
 }
-
+    
     /**
      * Get all nudges (kind:4201 events).
      *
@@ -1980,15 +1976,15 @@ open func getNudges()throws  -> [Nudge]  {
     )
 })
 }
-
+    
     /**
-     * Get online agents for a project from the project status (kind:24010).
+     * Get project roster agents for a project.
      *
-     * These are actual agent instances with their own Nostr keypairs.
-     * Use these for agent selection in the message composer - the pubkeys
-     * can be used for profile picture lookups and p-tags.
+     * Membership/order comes from kind:31933. The `is_online` flag comes from
+     * approved kind:24011 backend inventories, and per-agent config is merged
+     * from kind:34011.
      *
-     * Returns empty if project not found or project is offline.
+     * Returns empty if the project is not found.
      */
 open func getOnlineAgents(projectId: String)throws  -> [ProjectAgent]  {
     return try  FfiConverterSequenceTypeProjectAgent.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -1997,7 +1993,7 @@ open func getOnlineAgents(projectId: String)throws  -> [ProjectAgent]  {
     )
 })
 }
-
+    
     /**
      * Get the display name for a pubkey.
      * Returns the kind:0 profile name if available, otherwise a shortened pubkey.
@@ -2009,7 +2005,7 @@ open func getProfileName(pubkey: String) -> String  {
     )
 })
 }
-
+    
     /**
      * Get profile picture URL for a pubkey from kind:0 metadata.
      *
@@ -2026,7 +2022,7 @@ open func getProfilePicture(pubkey: String)throws  -> String?  {
     )
 })
 }
-
+    
 open func getProjectBackendPubkey(projectId: String) -> String?  {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_project_backend_pubkey(self.uniffiClonePointer(),
@@ -2034,7 +2030,7 @@ open func getProjectBackendPubkey(projectId: String) -> String?  {
     )
 })
 }
-
+    
     /**
      * Get available configuration options for a project.
      *
@@ -2048,7 +2044,7 @@ open func getProjectConfigOptions(projectId: String)throws  -> ProjectConfigOpti
     )
 })
 }
-
+    
     /**
      * Get all projects with filter info (visibility, counts).
      * Returns Result to distinguish "no data" from "core error".
@@ -2059,7 +2055,7 @@ open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
     )
 })
 }
-
+    
     /**
      * Get a list of projects.
      *
@@ -2071,7 +2067,7 @@ open func getProjects() -> [Project]  {
     )
 })
 }
-
+    
     /**
      * Get raw Nostr event JSON for an event ID.
      */
@@ -2082,7 +2078,7 @@ open func getRawEventJson(eventId: String) -> String?  {
     )
 })
 }
-
+    
     /**
      * Get reports for a project.
      */
@@ -2093,7 +2089,7 @@ open func getReports(projectId: String) -> [Report]  {
     )
 })
 }
-
+    
     /**
      * Get all skills (kind:4202 events).
      *
@@ -2107,7 +2103,7 @@ open func getSkills()throws  -> [Skill]  {
     )
 })
 }
-
+    
     /**
      * Get comprehensive stats snapshot with all data needed for iOS Stats tab.
      * This is a single batched FFI call that returns all stats data pre-computed.
@@ -2120,7 +2116,7 @@ open func getStatsSnapshot()throws  -> StatsSnapshot  {
     )
 })
 }
-
+    
     /**
      * Get team comments (kind:1111) for one team using dual-anchor matching.
      */
@@ -2132,7 +2128,7 @@ open func getTeamComments(teamCoordinate: String, teamEventId: String)throws  ->
     )
 })
 }
-
+    
     /**
      * Get today's LLM runtime for statusbar display (in milliseconds).
      * Reads from a lock-free AtomicU64 cache that is updated after refresh()
@@ -2147,7 +2143,7 @@ open func getTodayRuntimeMs() -> UInt64  {
     )
 })
 }
-
+    
     /**
      * Initialize the core. Must be called before other operations.
      * Returns true if initialization succeeded.
@@ -2161,7 +2157,7 @@ open func `init`() -> Bool  {
     )
 })
 }
-
+    
     /**
      * Check if a nudge or skill is bookmarked by the current user.
      */
@@ -2172,7 +2168,7 @@ open func isBookmarked(itemId: String) -> Bool  {
     )
 })
 }
-
+    
     /**
      * Check if a conversation is archived.
      */
@@ -2183,7 +2179,7 @@ open func isConversationArchived(conversationId: String) -> Bool  {
     )
 })
 }
-
+    
     /**
      * Check if the core is initialized.
      */
@@ -2193,7 +2189,7 @@ open func isInitialized() -> Bool  {
     )
 })
 }
-
+    
     /**
      * Check if a user is currently logged in.
      * Returns true only if we have stored keys.
@@ -2204,13 +2200,12 @@ open func isLoggedIn() -> Bool  {
     )
 })
 }
-
+    
     /**
-     * Check if a project is online (has a recent kind:24010 status event).
+     * Check if a project has at least one available roster agent.
      *
-     * A project is considered online if:
-     * 1. It has a status event from an approved backend
-     * 2. The status event is not stale (within the staleness threshold)
+     * A project is considered online if one of its kind:31933 roster agents is
+     * present in an approved kind:24011 backend inventory.
      *
      * Returns true if the project is online, false otherwise.
      */
@@ -2221,7 +2216,7 @@ open func isProjectOnline(projectId: String) -> Bool  {
     )
 })
 }
-
+    
     /**
      * Check if a thread is collapsed.
      */
@@ -2232,7 +2227,7 @@ open func isThreadCollapsed(threadId: String) -> Bool  {
     )
 })
 }
-
+    
     /**
      * Login with an nsec (Nostr secret key in bech32 format).
      *
@@ -2247,7 +2242,7 @@ open func login(nsec: String)throws  -> LoginResult  {
     )
 })
 }
-
+    
     /**
      * Logout the current user.
      * Disconnects from relays, wipes local Nostr cache files, and resets session state.
@@ -2264,7 +2259,7 @@ open func logout()throws   {try rustCallWithError(FfiConverterTypeTenexError_lif
     )
 }
 }
-
+    
     /**
      * Convert an npub (bech32) string to a hex pubkey string.
      * Returns None if the input is not a valid npub.
@@ -2278,7 +2273,7 @@ open func npubToHex(npub: String) -> String?  {
     )
 })
 }
-
+    
     /**
      * Publish a team comment (kind:1111 NIP-22) and return comment event ID.
      */
@@ -2294,7 +2289,7 @@ open func postTeamComment(teamCoordinate: String, teamEventId: String, teamPubke
     )
 })
 }
-
+    
     /**
      * Publish a kind:0 profile metadata event for the logged-in user.
      *
@@ -2308,7 +2303,7 @@ open func publishProfile(name: String, pictureUrl: String?)throws   {try rustCal
     )
 }
 }
-
+    
     /**
      * Publish a team reaction (kind:7 NIP-25) and return reaction event ID.
      */
@@ -2322,7 +2317,7 @@ open func reactToTeam(teamCoordinate: String, teamEventId: String, teamPubkey: S
     )
 })
 }
-
+    
     /**
      * Refresh data from relays.
      * Call this to fetch the latest data from relays.
@@ -2337,7 +2332,7 @@ open func refresh() -> Bool  {
     )
 })
 }
-
+    
     /**
      * Register or deregister an APNs push-notification token with the backend.
      */
@@ -2350,7 +2345,7 @@ open func registerApnsToken(deviceToken: String, enable: Bool, backendPubkey: St
     )
 }
 }
-
+    
     /**
      * Remove a bunker auto-approve rule.
      */
@@ -2361,7 +2356,7 @@ open func removeBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16
     )
 }
 }
-
+    
     /**
      * Respond to a pending bunker signing request.
      */
@@ -2372,7 +2367,7 @@ open func respondToBunkerRequest(requestId: String, approved: Bool)throws   {try
     )
 }
 }
-
+    
     /**
      * Full-text search across threads and messages.
      * Uses in-memory store data (same approach as TUI search).
@@ -2386,7 +2381,7 @@ open func search(query: String, limit: Int32) -> [SearchResult]  {
     )
 })
 }
-
+    
     /**
      * Send a message to an existing conversation.
      *
@@ -2405,7 +2400,7 @@ open func sendMessage(conversationId: String, projectId: String, content: String
     )
 })
 }
-
+    
     /**
      * Send a new conversation (thread) to a project.
      *
@@ -2426,7 +2421,7 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
     )
 })
 }
-
+    
     /**
      * Enable or disable audio notifications
      */
@@ -2436,7 +2431,7 @@ open func setAudioNotificationsEnabled(enabled: Bool)throws   {try rustCallWithE
     )
 }
 }
-
+    
     /**
      * Set audio prompt
      */
@@ -2446,7 +2441,7 @@ open func setAudioPrompt(prompt: String)throws   {try rustCallWithError(FfiConve
     )
 }
 }
-
+    
     /**
      * Set collapsed thread IDs (replace all).
      */
@@ -2456,7 +2451,7 @@ open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
     )
 }
 }
-
+    
     /**
      * Set ElevenLabs API key (stored in OS secure storage)
      */
@@ -2466,7 +2461,7 @@ open func setElevenlabsApiKey(key: String?)throws   {try rustCallWithError(FfiCo
     )
 }
 }
-
+    
     /**
      * Register a callback to receive event notifications.
      * Call this after login to enable push-based updates.
@@ -2486,7 +2481,7 @@ open func setEventCallback(callback: EventCallback)  {try! rustCall() {
     )
 }
 }
-
+    
     /**
      * Set OpenRouter API key (stored in OS secure storage)
      */
@@ -2496,7 +2491,7 @@ open func setOpenrouterApiKey(key: String?)throws   {try rustCallWithError(FfiCo
     )
 }
 }
-
+    
     /**
      * Set OpenRouter model
      */
@@ -2506,7 +2501,7 @@ open func setOpenrouterModel(model: String?)throws   {try rustCallWithError(FfiC
     )
 }
 }
-
+    
     /**
      * Set relay URLs at runtime. Takes effect on next connect/reconnect.
      */
@@ -2516,7 +2511,7 @@ open func setRelayUrls(urls: [String])throws   {try rustCallWithError(FfiConvert
     )
 }
 }
-
+    
     /**
      * Set selected voice IDs
      */
@@ -2526,13 +2521,12 @@ open func setSelectedVoiceIds(voiceIds: [String])throws   {try rustCallWithError
     )
 }
 }
-
+    
     /**
      * Set the trusted backends from preferences.
      *
-     * This must be called after login to enable processing of kind:24010 (project status)
-     * events. Status events from approved backends will populate project_statuses,
-     * enabling get_online_agents() to return online agents.
+     * This must be called after login to enable trust-gated backend data.
+     * Approved kind:24011 inventories mark roster agents online.
      *
      * Call this on app startup with stored approved/blocked backend pubkeys.
      */
@@ -2543,7 +2537,7 @@ open func setTrustedBackends(approved: [String], blocked: [String])throws   {try
     )
 }
 }
-
+    
     /**
      * Set TTS inactivity threshold (seconds of inactivity before TTS fires)
      */
@@ -2553,7 +2547,7 @@ open func setTtsInactivityThreshold(secs: UInt64)throws   {try rustCallWithError
     )
 }
 }
-
+    
     /**
      * Set which projects are visible in the Conversations tab.
      * Pass empty array to show all projects.
@@ -2564,7 +2558,7 @@ open func setVisibleProjects(projectATags: [String])  {try! rustCall() {
     )
 }
 }
-
+    
     /**
      * Start the NIP-46 bunker. Returns the bunker:// URI for clients to connect.
      */
@@ -2574,7 +2568,7 @@ open func startBunker()throws  -> String  {
     )
 })
 }
-
+    
     /**
      * Stop the NIP-46 bunker.
      */
@@ -2583,7 +2577,7 @@ open func stopBunker()throws   {try rustCallWithError(FfiConverterTypeTenexError
     )
 }
 }
-
+    
     /**
      * Toggle bookmark status for a nudge or skill.
      */
@@ -2594,7 +2588,7 @@ open func toggleBookmark(itemId: String)throws  -> [String]  {
     )
 })
 }
-
+    
     /**
      * Toggle archive status for a conversation.
      * Returns true if the conversation is now archived.
@@ -2606,7 +2600,7 @@ open func toggleConversationArchived(conversationId: String) -> Bool  {
     )
 })
 }
-
+    
     /**
      * Toggle collapsed state for a thread.
      * Returns true if the thread is now collapsed.
@@ -2618,7 +2612,7 @@ open func toggleThreadCollapsed(threadId: String) -> Bool  {
     )
 })
 }
-
+    
     /**
      * Unarchive a conversation (show in default view).
      */
@@ -2628,7 +2622,7 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
     )
 }
 }
-
+    
     /**
      * Update an agent's configuration (model and tools).
      *
@@ -2647,7 +2641,7 @@ open func updateAgentConfig(projectId: String, agentPubkey: String, model: Strin
     )
 }
 }
-
+    
     /**
      * Update an agent's configuration globally (all projects).
      *
@@ -2664,7 +2658,7 @@ open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [S
     )
 }
 }
-
+    
     /**
      * Update an existing project (kind:31933 replaceable event).
      *
@@ -2682,7 +2676,7 @@ open func updateProject(projectId: String, title: String, description: String, r
     )
 }
 }
-
+    
     /**
      * Upload an image to Blossom and return the URL.
      *
@@ -2704,7 +2698,7 @@ open func uploadImage(data: Data, mimeType: String)throws  -> String  {
     )
 })
 }
-
+    
     /**
      * Get the version of tenex-core.
      */
@@ -2714,7 +2708,7 @@ open func version() -> String  {
     )
 })
 }
-
+    
 
 }
 
@@ -2831,39 +2825,39 @@ public struct AgentConfig {
     public init(
         /**
          * Hex-encoded public key of the agent — the event signer.
-         */pubkey: String,
+         */pubkey: String, 
         /**
          * Human-friendly slug for the agent (the NIP-33 d-tag).
-         */slug: String,
+         */slug: String, 
         /**
          * Hex-encoded public key of the backend that runs this agent, sourced
          * from the first `["p", "<backend_pubkey>"]` tag on the event. Optional
          * because the tag may be absent on malformed events.
-         */backendPubkey: String?,
+         */backendPubkey: String?, 
         /**
          * Unix timestamp the event was created.
-         */createdAt: UInt64,
+         */createdAt: UInt64, 
         /**
          * Currently-selected model slug, if any model is active.
-         */activeModel: String?,
+         */activeModel: String?, 
         /**
          * Every available model slug (includes `active_model`).
-         */models: [String],
+         */models: [String], 
         /**
          * Enabled tool IDs.
-         */activeTools: [String],
+         */activeTools: [String], 
         /**
          * Every visible tool ID (includes `active_tools`).
-         */tools: [String],
+         */tools: [String], 
         /**
          * Enabled, non-blocked skill IDs.
-         */activeSkills: [String],
+         */activeSkills: [String], 
         /**
          * Every visible skill ID (includes `active_skills`).
-         */skills: [String],
+         */skills: [String], 
         /**
          * MCP server slugs currently in `mcpAccess`.
-         */activeMcps: [String],
+         */activeMcps: [String], 
         /**
          * Every configured MCP server slug (includes `active_mcps`).
          */mcps: [String]) {
@@ -2953,17 +2947,17 @@ public struct FfiConverterTypeAgentConfig: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentConfig {
         return
             try AgentConfig(
-                pubkey: FfiConverterString.read(from: &buf),
-                slug: FfiConverterString.read(from: &buf),
-                backendPubkey: FfiConverterOptionString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
-                activeModel: FfiConverterOptionString.read(from: &buf),
-                models: FfiConverterSequenceString.read(from: &buf),
-                activeTools: FfiConverterSequenceString.read(from: &buf),
-                tools: FfiConverterSequenceString.read(from: &buf),
-                activeSkills: FfiConverterSequenceString.read(from: &buf),
-                skills: FfiConverterSequenceString.read(from: &buf),
-                activeMcps: FfiConverterSequenceString.read(from: &buf),
+                pubkey: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
+                backendPubkey: FfiConverterOptionString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                activeModel: FfiConverterOptionString.read(from: &buf), 
+                models: FfiConverterSequenceString.read(from: &buf), 
+                activeTools: FfiConverterSequenceString.read(from: &buf), 
+                tools: FfiConverterSequenceString.read(from: &buf), 
+                activeSkills: FfiConverterSequenceString.read(from: &buf), 
+                skills: FfiConverterSequenceString.read(from: &buf), 
+                activeMcps: FfiConverterSequenceString.read(from: &buf), 
                 mcps: FfiConverterSequenceString.read(from: &buf)
         )
     }
@@ -3030,10 +3024,10 @@ public struct AgentDefinition {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, pubkey: String, dTag: String, name: String, description: String, role: String, content: String, instructions: String, picture: String?, version: String?, model: String?, tools: [String], mcpServers: [String], useCriteria: [String],
+    public init(id: String, pubkey: String, dTag: String, name: String, description: String, role: String, content: String, instructions: String, picture: String?, version: String?, model: String?, tools: [String], mcpServers: [String], useCriteria: [String], 
         /**
          * Skill event IDs (kind:4202 references via `["skill", <event-id>]` tags)
-         */skillIds: [String],
+         */skillIds: [String], 
         /**
          * File attachment event IDs (e-tags referencing NIP-94 kind:1063 events)
          */fileIds: [String], createdAt: UInt64) {
@@ -3148,22 +3142,22 @@ public struct FfiConverterTypeAgentDefinition: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentDefinition {
         return
             try AgentDefinition(
-                id: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                dTag: FfiConverterString.read(from: &buf),
-                name: FfiConverterString.read(from: &buf),
-                description: FfiConverterString.read(from: &buf),
-                role: FfiConverterString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                instructions: FfiConverterString.read(from: &buf),
-                picture: FfiConverterOptionString.read(from: &buf),
-                version: FfiConverterOptionString.read(from: &buf),
-                model: FfiConverterOptionString.read(from: &buf),
-                tools: FfiConverterSequenceString.read(from: &buf),
-                mcpServers: FfiConverterSequenceString.read(from: &buf),
-                useCriteria: FfiConverterSequenceString.read(from: &buf),
-                skillIds: FfiConverterSequenceString.read(from: &buf),
-                fileIds: FfiConverterSequenceString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                role: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                instructions: FfiConverterString.read(from: &buf), 
+                picture: FfiConverterOptionString.read(from: &buf), 
+                version: FfiConverterOptionString.read(from: &buf), 
+                model: FfiConverterOptionString.read(from: &buf), 
+                tools: FfiConverterSequenceString.read(from: &buf), 
+                mcpServers: FfiConverterSequenceString.read(from: &buf), 
+                useCriteria: FfiConverterSequenceString.read(from: &buf), 
+                skillIds: FfiConverterSequenceString.read(from: &buf), 
+                fileIds: FfiConverterSequenceString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -3257,8 +3251,8 @@ public struct FfiConverterTypeAgentInventoryBackend: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentInventoryBackend {
         return
             try AgentInventoryBackend(
-                backendPubkey: FfiConverterString.read(from: &buf),
-                slug: FfiConverterString.read(from: &buf),
+                backendPubkey: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -3344,9 +3338,9 @@ public struct FfiConverterTypeAgentInventoryItem: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentInventoryItem {
         return
             try AgentInventoryItem(
-                pubkey: FfiConverterString.read(from: &buf),
-                slug: FfiConverterString.read(from: &buf),
-                backends: FfiConverterSequenceTypeAgentInventoryBackend.read(from: &buf),
+                pubkey: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
+                backends: FfiConverterSequenceTypeAgentInventoryBackend.read(from: &buf), 
                 isMultiBackend: FfiConverterBool.read(from: &buf)
         )
     }
@@ -3451,12 +3445,12 @@ public struct FfiConverterTypeAiAudioSettingsInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AiAudioSettingsInfo {
         return
             try AiAudioSettingsInfo(
-                elevenlabsApiKeyConfigured: FfiConverterBool.read(from: &buf),
-                openrouterApiKeyConfigured: FfiConverterBool.read(from: &buf),
-                selectedVoiceIds: FfiConverterSequenceString.read(from: &buf),
-                openrouterModel: FfiConverterOptionString.read(from: &buf),
-                audioPrompt: FfiConverterString.read(from: &buf),
-                enabled: FfiConverterBool.read(from: &buf),
+                elevenlabsApiKeyConfigured: FfiConverterBool.read(from: &buf), 
+                openrouterApiKeyConfigured: FfiConverterBool.read(from: &buf), 
+                selectedVoiceIds: FfiConverterSequenceString.read(from: &buf), 
+                openrouterModel: FfiConverterOptionString.read(from: &buf), 
+                audioPrompt: FfiConverterString.read(from: &buf), 
+                enabled: FfiConverterBool.read(from: &buf), 
                 ttsInactivityThresholdSecs: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -3506,7 +3500,7 @@ public struct AskAnswer {
     public init(
         /**
          * The question title (used to format the response)
-         */questionTitle: String,
+         */questionTitle: String, 
         /**
          * The answer type and value(s)
          */answerType: AskAnswerType) {
@@ -3546,7 +3540,7 @@ public struct FfiConverterTypeAskAnswer: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskAnswer {
         return
             try AskAnswer(
-                questionTitle: FfiConverterString.read(from: &buf),
+                questionTitle: FfiConverterString.read(from: &buf), 
                 answerType: FfiConverterTypeAskAnswerType.read(from: &buf)
         )
     }
@@ -3622,8 +3616,8 @@ public struct FfiConverterTypeAskEvent: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskEvent {
         return
             try AskEvent(
-                title: FfiConverterOptionString.read(from: &buf),
-                context: FfiConverterString.read(from: &buf),
+                title: FfiConverterOptionString.read(from: &buf), 
+                context: FfiConverterString.read(from: &buf), 
                 questions: FfiConverterSequenceTypeAskQuestion.read(from: &buf)
         )
     }
@@ -3669,7 +3663,7 @@ public struct AskEventLookupInfo {
     public init(
         /**
          * Ask payload resolved from the referenced event.
-         */askEvent: AskEvent,
+         */askEvent: AskEvent, 
         /**
          * Author pubkey (hex) of the ask event.
          */authorPubkey: String) {
@@ -3709,7 +3703,7 @@ public struct FfiConverterTypeAskEventLookupInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskEventLookupInfo {
         return
             try AskEventLookupInfo(
-                askEvent: FfiConverterTypeAskEvent.read(from: &buf),
+                askEvent: FfiConverterTypeAskEvent.read(from: &buf), 
                 authorPubkey: FfiConverterString.read(from: &buf)
         )
     }
@@ -3818,13 +3812,13 @@ public struct FfiConverterTypeAudioNotificationInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioNotificationInfo {
         return
             try AudioNotificationInfo(
-                id: FfiConverterString.read(from: &buf),
-                agentPubkey: FfiConverterString.read(from: &buf),
-                conversationTitle: FfiConverterString.read(from: &buf),
-                originalText: FfiConverterString.read(from: &buf),
-                massagedText: FfiConverterString.read(from: &buf),
-                voiceId: FfiConverterString.read(from: &buf),
-                audioFilePath: FfiConverterString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                agentPubkey: FfiConverterString.read(from: &buf), 
+                conversationTitle: FfiConverterString.read(from: &buf), 
+                originalText: FfiConverterString.read(from: &buf), 
+                massagedText: FfiConverterString.read(from: &buf), 
+                voiceId: FfiConverterString.read(from: &buf), 
+                audioFilePath: FfiConverterString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -3909,8 +3903,8 @@ public struct FfiConverterTypeBackendTrustSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BackendTrustSnapshot {
         return
             try BackendTrustSnapshot(
-                approved: FfiConverterSequenceString.read(from: &buf),
-                blocked: FfiConverterSequenceString.read(from: &buf),
+                approved: FfiConverterSequenceString.read(from: &buf), 
+                blocked: FfiConverterSequenceString.read(from: &buf), 
                 pending: FfiConverterSequenceTypePendingBackendInfo.read(from: &buf)
         )
     }
@@ -3968,16 +3962,16 @@ public struct ConversationFilter {
     public init(
         /**
          * Project IDs to include (empty = all projects)
-         */projectIds: [String],
+         */projectIds: [String], 
         /**
          * Whether to include archived conversations
-         */showArchived: Bool,
+         */showArchived: Bool, 
         /**
          * Whether to hide scheduled events
-         */hideScheduled: Bool,
+         */hideScheduled: Bool, 
         /**
          * Whether to hide intervention review conversations
-         */hideInterventionReview: Bool,
+         */hideInterventionReview: Bool, 
         /**
          * Time filter
          */timeFilter: TimeFilterOption) {
@@ -4032,10 +4026,10 @@ public struct FfiConverterTypeConversationFilter: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationFilter {
         return
             try ConversationFilter(
-                projectIds: FfiConverterSequenceString.read(from: &buf),
-                showArchived: FfiConverterBool.read(from: &buf),
-                hideScheduled: FfiConverterBool.read(from: &buf),
-                hideInterventionReview: FfiConverterBool.read(from: &buf),
+                projectIds: FfiConverterSequenceString.read(from: &buf), 
+                showArchived: FfiConverterBool.read(from: &buf), 
+                hideScheduled: FfiConverterBool.read(from: &buf), 
+                hideInterventionReview: FfiConverterBool.read(from: &buf), 
                 timeFilter: FfiConverterTypeTimeFilterOption.read(from: &buf)
         )
     }
@@ -4104,22 +4098,22 @@ public struct ConversationFullInfo {
     public init(
         /**
          * The underlying thread data
-         */thread: Thread,
+         */thread: Thread, 
         /**
          * Author display name (resolved from profile)
-         */author: String,
+         */author: String, 
         /**
          * Number of messages in the thread
-         */messageCount: UInt32,
+         */messageCount: UInt32, 
         /**
          * Whether this conversation has an agent actively working on it
-         */isActive: Bool,
+         */isActive: Bool, 
         /**
          * Whether this conversation is archived
-         */isArchived: Bool,
+         */isArchived: Bool, 
         /**
          * Whether this thread has children (for collapse/expand UI)
-         */hasChildren: Bool,
+         */hasChildren: Bool, 
         /**
          * Project a_tag this conversation belongs to
          */projectATag: String) {
@@ -4184,12 +4178,12 @@ public struct FfiConverterTypeConversationFullInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationFullInfo {
         return
             try ConversationFullInfo(
-                thread: FfiConverterTypeThread.read(from: &buf),
-                author: FfiConverterString.read(from: &buf),
-                messageCount: FfiConverterUInt32.read(from: &buf),
-                isActive: FfiConverterBool.read(from: &buf),
-                isArchived: FfiConverterBool.read(from: &buf),
-                hasChildren: FfiConverterBool.read(from: &buf),
+                thread: FfiConverterTypeThread.read(from: &buf), 
+                author: FfiConverterString.read(from: &buf), 
+                messageCount: FfiConverterUInt32.read(from: &buf), 
+                isActive: FfiConverterBool.read(from: &buf), 
+                isArchived: FfiConverterBool.read(from: &buf), 
+                hasChildren: FfiConverterBool.read(from: &buf), 
                 projectATag: FfiConverterString.read(from: &buf)
         )
     }
@@ -4243,10 +4237,10 @@ public struct DatabaseStats {
     public init(
         /**
          * Database file size in bytes
-         */dbSizeBytes: UInt64,
+         */dbSizeBytes: UInt64, 
         /**
          * Event counts by kind (sorted by count descending)
-         */eventCountsByKind: [KindEventCount],
+         */eventCountsByKind: [KindEventCount], 
         /**
          * Total events across all kinds
          */totalEvents: UInt64) {
@@ -4291,8 +4285,8 @@ public struct FfiConverterTypeDatabaseStats: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DatabaseStats {
         return
             try DatabaseStats(
-                dbSizeBytes: FfiConverterUInt64.read(from: &buf),
-                eventCountsByKind: FfiConverterSequenceTypeKindEventCount.read(from: &buf),
+                dbSizeBytes: FfiConverterUInt64.read(from: &buf), 
+                eventCountsByKind: FfiConverterSequenceTypeKindEventCount.read(from: &buf), 
                 totalEvents: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -4342,10 +4336,10 @@ public struct DayMessages {
     public init(
         /**
          * Unix timestamp (seconds) for the start of the day (UTC)
-         */dayStart: UInt64,
+         */dayStart: UInt64, 
         /**
          * Number of messages from the current user
-         */userCount: UInt64,
+         */userCount: UInt64, 
         /**
          * Total number of messages from all users
          */allCount: UInt64) {
@@ -4390,8 +4384,8 @@ public struct FfiConverterTypeDayMessages: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DayMessages {
         return
             try DayMessages(
-                dayStart: FfiConverterUInt64.read(from: &buf),
-                userCount: FfiConverterUInt64.read(from: &buf),
+                dayStart: FfiConverterUInt64.read(from: &buf), 
+                userCount: FfiConverterUInt64.read(from: &buf), 
                 allCount: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -4437,7 +4431,7 @@ public struct DayRuntime {
     public init(
         /**
          * Unix timestamp (seconds) for the start of the day (UTC)
-         */dayStart: UInt64,
+         */dayStart: UInt64, 
         /**
          * Total LLM runtime for this day in milliseconds
          */runtimeMs: UInt64) {
@@ -4477,7 +4471,7 @@ public struct FfiConverterTypeDayRuntime: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DayRuntime {
         return
             try DayRuntime(
-                dayStart: FfiConverterUInt64.read(from: &buf),
+                dayStart: FfiConverterUInt64.read(from: &buf), 
                 runtimeMs: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -4540,19 +4534,19 @@ public struct DiagnosticsSnapshot {
     public init(
         /**
          * System information (None if system info collection failed)
-         */system: SystemDiagnostics?,
+         */system: SystemDiagnostics?, 
         /**
          * Negentropy sync status (None if sync stats unavailable)
-         */sync: NegentropySyncDiagnostics?,
+         */sync: NegentropySyncDiagnostics?, 
         /**
          * Active subscriptions (None if subscription stats unavailable)
-         */subscriptions: [SubscriptionDiagnostics]?,
+         */subscriptions: [SubscriptionDiagnostics]?, 
         /**
          * Total events received across all subscriptions (0 if unavailable)
-         */totalSubscriptionEvents: UInt64,
+         */totalSubscriptionEvents: UInt64, 
         /**
          * Database statistics (None if database stats collection failed)
-         */database: DatabaseStats?,
+         */database: DatabaseStats?, 
         /**
          * Error messages for sections that failed to load (for debugging)
          */sectionErrors: [String]) {
@@ -4612,11 +4606,11 @@ public struct FfiConverterTypeDiagnosticsSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DiagnosticsSnapshot {
         return
             try DiagnosticsSnapshot(
-                system: FfiConverterOptionTypeSystemDiagnostics.read(from: &buf),
-                sync: FfiConverterOptionTypeNegentropySyncDiagnostics.read(from: &buf),
-                subscriptions: FfiConverterOptionSequenceTypeSubscriptionDiagnostics.read(from: &buf),
-                totalSubscriptionEvents: FfiConverterUInt64.read(from: &buf),
-                database: FfiConverterOptionTypeDatabaseStats.read(from: &buf),
+                system: FfiConverterOptionTypeSystemDiagnostics.read(from: &buf), 
+                sync: FfiConverterOptionTypeNegentropySyncDiagnostics.read(from: &buf), 
+                subscriptions: FfiConverterOptionSequenceTypeSubscriptionDiagnostics.read(from: &buf), 
+                totalSubscriptionEvents: FfiConverterUInt64.read(from: &buf), 
+                database: FfiConverterOptionTypeDatabaseStats.read(from: &buf), 
                 sectionErrors: FfiConverterSequenceString.read(from: &buf)
         )
     }
@@ -4765,19 +4759,19 @@ public struct FfiConverterTypeFfiBunkerAuditEntry: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiBunkerAuditEntry {
         return
             try FfiBunkerAuditEntry(
-                timestampMs: FfiConverterUInt64.read(from: &buf),
-                completedAtMs: FfiConverterUInt64.read(from: &buf),
-                requestId: FfiConverterString.read(from: &buf),
-                sourceEventId: FfiConverterString.read(from: &buf),
-                requesterPubkey: FfiConverterString.read(from: &buf),
-                requestType: FfiConverterString.read(from: &buf),
-                eventKind: FfiConverterOptionUInt16.read(from: &buf),
-                eventContentPreview: FfiConverterOptionString.read(from: &buf),
-                eventContentFull: FfiConverterOptionString.read(from: &buf),
-                eventTagsJson: FfiConverterOptionString.read(from: &buf),
-                requestPayloadJson: FfiConverterOptionString.read(from: &buf),
-                responsePayloadJson: FfiConverterOptionString.read(from: &buf),
-                decision: FfiConverterString.read(from: &buf),
+                timestampMs: FfiConverterUInt64.read(from: &buf), 
+                completedAtMs: FfiConverterUInt64.read(from: &buf), 
+                requestId: FfiConverterString.read(from: &buf), 
+                sourceEventId: FfiConverterString.read(from: &buf), 
+                requesterPubkey: FfiConverterString.read(from: &buf), 
+                requestType: FfiConverterString.read(from: &buf), 
+                eventKind: FfiConverterOptionUInt16.read(from: &buf), 
+                eventContentPreview: FfiConverterOptionString.read(from: &buf), 
+                eventContentFull: FfiConverterOptionString.read(from: &buf), 
+                eventTagsJson: FfiConverterOptionString.read(from: &buf), 
+                requestPayloadJson: FfiConverterOptionString.read(from: &buf), 
+                responsePayloadJson: FfiConverterOptionString.read(from: &buf), 
+                decision: FfiConverterString.read(from: &buf), 
                 responseTimeMs: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -4862,7 +4856,7 @@ public struct FfiConverterTypeFfiBunkerAutoApproveRule: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiBunkerAutoApproveRule {
         return
             try FfiBunkerAutoApproveRule(
-                requesterPubkey: FfiConverterString.read(from: &buf),
+                requesterPubkey: FfiConverterString.read(from: &buf), 
                 eventKind: FfiConverterOptionUInt16.read(from: &buf)
         )
     }
@@ -4959,11 +4953,11 @@ public struct FfiConverterTypeFfiBunkerSignRequest: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FfiBunkerSignRequest {
         return
             try FfiBunkerSignRequest(
-                requestId: FfiConverterString.read(from: &buf),
-                requesterPubkey: FfiConverterString.read(from: &buf),
-                eventKind: FfiConverterOptionUInt16.read(from: &buf),
-                eventJson: FfiConverterOptionString.read(from: &buf),
-                eventContent: FfiConverterOptionString.read(from: &buf),
+                requestId: FfiConverterString.read(from: &buf), 
+                requesterPubkey: FfiConverterString.read(from: &buf), 
+                eventKind: FfiConverterOptionUInt16.read(from: &buf), 
+                eventJson: FfiConverterOptionString.read(from: &buf), 
+                eventContent: FfiConverterOptionString.read(from: &buf), 
                 eventTagsJson: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -5016,10 +5010,10 @@ public struct GeneratedKeypair {
     public init(
         /**
          * Bech32-encoded secret key (nsec1...)
-         */nsec: String,
+         */nsec: String, 
         /**
          * Bech32-encoded public key (npub1...)
-         */npub: String,
+         */npub: String, 
         /**
          * Hex-encoded public key (for whitelistedPubkeys config)
          */pubkeyHex: String) {
@@ -5064,8 +5058,8 @@ public struct FfiConverterTypeGeneratedKeypair: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GeneratedKeypair {
         return
             try GeneratedKeypair(
-                nsec: FfiConverterString.read(from: &buf),
-                npub: FfiConverterString.read(from: &buf),
+                nsec: FfiConverterString.read(from: &buf), 
+                npub: FfiConverterString.read(from: &buf), 
                 pubkeyHex: FfiConverterString.read(from: &buf)
         )
     }
@@ -5123,16 +5117,16 @@ public struct HourActivity {
     public init(
         /**
          * Unix timestamp (seconds) for the start of the hour (UTC)
-         */hourStart: UInt64,
+         */hourStart: UInt64, 
         /**
          * Total tokens used in this hour
-         */tokens: UInt64,
+         */tokens: UInt64, 
         /**
          * Number of messages generated in this hour
-         */messages: UInt64,
+         */messages: UInt64, 
         /**
          * Pre-normalized intensity (0-255) for token-based visualization
-         */tokenIntensity: UInt8,
+         */tokenIntensity: UInt8, 
         /**
          * Pre-normalized intensity (0-255) for message-based visualization
          */messageIntensity: UInt8) {
@@ -5187,10 +5181,10 @@ public struct FfiConverterTypeHourActivity: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HourActivity {
         return
             try HourActivity(
-                hourStart: FfiConverterUInt64.read(from: &buf),
-                tokens: FfiConverterUInt64.read(from: &buf),
-                messages: FfiConverterUInt64.read(from: &buf),
-                tokenIntensity: FfiConverterUInt8.read(from: &buf),
+                hourStart: FfiConverterUInt64.read(from: &buf), 
+                tokens: FfiConverterUInt64.read(from: &buf), 
+                messages: FfiConverterUInt64.read(from: &buf), 
+                tokenIntensity: FfiConverterUInt8.read(from: &buf), 
                 messageIntensity: FfiConverterUInt8.read(from: &buf)
         )
     }
@@ -5271,28 +5265,28 @@ public struct HtmlReport {
     public init(
         /**
          * Event ID (hex)
-         */eventId: String,
+         */eventId: String, 
         /**
          * Blossom URL of the report (single `.html` or `.zip` bundle)
-         */url: String,
+         */url: String, 
         /**
          * Display title (from `title` tag, or first 80 chars of content)
-         */title: String,
+         */title: String, 
         /**
          * Description (the kind:1 note content)
-         */description: String,
+         */description: String, 
         /**
          * Author pubkey (hex)
-         */authorPubkey: String,
+         */authorPubkey: String, 
         /**
          * First `e` tag value referencing the source conversation; empty if none.
-         */conversationId: String,
+         */conversationId: String, 
         /**
          * First `a` tag value matching the project pattern (`31933:...`); empty if none.
-         */projectATag: String,
+         */projectATag: String, 
         /**
          * Creation timestamp (unix seconds)
-         */createdAt: UInt64,
+         */createdAt: UInt64, 
         /**
          * Whether the URL points to a `.zip` bundle
          */isZip: Bool) {
@@ -5367,14 +5361,14 @@ public struct FfiConverterTypeHtmlReport: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HtmlReport {
         return
             try HtmlReport(
-                eventId: FfiConverterString.read(from: &buf),
-                url: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                description: FfiConverterString.read(from: &buf),
-                authorPubkey: FfiConverterString.read(from: &buf),
-                conversationId: FfiConverterString.read(from: &buf),
-                projectATag: FfiConverterString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
+                eventId: FfiConverterString.read(from: &buf), 
+                url: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                authorPubkey: FfiConverterString.read(from: &buf), 
+                conversationId: FfiConverterString.read(from: &buf), 
+                projectATag: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
                 isZip: FfiConverterBool.read(from: &buf)
         )
     }
@@ -5428,10 +5422,10 @@ public struct InboxItem {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, eventType: InboxEventType, title: String,
+    public init(id: String, eventType: InboxEventType, title: String, 
         /**
          * Full message content (not truncated)
-         */content: String, projectATag: String, authorPubkey: String, createdAt: UInt64, isRead: Bool, threadId: String?,
+         */content: String, projectATag: String, authorPubkey: String, createdAt: UInt64, isRead: Bool, threadId: String?, 
         /**
          * Ask event data if this inbox item is an ask (for interactive answering)
          */askEvent: AskEvent?) {
@@ -5511,15 +5505,15 @@ public struct FfiConverterTypeInboxItem: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InboxItem {
         return
             try InboxItem(
-                id: FfiConverterString.read(from: &buf),
-                eventType: FfiConverterTypeInboxEventType.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                projectATag: FfiConverterString.read(from: &buf),
-                authorPubkey: FfiConverterString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
-                isRead: FfiConverterBool.read(from: &buf),
-                threadId: FfiConverterOptionString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                eventType: FfiConverterTypeInboxEventType.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                projectATag: FfiConverterString.read(from: &buf), 
+                authorPubkey: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                isRead: FfiConverterBool.read(from: &buf), 
+                threadId: FfiConverterOptionString.read(from: &buf), 
                 askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf)
         )
     }
@@ -5612,9 +5606,9 @@ public struct FfiConverterTypeInstalledAgent: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InstalledAgent {
         return
             try InstalledAgent(
-                backendPubkey: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                slug: FfiConverterString.read(from: &buf),
+                backendPubkey: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -5665,10 +5659,10 @@ public struct KindEventCount {
     public init(
         /**
          * Event kind number
-         */kind: UInt16,
+         */kind: UInt16, 
         /**
          * Number of events of this kind in the database
-         */count: UInt64,
+         */count: UInt64, 
         /**
          * Human-readable name for this kind (if known)
          */name: String) {
@@ -5713,8 +5707,8 @@ public struct FfiConverterTypeKindEventCount: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> KindEventCount {
         return
             try KindEventCount(
-                kind: FfiConverterUInt16.read(from: &buf),
-                count: FfiConverterUInt64.read(from: &buf),
+                kind: FfiConverterUInt16.read(from: &buf), 
+                count: FfiConverterUInt64.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf)
         )
     }
@@ -5764,10 +5758,10 @@ public struct LoginResult {
     public init(
         /**
          * Hex-encoded public key
-         */pubkey: String,
+         */pubkey: String, 
         /**
          * Bech32-encoded public key (npub1...)
-         */npub: String,
+         */npub: String, 
         /**
          * Whether login was successful
          */success: Bool) {
@@ -5812,8 +5806,8 @@ public struct FfiConverterTypeLoginResult: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LoginResult {
         return
             try LoginResult(
-                pubkey: FfiConverterString.read(from: &buf),
-                npub: FfiConverterString.read(from: &buf),
+                pubkey: FfiConverterString.read(from: &buf), 
+                npub: FfiConverterString.read(from: &buf), 
                 success: FfiConverterBool.read(from: &buf)
         )
     }
@@ -5941,16 +5935,16 @@ public struct FfiConverterTypeMCPTool: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> McpTool {
         return
             try McpTool(
-                id: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                dTag: FfiConverterString.read(from: &buf),
-                name: FfiConverterString.read(from: &buf),
-                description: FfiConverterString.read(from: &buf),
-                command: FfiConverterString.read(from: &buf),
-                parameters: FfiConverterOptionString.read(from: &buf),
-                capabilities: FfiConverterSequenceString.read(from: &buf),
-                serverUrl: FfiConverterOptionString.read(from: &buf),
-                version: FfiConverterOptionString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                command: FfiConverterString.read(from: &buf), 
+                parameters: FfiConverterOptionString.read(from: &buf), 
+                capabilities: FfiConverterSequenceString.read(from: &buf), 
+                serverUrl: FfiConverterOptionString.read(from: &buf), 
+                version: FfiConverterOptionString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -6052,17 +6046,17 @@ public struct Message {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, content: String, pubkey: String, threadId: String, createdAt: UInt64,
+    public init(id: String, content: String, pubkey: String, threadId: String, createdAt: UInt64, 
         /**
          * Direct parent message ID (for threaded replies)
          * None for messages replying directly to thread root
-         */replyTo: String?,
+         */replyTo: String?, 
         /**
          * Whether this is a reasoning/thinking message (has "reasoning" tag)
-         */isReasoning: Bool,
+         */isReasoning: Bool, 
         /**
          * Ask event data if this message contains an ask
-         */askEvent: AskEvent?,
+         */askEvent: AskEvent?, 
         /**
          * Q-tags from the event (may reference other conversation IDs).
          * While delegation tool calls use q-tags to point to child conversations,
@@ -6070,31 +6064,31 @@ public struct Message {
          * Only messages from specific delegation tools (mcp__tenex__delegate, etc.)
          * should have their q_tags treated as delegation references.
          * See `should_treat_as_delegation()` in grouping.rs for the filter logic.
-         */qTags: [String],
+         */qTags: [String], 
         /**
          * A-tags (addressable references) - NIP-33 coordinates for kind:30023 reports
          * Format: "30023:pubkey:slug" - used to show referenced reports in sidebar
-         */aTags: [String],
+         */aTags: [String], 
         /**
          * P-tags (mentions) - pubkeys this message mentions
          * Used for message grouping: p-tag breaks consecutive message groups
-         */pTags: [String],
+         */pTags: [String], 
         /**
          * Tool name from "tool" tag (e.g., "delegate", "fs_read", etc.)
          * Used for grouping: delegation tools break groups and are never collapsible
-         */toolName: String?,
+         */toolName: String?, 
         /**
          * Tool arguments from "tool-args" tag (JSON string)
          * Used for extracting tool call parameters when stored in tags rather than content
-         */toolArgs: String?,
+         */toolArgs: String?, 
         /**
          * LLM metadata tags (llm-prompt-tokens, llm-completion-tokens, llm-model, etc.)
          * Key is the tag name without "llm-" prefix, value is the tag value
-         */llmMetadata: [String: String],
+         */llmMetadata: [String: String], 
         /**
          * Delegation tag value - parent conversation ID if this message has a delegation tag
          * Format: ["delegation", "<parent-conversation-id>"]
-         */delegationTag: String?,
+         */delegationTag: String?, 
         /**
          * Branch tag value - git branch associated with this message
          * Format: ["branch", "<branch-name>"]
@@ -6205,21 +6199,21 @@ public struct FfiConverterTypeMessage: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Message {
         return
             try Message(
-                id: FfiConverterString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                threadId: FfiConverterString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
-                replyTo: FfiConverterOptionString.read(from: &buf),
-                isReasoning: FfiConverterBool.read(from: &buf),
-                askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf),
-                qTags: FfiConverterSequenceString.read(from: &buf),
-                aTags: FfiConverterSequenceString.read(from: &buf),
-                pTags: FfiConverterSequenceString.read(from: &buf),
-                toolName: FfiConverterOptionString.read(from: &buf),
-                toolArgs: FfiConverterOptionString.read(from: &buf),
-                llmMetadata: FfiConverterDictionaryStringString.read(from: &buf),
-                delegationTag: FfiConverterOptionString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                threadId: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                replyTo: FfiConverterOptionString.read(from: &buf), 
+                isReasoning: FfiConverterBool.read(from: &buf), 
+                askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf), 
+                qTags: FfiConverterSequenceString.read(from: &buf), 
+                aTags: FfiConverterSequenceString.read(from: &buf), 
+                pTags: FfiConverterSequenceString.read(from: &buf), 
+                toolName: FfiConverterOptionString.read(from: &buf), 
+                toolArgs: FfiConverterOptionString.read(from: &buf), 
+                llmMetadata: FfiConverterDictionaryStringString.read(from: &buf), 
+                delegationTag: FfiConverterOptionString.read(from: &buf), 
                 branch: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -6318,9 +6312,9 @@ public struct FfiConverterTypeModelInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ModelInfo {
         return
             try ModelInfo(
-                id: FfiConverterString.read(from: &buf),
-                name: FfiConverterOptionString.read(from: &buf),
-                description: FfiConverterOptionString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                name: FfiConverterOptionString.read(from: &buf), 
+                description: FfiConverterOptionString.read(from: &buf), 
                 contextLength: FfiConverterOptionUInt32.read(from: &buf)
         )
     }
@@ -6395,28 +6389,28 @@ public struct NegentropySyncDiagnostics {
     public init(
         /**
          * Whether negentropy sync is enabled
-         */enabled: Bool,
+         */enabled: Bool, 
         /**
          * Current sync interval in seconds
-         */currentIntervalSecs: UInt64,
+         */currentIntervalSecs: UInt64, 
         /**
          * Seconds since last full sync cycle completed (None if never completed)
-         */secondsSinceLastCycle: UInt64?,
+         */secondsSinceLastCycle: UInt64?, 
         /**
          * Whether a sync is currently in progress
-         */syncInProgress: Bool,
+         */syncInProgress: Bool, 
         /**
          * Number of successful syncs
-         */successfulSyncs: UInt64,
+         */successfulSyncs: UInt64, 
         /**
          * Number of failed syncs (actual errors, not unsupported relays)
-         */failedSyncs: UInt64,
+         */failedSyncs: UInt64, 
         /**
          * Number of syncs where relay didn't support negentropy
-         */unsupportedSyncs: UInt64,
+         */unsupportedSyncs: UInt64, 
         /**
          * Total events reconciled
-         */totalEventsReconciled: UInt64,
+         */totalEventsReconciled: UInt64, 
         /**
          * Recent sync results (last 20)
          */recentResults: [SyncResultDiagnostic]) {
@@ -6491,14 +6485,14 @@ public struct FfiConverterTypeNegentropySyncDiagnostics: FfiConverterRustBuffer 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NegentropySyncDiagnostics {
         return
             try NegentropySyncDiagnostics(
-                enabled: FfiConverterBool.read(from: &buf),
-                currentIntervalSecs: FfiConverterUInt64.read(from: &buf),
-                secondsSinceLastCycle: FfiConverterOptionUInt64.read(from: &buf),
-                syncInProgress: FfiConverterBool.read(from: &buf),
-                successfulSyncs: FfiConverterUInt64.read(from: &buf),
-                failedSyncs: FfiConverterUInt64.read(from: &buf),
-                unsupportedSyncs: FfiConverterUInt64.read(from: &buf),
-                totalEventsReconciled: FfiConverterUInt64.read(from: &buf),
+                enabled: FfiConverterBool.read(from: &buf), 
+                currentIntervalSecs: FfiConverterUInt64.read(from: &buf), 
+                secondsSinceLastCycle: FfiConverterOptionUInt64.read(from: &buf), 
+                syncInProgress: FfiConverterBool.read(from: &buf), 
+                successfulSyncs: FfiConverterUInt64.read(from: &buf), 
+                failedSyncs: FfiConverterUInt64.read(from: &buf), 
+                unsupportedSyncs: FfiConverterUInt64.read(from: &buf), 
+                totalEventsReconciled: FfiConverterUInt64.read(from: &buf), 
                 recentResults: FfiConverterSequenceTypeSyncResultDiagnostic.read(from: &buf)
         )
     }
@@ -6571,24 +6565,24 @@ public struct Nudge {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, pubkey: String,
+    public init(id: String, pubkey: String, 
         /**
          * Replaceable identifier (NIP-33 `d` tag).
          * Used to group multiple versions of the same logical nudge.
-         */dTag: String, title: String, description: String, content: String, hashtags: [String], createdAt: UInt64,
+         */dTag: String, title: String, description: String, content: String, hashtags: [String], createdAt: UInt64, 
         /**
          * Tools to add to agent's available tools (allow-tool tags)
          * Used in additive/subtractive mode - mutually exclusive with only_tools
-         */allowedTools: [String],
+         */allowedTools: [String], 
         /**
          * Tools to remove from agent's available tools (deny-tool tags)
          * Used in additive/subtractive mode - mutually exclusive with only_tools
-         */deniedTools: [String],
+         */deniedTools: [String], 
         /**
          * Exclusive tool list (only-tool tags)
          * When present, overrides all other tool permissions - agent gets EXACTLY these tools
          * Mutually exclusive with allow_tools/deny_tools
-         */onlyTools: [String],
+         */onlyTools: [String], 
         /**
          * ID of the nudge this one supersedes (supersedes tag)
          */supersedes: String?) {
@@ -6678,17 +6672,17 @@ public struct FfiConverterTypeNudge: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Nudge {
         return
             try Nudge(
-                id: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                dTag: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                description: FfiConverterString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                hashtags: FfiConverterSequenceString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
-                allowedTools: FfiConverterSequenceString.read(from: &buf),
-                deniedTools: FfiConverterSequenceString.read(from: &buf),
-                onlyTools: FfiConverterSequenceString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                hashtags: FfiConverterSequenceString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                allowedTools: FfiConverterSequenceString.read(from: &buf), 
+                deniedTools: FfiConverterSequenceString.read(from: &buf), 
+                onlyTools: FfiConverterSequenceString.read(from: &buf), 
                 supersedes: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -6783,9 +6777,9 @@ public struct FfiConverterTypePendingBackendInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PendingBackendInfo {
         return
             try PendingBackendInfo(
-                backendPubkey: FfiConverterString.read(from: &buf),
-                projectATag: FfiConverterString.read(from: &buf),
-                firstSeen: FfiConverterUInt64.read(from: &buf),
+                backendPubkey: FfiConverterString.read(from: &buf), 
+                projectATag: FfiConverterString.read(from: &buf), 
+                firstSeen: FfiConverterUInt64.read(from: &buf), 
                 statusCreatedAt: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -6911,16 +6905,16 @@ public struct FfiConverterTypeProject: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Project {
         return
             try Project(
-                id: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                description: FfiConverterOptionString.read(from: &buf),
-                repoUrl: FfiConverterOptionString.read(from: &buf),
-                pictureUrl: FfiConverterOptionString.read(from: &buf),
-                isDeleted: FfiConverterBool.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                participants: FfiConverterSequenceString.read(from: &buf),
-                agentPubkeys: FfiConverterSequenceString.read(from: &buf),
-                mcpToolIds: FfiConverterSequenceString.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterOptionString.read(from: &buf), 
+                repoUrl: FfiConverterOptionString.read(from: &buf), 
+                pictureUrl: FfiConverterOptionString.read(from: &buf), 
+                isDeleted: FfiConverterBool.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                participants: FfiConverterSequenceString.read(from: &buf), 
+                agentPubkeys: FfiConverterSequenceString.read(from: &buf), 
+                mcpToolIds: FfiConverterSequenceString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -6957,7 +6951,11 @@ public func FfiConverterTypeProject_lower(_ value: Project) -> RustBuffer {
 
 
 /**
- * Represents an agent within a project status
+ * Represents an agent in a project roster.
+ *
+ * Roster membership and PM/default status come from ordered kind:31933 `p`
+ * tags. kind:24011 inventories set `is_online` and backend availability.
+ * kind:34011 configs set current model/tools/skills/MCP fields.
  */
 public struct ProjectAgent {
     public var pubkey: String
@@ -7044,14 +7042,14 @@ public struct FfiConverterTypeProjectAgent: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectAgent {
         return
             try ProjectAgent(
-                pubkey: FfiConverterString.read(from: &buf),
-                name: FfiConverterString.read(from: &buf),
-                backendPubkey: FfiConverterString.read(from: &buf),
-                isPm: FfiConverterBool.read(from: &buf),
-                isOnline: FfiConverterBool.read(from: &buf),
-                model: FfiConverterOptionString.read(from: &buf),
-                tools: FfiConverterSequenceString.read(from: &buf),
-                skills: FfiConverterSequenceString.read(from: &buf),
+                pubkey: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                backendPubkey: FfiConverterString.read(from: &buf), 
+                isPm: FfiConverterBool.read(from: &buf), 
+                isOnline: FfiConverterBool.read(from: &buf), 
+                model: FfiConverterOptionString.read(from: &buf), 
+                tools: FfiConverterSequenceString.read(from: &buf), 
+                skills: FfiConverterSequenceString.read(from: &buf), 
                 mcpServers: FfiConverterSequenceString.read(from: &buf)
         )
     }
@@ -7108,10 +7106,10 @@ public struct ProjectConfigOptions {
     public init(
         /**
          * All available models for the project
-         */allModels: [String],
+         */allModels: [String], 
         /**
          * All available tools for the project
-         */allTools: [String],
+         */allTools: [String], 
         /**
          * All available skills for the project
          */allSkills: [String]) {
@@ -7156,8 +7154,8 @@ public struct FfiConverterTypeProjectConfigOptions: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectConfigOptions {
         return
             try ProjectConfigOptions(
-                allModels: FfiConverterSequenceString.read(from: &buf),
-                allTools: FfiConverterSequenceString.read(from: &buf),
+                allModels: FfiConverterSequenceString.read(from: &buf), 
+                allTools: FfiConverterSequenceString.read(from: &buf), 
                 allSkills: FfiConverterSequenceString.read(from: &buf)
         )
     }
@@ -7207,10 +7205,10 @@ public struct ProjectCost {
     public init(
         /**
          * Project a_tag
-         */aTag: String,
+         */aTag: String, 
         /**
          * Human-readable project name
-         */name: String,
+         */name: String, 
         /**
          * Total cost in USD
          */cost: Double) {
@@ -7255,8 +7253,8 @@ public struct FfiConverterTypeProjectCost: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectCost {
         return
             try ProjectCost(
-                aTag: FfiConverterString.read(from: &buf),
-                name: FfiConverterString.read(from: &buf),
+                aTag: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
                 cost: FfiConverterDouble.read(from: &buf)
         )
     }
@@ -7318,19 +7316,19 @@ public struct ProjectFilterInfo {
     public init(
         /**
          * Project ID (d-tag)
-         */id: String,
+         */id: String, 
         /**
          * Project a_tag (full coordinate)
-         */aTag: String,
+         */aTag: String, 
         /**
          * Display title
-         */title: String,
+         */title: String, 
         /**
          * Whether this project is currently visible/selected
-         */isVisible: Bool,
+         */isVisible: Bool, 
         /**
          * Number of active conversations in this project
-         */activeCount: UInt32,
+         */activeCount: UInt32, 
         /**
          * Total conversations in this project
          */totalCount: UInt32) {
@@ -7390,11 +7388,11 @@ public struct FfiConverterTypeProjectFilterInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectFilterInfo {
         return
             try ProjectFilterInfo(
-                id: FfiConverterString.read(from: &buf),
-                aTag: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                isVisible: FfiConverterBool.read(from: &buf),
-                activeCount: FfiConverterUInt32.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                aTag: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                isVisible: FfiConverterBool.read(from: &buf), 
+                activeCount: FfiConverterUInt32.read(from: &buf), 
                 totalCount: FfiConverterUInt32.read(from: &buf)
         )
     }
@@ -7471,7 +7469,7 @@ public struct FfiConverterTypeRelayDiagnosticInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RelayDiagnosticInfo {
         return
             try RelayDiagnosticInfo(
-                url: FfiConverterString.read(from: &buf),
+                url: FfiConverterString.read(from: &buf), 
                 status: FfiConverterString.read(from: &buf)
         )
     }
@@ -7552,34 +7550,34 @@ public struct Report {
     public init(
         /**
          * Event ID (hex)
-         */id: String,
+         */id: String, 
         /**
          * d-tag slug (for version tracking - same slug = same document, different versions)
-         */slug: String,
+         */slug: String, 
         /**
          * Project a-tag this report belongs to
-         */projectATag: String,
+         */projectATag: String, 
         /**
          * Author pubkey (hex)
-         */author: String,
+         */author: String, 
         /**
          * Document title (from title tag)
-         */title: String,
+         */title: String, 
         /**
          * Summary (from summary tag, or first 160 chars of content)
-         */summary: String,
+         */summary: String, 
         /**
          * Full markdown content
-         */content: String,
+         */content: String, 
         /**
          * Document group tag (from "document" tag - groups related reports like a directory)
-         */document: String,
+         */document: String, 
         /**
          * Hashtags (t-tags)
-         */hashtags: [String],
+         */hashtags: [String], 
         /**
          * Creation timestamp
-         */createdAt: UInt64,
+         */createdAt: UInt64, 
         /**
          * Calculated reading time in minutes (content length / 200 words per minute)
          */readingTimeMins: UInt8) {
@@ -7664,16 +7662,16 @@ public struct FfiConverterTypeReport: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Report {
         return
             try Report(
-                id: FfiConverterString.read(from: &buf),
-                slug: FfiConverterString.read(from: &buf),
-                projectATag: FfiConverterString.read(from: &buf),
-                author: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                summary: FfiConverterString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                document: FfiConverterString.read(from: &buf),
-                hashtags: FfiConverterSequenceString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf), 
+                projectATag: FfiConverterString.read(from: &buf), 
+                author: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                summary: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                document: FfiConverterString.read(from: &buf), 
+                hashtags: FfiConverterSequenceString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
                 readingTimeMins: FfiConverterUInt8.read(from: &buf)
         )
     }
@@ -7747,22 +7745,22 @@ public struct SearchResult {
     public init(
         /**
          * Event ID of the matching message/report
-         */eventId: String,
+         */eventId: String, 
         /**
          * Thread/conversation ID for context
-         */threadId: String?,
+         */threadId: String?, 
         /**
          * Content snippet with match
-         */content: String,
+         */content: String, 
         /**
          * Event kind (1 = message, 30023 = report)
-         */kind: UInt32,
+         */kind: UInt32, 
         /**
          * Author name/npub
-         */author: String,
+         */author: String, 
         /**
          * Unix timestamp
-         */createdAt: UInt64,
+         */createdAt: UInt64, 
         /**
          * Project a-tag if known
          */projectATag: String?) {
@@ -7827,12 +7825,12 @@ public struct FfiConverterTypeSearchResult: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SearchResult {
         return
             try SearchResult(
-                eventId: FfiConverterString.read(from: &buf),
-                threadId: FfiConverterOptionString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                kind: FfiConverterUInt32.read(from: &buf),
-                author: FfiConverterString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
+                eventId: FfiConverterString.read(from: &buf), 
+                threadId: FfiConverterOptionString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterUInt32.read(from: &buf), 
+                author: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
                 projectATag: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -7882,7 +7880,7 @@ public struct SendMessageResult {
     public init(
         /**
          * Event ID of the published message
-         */eventId: String,
+         */eventId: String, 
         /**
          * Whether the message was successfully sent
          */success: Bool) {
@@ -7922,7 +7920,7 @@ public struct FfiConverterTypeSendMessageResult: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SendMessageResult {
         return
             try SendMessageResult(
-                eventId: FfiConverterString.read(from: &buf),
+                eventId: FfiConverterString.read(from: &buf), 
                 success: FfiConverterBool.read(from: &buf)
         )
     }
@@ -7975,11 +7973,11 @@ public struct Skill {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, pubkey: String,
+    public init(id: String, pubkey: String, 
         /**
          * Replaceable identifier (NIP-33 `d` tag).
          * Used to group multiple versions of the same logical skill.
-         */dTag: String, title: String, description: String, image: String?, content: String, hashtags: [String], createdAt: UInt64,
+         */dTag: String, title: String, description: String, image: String?, content: String, hashtags: [String], createdAt: UInt64, 
         /**
          * File attachment event IDs (e-tags referencing NIP-94 kind:1063 events)
          */fileIds: [String]) {
@@ -8059,15 +8057,15 @@ public struct FfiConverterTypeSkill: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Skill {
         return
             try Skill(
-                id: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                dTag: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                description: FfiConverterString.read(from: &buf),
-                image: FfiConverterOptionString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                hashtags: FfiConverterSequenceString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                image: FfiConverterOptionString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                hashtags: FfiConverterSequenceString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
                 fileIds: FfiConverterSequenceString.read(from: &buf)
         )
     }
@@ -8143,23 +8141,23 @@ public struct StatsSnapshot {
         /**
          * Total cost in USD for the past 14 days (COST_WINDOW_DAYS).
          * Note: This is NOT all-time cost. For display, show as "past 2 weeks" or similar.
-         */totalCost14Days: Double,
+         */totalCost14Days: Double, 
         /**
          * Cost by project (sorted descending)
-         */costByProject: [ProjectCost],
+         */costByProject: [ProjectCost], 
         /**
          * Last 14 days of message counts (user vs all, newest first)
-         */messagesByDay: [DayMessages],
+         */messagesByDay: [DayMessages], 
         /**
          * Last 14 days of runtime totals (newest first)
-         */runtimeByDay: [DayRuntime],
+         */runtimeByDay: [DayRuntime], 
         /**
          * Last 720 hours of activity data with pre-computed intensities
          * Pre-normalized to 0-255 intensity scale for direct visualization
-         */activityByHour: [HourActivity],
+         */activityByHour: [HourActivity], 
         /**
          * Maximum token value across all hours (for legend display)
-         */maxTokens: UInt64,
+         */maxTokens: UInt64, 
         /**
          * Maximum message count across all hours (for legend display)
          */maxMessages: UInt64) {
@@ -8224,12 +8222,12 @@ public struct FfiConverterTypeStatsSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StatsSnapshot {
         return
             try StatsSnapshot(
-                totalCost14Days: FfiConverterDouble.read(from: &buf),
-                costByProject: FfiConverterSequenceTypeProjectCost.read(from: &buf),
-                messagesByDay: FfiConverterSequenceTypeDayMessages.read(from: &buf),
-                runtimeByDay: FfiConverterSequenceTypeDayRuntime.read(from: &buf),
-                activityByHour: FfiConverterSequenceTypeHourActivity.read(from: &buf),
-                maxTokens: FfiConverterUInt64.read(from: &buf),
+                totalCost14Days: FfiConverterDouble.read(from: &buf), 
+                costByProject: FfiConverterSequenceTypeProjectCost.read(from: &buf), 
+                messagesByDay: FfiConverterSequenceTypeDayMessages.read(from: &buf), 
+                runtimeByDay: FfiConverterSequenceTypeDayRuntime.read(from: &buf), 
+                activityByHour: FfiConverterSequenceTypeHourActivity.read(from: &buf), 
+                maxTokens: FfiConverterUInt64.read(from: &buf), 
                 maxMessages: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -8295,19 +8293,19 @@ public struct SubscriptionDiagnostics {
     public init(
         /**
          * Subscription ID
-         */subId: String,
+         */subId: String, 
         /**
          * Human-readable description
-         */description: String,
+         */description: String, 
         /**
          * Event kinds this subscription listens for
-         */kinds: [UInt16],
+         */kinds: [UInt16], 
         /**
          * Raw filter JSON (for debugging)
-         */rawFilter: String?,
+         */rawFilter: String?, 
         /**
          * Number of events received
-         */eventsReceived: UInt64,
+         */eventsReceived: UInt64, 
         /**
          * Seconds since subscription was created
          */ageSecs: UInt64) {
@@ -8367,11 +8365,11 @@ public struct FfiConverterTypeSubscriptionDiagnostics: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SubscriptionDiagnostics {
         return
             try SubscriptionDiagnostics(
-                subId: FfiConverterString.read(from: &buf),
-                description: FfiConverterString.read(from: &buf),
-                kinds: FfiConverterSequenceUInt16.read(from: &buf),
-                rawFilter: FfiConverterOptionString.read(from: &buf),
-                eventsReceived: FfiConverterUInt64.read(from: &buf),
+                subId: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                kinds: FfiConverterSequenceUInt16.read(from: &buf), 
+                rawFilter: FfiConverterOptionString.read(from: &buf), 
+                eventsReceived: FfiConverterUInt64.read(from: &buf), 
                 ageSecs: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -8432,16 +8430,16 @@ public struct SyncResultDiagnostic {
     public init(
         /**
          * Event kind label (e.g., "31933", "4199")
-         */kindLabel: String,
+         */kindLabel: String, 
         /**
          * Number of new events received
-         */eventsReceived: UInt64,
+         */eventsReceived: UInt64, 
         /**
          * Status: "ok", "unsupported", or "failed"
-         */status: String,
+         */status: String, 
         /**
          * Error message if failed
-         */error: String?,
+         */error: String?, 
         /**
          * Seconds ago this sync completed
          */secondsAgo: UInt64) {
@@ -8496,10 +8494,10 @@ public struct FfiConverterTypeSyncResultDiagnostic: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncResultDiagnostic {
         return
             try SyncResultDiagnostic(
-                kindLabel: FfiConverterString.read(from: &buf),
-                eventsReceived: FfiConverterUInt64.read(from: &buf),
-                status: FfiConverterString.read(from: &buf),
-                error: FfiConverterOptionString.read(from: &buf),
+                kindLabel: FfiConverterString.read(from: &buf), 
+                eventsReceived: FfiConverterUInt64.read(from: &buf), 
+                status: FfiConverterString.read(from: &buf), 
+                error: FfiConverterOptionString.read(from: &buf), 
                 secondsAgo: FfiConverterUInt64.read(from: &buf)
         )
     }
@@ -8567,22 +8565,22 @@ public struct SystemDiagnostics {
     public init(
         /**
          * Log file path
-         */logPath: String,
+         */logPath: String, 
         /**
          * Core version
-         */version: String,
+         */version: String, 
         /**
          * Whether the core is initialized
-         */isInitialized: Bool,
+         */isInitialized: Bool, 
         /**
          * Whether a user is logged in
-         */isLoggedIn: Bool,
+         */isLoggedIn: Bool, 
         /**
          * Whether any relay is currently connected
-         */relayConnected: Bool,
+         */relayConnected: Bool, 
         /**
          * Number of connected relays
-         */connectedRelays: UInt32,
+         */connectedRelays: UInt32, 
         /**
          * Individual relay info
          */relays: [RelayDiagnosticInfo]) {
@@ -8647,12 +8645,12 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SystemDiagnostics {
         return
             try SystemDiagnostics(
-                logPath: FfiConverterString.read(from: &buf),
-                version: FfiConverterString.read(from: &buf),
-                isInitialized: FfiConverterBool.read(from: &buf),
-                isLoggedIn: FfiConverterBool.read(from: &buf),
-                relayConnected: FfiConverterBool.read(from: &buf),
-                connectedRelays: FfiConverterUInt32.read(from: &buf),
+                logPath: FfiConverterString.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf), 
+                isInitialized: FfiConverterBool.read(from: &buf), 
+                isLoggedIn: FfiConverterBool.read(from: &buf), 
+                relayConnected: FfiConverterBool.read(from: &buf), 
+                connectedRelays: FfiConverterUInt32.read(from: &buf), 
                 relays: FfiConverterSequenceTypeRelayDiagnosticInfo.read(from: &buf)
         )
     }
@@ -8718,19 +8716,19 @@ public struct TeamCommentInfo {
     public init(
         /**
          * Comment event ID.
-         */id: String,
+         */id: String, 
         /**
          * Comment author pubkey (hex).
-         */pubkey: String,
+         */pubkey: String, 
         /**
          * Display author name resolved from profile cache.
-         */author: String,
+         */author: String, 
         /**
          * Raw comment content.
-         */content: String,
+         */content: String, 
         /**
          * Creation timestamp (unix seconds).
-         */createdAt: UInt64,
+         */createdAt: UInt64, 
         /**
          * Parent comment event ID for replies (None for roots).
          */parentCommentId: String?) {
@@ -8790,11 +8788,11 @@ public struct FfiConverterTypeTeamCommentInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TeamCommentInfo {
         return
             try TeamCommentInfo(
-                id: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                author: FfiConverterString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                author: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
                 parentCommentId: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -8891,43 +8889,43 @@ public struct TeamInfo {
     public init(
         /**
          * Event ID of this team pack event.
-         */id: String,
+         */id: String, 
         /**
          * Author pubkey (hex) of the team pack event.
-         */pubkey: String,
+         */pubkey: String, 
         /**
          * Team d-tag (replaceable identifier).
-         */dTag: String,
+         */dTag: String, 
         /**
          * Full team coordinate `34199:<pubkey>:<d_tag>`.
-         */coordinate: String,
+         */coordinate: String, 
         /**
          * Display title from `title` tag.
-         */title: String,
+         */title: String, 
         /**
          * Markdown/plain description from content.
-         */description: String,
+         */description: String, 
         /**
          * Optional image URL from `image`/`picture` tags.
-         */image: String?,
+         */image: String?, 
         /**
          * Agent definition event IDs from repeated `e` tags.
-         */agentDefinitionIds: [String],
+         */agentDefinitionIds: [String], 
         /**
          * Categories from repeated `c` tags.
-         */categories: [String],
+         */categories: [String], 
         /**
          * Hashtags from repeated `t` tags.
-         */tags: [String],
+         */tags: [String], 
         /**
          * Creation timestamp (unix seconds).
-         */createdAt: UInt64,
+         */createdAt: UInt64, 
         /**
          * Aggregated positive reaction count (NIP-25 kind:7).
-         */likeCount: UInt64,
+         */likeCount: UInt64, 
         /**
          * Aggregated comment count (NIP-22 kind:1111).
-         */commentCount: UInt64,
+         */commentCount: UInt64, 
         /**
          * Whether current user has a positive latest reaction on this team.
          */likedByMe: Bool) {
@@ -9027,19 +9025,19 @@ public struct FfiConverterTypeTeamInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TeamInfo {
         return
             try TeamInfo(
-                id: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                dTag: FfiConverterString.read(from: &buf),
-                coordinate: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                description: FfiConverterString.read(from: &buf),
-                image: FfiConverterOptionString.read(from: &buf),
-                agentDefinitionIds: FfiConverterSequenceString.read(from: &buf),
-                categories: FfiConverterSequenceString.read(from: &buf),
-                tags: FfiConverterSequenceString.read(from: &buf),
-                createdAt: FfiConverterUInt64.read(from: &buf),
-                likeCount: FfiConverterUInt64.read(from: &buf),
-                commentCount: FfiConverterUInt64.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
+                coordinate: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                image: FfiConverterOptionString.read(from: &buf), 
+                agentDefinitionIds: FfiConverterSequenceString.read(from: &buf), 
+                categories: FfiConverterSequenceString.read(from: &buf), 
+                tags: FfiConverterSequenceString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                likeCount: FfiConverterUInt64.read(from: &buf), 
+                commentCount: FfiConverterUInt64.read(from: &buf), 
                 likedByMe: FfiConverterBool.read(from: &buf)
         )
     }
@@ -9132,39 +9130,39 @@ public struct Thread {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, content: String, pubkey: String,
+    public init(id: String, title: String, content: String, pubkey: String, 
         /**
          * Most recent activity (thread creation or latest reply)
-         */lastActivity: UInt64,
+         */lastActivity: UInt64, 
         /**
          * Effective last activity for sorting - max of own last_activity and all descendants
          * This enables hierarchical sorting where a parent conversation reflects the most
          * recent activity in its entire delegation tree.
-         */effectiveLastActivity: UInt64,
+         */effectiveLastActivity: UInt64, 
         /**
          * Status label from kind:513 metadata (e.g., "In Progress", "Blocked", "Done")
-         */statusLabel: String?,
+         */statusLabel: String?, 
         /**
          * Current activity from kind:513 metadata (e.g., "Writing tests...")
-         */statusCurrentActivity: String?,
+         */statusCurrentActivity: String?, 
         /**
          * Summary from kind:513 metadata (brief description of the conversation)
-         */summary: String?,
+         */summary: String?, 
         /**
          * Hashtags from kind:513 metadata (repeated t-tags)
-         */hashtags: [String],
+         */hashtags: [String], 
         /**
          * Parent conversation ID from "delegation" tag (for hierarchical nesting)
-         */parentConversationId: String?,
+         */parentConversationId: String?, 
         /**
          * Pubkeys mentioned in p-tags of the root event
-         */pTags: [String],
+         */pTags: [String], 
         /**
          * Ask event data if this thread contains questions
-         */askEvent: AskEvent?,
+         */askEvent: AskEvent?, 
         /**
          * Whether this thread is a scheduled event (has scheduled-task-id tag)
-         */isScheduled: Bool,
+         */isScheduled: Bool, 
         /**
          * Whether this thread is an intervention review conversation (has context=intervention-review tag)
          */isInterventionReview: Bool) {
@@ -9269,20 +9267,20 @@ public struct FfiConverterTypeThread: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Thread {
         return
             try Thread(
-                id: FfiConverterString.read(from: &buf),
-                title: FfiConverterString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
-                lastActivity: FfiConverterUInt64.read(from: &buf),
-                effectiveLastActivity: FfiConverterUInt64.read(from: &buf),
-                statusLabel: FfiConverterOptionString.read(from: &buf),
-                statusCurrentActivity: FfiConverterOptionString.read(from: &buf),
-                summary: FfiConverterOptionString.read(from: &buf),
-                hashtags: FfiConverterSequenceString.read(from: &buf),
-                parentConversationId: FfiConverterOptionString.read(from: &buf),
-                pTags: FfiConverterSequenceString.read(from: &buf),
-                askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf),
-                isScheduled: FfiConverterBool.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                lastActivity: FfiConverterUInt64.read(from: &buf), 
+                effectiveLastActivity: FfiConverterUInt64.read(from: &buf), 
+                statusLabel: FfiConverterOptionString.read(from: &buf), 
+                statusCurrentActivity: FfiConverterOptionString.read(from: &buf), 
+                summary: FfiConverterOptionString.read(from: &buf), 
+                hashtags: FfiConverterSequenceString.read(from: &buf), 
+                parentConversationId: FfiConverterOptionString.read(from: &buf), 
+                pTags: FfiConverterSequenceString.read(from: &buf), 
+                askEvent: FfiConverterOptionTypeAskEvent.read(from: &buf), 
+                isScheduled: FfiConverterBool.read(from: &buf), 
                 isInterventionReview: FfiConverterBool.read(from: &buf)
         )
     }
@@ -9344,10 +9342,10 @@ public struct UserInfo {
     public init(
         /**
          * Hex-encoded public key
-         */pubkey: String,
+         */pubkey: String, 
         /**
          * Bech32-encoded public key (npub1...)
-         */npub: String,
+         */npub: String, 
         /**
          * Display name (empty for now, can be fetched from profile later)
          */displayName: String) {
@@ -9392,8 +9390,8 @@ public struct FfiConverterTypeUserInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UserInfo {
         return
             try UserInfo(
-                pubkey: FfiConverterString.read(from: &buf),
-                npub: FfiConverterString.read(from: &buf),
+                pubkey: FfiConverterString.read(from: &buf), 
+                npub: FfiConverterString.read(from: &buf), 
                 displayName: FfiConverterString.read(from: &buf)
         )
     }
@@ -9485,10 +9483,10 @@ public struct FfiConverterTypeVoiceInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceInfo {
         return
             try VoiceInfo(
-                voiceId: FfiConverterString.read(from: &buf),
-                name: FfiConverterString.read(from: &buf),
-                category: FfiConverterOptionString.read(from: &buf),
-                description: FfiConverterOptionString.read(from: &buf),
+                voiceId: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                category: FfiConverterOptionString.read(from: &buf), 
+                description: FfiConverterOptionString.read(from: &buf), 
                 previewUrl: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -9524,7 +9522,7 @@ public func FfiConverterTypeVoiceInfo_lower(_ value: VoiceInfo) -> RustBuffer {
  */
 
 public enum AskAnswerType {
-
+    
     /**
      * Single selection from suggestions
      */
@@ -9556,38 +9554,38 @@ public struct FfiConverterTypeAskAnswerType: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskAnswerType {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-
+        
         case 1: return .singleSelect(value: try FfiConverterString.read(from: &buf)
         )
-
+        
         case 2: return .multiSelect(values: try FfiConverterSequenceString.read(from: &buf)
         )
-
+        
         case 3: return .customText(value: try FfiConverterString.read(from: &buf)
         )
-
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: AskAnswerType, into buf: inout [UInt8]) {
         switch value {
-
-
+        
+        
         case let .singleSelect(value):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(value, into: &buf)
-
-
+            
+        
         case let .multiSelect(values):
             writeInt(&buf, Int32(2))
             FfiConverterSequenceString.write(values, into: &buf)
-
-
+            
+        
         case let .customText(value):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(value, into: &buf)
-
+            
         }
     }
 }
@@ -9619,7 +9617,7 @@ extension AskAnswerType: Equatable, Hashable {}
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum AskQuestion {
-
+    
     case singleSelect(title: String, question: String, suggestions: [String]
     )
     case multiSelect(title: String, question: String, options: [String]
@@ -9640,34 +9638,34 @@ public struct FfiConverterTypeAskQuestion: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskQuestion {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-
+        
         case 1: return .singleSelect(title: try FfiConverterString.read(from: &buf), question: try FfiConverterString.read(from: &buf), suggestions: try FfiConverterSequenceString.read(from: &buf)
         )
-
+        
         case 2: return .multiSelect(title: try FfiConverterString.read(from: &buf), question: try FfiConverterString.read(from: &buf), options: try FfiConverterSequenceString.read(from: &buf)
         )
-
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: AskQuestion, into buf: inout [UInt8]) {
         switch value {
-
-
+        
+        
         case let .singleSelect(title,question,suggestions):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(title, into: &buf)
             FfiConverterString.write(question, into: &buf)
             FfiConverterSequenceString.write(suggestions, into: &buf)
-
-
+            
+        
         case let .multiSelect(title,question,options):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(title, into: &buf)
             FfiConverterString.write(question, into: &buf)
             FfiConverterSequenceString.write(options, into: &buf)
-
+            
         }
     }
 }
@@ -9703,7 +9701,7 @@ extension AskQuestion: Equatable, Hashable {}
  */
 
 public enum DataChangeType {
-
+    
     /**
      * A new message was appended to a conversation
      */
@@ -9730,7 +9728,7 @@ public enum DataChangeType {
     case reportUpsert(report: Report
     )
     /**
-     * Project online status updated (kind:24010)
+     * Project roster/status changed.
      */
     case projectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [ProjectAgent]
     )
@@ -9802,155 +9800,155 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DataChangeType {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-
+        
         case 1: return .messageAppended(conversationId: try FfiConverterString.read(from: &buf), message: try FfiConverterTypeMessage.read(from: &buf)
         )
-
+        
         case 2: return .conversationUpsert(conversation: try FfiConverterTypeConversationFullInfo.read(from: &buf)
         )
-
+        
         case 3: return .projectUpsert(project: try FfiConverterTypeProject.read(from: &buf)
         )
-
+        
         case 4: return .inboxUpsert(item: try FfiConverterTypeInboxItem.read(from: &buf)
         )
-
+        
         case 5: return .reportUpsert(report: try FfiConverterTypeReport.read(from: &buf)
         )
-
+        
         case 6: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf), onlineAgents: try FfiConverterSequenceTypeProjectAgent.read(from: &buf)
         )
-
+        
         case 7: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
         )
-
+        
         case 8: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
         )
-
+        
         case 9: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
         )
-
+        
         case 10: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
         )
-
+        
         case 11: return .mcpToolsChanged
-
+        
         case 12: return .teamsChanged
-
+        
         case 13: return .contentCatalogChanged
-
+        
         case 14: return .statsUpdated
-
+        
         case 15: return .diagnosticsUpdated
-
+        
         case 16: return .general
-
+        
         case 17: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
         )
-
+        
         case 18: return .bookmarkListChanged(bookmarkedIds: try FfiConverterSequenceString.read(from: &buf)
         )
-
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: DataChangeType, into buf: inout [UInt8]) {
         switch value {
-
-
+        
+        
         case let .messageAppended(conversationId,message):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterTypeMessage.write(message, into: &buf)
-
-
+            
+        
         case let .conversationUpsert(conversation):
             writeInt(&buf, Int32(2))
             FfiConverterTypeConversationFullInfo.write(conversation, into: &buf)
-
-
+            
+        
         case let .projectUpsert(project):
             writeInt(&buf, Int32(3))
             FfiConverterTypeProject.write(project, into: &buf)
-
-
+            
+        
         case let .inboxUpsert(item):
             writeInt(&buf, Int32(4))
             FfiConverterTypeInboxItem.write(item, into: &buf)
-
-
+            
+        
         case let .reportUpsert(report):
             writeInt(&buf, Int32(5))
             FfiConverterTypeReport.write(report, into: &buf)
-
-
+            
+        
         case let .projectStatusChanged(projectId,projectATag,isOnline,onlineAgents):
             writeInt(&buf, Int32(6))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterBool.write(isOnline, into: &buf)
             FfiConverterSequenceTypeProjectAgent.write(onlineAgents, into: &buf)
-
-
+            
+        
         case let .pendingBackendApproval(backendPubkey,projectATag):
             writeInt(&buf, Int32(7))
             FfiConverterString.write(backendPubkey, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
-
-
+            
+        
         case let .installedAgentsChanged(backendPubkey):
             writeInt(&buf, Int32(8))
             FfiConverterString.write(backendPubkey, into: &buf)
-
-
+            
+        
         case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
             writeInt(&buf, Int32(9))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterSequenceString.write(activeConversationIds, into: &buf)
-
-
+            
+        
         case let .streamChunk(agentPubkey,conversationId,textDelta):
             writeInt(&buf, Int32(10))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterOptionString.write(textDelta, into: &buf)
-
-
+            
+        
         case .mcpToolsChanged:
             writeInt(&buf, Int32(11))
-
-
+        
+        
         case .teamsChanged:
             writeInt(&buf, Int32(12))
-
-
+        
+        
         case .contentCatalogChanged:
             writeInt(&buf, Int32(13))
-
-
+        
+        
         case .statsUpdated:
             writeInt(&buf, Int32(14))
-
-
+        
+        
         case .diagnosticsUpdated:
             writeInt(&buf, Int32(15))
-
-
+        
+        
         case .general:
             writeInt(&buf, Int32(16))
-
-
+        
+        
         case let .bunkerSignRequest(request):
             writeInt(&buf, Int32(17))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
-
-
+            
+        
         case let .bookmarkListChanged(bookmarkedIds):
             writeInt(&buf, Int32(18))
             FfiConverterSequenceString.write(bookmarkedIds, into: &buf)
-
+            
         }
     }
 }
@@ -9982,7 +9980,7 @@ extension DataChangeType: Equatable, Hashable {}
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum InboxEventType {
-
+    
     /**
      * Ask event (kind:1 with "ask" tag) - agent asking user a question
      */
@@ -10007,26 +10005,26 @@ public struct FfiConverterTypeInboxEventType: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> InboxEventType {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-
+        
         case 1: return .ask
-
+        
         case 2: return .mention
-
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: InboxEventType, into buf: inout [UInt8]) {
         switch value {
-
-
+        
+        
         case .ask:
             writeInt(&buf, Int32(1))
-
-
+        
+        
         case .mention:
             writeInt(&buf, Int32(2))
-
+        
         }
     }
 }
@@ -10060,8 +10058,8 @@ extension InboxEventType: Equatable, Hashable {}
  */
 public enum TenexError: Swift.Error {
 
-
-
+    
+    
     case InvalidNsec(message: String
     )
     case NotLoggedIn
@@ -10085,9 +10083,9 @@ public struct FfiConverterTypeTenexError: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
 
+        
 
-
-
+        
         case 1: return .InvalidNsec(
             message: try FfiConverterString.read(from: &buf)
             )
@@ -10110,37 +10108,37 @@ public struct FfiConverterTypeTenexError: FfiConverterRustBuffer {
     public static func write(_ value: TenexError, into buf: inout [UInt8]) {
         switch value {
 
+        
 
-
-
-
+        
+        
         case let .InvalidNsec(message):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(message, into: &buf)
-
-
+            
+        
         case .NotLoggedIn:
             writeInt(&buf, Int32(2))
-
-
+        
+        
         case let .Internal(message):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(message, into: &buf)
-
-
+            
+        
         case let .LogoutFailed(message):
             writeInt(&buf, Int32(4))
             FfiConverterString.write(message, into: &buf)
-
-
+            
+        
         case let .LockError(resource):
             writeInt(&buf, Int32(5))
             FfiConverterString.write(resource, into: &buf)
-
-
+            
+        
         case .CoreNotInitialized:
             writeInt(&buf, Int32(6))
-
+        
         }
     }
 }
@@ -10182,7 +10180,7 @@ extension TenexError: Foundation.LocalizedError {
  */
 
 public enum TimeFilterOption {
-
+    
     /**
      * All time (no filter)
      */
@@ -10215,38 +10213,38 @@ public struct FfiConverterTypeTimeFilterOption: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TimeFilterOption {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-
+        
         case 1: return .all
-
+        
         case 2: return .today
-
+        
         case 3: return .thisWeek
-
+        
         case 4: return .thisMonth
-
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: TimeFilterOption, into buf: inout [UInt8]) {
         switch value {
-
-
+        
+        
         case .all:
             writeInt(&buf, Int32(1))
-
-
+        
+        
         case .today:
             writeInt(&buf, Int32(2))
-
-
+        
+        
         case .thisWeek:
             writeInt(&buf, Int32(3))
-
-
+        
+        
         case .thisMonth:
             writeInt(&buf, Int32(4))
-
+        
         }
     }
 }
@@ -10286,15 +10284,15 @@ extension TimeFilterOption: Equatable, Hashable {}
  * Swift implementations should dispatch to main thread for UI updates.
  */
 public protocol EventCallback: AnyObject, Sendable {
-
+    
     /**
      * Called when data has changed and UI should refresh.
      *
      * # Arguments
      * * `change_type` - Type of change that occurred, for targeted updates
      */
-    func onDataChanged(changeType: DataChangeType)
-
+    func onDataChanged(changeType: DataChangeType) 
+    
 }
 
 
@@ -10323,7 +10321,7 @@ fileprivate struct UniffiCallbackInterfaceEventCallback {
                 )
             }
 
-
+            
             let writeReturn = { () }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -11711,7 +11709,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_approve_all_pending_backends() != 35645) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_approve_backend() != 12474) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_approve_backend() != 32514) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_archive_conversation() != 34495) {
@@ -11720,7 +11718,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_block_backend() != 26206) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_boot_project() != 56755) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_boot_project() != 57986) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback() != 2440) {
@@ -11849,7 +11847,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_nudges() != 58735) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 25307) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 40680) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_name() != 49811) {
@@ -11903,7 +11901,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_is_logged_in() != 37564) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_is_project_online() != 37678) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_project_online() != 27333) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_thread_collapsed() != 43840) {
@@ -11975,7 +11973,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_set_selected_voice_ids() != 61539) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends() != 54253) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends() != 14943) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_tts_inactivity_threshold() != 15286) {

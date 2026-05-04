@@ -4,7 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::constants::STALENESS_THRESHOLD_SECS;
 
-/// Represents an agent within a project status
+/// Represents an agent in a project roster.
+///
+/// Roster membership and PM/default status come from ordered kind:31933 `p`
+/// tags. kind:24011 inventories set `is_online` and backend availability.
+/// kind:34011 configs set current model/tools/skills/MCP fields.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProjectAgent {
     pub pubkey: String,
@@ -19,7 +23,10 @@ pub struct ProjectAgent {
 }
 
 /// Represents a TENEX project status (Nostr kind:24010).
-/// Contains online project agents; current per-agent config is kind:34011.
+///
+/// 24010 is project-level heartbeat/config-option data. It does not define the
+/// project roster, PM/default agent, agent availability, or current per-agent
+/// config.
 #[derive(Debug, Clone)]
 pub struct ProjectStatus {
     pub project_coordinate: String,
@@ -108,14 +115,13 @@ impl ProjectStatus {
     /// Common parsing logic for tags
     fn from_tags(created_at: u64, tags: Vec<Vec<String>>, backend_pubkey: String) -> Option<Self> {
         let mut project_coordinate: Option<String> = None;
-        let mut agent_map: HashMap<String, ProjectAgent> = HashMap::new();
         let mut branches: Vec<String> = Vec::new();
         let mut all_models: Vec<String> = Vec::new();
         let mut all_tools: Vec<String> = Vec::new();
         let mut all_skills: Vec<String> = Vec::new();
         let mut all_mcp_servers: Vec<String> = Vec::new();
 
-        // First pass: collect project coordinate, agents, branches, all models, all tools, and all skills
+        // Collect project coordinate, branches, and project-level option tags.
         for tag in &tags {
             if tag.is_empty() {
                 continue;
@@ -127,24 +133,7 @@ impl ProjectStatus {
                         project_coordinate = Some(tag[1].clone());
                     }
                 }
-                "agent" => {
-                    if tag.len() >= 3 {
-                        // PM detection: check for "pm" marker in tag[3] (if present)
-                        let is_pm = tag.len() >= 4 && tag[3] == "pm";
-                        let agent = ProjectAgent {
-                            pubkey: tag[1].clone(),
-                            name: tag[2].clone(),
-                            backend_pubkey: backend_pubkey.clone(),
-                            is_pm,
-                            is_online: true,
-                            model: None,
-                            tools: Vec::new(),
-                            skills: Vec::new(),
-                            mcp_servers: Vec::new(),
-                        };
-                        agent_map.insert(tag[1].clone(), agent);
-                    }
-                }
+                "agent" => {}
                 "branch" => {
                     if tag.len() > 1 {
                         branches.push(tag[1].clone());
@@ -188,16 +177,15 @@ impl ProjectStatus {
         all_mcp_servers.sort();
         all_mcp_servers.dedup();
 
-        // Agent current configuration is not derived from 24010. The heartbeat
-        // only identifies which agents a backend is running in this project;
-        // per-agent model/tool/skill/MCP state comes from the agent's 34011.
+        // Agent roster and current configuration are not derived from 24010.
+        // Membership/defaults come from 31933, availability comes from 24011,
+        // and per-agent model/tool/skill/MCP state comes from 34011.
 
         let project_coordinate = project_coordinate?;
-        let agents = agent_map.into_values().collect();
 
         Some(ProjectStatus {
             project_coordinate,
-            agents,
+            agents: Vec::new(),
             branches,
             all_models,
             all_tools,
@@ -232,7 +220,8 @@ impl ProjectStatus {
     }
 
     /// Returns current tools carried on ProjectAgent records.
-    /// 24010 parsing leaves this empty; 34011 merge fills it for FFI consumers.
+    /// 24010 parsing leaves this empty; roster enrichment happens outside
+    /// ProjectStatus via the shared store roster builder.
     pub fn agent_assigned_tools(&self) -> Vec<&str> {
         let mut tools: Vec<&str> = self
             .agents
@@ -257,7 +246,8 @@ impl ProjectStatus {
     }
 
     /// Returns current skills carried on ProjectAgent records.
-    /// 24010 parsing leaves this empty; 34011 merge fills it for FFI consumers.
+    /// 24010 parsing leaves this empty; roster enrichment happens outside
+    /// ProjectStatus via the shared store roster builder.
     pub fn agent_assigned_skills(&self) -> Vec<&str> {
         let mut skills: Vec<&str> = self
             .agents
@@ -905,9 +895,10 @@ mod tests {
     // - Query it to get a Note reference
     // This is better suited for integration tests rather than unit tests.
 
-    /// Test PM detection based on ["pm"] marker in agent tag (4th element)
+    /// kind:24010 agent tags are legacy heartbeat details only. They must not
+    /// create roster agents or mark the PM/default agent.
     #[test]
-    fn test_pm_tag_detection() {
+    fn test_24010_agent_tags_do_not_create_roster_agents() {
         let json = r#"{
             "kind": 24010,
             "pubkey": "backend_pubkey",
@@ -922,133 +913,21 @@ mod tests {
 
         let status = ProjectStatus::from_json(json).unwrap();
 
-        // Find each agent and verify PM status
-        let architect = status
-            .agents
-            .iter()
-            .find(|a| a.name == "architect")
-            .unwrap();
-        let claude_code = status
-            .agents
-            .iter()
-            .find(|a| a.name == "claude-code")
-            .unwrap();
-        let researcher = status
-            .agents
-            .iter()
-            .find(|a| a.name == "researcher")
-            .unwrap();
-
-        assert!(
-            architect.is_pm,
-            "architect should be PM (has 'pm' marker in tag)"
-        );
-        assert!(!claude_code.is_pm, "claude-code should NOT be PM");
-        assert!(!researcher.is_pm, "researcher should NOT be PM");
-
-        // Verify pm_agent() returns the correct agent
-        let pm = status.pm_agent().expect("Should have a PM agent");
-        assert_eq!(pm.name, "architect");
+        assert!(status.agents.is_empty());
+        assert!(status.pm_agent().is_none());
     }
 
-    /// Test PM detection when PM marker is on a non-first agent
+    /// Real fixture data may still contain legacy `agent` tags, but 24010 must
+    /// not turn them into roster entries.
     #[test]
-    fn test_pm_tag_on_non_first_agent() {
-        let json = r#"{
-            "kind": 24010,
-            "pubkey": "backend_pubkey",
-            "created_at": 1706400000,
-            "tags": [
-                ["a", "31933:user_pubkey:project_id"],
-                ["agent", "agent1_pubkey", "researcher"],
-                ["agent", "agent2_pubkey", "execution-coordinator", "pm"],
-                ["agent", "agent3_pubkey", "claude-code"]
-            ]
-        }"#;
-
-        let status = ProjectStatus::from_json(json).unwrap();
-
-        // The PM is NOT the first agent - it's the one with the "pm" marker
-        let researcher = status
-            .agents
-            .iter()
-            .find(|a| a.name == "researcher")
-            .unwrap();
-        let exec_coord = status
-            .agents
-            .iter()
-            .find(|a| a.name == "execution-coordinator")
-            .unwrap();
-        let claude_code = status
-            .agents
-            .iter()
-            .find(|a| a.name == "claude-code")
-            .unwrap();
-
-        assert!(
-            !researcher.is_pm,
-            "researcher should NOT be PM (no 'pm' marker)"
-        );
-        assert!(
-            exec_coord.is_pm,
-            "execution-coordinator should be PM (has 'pm' marker)"
-        );
-        assert!(!claude_code.is_pm, "claude-code should NOT be PM");
-
-        // Verify pm_agent() returns the correct agent
-        let pm = status.pm_agent().expect("Should have a PM agent");
-        assert_eq!(pm.name, "execution-coordinator");
-    }
-
-    /// Test handling of agents without any PM marker
-    #[test]
-    fn test_no_pm_marker() {
-        let json = r#"{
-            "kind": 24010,
-            "pubkey": "backend_pubkey",
-            "created_at": 1706400000,
-            "tags": [
-                ["a", "31933:user_pubkey:project_id"],
-                ["agent", "agent1_pubkey", "agent1"],
-                ["agent", "agent2_pubkey", "agent2"]
-            ]
-        }"#;
-
-        let status = ProjectStatus::from_json(json).unwrap();
-
-        // No agent should be marked as PM
-        assert!(
-            !status.agents.iter().any(|a| a.is_pm),
-            "No agent should be PM when no 'pm' marker exists"
-        );
-        assert!(status.pm_agent().is_none(), "pm_agent() should return None");
-    }
-
-    /// Test PM detection with real fixture data containing the pm marker
-    #[test]
-    fn test_pm_tag_in_real_fixture() {
+    fn test_real_fixture_24010_agent_tags_are_ignored_for_roster() {
         // The real fixture has: ["agent","bd2b5117...","architect-orchestrator","pm"]
         let json = include_str!("../../tests/fixtures/real_status_event_128_tools.json");
 
         let status = ProjectStatus::from_json(json).expect("Failed to parse real event");
 
-        // Find the architect-orchestrator agent (should be PM based on the fixture)
-        let architect = status
-            .agents
-            .iter()
-            .find(|a| a.name == "architect-orchestrator");
-        assert!(
-            architect.is_some(),
-            "Should have architect-orchestrator agent"
-        );
-        assert!(
-            architect.unwrap().is_pm,
-            "architect-orchestrator should be PM (has 'pm' marker in fixture)"
-        );
-
-        // Verify pm_agent() returns the correct agent
-        let pm = status.pm_agent().expect("Should have a PM agent");
-        assert_eq!(pm.name, "architect-orchestrator");
+        assert!(status.agents.is_empty());
+        assert!(status.pm_agent().is_none());
     }
 
     #[test]
@@ -1081,19 +960,7 @@ mod tests {
         let assigned = status.agent_assigned_skills();
         assert!(assigned.is_empty());
 
-        // Verify 24010 did not set per-agent skill config.
-        let claude = status
-            .agents
-            .iter()
-            .find(|a| a.name == "claude-code")
-            .unwrap();
-        assert!(claude.skills.is_empty());
-
-        let architect = status
-            .agents
-            .iter()
-            .find(|a| a.name == "architect")
-            .unwrap();
-        assert!(architect.skills.is_empty());
+        // Verify 24010 did not create per-agent records.
+        assert!(status.agents.is_empty());
     }
 }

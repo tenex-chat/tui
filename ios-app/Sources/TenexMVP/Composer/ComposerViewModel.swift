@@ -165,10 +165,7 @@ final class ComposerViewModel {
         initialAgentPubkey: String?,
         currentAgentPubkey: String?
     ) async -> ComposerAgentLoadResult {
-        let onlineAgents = dependencies.core.onlineAgents[projectId] ?? []
-        let project = dependencies.core.projects.first { $0.id == projectId }
-        let offlineAgents = await agentsFromProjectPubkeys(project?.agentPubkeys ?? [], excluding: Set(onlineAgents.map(\.pubkey)))
-        let agents = Self.mergeProjectAgents(onlineAgents: onlineAgents, offlineAgents: offlineAgents)
+        let agents = dependencies.core.projectRosterAgents[projectId] ?? []
         var selectedAgentPubkey = currentAgentPubkey
         var replyTargetName: String?
 
@@ -288,40 +285,13 @@ final class ComposerViewModel {
         character.isLetter || character.isNumber || character == "-" || character == "_"
     }
 
-    nonisolated static func mergeProjectAgents(onlineAgents: [ProjectAgent], offlineAgents: [ProjectAgent]) -> [ProjectAgent] {
-        var seen = Set(onlineAgents.map(\.pubkey))
-        var merged = onlineAgents
-        merged.append(contentsOf: offlineAgents.filter { seen.insert($0.pubkey).inserted })
-        return merged.sorted { lhs, rhs in
-            if lhs.isPm != rhs.isPm { return lhs.isPm && !rhs.isPm }
-            if lhs.isOnline != rhs.isOnline { return lhs.isOnline && !rhs.isOnline }
-            return lhs.pubkey < rhs.pubkey
-        }
+    nonisolated static func orderedProjectRosterAgents(_ agents: [ProjectAgent]) -> [ProjectAgent] {
+        var seen = Set<String>()
+        return agents.filter { seen.insert($0.pubkey).inserted }
     }
 
     nonisolated static func agentDisplayName(_ name: String, fallbackPubkey pubkey: String) -> String {
         AgentDisplayName.text(name, fallbackPubkey: pubkey)
-    }
-
-    private func agentsFromProjectPubkeys(_ pubkeys: [String], excluding excludedPubkeys: Set<String> = []) async -> [ProjectAgent] {
-        var result: [ProjectAgent] = []
-        for pubkey in pubkeys {
-            guard !excludedPubkeys.contains(pubkey) else { continue }
-            let profileName = await dependencies.core.getProfileName(pubkey: pubkey)
-            let name = Self.agentDisplayName(profileName, fallbackPubkey: pubkey)
-            result.append(ProjectAgent(
-                pubkey: pubkey,
-                name: name,
-                backendPubkey: "",
-                isPm: false,
-                isOnline: false,
-                model: nil,
-                tools: [],
-                skills: [],
-                mcpServers: []
-            ))
-        }
-        return result
     }
 }
 

@@ -373,8 +373,8 @@ struct ProjectRowView: View {
 
                 // Row 3: Status badges
                 HStack(spacing: 8) {
-                    // Online/Offline badge
-                    Text(isOnline ? "Online" : "Offline")
+                    // Inventory availability badge
+                    Text(isOnline ? "Available" : "Unavailable")
                         .font(.caption2)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)

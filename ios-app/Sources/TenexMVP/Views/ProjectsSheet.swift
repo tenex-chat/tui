@@ -19,7 +19,7 @@ struct ProjectsContentView: View {
                             project: project,
                             isFiltered: selectedProjectIds.contains(project.id),
                             isOnline: coreManager.projectOnlineStatus[project.id] ?? false,
-                            onlineAgentCount: coreManager.onlineAgents[project.id]?.count ?? 0,
+                            availableAgentCount: coreManager.projectRosterAgents[project.id]?.filter(\.isOnline).count ?? 0,
                             onToggleFilter: { toggleProject(project.id) }
                         )
                     }
@@ -114,7 +114,7 @@ private struct ProjectsSheetRow: View {
     let project: Project
     let isFiltered: Bool
     let isOnline: Bool
-    let onlineAgentCount: Int
+    let availableAgentCount: Int
     let onToggleFilter: () -> Void
 
     @State private var isBooting = false
@@ -138,7 +138,7 @@ private struct ProjectsSheetRow: View {
                             .lineLimit(1)
 
                         HStack(spacing: 6) {
-                            Text(isOnline ? "Online" : "Offline")
+                            Text(isOnline ? "Available" : "Unavailable")
                                 .font(.caption)
                                 .foregroundStyle(isOnline ? Color.presenceOnline : .secondary)
 
@@ -147,7 +147,7 @@ private struct ProjectsSheetRow: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
 
-                                Text("\(onlineAgentCount) agent\(onlineAgentCount == 1 ? "" : "s")")
+                                Text("\(availableAgentCount) available agent\(availableAgentCount == 1 ? "" : "s")")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }

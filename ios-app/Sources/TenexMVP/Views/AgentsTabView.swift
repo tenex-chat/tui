@@ -18,7 +18,7 @@ struct AgentInstance: Identifiable, Hashable {
     let tools: [String]
     let projectId: String
     let projectTitle: String
-    let isProjectOnline: Bool
+    let isAvailable: Bool
     let projectCount: Int
 
     var id: String { pubkey }
@@ -71,20 +71,19 @@ struct AgentsTabView: View {
     private var allAgents: [AgentInstance] {
         var allInstances: [AgentInstance] = []
         let projects = coreManager.projects
-        let onlineStatus = coreManager.projectOnlineStatus
-        let onlineAgents = coreManager.onlineAgents
+        let availabilityStatus = coreManager.projectOnlineStatus
+        let projectRosters = coreManager.projectRosterAgents
 
         var projectCountByPubkey: [String: Int] = [:]
         for project in projects {
-            guard let agents = onlineAgents[project.id], !agents.isEmpty else { continue }
+            guard let agents = projectRosters[project.id], !agents.isEmpty else { continue }
             for agent in agents {
                 projectCountByPubkey[agent.pubkey, default: 0] += 1
             }
         }
 
         for project in projects {
-            let isOnline = onlineStatus[project.id] ?? false
-            guard let agents = onlineAgents[project.id], !agents.isEmpty else { continue }
+            guard let agents = projectRosters[project.id], !agents.isEmpty else { continue }
             for agent in agents {
                 allInstances.append(AgentInstance(
                     pubkey: agent.pubkey,
@@ -94,24 +93,14 @@ struct AgentsTabView: View {
                     tools: agent.tools,
                     projectId: project.id,
                     projectTitle: project.title,
-                    isProjectOnline: isOnline,
+                    isAvailable: agent.isOnline && (availabilityStatus[project.id] ?? false),
                     projectCount: projectCountByPubkey[agent.pubkey] ?? 1
                 ))
             }
         }
 
-        let sorted = allInstances.sorted { a, b in
-            if a.isProjectOnline != b.isProjectOnline { return a.isProjectOnline }
-            if a.isPm != b.isPm { return a.isPm }
-            let comparison = a.name.localizedCaseInsensitiveCompare(b.name)
-            if comparison != .orderedSame {
-                return comparison == .orderedAscending
-            }
-            return a.pubkey < b.pubkey
-        }
-
         var seen = Set<String>()
-        return sorted.filter { agent in
+        return allInstances.filter { agent in
             guard !seen.contains(agent.pubkey) else { return false }
             seen.insert(agent.pubkey)
             return true
@@ -126,10 +115,6 @@ struct AgentsTabView: View {
             $0.projectTitle.lowercased().contains(query) ||
             ($0.model?.lowercased().contains(query) ?? false)
         }
-    }
-
-    private var onlineAgentsCount: Int {
-        allAgents.filter(\.isProjectOnline).count
     }
 
     // MARK: - Body
@@ -149,7 +134,7 @@ struct AgentsTabView: View {
                 }
             }
         }
-        .onChange(of: coreManager.onlineAgents) { _, _ in
+        .onChange(of: coreManager.projectRosterAgents) { _, _ in
             guard let selected = selectedAgentBinding.wrappedValue else { return }
             if !filteredAgents.contains(where: { $0.id == selected.id }) {
                 selectedAgentBinding.wrappedValue = nil
@@ -294,14 +279,14 @@ struct AgentsTabView: View {
     }
 
     private var emptyTitle: String {
-        !searchText.isEmpty ? "No Matching Agents" : "No Online Agents"
+        !searchText.isEmpty ? "No Matching Agents" : "No Roster Agents"
     }
 
     private var emptyMessage: String {
         if !searchText.isEmpty {
             return "Try adjusting your search terms"
         }
-        return "Agents will appear here when projects are booted"
+        return "Agents appear here from each project's ordered roster."
     }
 
     // MARK: - Actions
@@ -390,12 +375,12 @@ struct AgentRowView: View {
                             .foregroundStyle(.tertiary)
                     }
 
-                    if agent.isProjectOnline {
+                    if agent.isAvailable {
                         HStack(spacing: 3) {
                             Circle()
                                 .fill(Color.presenceOnline)
                                 .frame(width: 6, height: 6)
-                            Text("Online")
+                            Text("Available")
                         }
                         .font(.caption2)
                         .foregroundStyle(Color.presenceOnline)
@@ -423,12 +408,12 @@ struct AgentDetailView: View {
 
     private var otherProjectsForAgent: [AgentInstance] {
         let projects = coreManager.projects
-        let onlineAgents = coreManager.onlineAgents
-        let onlineStatus = coreManager.projectOnlineStatus
+        let projectRosters = coreManager.projectRosterAgents
+        let availabilityStatus = coreManager.projectOnlineStatus
 
         var result: [AgentInstance] = []
         for project in projects where project.id != agent.projectId {
-            guard let agents = onlineAgents[project.id] else { continue }
+            guard let agents = projectRosters[project.id] else { continue }
             if let match = agents.first(where: { $0.pubkey == agent.pubkey }) {
                 result.append(AgentInstance(
                     pubkey: match.pubkey,
@@ -438,7 +423,7 @@ struct AgentDetailView: View {
                     tools: match.tools,
                     projectId: project.id,
                     projectTitle: project.title,
-                    isProjectOnline: onlineStatus[project.id] ?? false,
+                    isAvailable: match.isOnline && (availabilityStatus[project.id] ?? false),
                     projectCount: 1
                 ))
             }
@@ -504,12 +489,12 @@ struct AgentDetailView: View {
                             .clipShape(Capsule())
                     }
 
-                    if agent.isProjectOnline {
+                    if agent.isAvailable {
                         HStack(spacing: 4) {
                             Circle()
                                 .fill(Color.presenceOnline)
                                 .frame(width: 8, height: 8)
-                            Text("Online")
+                            Text("Available")
                         }
                         .font(.caption.weight(.medium))
                         .foregroundStyle(Color.presenceOnline)
@@ -557,7 +542,7 @@ struct AgentDetailView: View {
             Image(systemName: "folder.fill")
                 .font(.title3)
                 .foregroundStyle(
-                    agentInstance.isProjectOnline
+                    agentInstance.isAvailable
                         ? deterministicProjectColor(for: agentInstance.projectId)
                         : .secondary
                 )
@@ -567,7 +552,7 @@ struct AgentDetailView: View {
                     Text(agentInstance.projectTitle)
                         .font(.subheadline.weight(.medium))
 
-                    if agentInstance.isProjectOnline {
+                    if agentInstance.isAvailable {
                         Circle()
                             .fill(Color.presenceOnline)
                             .frame(width: 6, height: 6)

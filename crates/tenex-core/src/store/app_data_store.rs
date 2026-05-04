@@ -2305,16 +2305,53 @@ impl AppDataStore {
         items
     }
 
-    /// Get online agents for a project (from ProjectStatus if online)
-    pub fn get_online_agents(&self, a_tag: &str) -> Option<&[ProjectAgent]> {
-        self.project_statuses
-            .get(a_tag)
-            .filter(|s| s.is_online())
-            .map(|s| s.agents.as_slice())
+    /// Get the canonical project roster.
+    ///
+    /// The roster is ordered by the project's kind:31933 `p` tags. Each entry's
+    /// `is_online` flag comes from approved kind:24011 backend inventories, and
+    /// current per-agent config comes from kind:34011.
+    pub fn get_project_roster(&self, a_tag: &str) -> Option<Vec<ProjectAgent>> {
+        let project = self
+            .projects
+            .iter()
+            .find(|project| project.a_tag() == a_tag)?;
+        Some(crate::store::roster::build_project_roster(
+            project,
+            &self.installed_agents_by_backend,
+            &self.agent_configs_by_pubkey,
+            |backend_pubkey| self.trust.is_approved(backend_pubkey),
+        ))
+    }
+
+    /// Get project agents for compatibility with existing callers.
+    ///
+    /// This returns the full 31933 roster, not only online entries. Use each
+    /// agent's `is_online` flag to distinguish approved 24011 availability.
+    pub fn get_online_agents(&self, a_tag: &str) -> Option<Vec<ProjectAgent>> {
+        self.get_project_roster(a_tag)
     }
 
     pub fn is_project_online(&self, a_tag: &str) -> bool {
-        self.get_online_agents(a_tag).is_some()
+        self.get_project_roster(a_tag)
+            .map(|agents| agents.iter().any(|agent| agent.is_online))
+            .unwrap_or(false)
+    }
+
+    pub fn project_a_tags_for_agent_pubkeys(&self, agent_pubkeys: &HashSet<String>) -> Vec<String> {
+        let mut a_tags: Vec<String> = self
+            .projects
+            .iter()
+            .filter(|project| {
+                project
+                    .agent_pubkeys
+                    .iter()
+                    .any(|pubkey| agent_pubkeys.contains(pubkey))
+            })
+            .map(|project| project.a_tag())
+            .collect();
+        a_tags.sort();
+        a_tags.dedup();
+        a_tags
     }
 
     pub fn get_threads(&self, project_a_tag: &str) -> &[Thread] {
@@ -3226,6 +3263,39 @@ mod tests {
         }
     }
 
+    fn make_test_project(agent_pubkeys: Vec<&str>) -> Project {
+        Project {
+            id: "project".to_string(),
+            title: "Project".to_string(),
+            description: None,
+            repo_url: None,
+            picture_url: None,
+            is_deleted: false,
+            pubkey: "owner".to_string(),
+            participants: Vec::new(),
+            agent_pubkeys: agent_pubkeys.into_iter().map(str::to_string).collect(),
+            mcp_tool_ids: Vec::new(),
+            created_at: 1,
+        }
+    }
+
+    fn make_test_agent_config(agent_pubkey: &str) -> AgentConfig {
+        AgentConfig {
+            pubkey: agent_pubkey.to_string(),
+            slug: "config-agent".to_string(),
+            backend_pubkey: Some("backend1".to_string()),
+            created_at: 2,
+            active_model: Some("model-active".to_string()),
+            models: vec!["model-active".to_string()],
+            active_tools: vec!["tool-active".to_string()],
+            tools: vec!["tool-active".to_string()],
+            active_skills: vec!["skill-active".to_string()],
+            skills: vec!["skill-active".to_string()],
+            active_mcps: vec!["mcp-active".to_string()],
+            mcps: vec!["mcp-active".to_string()],
+        }
+    }
+
     #[test]
     fn test_incremental_same_second_reply_stays_after_thread_root() {
         use crate::store::events::ingest_events;
@@ -3744,6 +3814,125 @@ mod tests {
         assert!(!store.operations.has_active_agents());
     }
 
+    #[test]
+    fn test_project_roster_does_not_require_24010_status() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store
+            .projects
+            .push(make_test_project(vec!["agent-b", "agent-a"]));
+
+        let roster = store
+            .get_online_agents("31933:owner:project")
+            .expect("expected roster for known project");
+
+        assert_eq!(roster.len(), 2);
+        assert_eq!(roster[0].pubkey, "agent-b");
+        assert!(roster[0].is_pm);
+        assert!(!roster[0].is_online);
+        assert_eq!(roster[1].pubkey, "agent-a");
+        assert!(!roster[1].is_pm);
+        assert!(!store.is_project_online("31933:owner:project"));
+    }
+
+    #[test]
+    fn test_24010_agents_do_not_change_project_roster() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store
+            .projects
+            .push(make_test_project(vec!["agent-b", "agent-a"]));
+        store.add_approved_backend("backend1");
+
+        let json = r#"{
+            "kind": 24010,
+            "id": "status1",
+            "pubkey": "backend1",
+            "created_at": 1000,
+            "tags": [
+                ["a", "31933:owner:project"],
+                ["agent", "agent-x", "contradictory", "pm"],
+                ["agent", "agent-a", "wrong-name"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json);
+        let roster = store
+            .get_online_agents("31933:owner:project")
+            .expect("expected roster for known project");
+
+        assert_eq!(
+            roster
+                .iter()
+                .map(|agent| agent.pubkey.as_str())
+                .collect::<Vec<_>>(),
+            vec!["agent-b", "agent-a"]
+        );
+        assert!(roster[0].is_pm);
+        assert!(!roster.iter().any(|agent| agent.pubkey == "agent-x"));
+        assert!(roster.iter().all(|agent| !agent.is_online));
+    }
+
+    #[test]
+    fn test_24011_inventory_sets_roster_availability_when_trusted() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store
+            .projects
+            .push(make_test_project(vec!["agent-a", "agent-b"]));
+
+        let json = r#"{
+            "kind": 24011,
+            "id": "inventory1",
+            "pubkey": "backend1",
+            "created_at": 1000,
+            "tags": [
+                ["agent", "agent-a", "available-a"],
+                ["agent", "agent-x", "not-in-roster"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json);
+        let roster = store
+            .get_online_agents("31933:owner:project")
+            .expect("expected roster for known project");
+        assert!(roster.iter().all(|agent| !agent.is_online));
+
+        store.add_approved_backend("backend1");
+        store.handle_status_event_json(json);
+        let roster = store
+            .get_online_agents("31933:owner:project")
+            .expect("expected roster for known project");
+
+        assert!(roster[0].is_online);
+        assert_eq!(roster[0].name, "available-a");
+        assert_eq!(roster[0].backend_pubkey, "backend1");
+        assert!(!roster[1].is_online);
+        assert!(store.is_project_online("31933:owner:project"));
+    }
+
+    #[test]
+    fn test_34011_config_enriches_roster_agents() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        store.projects.push(make_test_project(vec!["agent-a"]));
+        store.upsert_agent_config(make_test_agent_config("agent-a"));
+
+        let roster = store
+            .get_online_agents("31933:owner:project")
+            .expect("expected roster for known project");
+
+        assert_eq!(roster[0].name, "config-agent");
+        assert_eq!(roster[0].model.as_deref(), Some("model-active"));
+        assert_eq!(roster[0].tools, vec!["tool-active"]);
+        assert_eq!(roster[0].skills, vec!["skill-active"]);
+        assert_eq!(roster[0].mcp_servers, vec!["mcp-active"]);
+    }
+
     /// Test handle_status_event_json aggregates 24010 status across approved backends
     #[test]
     fn test_handle_status_event_json_aggregates_project_status_by_backend() {
@@ -3791,24 +3980,9 @@ mod tests {
             .project_statuses
             .get("31933:user:project")
             .expect("expected aggregated status");
-        assert_eq!(status.agents.len(), 2);
-        assert_eq!(
-            status
-                .agents
-                .iter()
-                .find(|agent| agent.name == "agent1")
-                .unwrap()
-                .backend_pubkey,
-            "backend1"
-        );
-        assert_eq!(
-            status
-                .agents
-                .iter()
-                .find(|agent| agent.name == "agent2")
-                .unwrap()
-                .backend_pubkey,
-            "backend2"
+        assert!(
+            status.agents.is_empty(),
+            "24010 must not define project roster agents"
         );
         assert!(status.models().contains(&"model-a"));
         assert!(status.models().contains(&"model-b"));
@@ -3833,8 +4007,10 @@ mod tests {
             .project_statuses
             .get("31933:user:project")
             .expect("expected backend2 status to remain");
-        assert_eq!(status.agents.len(), 1);
-        assert_eq!(status.agents[0].name, "agent2");
+        assert!(
+            status.agents.is_empty(),
+            "24010 must not define project roster agents"
+        );
 
         let updates = store.add_blocked_backend("backend2");
         assert_eq!(updates.len(), 1);

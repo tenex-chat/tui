@@ -711,15 +711,9 @@ fn new_conversation_current_project(app: &mut App) {
     if let Some((a_tag, name, project)) = project_info {
         app.selected_project = Some(project);
 
-        // Auto-select PM agent from status
-        let pm_agent = {
-            let store = app.data_store.borrow();
-            store
-                .get_project_status(&a_tag)
-                .and_then(|status| status.pm_agent().cloned())
-        };
-        if let Some(pm) = pm_agent {
-            app.set_selected_agent(Some(pm));
+        // Auto-select the first 31933 roster agent.
+        if let Some(default_agent) = app.selected_project_default_agent() {
+            app.set_selected_agent(Some(default_agent));
         }
 
         let tab_idx = app.open_draft_tab(&a_tag, &name);

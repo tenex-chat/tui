@@ -52,8 +52,8 @@ struct ProjectSettingsView: View {
         coreManager.projectOnlineStatus[projectId] ?? false
     }
 
-    private var onlineAgentCount: Int {
-        coreManager.onlineAgents[projectId]?.count ?? 0
+    private var availableAgentCount: Int {
+        coreManager.projectRosterAgents[projectId]?.filter(\.isOnline).count ?? 0
     }
 
     private var filteredAvailableAgents: [AgentInventoryItem] {
@@ -146,11 +146,11 @@ struct ProjectSettingsView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Label(isProjectOnline ? "Online" : "Offline", systemImage: isProjectOnline ? "checkmark.circle.fill" : "xmark.circle")
+                    Label(isProjectOnline ? "Available" : "Unavailable", systemImage: isProjectOnline ? "checkmark.circle.fill" : "xmark.circle")
                         .font(.subheadline)
                         .foregroundStyle(isProjectOnline ? Color.orange : .secondary)
                     if isProjectOnline {
-                        Text("• \(onlineAgentCount) agent\(onlineAgentCount == 1 ? "" : "s") active")
+                        Text("• \(availableAgentCount) available agent\(availableAgentCount == 1 ? "" : "s")")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -283,10 +283,14 @@ struct ProjectSettingsView: View {
                                 .font(.caption2.monospaced())
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                            if let inventoryAgent = inventoryAgent(for: agentPubkey), inventoryAgent.isMultiBackend {
-                                Text("Warning: available on \(inventoryAgent.backends.count) backends")
+                            if let inventoryAgent = inventoryAgent(for: agentPubkey) {
+                                Text(agentBackendSummary(inventoryAgent))
                                     .font(.caption2)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(inventoryAgent.isMultiBackend ? .orange : .secondary)
+                            } else {
+                                Text("Unavailable in approved backend inventory")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
                         }
 

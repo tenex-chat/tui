@@ -4,7 +4,7 @@ import Foundation
 protocol CoreGateway: AnyObject {
     var projects: [Project] { get }
     var conversations: [ConversationFullInfo] { get }
-    var onlineAgents: [String: [ProjectAgent]] { get }
+    var projectRosterAgents: [String: [ProjectAgent]] { get }
 
     func getSkills() async throws -> [Skill]
     func getProfileName(pubkey: String) async -> String

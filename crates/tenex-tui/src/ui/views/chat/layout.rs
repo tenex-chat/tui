@@ -1043,39 +1043,30 @@ fn render_agent_config_modal(
         );
     }
 
-    // Footer toggles row (above hints)
-    let toggles_area = Rect::new(
+    // Footer metadata row (above hints)
+    let metadata_area = Rect::new(
         popup_area.x + 1,
         popup_area.y + popup_area.height.saturating_sub(3),
         popup_area.width.saturating_sub(2),
         1,
     );
-    let pm_checked = state.settings.as_ref().map(|s| s.is_pm).unwrap_or(false);
-    let pm_prefix = if pm_checked { "[x] " } else { "[ ] " };
-    let pm_style = if pm_checked {
-        Style::default().fg(theme::ACCENT_WARNING)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    let mut toggles_spans: Vec<Span> =
-        vec![Span::styled(format!("{}Set as PM", pm_prefix), pm_style)];
+    let mut metadata_spans: Vec<Span> = Vec::new();
     if state.settings.is_some() {
         if let Some(backend_name) = active_backend_name.as_deref() {
-            toggles_spans.push(Span::styled("  ·  ", Style::default().fg(theme::TEXT_DIM)));
-            toggles_spans.push(Span::styled(
+            metadata_spans.push(Span::styled(
                 "Backend: ",
                 Style::default().fg(theme::TEXT_DIM),
             ));
-            toggles_spans.push(Span::styled(
+            metadata_spans.push(Span::styled(
                 truncate_with_ellipsis(
                     backend_name,
-                    toggles_area.width.saturating_sub(24) as usize,
+                    metadata_area.width.saturating_sub(9) as usize,
                 ),
                 Style::default().fg(theme::TEXT_PRIMARY),
             ));
         }
     }
-    f.render_widget(Paragraph::new(Line::from(toggles_spans)), toggles_area);
+    f.render_widget(Paragraph::new(Line::from(metadata_spans)), metadata_area);
 
     let hints_area = Rect::new(
         popup_area.x + 1,
@@ -1086,7 +1077,7 @@ fn render_agent_config_modal(
     let hints_text = if state.focus == AgentConfigFocus::Agents {
         "tab switch panes · type to search · a manage project agents · enter save/select · esc"
     } else {
-        "tab switch panes · space toggle · a toggle all · ctrl+m pm · enter save · esc"
+        "tab switch panes · space toggle · a toggle all · enter save · esc"
     };
     let hints = Paragraph::new(hints_text).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);

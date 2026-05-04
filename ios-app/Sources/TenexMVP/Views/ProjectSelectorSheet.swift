@@ -9,7 +9,7 @@ struct ProjectSelectorSheet: View {
     /// Available projects to choose from
     let projects: [Project]
 
-    /// Online status per project ID
+    /// Inventory-backed availability per project ID.
     var projectOnlineStatus: [String: Bool] = [:]
 
     /// Currently selected project (binding for single-select)

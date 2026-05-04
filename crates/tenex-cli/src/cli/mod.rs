@@ -3,6 +3,7 @@ pub mod config;
 pub mod daemon;
 pub mod http;
 pub mod protocol;
+mod roster;
 
 pub use client::{is_daemon_running, send_command, socket_path};
 pub use config::CliConfig;

@@ -98,24 +98,6 @@ pub fn is_within_48h_cap(created_at: u64, now: u64) -> bool {
     created_at >= cutoff
 }
 
-fn resolve_selected_agent_from_status(
-    current: Option<&ProjectAgent>,
-    status: &ProjectStatus,
-) -> Option<ProjectAgent> {
-    if let Some(current_agent) = current {
-        if let Some(updated) = status
-            .agents
-            .iter()
-            .find(|agent| agent.pubkey == current_agent.pubkey)
-        {
-            return Some(updated.clone());
-        }
-        return Some(current_agent.clone());
-    }
-
-    status.pm_agent().cloned()
-}
-
 fn clear_selected_nudge_modal(modal_state: &mut ModalState, nudge_id: &str) {
     let should_clear = match modal_state {
         ModalState::NudgeDetail(state) => state.nudge_id == nudge_id,
@@ -439,7 +421,7 @@ impl MergedAgentSettingsInputs {
     /// Compute the merge from the data sources for `agent`.
     ///
     /// Agent current configuration and available choices come exclusively from
-    /// kind:34011. The kind:24010 heartbeat only identifies live project agents.
+    /// kind:34011. Roster membership/defaults come from ordered 31933 p-tags.
     pub fn compute(
         _agent: &crate::models::ProjectAgent,
         agent_config: Option<&AgentConfig>,
@@ -1310,8 +1292,8 @@ impl App {
         );
     }
 
-    /// Sync selected_agent with the most recent agent in the conversation
-    /// Falls back to PM agent if no agent has responded yet
+    /// Sync selected_agent with the most recent agent in the conversation.
+    /// Falls back to the first 31933 roster agent if no agent has responded yet.
     pub fn sync_agent_with_conversation(&mut self) {
         tlog!("AGENT", "sync_agent_with_conversation called");
 
@@ -1327,21 +1309,17 @@ impl App {
             return;
         }
 
-        // Fall back to PM agent if no agent has responded yet
-        if let Some(status) = self.get_selected_project_status() {
-            if let Some(pm) = status.pm_agent() {
-                tlog!(
-                    "AGENT",
-                    "sync_agent: no recent agent, falling back to PM='{}' (pubkey={})",
-                    pm.name,
-                    &pm.pubkey[..8]
-                );
-                self.conversation.selected_agent = Some(pm.clone());
-            } else {
-                tlog!("AGENT", "sync_agent: no recent agent and no PM available");
-            }
+        // Fall back to the first 31933 p-tag if no agent has responded yet.
+        if let Some(default_agent) = self.selected_project_default_agent() {
+            tlog!(
+                "AGENT",
+                "sync_agent: no recent agent, falling back to default='{}' (pubkey={})",
+                default_agent.name,
+                &default_agent.pubkey[..8]
+            );
+            self.conversation.selected_agent = Some(default_agent);
         } else {
-            tlog!("AGENT", "sync_agent: no project status available");
+            tlog!("AGENT", "sync_agent: no project roster agent available");
         }
     }
 
@@ -1622,7 +1600,7 @@ impl App {
             })
             .filter_map(|p| {
                 fuzzy_score(&p.title, filter).map(|score| {
-                    let is_online = store.is_project_online(&p.a_tag());
+                    let is_online = crate::ui::roster::project_has_available_agent(&store, p);
                     (p, score, is_online)
                 })
             })
@@ -1782,10 +1760,10 @@ impl App {
                 }
                 DataChange::ProjectStatus { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
-                    self.refresh_selected_agent_from_project_status();
                 }
                 DataChange::InstalledAgentList { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
+                    self.refresh_selected_agent_from_roster();
                 }
                 DataChange::BackendHeartbeat { backend_pubkey } => {
                     let is_blocked = self.data_store.borrow().trust.is_blocked(&backend_pubkey);
@@ -1846,22 +1824,14 @@ impl App {
         Ok(())
     }
 
-    /// Refresh selected_agent from the latest selected-project status.
-    /// Ensures model/tool changes are reflected in the composer immediately.
-    pub fn refresh_selected_agent_from_project_status(&mut self) {
-        let status = self.selected_project.as_ref().and_then(|project| {
-            self.data_store
-                .borrow()
-                .get_project_status(&project.a_tag())
-                .cloned()
-        });
-
-        let Some(status) = status else {
-            return;
-        };
-
+    /// Refresh selected_agent from the selected project's 31933 roster.
+    /// Ensures 24011 availability and 34011 config changes are reflected.
+    pub fn refresh_selected_agent_from_roster(&mut self) {
+        let roster = self.available_agents();
         let current = self.selected_agent().cloned();
-        if let Some(resolved) = resolve_selected_agent_from_status(current.as_ref(), &status) {
+        if let Some(resolved) =
+            crate::ui::roster::resolve_selected_agent_from_roster(current.as_ref(), &roster)
+        {
             self.set_selected_agent(Some(resolved));
         }
     }
@@ -1984,51 +1954,25 @@ impl App {
         self.cursor_position = 0;
     }
 
-    /// Get available agents for the selected project.
-    /// Prefers kind:24010 online agents; falls back to kind:31933 agent pubkeys
-    /// resolved via kind:0 profile names when no status is available yet.
+    /// Get roster agents for the selected project.
+    /// The 31933 p-tag order is authoritative; 24011 inventory only marks
+    /// availability, and 34011 supplies per-agent config.
     pub fn available_agents(&self) -> Vec<crate::models::ProjectAgent> {
         let Some(project) = self.selected_project.as_ref() else {
             return vec![];
         };
         let store = self.data_store.borrow();
+        crate::ui::roster::project_roster_agents(&store, project)
+    }
 
-        // Collect online agents from kind:24010 status, keyed by pubkey
-        let mut agents: std::collections::HashMap<String, crate::models::ProjectAgent> =
-            std::collections::HashMap::new();
-        if let Some(status) = store.get_project_status(&project.a_tag()) {
-            for agent in &status.agents {
-                agents.insert(agent.pubkey.clone(), agent.clone());
-            }
-        }
+    pub fn default_project_agent(&self, project: &Project) -> Option<crate::models::ProjectAgent> {
+        let store = self.data_store.borrow();
+        crate::ui::roster::default_project_agent(&store, project)
+    }
 
-        // Merge in agents from kind:31933 definition that aren't online
-        let fallback_backend_pubkey = store
-            .get_project_status(&project.a_tag())
-            .map(|status| status.backend_pubkey.clone())
-            .unwrap_or_default();
-        for pubkey in &project.agent_pubkeys {
-            if agents.contains_key(pubkey) {
-                continue;
-            }
-            let name = store.get_profile_name(pubkey);
-            agents.insert(
-                pubkey.clone(),
-                crate::models::ProjectAgent {
-                    pubkey: pubkey.clone(),
-                    name,
-                    backend_pubkey: fallback_backend_pubkey.clone(),
-                    is_pm: false,
-                    is_online: false,
-                    model: None,
-                    tools: vec![],
-                    skills: vec![],
-                    mcp_servers: vec![],
-                },
-            );
-        }
-
-        agents.into_values().collect()
+    pub fn selected_project_default_agent(&self) -> Option<crate::models::ProjectAgent> {
+        let project = self.selected_project.as_ref()?;
+        self.default_project_agent(project)
     }
 
     /// Get the most recent agent that published a message in the current conversation.
@@ -2119,7 +2063,7 @@ impl App {
     fn filtered_agents_with_filter(&self, filter: &str) -> Vec<crate::models::ProjectAgent> {
         let agents = self.available_agents();
         let store = self.data_store.borrow();
-        let mut agents_with_scores: Vec<_> = agents
+        let agents_with_scores: Vec<_> = agents
             .into_iter()
             .filter_map(|agent| {
                 let display_name = store.get_profile_name(&agent.pubkey);
@@ -2128,15 +2072,6 @@ impl App {
                     .map(|score| (agent, display_name, score))
             })
             .collect();
-        // Sort: online before offline, PM first, then score, then alphabetically.
-        agents_with_scores.sort_by(|(a, name_a, score_a), (b, name_b, score_b)| {
-            b.is_online
-                .cmp(&a.is_online)
-                .then_with(|| b.is_pm.cmp(&a.is_pm))
-                .then_with(|| score_a.cmp(score_b))
-                .then_with(|| name_a.cmp(name_b))
-                .then_with(|| a.pubkey.cmp(&b.pubkey))
-        });
         agents_with_scores
             .into_iter()
             .map(|(agent, _, _)| agent)
@@ -2420,18 +2355,16 @@ impl App {
                 let a_tag = project.a_tag();
                 self.selected_project = Some(project);
 
-                // Auto-select PM agent and default branch from status
+                // Auto-select first 31933 roster agent.
                 // (restore_chat_draft will override if draft has specific values)
-                if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
-                    if let Some(pm) = status.pm_agent() {
-                        tlog!(
-                            "AGENT",
-                            "switch_to_tab(draft): setting PM='{}' (pubkey={})",
-                            pm.name,
-                            &pm.pubkey[..8]
-                        );
-                        self.conversation.selected_agent = Some(pm.clone());
-                    }
+                if let Some(default_agent) = self.selected_project_default_agent() {
+                    tlog!(
+                        "AGENT",
+                        "switch_to_tab(draft): setting default='{}' (pubkey={})",
+                        default_agent.name,
+                        &default_agent.pubkey[..8]
+                    );
+                    self.conversation.selected_agent = Some(default_agent);
                 }
             }
 
@@ -2488,35 +2421,24 @@ impl App {
                         draft_has_agent
                     );
 
-                    // Set agent defaults only if draft doesn't have one
-                    if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
-                        if !draft_has_agent {
-                            // No draft agent, use PM as default
-                            if let Some(pm) = status.pm_agent() {
-                                tlog!("AGENT", "switch_to_tab(real): no draft agent, setting PM='{}' (pubkey={}) BEFORE restore_chat_draft",
-                                    pm.name, &pm.pubkey[..8]);
-                                self.conversation.selected_agent = Some(pm.clone());
-                            } else {
-                                // No PM available, clear to prevent stale state
-                                tlog!(
-                                    "AGENT",
-                                    "switch_to_tab(real): no draft agent and no PM, clearing"
-                                );
-                                self.conversation.selected_agent = None;
-                            }
+                    // Set agent defaults only if draft doesn't have one.
+                    if !draft_has_agent {
+                        if let Some(default_agent) = self.selected_project_default_agent() {
+                            tlog!("AGENT", "switch_to_tab(real): no draft agent, setting default='{}' (pubkey={}) BEFORE restore_chat_draft",
+                                default_agent.name, &default_agent.pubkey[..8]);
+                            self.conversation.selected_agent = Some(default_agent);
                         } else {
                             tlog!(
                                 "AGENT",
-                                "switch_to_tab(real): draft has agent, skipping PM default"
+                                "switch_to_tab(real): no draft agent and no roster agent, clearing"
                             );
+                            self.conversation.selected_agent = None;
                         }
                     } else {
-                        // No project status, clear agent to prevent stale state
                         tlog!(
                             "AGENT",
-                            "switch_to_tab(real): no project status, clearing agent"
+                            "switch_to_tab(real): draft has agent, skipping default"
                         );
-                        self.conversation.selected_agent = None;
                     }
 
                     // Now restore the draft (uses cached load if same key)
@@ -2821,19 +2743,10 @@ impl App {
             .cloned();
 
         if let Some(project) = project {
-            let a_tag = project.a_tag();
             self.selected_project = Some(project);
 
-            // Set default agent/branch from project status
-            if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
-                if let Some(pm) = status.pm_agent() {
-                    self.conversation.selected_agent = Some(pm.clone());
-                } else {
-                    self.conversation.selected_agent = None;
-                }
-            } else {
-                self.conversation.selected_agent = None;
-            }
+            // Set default agent from the ordered 31933 roster.
+            self.conversation.selected_agent = self.selected_project_default_agent();
 
             // Open tab and switch to chat
             self.open_tab(thread, project_a_tag);
@@ -3334,11 +3247,12 @@ impl App {
     }
 
     pub fn project_backend_pubkey(&self, project_a_tag: &str) -> Option<String> {
-        self.data_store
-            .borrow()
-            .get_project_status(project_a_tag)
-            .filter(|status| status.is_online())
-            .map(|status| status.backend_pubkey.clone())
+        let store = self.data_store.borrow();
+        let project = store
+            .get_projects()
+            .iter()
+            .find(|project| project.a_tag() == project_a_tag)?;
+        crate::ui::roster::first_available_backend_for_project(&store, project)
     }
 
     pub fn project_settings_backend_pubkey(&self, project_a_tag: &str) -> Option<String> {
@@ -4841,13 +4755,19 @@ impl App {
                                 if profile_name.ends_with("...") {
                                     store
                                         .find_project_for_thread(&child_thread_id)
-                                        .and_then(|a_tag| store.get_project_status(&a_tag))
-                                        .and_then(|status| {
-                                            status
-                                                .agents
+                                        .and_then(|a_tag| {
+                                            store
+                                                .get_projects()
                                                 .iter()
-                                                .find(|a| a.pubkey == *pk)
-                                                .map(|a| a.name.clone())
+                                                .find(|project| project.a_tag() == a_tag)
+                                                .and_then(|project| {
+                                                    crate::ui::roster::project_roster_agents(
+                                                        &store, project,
+                                                    )
+                                                    .into_iter()
+                                                    .find(|agent| agent.pubkey == *pk)
+                                                    .map(|agent| agent.name)
+                                                })
                                         })
                                         .unwrap_or(profile_name)
                                 } else {
@@ -5332,141 +5252,5 @@ mod selected_nudge_modal_tests {
         clear_selected_nudge_modal(&mut modal_state, "nudge-1");
 
         assert!(matches!(modal_state, ModalState::NudgeList(_)));
-    }
-}
-
-#[cfg(test)]
-mod selected_agent_refresh_tests {
-    use super::*;
-    use serde_json::json;
-
-    fn make_status(agents: Vec<ProjectAgent>) -> ProjectStatus {
-        let mut tags: Vec<Vec<String>> =
-            vec![vec!["a".to_string(), "31933:backend:project".to_string()]];
-
-        for agent in &agents {
-            let mut agent_tag = vec![
-                "agent".to_string(),
-                agent.pubkey.clone(),
-                agent.name.clone(),
-            ];
-            if agent.is_pm {
-                agent_tag.push("pm".to_string());
-            }
-            tags.push(agent_tag);
-
-            if let Some(model) = &agent.model {
-                tags.push(vec!["model".to_string(), model.clone(), agent.name.clone()]);
-            }
-
-            for tool in &agent.tools {
-                tags.push(vec!["tool".to_string(), tool.clone(), agent.name.clone()]);
-            }
-        }
-
-        let event = json!({
-            "kind": 24010,
-            "pubkey": "backend",
-            "created_at": 1,
-            "tags": tags,
-        });
-
-        ProjectStatus::from_value(&event).expect("status fixture should parse")
-    }
-
-    #[test]
-    fn status_update_refreshes_selected_agent_model() {
-        let current = ProjectAgent {
-            pubkey: "agent-a".to_string(),
-            name: "Agent A".to_string(),
-            backend_pubkey: "backend".to_string(),
-            is_pm: false,
-            is_online: true,
-            model: Some("old-model".to_string()),
-            tools: vec!["shell".to_string()],
-            skills: vec![],
-            mcp_servers: vec![],
-        };
-        let status = make_status(vec![ProjectAgent {
-            pubkey: "agent-a".to_string(),
-            name: "Agent A".to_string(),
-            backend_pubkey: "backend".to_string(),
-            is_pm: false,
-            is_online: true,
-            model: Some("new-model".to_string()),
-            tools: vec!["shell".to_string()],
-            skills: vec![],
-            mcp_servers: vec![],
-        }]);
-
-        let resolved = resolve_selected_agent_from_status(Some(&current), &status)
-            .expect("selected agent should resolve");
-
-        assert_eq!(resolved.model.as_deref(), Some("new-model"));
-    }
-
-    #[test]
-    fn status_update_keeps_selected_agent_if_missing() {
-        let current = ProjectAgent {
-            pubkey: "agent-a".to_string(),
-            name: "Agent A".to_string(),
-            backend_pubkey: "backend".to_string(),
-            is_pm: false,
-            is_online: true,
-            model: Some("old-model".to_string()),
-            tools: vec!["shell".to_string()],
-            skills: vec![],
-            mcp_servers: vec![],
-        };
-        let status = make_status(vec![ProjectAgent {
-            pubkey: "agent-b".to_string(),
-            name: "Agent B".to_string(),
-            backend_pubkey: "backend".to_string(),
-            is_pm: true,
-            is_online: true,
-            model: Some("pm-model".to_string()),
-            tools: vec![],
-            skills: vec![],
-            mcp_servers: vec![],
-        }]);
-
-        let resolved = resolve_selected_agent_from_status(Some(&current), &status)
-            .expect("selected agent should remain set");
-
-        assert_eq!(resolved.pubkey, "agent-a");
-        assert_eq!(resolved.model.as_deref(), Some("old-model"));
-    }
-
-    #[test]
-    fn status_update_defaults_to_pm_when_none_selected() {
-        let status = make_status(vec![
-            ProjectAgent {
-                pubkey: "agent-a".to_string(),
-                name: "Agent A".to_string(),
-                backend_pubkey: "backend".to_string(),
-                is_pm: false,
-                is_online: true,
-                model: Some("model-a".to_string()),
-                tools: vec![],
-                skills: vec![],
-                mcp_servers: vec![],
-            },
-            ProjectAgent {
-                pubkey: "agent-pm".to_string(),
-                name: "PM".to_string(),
-                backend_pubkey: "backend".to_string(),
-                is_pm: true,
-                is_online: true,
-                model: Some("model-pm".to_string()),
-                tools: vec![],
-                skills: vec![],
-                mcp_servers: vec![],
-            },
-        ]);
-
-        let resolved = resolve_selected_agent_from_status(None, &status)
-            .expect("pm should be selected by default");
-
-        assert_eq!(resolved.pubkey, "agent-pm");
     }
 }

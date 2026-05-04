@@ -58,13 +58,12 @@ extension TenexCoreManager {
             }
             refreshUnansweredAskCount(reason: "fetchData")
 
-            // Initialize project online status and online agents in parallel, OFF main actor
-            // This uses the shared helper to avoid code duplication and ensure consistent behavior
+            // Initialize project availability and ordered rosters from 31933 + 24011/34011 state.
             let statusStartedAt = CFAbsoluteTimeGetCurrent()
-            await refreshProjectStatusParallel(for: p)
+            await refreshProjectRosterState(for: p)
             let statusMs = (CFAbsoluteTimeGetCurrent() - statusStartedAt) * 1000
             profiler.logEvent(
-                "fetchData refreshProjectStatusParallel projects=\(p.count) elapsedMs=\(String(format: "%.2f", statusMs))",
+                "fetchData refreshProjectRosterState projects=\(p.count) elapsedMs=\(String(format: "%.2f", statusMs))",
                 category: .general,
                 level: statusMs >= 300 ? .error : .info
             )
@@ -91,8 +90,8 @@ extension TenexCoreManager {
         }
     }
 
-    /// Signal that project status has changed (kind:24010 events).
-    /// This triggers a refresh of project status data, online status, and agents cache.
+    /// Signal that project-related cached data should be refreshed.
+    /// The roster remains 31933-driven; availability is derived from 24011 inventory.
     /// Uses task cancellation to prevent stale overwrites from overlapping refreshes.
     @MainActor
     func signalProjectStatusUpdate() {
@@ -112,8 +111,7 @@ extension TenexCoreManager {
                 self.projects = projects
             }
 
-            // Compute status and agents OFF main actor using shared helper
-            await self.refreshProjectStatusParallel(for: projects)
+            await self.refreshProjectRosterState(for: projects)
 
             // Final diagnostics update on main actor
             if !Task.isCancelled {
@@ -124,58 +122,62 @@ extension TenexCoreManager {
         }
     }
 
-    /// Refresh project online status and agents in parallel, OFF the main actor.
-    /// This shared helper is used by both signalProjectStatusUpdate() and fetchData()
-    /// to eliminate code duplication and ensure consistent behavior.
-    /// - Parameter projects: Array of projects to check status for
-    func refreshProjectStatusParallel(for projects: [Project]) async {
+    /// Refresh the ordered project roster cache.
+    /// Membership and PM/default ordering come from kind:31933 `p` tags. Availability comes from
+    /// approved kind:24011 inventory, and displayed config metadata comes from kind:34011 when cached.
+    /// - Parameter projects: Array of projects to rebuild roster rows for.
+    func refreshProjectRosterState(for projects: [Project]? = nil) async {
         let startedAt = CFAbsoluteTimeGetCurrent()
+        let projects = projects ?? self.projects
+        let inventory = (try? await safeCore.getAgentInventory()) ?? []
+        let inventoryByPubkey = inventory.reduce(into: [String: AgentInventoryItem]()) { result, item in
+            result[item.pubkey] = item
+        }
         var statusUpdates: [String: Bool] = [:]
-        var agentsUpdates: [String: [ProjectAgent]] = [:]
+        var rosterUpdates: [String: [ProjectAgent]] = [:]
 
-        // Use withTaskGroup for concurrent project status checks (runs OFF MainActor)
+        // Build one ordered roster per project. The returned row order is exactly the 31933 p-tag order.
         await withTaskGroup(of: (String, Bool, [ProjectAgent]).self) { group in
             for project in projects {
                 group.addTask {
-                    // Check cancellation inside each task
                     if Task.isCancelled {
                         return (project.id, false, [])
                     }
 
-                    let isOnline = await self.safeCore.isProjectOnline(projectId: project.id)
-                    let agents: [ProjectAgent]
-                    if isOnline {
-                        agents = (try? await self.safeCore.getOnlineAgents(projectId: project.id)) ?? []
-                    } else {
-                        agents = []
-                    }
-                    return (project.id, isOnline, Self.canonicalOnlineAgents(agents))
+                    let roster = await self.rosterAgents(for: project, inventoryByPubkey: inventoryByPubkey)
+                    let isAvailable = roster.contains { $0.isOnline }
+                    return (project.id, isAvailable, roster)
                 }
             }
 
             // Collect results off-main, then publish once to avoid N UI invalidations.
-            for await (projectId, isOnline, agents) in group {
+            for await (projectId, isAvailable, roster) in group {
                 if Task.isCancelled { continue }
-                statusUpdates[projectId] = isOnline
-                agentsUpdates[projectId] = agents
+                statusUpdates[projectId] = isAvailable
+                rosterUpdates[projectId] = roster
             }
         }
 
         if !Task.isCancelled {
             await MainActor.run {
+                let sortedInventory = self.sortedAgentInventory(inventory)
+                if sortedInventory != self.agentInventory {
+                    self.agentInventory = sortedInventory
+                }
+
                 var nextProjectOnlineStatus = self.projectOnlineStatus
                 nextProjectOnlineStatus.merge(statusUpdates, uniquingKeysWith: { _, new in new })
                 if nextProjectOnlineStatus != self.projectOnlineStatus {
                     self.projectOnlineStatus = nextProjectOnlineStatus
                 }
 
-                var nextOnlineAgents = self.onlineAgents
-                nextOnlineAgents.merge(agentsUpdates, uniquingKeysWith: { _, new in new })
-                if nextOnlineAgents != self.onlineAgents {
-                    self.onlineAgents = nextOnlineAgents
+                var nextProjectRosterAgents = self.projectRosterAgents
+                nextProjectRosterAgents.merge(rosterUpdates, uniquingKeysWith: { _, new in new })
+                if nextProjectRosterAgents != self.projectRosterAgents {
+                    self.projectRosterAgents = nextProjectRosterAgents
                 }
 
-                // Re-sort projects: online first, then alphabetical
+                // Re-sort projects: available first, then alphabetical.
                 self.projects.sort { a, b in
                     let aOnline = nextProjectOnlineStatus[a.id] ?? false
                     let bOnline = nextProjectOnlineStatus[b.id] ?? false
@@ -186,7 +188,7 @@ extension TenexCoreManager {
         }
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
         profiler.logEvent(
-            "refreshProjectStatusParallel projects=\(projects.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+            "refreshProjectRosterState projects=\(projects.count) inventory=\(inventory.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
             category: .general,
             level: elapsedMs >= 200 ? .error : .info
         )
@@ -221,35 +223,19 @@ extension TenexCoreManager {
         return updated
     }
 
-    /// Fetch and cache online agents for a specific project.
-    /// This shared method eliminates code duplication and ensures consistent agent caching.
-    /// FFI work runs off the main thread; only state mutation hops to MainActor.
-    /// - Parameter projectId: The ID of the project to fetch agents for
+    /// Refresh and cache the 31933 roster for a specific project.
+    /// - Parameter projectId: The ID of the project to rebuild.
     func fetchAndCacheAgents(for projectId: String) async {
         let startedAt = CFAbsoluteTimeGetCurrent()
-        // Perform FFI call OFF the MainActor to avoid UI blocking
-        let agents: [ProjectAgent]
-        do {
-            agents = try await safeCore.getOnlineAgents(projectId: projectId)
-        } catch {
-            // Cache empty array on failure to prevent stale data
-            await MainActor.run { self.setOnlineAgentsCache([], for: projectId) }
-            let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
-            profiler.logEvent(
-                "fetchAndCacheAgents failed projectId=\(projectId) elapsedMs=\(String(format: "%.2f", elapsedMs))",
-                category: .general,
-                level: .error
-            )
+        guard let project = projects.first(where: { $0.id == projectId }) else {
+            setProjectRosterCache([], for: projectId)
+            setProjectOnlineStatus(false, for: projectId)
             return
         }
-
-        // Only hop to main actor to mutate state
-        await MainActor.run {
-            self.setOnlineAgentsCache(agents, for: projectId)
-        }
+        await refreshProjectRosterState(for: [project])
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
         profiler.logEvent(
-            "fetchAndCacheAgents projectId=\(projectId) agents=\(agents.count) elapsedMs=\(String(format: "%.2f", elapsedMs))",
+            "fetchAndCacheAgents projectId=\(projectId) elapsedMs=\(String(format: "%.2f", elapsedMs))",
             category: .general,
             level: elapsedMs >= 120 ? .error : .info
         )
@@ -298,14 +284,14 @@ extension TenexCoreManager {
     }
 
     @MainActor
-    func setOnlineAgentsCache(_ agents: [ProjectAgent], for projectId: String) {
-        let normalizedAgents = Self.canonicalOnlineAgents(agents)
-        if onlineAgents[projectId] == normalizedAgents {
+    func setProjectRosterCache(_ agents: [ProjectAgent], for projectId: String) {
+        let normalizedAgents = Self.canonicalRosterAgents(agents)
+        if projectRosterAgents[projectId] == normalizedAgents {
             return
         }
-        var updated = onlineAgents
+        var updated = projectRosterAgents
         updated[projectId] = normalizedAgents
-        onlineAgents = updated
+        projectRosterAgents = updated
     }
 
     @MainActor
@@ -318,27 +304,95 @@ extension TenexCoreManager {
         projectOnlineStatus = updated
     }
 
-    nonisolated static func canonicalOnlineAgents(_ agents: [ProjectAgent]) -> [ProjectAgent] {
-        agents
-            .map { agent in
-                var normalized = agent
-                normalized.tools = agent.tools.sorted()
-                return normalized
+    nonisolated static func canonicalRosterAgents(_ agents: [ProjectAgent]) -> [ProjectAgent] {
+        agents.map { agent in
+            var normalized = agent
+            normalized.tools = agent.tools.sorted()
+            normalized.skills = agent.skills.sorted()
+            normalized.mcpServers = agent.mcpServers.sorted()
+            return normalized
+        }
+    }
+
+    private func rosterAgents(
+        for project: Project,
+        inventoryByPubkey: [String: AgentInventoryItem]
+    ) async -> [ProjectAgent] {
+        var result: [ProjectAgent] = []
+        result.reserveCapacity(project.agentPubkeys.count)
+
+        for (index, pubkey) in project.agentPubkeys.enumerated() {
+            let inventoryItem = inventoryByPubkey[pubkey]
+            let config = try? await safeCore.getAgentConfig(agentPubkey: pubkey)
+            let profileName = await safeCore.getProfileName(pubkey: pubkey)
+            let displayName = Self.displayName(
+                pubkey: pubkey,
+                inventoryItem: inventoryItem,
+                config: config,
+                profileName: profileName
+            )
+            let backendPubkey = Self.preferredBackendPubkey(inventoryItem: inventoryItem, config: config)
+
+            result.append(ProjectAgent(
+                pubkey: pubkey,
+                name: displayName,
+                backendPubkey: backendPubkey,
+                isPm: index == 0,
+                isOnline: inventoryItem?.backends.isEmpty == false,
+                model: config?.activeModel,
+                tools: config?.activeTools ?? [],
+                skills: config?.activeSkills ?? [],
+                mcpServers: config?.activeMcps ?? []
+            ))
+        }
+
+        return Self.canonicalRosterAgents(result)
+    }
+
+    private func sortedAgentInventory(_ inventory: [AgentInventoryItem]) -> [AgentInventoryItem] {
+        inventory.sorted {
+            let lhsName = AgentDisplayName.resolve(pubkey: $0.pubkey, coreManager: self)
+            let rhsName = AgentDisplayName.resolve(pubkey: $1.pubkey, coreManager: self)
+            let comparison = lhsName.localizedCaseInsensitiveCompare(rhsName)
+            if comparison != .orderedSame {
+                return comparison == .orderedAscending
             }
-            .sorted { lhs, rhs in
-                if lhs.isPm != rhs.isPm {
-                    return lhs.isPm && !rhs.isPm
+            return $0.pubkey < $1.pubkey
+        }
+    }
+
+    nonisolated private static func displayName(
+        pubkey: String,
+        inventoryItem: AgentInventoryItem?,
+        config: AgentConfig?,
+        profileName: String
+    ) -> String {
+        if let slug = config?.slug, !slug.isEmpty {
+            return slug
+        }
+        if let slug = inventoryItem?.slug, !slug.isEmpty {
+            return slug
+        }
+        return AgentDisplayName.text(profileName, fallbackPubkey: pubkey)
+    }
+
+    nonisolated private static func preferredBackendPubkey(
+        inventoryItem: AgentInventoryItem?,
+        config: AgentConfig?
+    ) -> String {
+        if let backendPubkey = config?.backendPubkey, !backendPubkey.isEmpty {
+            return backendPubkey
+        }
+        return inventoryItem?
+            .backends
+            .sorted {
+                if $0.createdAt != $1.createdAt {
+                    return $0.createdAt > $1.createdAt
                 }
-                if lhs.pubkey != rhs.pubkey {
-                    return lhs.pubkey < rhs.pubkey
-                }
-                let lhsModel = lhs.model ?? ""
-                let rhsModel = rhs.model ?? ""
-                if lhsModel != rhsModel {
-                    return lhsModel < rhsModel
-                }
-                return lhs.tools.lexicographicallyPrecedes(rhs.tools)
+                return $0.backendPubkey < $1.backendPubkey
             }
+            .first?
+            .backendPubkey ?? ""
     }
 
     @MainActor
