@@ -65,6 +65,14 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
+    func setEventCallback(callback: EventCallback) {
+        core.setEventCallback(callback: callback)
+    }
+
+    func clearEventCallback() {
+        core.clearEventCallback()
+    }
+
     /// Force reconnect all relays and restart subscriptions.
     func forceReconnect() throws {
         try profiler.measureFFI("forceReconnect") {

@@ -8,11 +8,11 @@ extension TenexCoreManager {
 
     /// Register the event callback for push-based updates.
     /// Call this after successful login to enable real-time updates.
-    func registerEventCallback() {
+    func registerEventCallback() async {
         sessionStartTimestamp = UInt64(Date().timeIntervalSince1970)
         let handler = TenexEventHandler(coreManager: self)
         eventHandler = handler
-        core.setEventCallback(callback: handler)
+        await core.setEventCallback(callback: handler)
         profiler.logEvent(
             "event callback registered sessionStart=\(sessionStartTimestamp)",
             category: .general
@@ -23,10 +23,10 @@ extension TenexCoreManager {
 
     /// Unregister the event callback.
     /// Call this on logout to clean up resources.
-    func unregisterEventCallback() {
+    func unregisterEventCallback() async {
         // Stop APNs observer and publish deregistration event before clearing core state.
         unregisterApnsObserver()
-        core.clearEventCallback()
+        await core.clearEventCallback()
         eventHandler = nil
         projectStatusUpdateTask?.cancel()
         conversationRefreshTask?.cancel()
@@ -51,7 +51,7 @@ extension TenexCoreManager {
         // which would cause priority inversion for lightweight reads.
         let core = self.core
         await Task.detached {
-            _ = core.refresh()
+            _ = await core.refresh()
         }.value
         await fetchData()
         refreshRuntimeText()

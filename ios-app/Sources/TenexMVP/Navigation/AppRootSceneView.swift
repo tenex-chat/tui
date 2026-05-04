@@ -112,10 +112,10 @@ struct AppRootSceneView: View {
         #endif
 
         if loggedIn {
-            coreManager.registerEventCallback()
+            await coreManager.registerEventCallback()
             await performInitialLoginBootstrap()
         } else {
-            coreManager.unregisterEventCallback()
+            await coreManager.unregisterEventCallback()
             await notificationScheduler.clearBadge()
         }
     }

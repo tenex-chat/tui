@@ -943,6 +943,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      */
     func getProfilePicture(pubkey: String) throws  -> String?
     
+    /**
+     * Return the pubkey of a backend currently running the project — i.e.
+     * one whose kind:24010 heartbeat is fresh. Use this when sending a
+     * command (e.g. chat message) that should reach an actively running
+     * backend. Returns `None` if no backend is currently running the project.
+     */
     func getProjectBackendPubkey(projectId: String)  -> String?
     
     /**
@@ -1047,12 +1053,13 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func isLoggedIn()  -> Bool
     
     /**
-     * Check if a project has at least one available roster agent.
+     * Whether the project is currently online — i.e. has a fresh kind:24010
+     * heartbeat from any approved backend (within the 45-second staleness
+     * window).
      *
-     * A project is considered online if one of its kind:31933 roster agents is
-     * present in an approved kind:24011 backend inventory.
-     *
-     * Returns true if the project is online, false otherwise.
+     * Note: kind:24011 (installed-agent inventory) is *not* a liveness signal.
+     * A backend can publish 24011 once and then never run the project, so
+     * inventory presence does not imply the project is running.
      */
     func isProjectOnline(projectId: String)  -> Bool
     
@@ -2036,6 +2043,12 @@ open func getProfilePicture(pubkey: String)throws  -> String?  {
 })
 }
     
+    /**
+     * Return the pubkey of a backend currently running the project — i.e.
+     * one whose kind:24010 heartbeat is fresh. Use this when sending a
+     * command (e.g. chat message) that should reach an actively running
+     * backend. Returns `None` if no backend is currently running the project.
+     */
 open func getProjectBackendPubkey(projectId: String) -> String?  {
     return try!  FfiConverterOptionString.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_project_backend_pubkey(self.uniffiClonePointer(),
@@ -2223,12 +2236,13 @@ open func isLoggedIn() -> Bool  {
 }
     
     /**
-     * Check if a project has at least one available roster agent.
+     * Whether the project is currently online — i.e. has a fresh kind:24010
+     * heartbeat from any approved backend (within the 45-second staleness
+     * window).
      *
-     * A project is considered online if one of its kind:31933 roster agents is
-     * present in an approved kind:24011 backend inventory.
-     *
-     * Returns true if the project is online, false otherwise.
+     * Note: kind:24011 (installed-agent inventory) is *not* a liveness signal.
+     * A backend can publish 24011 once and then never run the project, so
+     * inventory presence does not imply the project is running.
      */
 open func isProjectOnline(projectId: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -11890,7 +11904,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture() != 63726) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_backend_pubkey() != 6708) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_backend_pubkey() != 53713) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 57303) {
@@ -11935,7 +11949,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_is_logged_in() != 37564) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_is_project_online() != 27333) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_project_online() != 56826) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_thread_collapsed() != 43840) {

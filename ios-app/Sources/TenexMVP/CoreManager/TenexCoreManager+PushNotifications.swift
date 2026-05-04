@@ -256,7 +256,7 @@ extension TenexCoreManager {
     @MainActor
     private func publishApnsToken(deviceToken: String, enable: Bool) async {
         #if os(iOS)
-        guard core.isLoggedIn() else {
+        guard await core.isLoggedIn() else {
             let message = "Skipping APNs publish — not logged in"
             Self.pushLogger.info("\(message)")
             Self.recordPushPublishResult(enable: enable, backendPubkeys: [], error: message)

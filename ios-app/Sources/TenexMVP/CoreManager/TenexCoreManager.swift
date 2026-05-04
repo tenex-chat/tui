@@ -134,6 +134,7 @@ class TenexCoreManager {
     private(set) var contentCatalogVersion: UInt64 = 0
     private(set) var agentInventoryVersion: UInt64 = 0
     private(set) var diagnosticsVersion: UInt64 = 0
+    private(set) var profileNamesVersion: UInt64 = 0
     var streamingBuffers: [String: StreamingBuffer] = [:]
 
     /// Bookmarked item IDs (kind:14202). Updated reactively when BookmarkListChanged fires.
@@ -268,17 +269,24 @@ class TenexCoreManager {
 
     /// Resolves a display name for a pubkey via kind:0 profile metadata (cached).
     func displayName(for pubkey: String) -> String {
+        _ = profileNamesVersion // observation dependency so views re-render on cache updates
         if let cached = profileNameCache[pubkey] {
             return cached
         }
-        let name = core.getProfileName(pubkey: pubkey)
-        profileNameCache[pubkey] = name
-        return name
+        profileNameCache[pubkey] = "" // placeholder to avoid duplicate Tasks
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let name = await self.core.getProfileName(pubkey: pubkey)
+            self.profileNameCache[pubkey] = name
+            self.profileNamesVersion += 1
+        }
+        return pubkey
     }
 
     /// Invalidates the profile name cache so next access re-fetches from core.
     func invalidateProfileNameCache() {
         profileNameCache.removeAll()
+        profileNamesVersion += 1
     }
 
     init() {

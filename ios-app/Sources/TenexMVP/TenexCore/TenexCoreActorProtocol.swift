@@ -5,6 +5,8 @@ import Foundation
 protocol TenexCoreActorProtocol: Actor {
     // MARK: - Core Lifecycle
     func refresh() -> Bool
+    func setEventCallback(callback: EventCallback)
+    func clearEventCallback()
     func forceReconnect() throws
 
     // MARK: - Projects

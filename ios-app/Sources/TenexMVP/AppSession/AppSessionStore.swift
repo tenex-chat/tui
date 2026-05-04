@@ -57,9 +57,7 @@ final class AppSessionStore: ObservableObject {
                 return
             }
 
-            let result = await self.runOnBackgroundQueue {
-                coreManager.attemptAutoLogin()
-            }
+            let result = await coreManager.attemptAutoLogin()
 
             guard !Task.isCancelled else { return }
             self.isAttemptingAutoLogin = false
@@ -77,8 +75,11 @@ final class AppSessionStore: ObservableObject {
 
     private func attemptDebugAutoLogin(nsec: String, coreManager: TenexCoreManager) async {
         let debugLoginStartedAt = CFAbsoluteTimeGetCurrent()
-        let loginResult = await runOnBackgroundQueue {
-            Result { try coreManager.core.login(nsec: nsec) }
+        let loginResult: Result<LoginResult, Error>
+        do {
+            loginResult = .success(try await coreManager.core.login(nsec: nsec))
+        } catch {
+            loginResult = .failure(error)
         }
 
         guard !Task.isCancelled else { return }

@@ -3,10 +3,9 @@ import Foundation
 extension TenexCoreManager {
     /// Attempts auto-login using stored credentials
     /// - Returns: AutoLoginResult indicating outcome
-    /// - Note: Call from background thread
-    nonisolated func attemptAutoLogin() -> AutoLoginResult {
+    func attemptAutoLogin() async -> AutoLoginResult {
         // Load credential from configured storage backend.
-        let loadResult = KeychainService.shared.loadNsec()
+        let loadResult = await KeychainService.shared.loadNsecAsync()
 
         switch loadResult {
         case .failure(.itemNotFound):
@@ -19,7 +18,7 @@ extension TenexCoreManager {
         case .success(let nsec):
             // Attempt login with stored credential
             do {
-                let loginResult = try core.login(nsec: nsec)
+                let loginResult = try await core.login(nsec: nsec)
                 if loginResult.success {
                     return .success(npub: loginResult.npub)
                 } else {

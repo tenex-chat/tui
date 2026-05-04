@@ -407,17 +407,12 @@ struct ConversationsTabView: View {
                         newConversationMenuButton
                     }
                 }
-                .sheet(item: selectedConversationBinding) { conversation in
-                    NavigationStack {
-                        ConversationAdaptiveDetailView(conversation: conversation)
-                            .environment(coreManager)
-                            .toolbar {
-                                ToolbarItem(placement: .confirmationAction) {
-                                    Button("Done") { selectedConversationBinding.wrappedValue = nil }
-                                }
-                            }
-                    }
-                    .tenexModalPresentation(detents: [.large])
+                .navigationDestination(item: selectedConversationBinding) { conversation in
+                    ConversationAdaptiveDetailView(conversation: conversation)
+                        .environment(coreManager)
+                        #if os(iOS)
+                        .toolbar(.hidden, for: .tabBar)
+                        #endif
                 }
         }
     }

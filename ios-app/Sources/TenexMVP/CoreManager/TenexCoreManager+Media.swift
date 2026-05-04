@@ -49,17 +49,15 @@ extension TenexCoreManager {
     /// This is the primary API for avatar views - always use this instead of core.getProfilePicture directly.
     /// - Parameter pubkey: The hex-encoded public key
     /// - Returns: Profile picture URL if available, nil otherwise
-    nonisolated func getProfilePicture(pubkey: String) -> String? {
+    func getProfilePicture(pubkey: String) async -> String? {
         // Check cache first (O(1) lookup)
         if let cached = profilePictureCache.getCached(pubkey) {
             return cached
         }
 
-        // Cache miss - fetch from FFI (synchronous, but only once per pubkey)
-        // Handle Result type properly - log errors but return nil for graceful degradation
         let startedAt = CFAbsoluteTimeGetCurrent()
         do {
-            let pictureUrl = try core.getProfilePicture(pubkey: pubkey)
+            let pictureUrl = try await core.getProfilePicture(pubkey: pubkey)
             profilePictureCache.store(pubkey, pictureUrl: pictureUrl)
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
             PerformanceProfiler.shared.logEvent(
@@ -69,8 +67,6 @@ extension TenexCoreManager {
             )
             return pictureUrl
         } catch {
-            // Log error for debugging but don't crash - graceful degradation
-            // Cache nil to prevent repeated failed calls
             profilePictureCache.store(pubkey, pictureUrl: nil)
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
             PerformanceProfiler.shared.logEvent(
@@ -85,7 +81,7 @@ extension TenexCoreManager {
     /// Prefetch profile pictures for multiple pubkeys in background.
     /// Call this when loading a list of agents/conversations to warm the cache.
     /// - Parameter pubkeys: Array of hex-encoded public keys to prefetch
-    nonisolated func prefetchProfilePictures(_ pubkeys: [String]) {
+    func prefetchProfilePictures(_ pubkeys: [String]) {
         let cache = profilePictureCache
         let core = core
         PerformanceProfiler.shared.logEvent(
@@ -93,22 +89,16 @@ extension TenexCoreManager {
             category: .ffi,
             level: .debug
         )
-        DispatchQueue.global(qos: .utility).async {
+        Task.detached(priority: .utility) {
             let startedAt = CFAbsoluteTimeGetCurrent()
             var fetchedCount = 0
             var cacheMisses = 0
             for pubkey in pubkeys {
-                // Only fetch if not already cached
                 if cache.getCached(pubkey) == nil {
                     cacheMisses += 1
-                    do {
-                        let pictureUrl = try core.getProfilePicture(pubkey: pubkey)
-                        cache.store(pubkey, pictureUrl: pictureUrl)
-                        fetchedCount += 1
-                    } catch {
-                        // Log but don't crash - cache nil to prevent repeated attempts
-                        cache.store(pubkey, pictureUrl: nil)
-                    }
+                    let pictureUrl = try? await core.getProfilePicture(pubkey: pubkey)
+                    cache.store(pubkey, pictureUrl: pictureUrl ?? nil)
+                    fetchedCount += 1
                 }
             }
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000

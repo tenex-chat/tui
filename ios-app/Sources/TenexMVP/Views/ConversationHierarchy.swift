@@ -396,15 +396,8 @@ struct AgentAvatarView: View {
         }
     }
 
-    /// Fetch profile picture asynchronously off the main thread.
-    /// This prevents FFI calls from blocking the UI during scroll.
     private func fetchProfilePictureAsync(pubkey: String) async -> String? {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = coreManager.getProfilePicture(pubkey: pubkey)
-                continuation.resume(returning: result)
-            }
-        }
+        await coreManager.getProfilePicture(pubkey: pubkey)
     }
 }
 
