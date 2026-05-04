@@ -948,8 +948,16 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Get available configuration options for a project.
      *
-     * Returns all available models and tools from the project status (kind:24010).
-     * Used by iOS to populate the agent config modal with available options.
+     * Returns the project-level catalog of models/tools/skills that the
+     * project's backend(s) currently advertise. Note: this is project-level
+     * availability, not any agent's *current* config — per-agent active
+     * config (and per-agent option catalogs) come from kind:34011. Used by
+     * iOS to populate the agent config modal with selectable options.
+     *
+     * (Implementation currently still aggregates from kind:24010
+     * `ProjectStatus`; long-term this should move behind the kind:34011
+     * per-agent catalog. See
+     * `docs/agent-identity-config-implementation-decisions.md`.)
      */
     func getProjectConfigOptions(projectId: String) throws  -> ProjectConfigOptions
     
@@ -1258,17 +1266,21 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func unarchiveConversation(conversationId: String) 
     
     /**
-     * Update an agent's configuration (model and tools).
+     * Request an agent configuration change (model and tools).
      *
-     * Publishes a kind:24020 event to update the agent's configuration.
-     * The backend will process this event and update the agent's config.
+     * Publishes a kind:24020 *config-change request* event. This is a
+     * command, not durable state: confirmation arrives as an updated
+     * kind:34011 authored by the agent. Callers should not treat this
+     * publish as the new current config.
      */
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
-     * Update an agent's configuration globally (all projects).
+     * Request a global agent configuration change (all projects).
      *
-     * Publishes a kind:24020 event without a project a-tag.
+     * Publishes a kind:24020 *config-change request* event without a
+     * project a-tag (agent-scoped only). Confirmation arrives as an
+     * updated kind:34011 authored by the agent.
      */
     func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
     
@@ -2034,8 +2046,16 @@ open func getProjectBackendPubkey(projectId: String) -> String?  {
     /**
      * Get available configuration options for a project.
      *
-     * Returns all available models and tools from the project status (kind:24010).
-     * Used by iOS to populate the agent config modal with available options.
+     * Returns the project-level catalog of models/tools/skills that the
+     * project's backend(s) currently advertise. Note: this is project-level
+     * availability, not any agent's *current* config — per-agent active
+     * config (and per-agent option catalogs) come from kind:34011. Used by
+     * iOS to populate the agent config modal with selectable options.
+     *
+     * (Implementation currently still aggregates from kind:24010
+     * `ProjectStatus`; long-term this should move behind the kind:34011
+     * per-agent catalog. See
+     * `docs/agent-identity-config-implementation-decisions.md`.)
      */
 open func getProjectConfigOptions(projectId: String)throws  -> ProjectConfigOptions  {
     return try  FfiConverterTypeProjectConfigOptions_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -2624,10 +2644,12 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
 }
     
     /**
-     * Update an agent's configuration (model and tools).
+     * Request an agent configuration change (model and tools).
      *
-     * Publishes a kind:24020 event to update the agent's configuration.
-     * The backend will process this event and update the agent's config.
+     * Publishes a kind:24020 *config-change request* event. This is a
+     * command, not durable state: confirmation arrives as an updated
+     * kind:34011 authored by the agent. Callers should not treat this
+     * publish as the new current config.
      */
 open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_agent_config(self.uniffiClonePointer(),
@@ -2643,9 +2665,11 @@ open func updateAgentConfig(projectId: String, agentPubkey: String, model: Strin
 }
     
     /**
-     * Update an agent's configuration globally (all projects).
+     * Request a global agent configuration change (all projects).
      *
-     * Publishes a kind:24020 event without a project a-tag.
+     * Publishes a kind:24020 *config-change request* event without a
+     * project a-tag (agent-scoped only). Confirmation arrives as an
+     * updated kind:34011 authored by the agent.
      */
 open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_global_agent_config(self.uniffiClonePointer(),
@@ -11859,7 +11883,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_backend_pubkey() != 6708) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 13106) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 57303) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
@@ -12000,10 +12024,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 37791) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 4274) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 46781) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 40554) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 26050) {
