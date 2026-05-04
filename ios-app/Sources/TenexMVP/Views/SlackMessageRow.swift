@@ -39,23 +39,11 @@ struct SlackMessageRow: View, Equatable {
         lhs.directedRecipientsText == rhs.directedRecipientsText
     }
 
-    /// State for expanded/collapsed content
-    @State private var isExpanded = false
-    @State private var contentHeight: CGFloat = 0
-
     /// Avatar size
     private let avatarSize: CGFloat = 20
 
     /// Font size for avatar initials
     private let avatarFontSize: CGFloat = 8
-
-    /// Maximum height before collapsing (roughly 60% of screen height)
-    private let maxCollapsedHeight: CGFloat = 400
-
-    /// Whether content needs collapsing
-    private var needsCollapsing: Bool {
-        contentHeight > maxCollapsedHeight
-    }
 
     /// Get author color using deterministic hash
     private var authorColor: Color {
@@ -74,14 +62,6 @@ struct SlackMessageRow: View, Equatable {
     /// P-tagged messages always show the header even in consecutive groups.
     private var shouldShowHeader: Bool {
         !isConsecutive || hasPTags
-    }
-
-    private var readMoreFadeBackground: Color {
-        #if os(macOS)
-        return .conversationWorkspaceBackdropMac
-        #else
-        return .systemBackground
-        #endif
     }
 
     /// Resolve the report callout kind for tool-publish messages.
@@ -177,7 +157,7 @@ struct SlackMessageRow: View, Equatable {
                         contentFallback: message.content
                     )
                 } else if !message.content.isEmpty {
-                    collapsibleContent
+                    messageContent
                 }
 
                 // Inline report callouts for `html_publish` and `report_publish` tool calls.
@@ -232,95 +212,22 @@ struct SlackMessageRow: View, Equatable {
         #endif
     }
 
-    // MARK: - Collapsible Content
+    // MARK: - Message Content
 
     @ViewBuilder
-    private var collapsibleContent: some View {
+    private var messageContent: some View {
         #if os(macOS)
-        // macOS transcript performance: avoid per-row geometry measurement and collapse state churn.
-        // Most rows are short; rendering directly keeps large transcripts responsive.
         // MessageContentView handles attachment detection and renders collapsible buttons
         // for [Text Attachment X] references, falling through to MarkdownView otherwise.
         MessageContentView(content: message.content, allowsTextSelection: false)
             .font(.system(size: 14))
             .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
         #else
-        VStack(alignment: .leading, spacing: 0) {
-            // Content with height measurement
-            // MessageContentView handles attachment detection and renders collapsible buttons
-            // for [Text Attachment X] references, falling through to MarkdownView otherwise.
-            MessageContentView(content: message.content)
-                .font(hasPTags ? .body : .callout)
-                .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
-                .background(
-                    GeometryReader { geometry in
-                        Color.clear
-                            .onAppear {
-                                contentHeight = geometry.size.height
-                            }
-                            .onChange(of: message.content) {
-                                contentHeight = geometry.size.height
-                            }
-                    }
-                )
-                .frame(maxHeight: isExpanded || !needsCollapsing ? nil : maxCollapsedHeight, alignment: .top)
-                .clipped()
-
-            // Gradient fade and "Read more" button when collapsed
-            if needsCollapsing && !isExpanded {
-                VStack(spacing: 0) {
-                    // Gradient fade overlay
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            readMoreFadeBackground.opacity(0),
-                            readMoreFadeBackground
-                        ]),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 40)
-                    .offset(y: -40)
-
-                    // Read more button
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            isExpanded = true
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Read more")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                            Image(systemName: "chevron.down")
-                                .font(.caption)
-                        }
-                        .foregroundStyle(Color.composerAction)
-                    }
-                    .buttonStyle(.borderless)
-                    .padding(.top, 4)
-                }
-            }
-
-            // Collapse button when expanded
-            if needsCollapsing && isExpanded {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.3)) {
-                        isExpanded = false
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("Show less")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Image(systemName: "chevron.up")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(Color.composerAction)
-                }
-                .buttonStyle(.borderless)
-                .padding(.top, 8)
-            }
-        }
+        // MessageContentView handles attachment detection and renders collapsible buttons
+        // for [Text Attachment X] references, falling through to MarkdownView otherwise.
+        MessageContentView(content: message.content)
+            .font(hasPTags ? .body : .callout)
+            .foregroundStyle(.primary.opacity(hasPTags ? 1.0 : 0.72))
         #endif
     }
 

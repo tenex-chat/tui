@@ -76,7 +76,6 @@ struct ProjectSettingsView: View {
                 headerSection(project: project)
                 generalSection(project: project)
                 agentsSection(project: project)
-                advancedSection
                 dangerSection(project: project)
             } else {
                 ContentUnavailableView(
@@ -342,13 +341,6 @@ struct ProjectSettingsView: View {
             Text("Agents")
         } footer: {
             Text("The first agent pubkey is treated as the default PM. You can add agents by npub or hex pubkey even when the backend is offline.")
-        }
-    }
-
-    private var advancedSection: some View {
-        Section("Advanced") {
-            Label("Coming soon", systemImage: "clock")
-                .foregroundStyle(.secondary)
         }
     }
 
