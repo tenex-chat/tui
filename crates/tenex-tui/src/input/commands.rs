@@ -791,12 +791,14 @@ fn open_project_settings(app: &mut App) {
         let backend_pubkey = app.project_settings_backend_pubkey(&a_tag);
         let agent_pubkeys = project.agent_pubkeys.clone();
         let mcp_tool_ids = project.mcp_tool_ids.clone();
+        let is_private = project.is_private;
         app.modal_state = ModalState::ProjectSettings(modal::ProjectSettingsState::new(
             a_tag,
             project_name,
             backend_pubkey,
             agent_pubkeys,
             mcp_tool_ids,
+            is_private,
         ));
     }
 }

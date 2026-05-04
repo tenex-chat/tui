@@ -68,7 +68,8 @@ protocol SafeTenexCoreProtocol: Actor {
         name: String,
         description: String,
         agentPubkeys: [String],
-        mcpToolIds: [String]
+        mcpToolIds: [String],
+        isPrivate: Bool
     ) throws
     func updateProject(
         projectId: String,
@@ -77,7 +78,8 @@ protocol SafeTenexCoreProtocol: Actor {
         repoUrl: String?,
         pictureUrl: String?,
         agentPubkeys: [String],
-        mcpToolIds: [String]
+        mcpToolIds: [String],
+        isPrivate: Bool
     ) throws
     func deleteProject(projectId: String) throws
 

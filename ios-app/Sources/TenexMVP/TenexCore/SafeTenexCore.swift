@@ -601,7 +601,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         name: String,
         description: String,
         agentPubkeys: [String],
-        mcpToolIds: [String]
+        mcpToolIds: [String],
+        isPrivate: Bool
     ) throws {
         try profiler.measureFFI("createProject") {
             do {
@@ -609,7 +610,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     name: name,
                     description: description,
                     agentPubkeys: agentPubkeys,
-                    mcpToolIds: mcpToolIds
+                    mcpToolIds: mcpToolIds,
+                    isPrivate: isPrivate
                 )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
@@ -625,7 +627,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         repoUrl: String?,
         pictureUrl: String?,
         agentPubkeys: [String],
-        mcpToolIds: [String]
+        mcpToolIds: [String],
+        isPrivate: Bool
     ) throws {
         try profiler.measureFFI("updateProject") {
             do {
@@ -636,7 +639,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     repoUrl: repoUrl,
                     pictureUrl: pictureUrl,
                     agentPubkeys: agentPubkeys,
-                    mcpToolIds: mcpToolIds
+                    mcpToolIds: mcpToolIds,
+                    isPrivate: isPrivate
                 )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)

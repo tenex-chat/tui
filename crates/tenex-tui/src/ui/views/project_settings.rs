@@ -79,7 +79,11 @@ fn add_mode_agents(app: &App, state: &ProjectSettingsState) -> Vec<AgentInventor
 }
 
 fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &mut ProjectSettingsState) {
-    let title = format!("Settings: {}", state.project_name);
+    let title = if state.is_private {
+        format!("Settings: {} [private]", state.project_name)
+    } else {
+        format!("Settings: {}", state.project_name)
+    };
 
     let (popup_area, content_area) = Modal::new(&title)
         .size(ModalSize {
@@ -535,6 +539,16 @@ fn render_hints(
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("t", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" add tool", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("P", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(
+            if state.is_private {
+                " make public"
+            } else {
+                " make private"
+            },
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
     ];
 
     // Show context-sensitive hints based on focus

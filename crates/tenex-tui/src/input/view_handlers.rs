@@ -354,6 +354,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let backend_pubkey = app.project_settings_backend_pubkey(&a_tag);
                 let agent_pubkeys = project.agent_pubkeys.clone();
                 let mcp_tool_ids = project.mcp_tool_ids.clone();
+                let is_private = project.is_private;
 
                 app.modal_state =
                     ui::modal::ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
@@ -362,6 +363,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         backend_pubkey,
                         agent_pubkeys,
                         mcp_tool_ids,
+                        is_private,
                     ));
             }
         }
@@ -755,7 +757,7 @@ fn save_project_settings_changes(app: &mut App, state: &ui::modal::ProjectSettin
             project_a_tag,
             agent_pubkeys,
             mcp_tool_ids,
-            is_private: false,
+            is_private: state.is_private,
         }) {
             app.set_warning_status(&format!("Failed to update agents: {}", e));
         } else {
@@ -1029,6 +1031,9 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                     state.agents_scroll_offset = 0;
                 }
             }
+            KeyCode::Char('P') => {
+                state.is_private = !state.is_private;
+            }
             KeyCode::Enter => {
                 if state.has_changes() {
                     save_project_settings_changes(app, &state);
@@ -1065,7 +1070,8 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
             KeyCode::Tab => {
                 state.focus = match state.focus {
                     CreateProjectFocus::Name => CreateProjectFocus::Description,
-                    CreateProjectFocus::Description => CreateProjectFocus::Name,
+                    CreateProjectFocus::Description => CreateProjectFocus::Private,
+                    CreateProjectFocus::Private => CreateProjectFocus::Name,
                 };
             }
             KeyCode::Enter => {
@@ -1076,6 +1082,11 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char(c) => match state.focus {
                 CreateProjectFocus::Name => state.name.push(c),
                 CreateProjectFocus::Description => state.description.push(c),
+                CreateProjectFocus::Private => {
+                    if c == ' ' {
+                        state.is_private = !state.is_private;
+                    }
+                }
             },
             KeyCode::Backspace => match state.focus {
                 CreateProjectFocus::Name => {
@@ -1084,6 +1095,7 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                 CreateProjectFocus::Description => {
                     state.description.pop();
                 }
+                CreateProjectFocus::Private => {}
             },
             _ => {}
         },
@@ -1174,7 +1186,7 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                             agent_pubkeys: state.agent_pubkeys.clone(),
                             mcp_tool_ids: all_tool_ids,
                             client: Some("tenex-tui".to_string()),
-                            is_private: false,
+                            is_private: state.is_private,
                         }) {
                             app.set_warning_status(&format!("Failed to save project: {}", e));
                         } else {

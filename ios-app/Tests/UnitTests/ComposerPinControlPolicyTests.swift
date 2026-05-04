@@ -62,6 +62,7 @@ final class ComposerPinControlPolicyTests: XCTestCase {
             repoUrl: nil,
             pictureUrl: nil,
             isDeleted: false,
+            isPrivate: false,
             pubkey: "",
             participants: [],
             agentPubkeys: [],

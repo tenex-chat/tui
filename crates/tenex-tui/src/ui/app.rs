@@ -3257,6 +3257,7 @@ impl App {
 
         let project_a_tag = project.a_tag();
         let backend_pubkey = self.project_settings_backend_pubkey(&project_a_tag);
+        let is_private = project.is_private;
         self.modal_state =
             ModalState::ProjectSettings(crate::ui::modal::ProjectSettingsState::new_agent_picker(
                 project_a_tag,
@@ -3264,6 +3265,7 @@ impl App {
                 backend_pubkey,
                 project.agent_pubkeys,
                 project.mcp_tool_ids,
+                is_private,
             ));
         true
     }

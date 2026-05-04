@@ -5,6 +5,7 @@ private struct ProjectGeneralDraft: Equatable {
     var description: String = ""
     var repoUrl: String = ""
     var pictureUrl: String = ""
+    var isPrivate: Bool = false
 }
 
 struct ProjectSettingsView: View {
@@ -232,6 +233,8 @@ struct ProjectSettingsView: View {
                 }
             }
 
+            Toggle("Private project", isOn: $generalDraft.isPrivate)
+
             LabeledContent("Created") {
                 Text(TimestampTextFormatter.string(from: project.createdAt, style: .mediumDateShortTime))
                     .foregroundStyle(.secondary)
@@ -456,7 +459,8 @@ struct ProjectSettingsView: View {
             title: project.title,
             description: project.description ?? "",
             repoUrl: project.repoUrl ?? "",
-            pictureUrl: project.pictureUrl ?? ""
+            pictureUrl: project.pictureUrl ?? "",
+            isPrivate: project.isPrivate
         )
         generalDraft = syncedGeneral
         baselineGeneralDraft = syncedGeneral
@@ -509,7 +513,8 @@ struct ProjectSettingsView: View {
                 repoUrl: normalizedOptional(generalDraft.repoUrl),
                 pictureUrl: normalizedOptional(generalDraft.pictureUrl),
                 agentPubkeys: project.agentPubkeys,
-                mcpToolIds: project.mcpToolIds
+                mcpToolIds: project.mcpToolIds,
+                isPrivate: generalDraft.isPrivate
             )
             baselineGeneralDraft = generalDraft
         } catch {
@@ -529,7 +534,8 @@ struct ProjectSettingsView: View {
                 repoUrl: project.repoUrl,
                 pictureUrl: project.pictureUrl,
                 agentPubkeys: pendingAgentPubkeys,
-                mcpToolIds: project.mcpToolIds
+                mcpToolIds: project.mcpToolIds,
+                isPrivate: project.isPrivate
             )
             baselineAgentPubkeys = pendingAgentPubkeys
         } catch {

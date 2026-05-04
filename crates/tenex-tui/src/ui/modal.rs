@@ -707,6 +707,8 @@ pub struct ProjectSettingsState {
     pub pending_agent_pubkeys: Vec<String>,
     pub original_mcp_tool_ids: Vec<String>,
     pub pending_mcp_tool_ids: Vec<String>,
+    pub is_private: bool,
+    pub original_is_private: bool,
     pub selector_index: usize,
     /// Index for tools pane selection
     pub tools_selector_index: usize,
@@ -742,6 +744,7 @@ pub enum CreateProjectStep {
 pub enum CreateProjectFocus {
     Name,
     Description,
+    Private,
 }
 
 /// State for the create project modal
@@ -755,6 +758,7 @@ pub struct CreateProjectState {
     pub agent_selector: SelectorState,
     pub mcp_tool_ids: Vec<String>,
     pub tool_selector: SelectorState,
+    pub is_private: bool,
 }
 
 impl CreateProjectState {
@@ -768,6 +772,7 @@ impl CreateProjectState {
             agent_selector: SelectorState::default(),
             mcp_tool_ids: Vec::new(),
             tool_selector: SelectorState::default(),
+            is_private: false,
         }
     }
 
@@ -942,6 +947,7 @@ impl ProjectSettingsState {
         backend_pubkey: Option<String>,
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        is_private: bool,
     ) -> Self {
         Self {
             project_a_tag,
@@ -953,6 +959,8 @@ impl ProjectSettingsState {
             pending_agent_pubkeys: agent_pubkeys,
             original_mcp_tool_ids: mcp_tool_ids.clone(),
             pending_mcp_tool_ids: mcp_tool_ids,
+            is_private,
+            original_is_private: is_private,
             selector_index: 0,
             tools_selector_index: 0,
             focus: ProjectSettingsFocus::default(),
@@ -974,6 +982,7 @@ impl ProjectSettingsState {
         backend_pubkey: Option<String>,
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        is_private: bool,
     ) -> Self {
         let mut state = Self::new(
             project_a_tag,
@@ -981,6 +990,7 @@ impl ProjectSettingsState {
             backend_pubkey,
             agent_pubkeys,
             mcp_tool_ids,
+            is_private,
         );
         state.presentation = ProjectSettingsPresentation::AgentPickerOnly;
         state.auto_publish_on_close = true;
@@ -1010,6 +1020,7 @@ impl ProjectSettingsState {
     pub fn has_changes(&self) -> bool {
         self.original_agent_pubkeys != self.pending_agent_pubkeys
             || self.original_mcp_tool_ids != self.pending_mcp_tool_ids
+            || self.is_private != self.original_is_private
     }
 
     pub fn add_agent(&mut self, agent_pubkey: String) {

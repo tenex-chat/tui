@@ -56,7 +56,7 @@ pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &Creat
     let hint_spans = match state.step {
         CreateProjectStep::Details => vec![
             Span::styled("Tab", Style::default().fg(theme::ACCENT_WARNING)),
-            Span::styled(" switch field", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" cycle field", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS)),
             Span::styled(" next step", Style::default().fg(theme::TEXT_MUTED)),
@@ -177,11 +177,33 @@ fn render_details_step(f: &mut Frame, area: Rect, state: &CreateProjectState) {
     f.render_widget(desc_input, Rect::new(area.x, y, area.width, 1));
     y += 2;
 
+    // Private toggle
+    let private_label_style = if state.focus == CreateProjectFocus::Private {
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    let private_checkbox = if state.is_private { "[✓]" } else { "[ ]" };
+    let private_style = if state.is_private {
+        Style::default().fg(theme::ACCENT_SUCCESS)
+    } else {
+        Style::default().fg(theme::TEXT_DIM)
+    };
+    let private_toggle = Paragraph::new(Line::from(vec![
+        Span::styled("Private: ", private_label_style),
+        Span::styled(private_checkbox, private_style),
+        Span::styled("  (Space to toggle)", Style::default().fg(theme::TEXT_DIM)),
+    ]));
+    f.render_widget(private_toggle, Rect::new(area.x, y, area.width, 1));
+    y += 2;
+
     // Show cursor in active field
     if state.focus == CreateProjectFocus::Name {
         f.set_cursor_position((area.x + 2 + state.name.len() as u16, area.y + 1));
     } else if state.focus == CreateProjectFocus::Description {
-        f.set_cursor_position((area.x + 2 + state.description.len() as u16, y - 2));
+        f.set_cursor_position((area.x + 2 + state.description.len() as u16, y - 4));
     }
 
     // Validation hint

@@ -61,6 +61,7 @@ struct CreateProjectView: View {
     @State private var selectedToolIds: Set<String> = []
 
     @State private var isCreating = false
+    @State private var isPrivate = false
     @State private var errorMessage: String?
 
     private var trimmedName: String { projectName.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -221,6 +222,9 @@ struct CreateProjectView: View {
             if !selectedToolIds.isEmpty {
                 summaryRow(label: "Tools", value: "\(selectedToolIds.count)")
             }
+            if isPrivate {
+                summaryRow(label: "Visibility", value: "Private")
+            }
         }
     }
 
@@ -326,6 +330,10 @@ struct CreateProjectView: View {
                         .textFieldStyle(.plain)
                         .padding(10)
                         .background(Color.systemGray6.opacity(0.8), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+                fieldGroup("Visibility", help: "Optional") {
+                    Toggle("Private project", isOn: $isPrivate)
+                        .toggleStyle(.switch)
                 }
             }
         }
@@ -555,6 +563,7 @@ struct CreateProjectView: View {
                 reviewRow(icon: "person.3.sequence.fill", title: "Agents", value: "Assigned later from backend")
                 reviewRow(icon: "wrench.and.screwdriver.fill", title: "Tools", value: "\(selectedToolIds.count) configured")
                 reviewRow(icon: "link", title: "Repository", value: repoUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "None" : repoUrl.trimmingCharacters(in: .whitespacesAndNewlines))
+                reviewRow(icon: "lock.fill", title: "Visibility", value: isPrivate ? "Private" : "Public")
             }
         }
     }
@@ -671,7 +680,8 @@ struct CreateProjectView: View {
                     name: trimmedName,
                     description: trimmedDescription,
                     agentPubkeys: [],
-                    mcpToolIds: Array(selectedToolIds)
+                    mcpToolIds: Array(selectedToolIds),
+                    isPrivate: isPrivate
                 )
                 await coreManager.fetchData()
                 await MainActor.run {

@@ -665,7 +665,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Create a new project (kind:31933 replaceable event).
      */
-    func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String]) throws 
+    func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool) throws
     
     /**
      * Delete an agent from a project or globally by publishing a kind:24030 event.
@@ -1289,7 +1289,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      *
      * Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
      */
-    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String]) throws 
+    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool) throws
     
     /**
      * Upload an image to Blossom and return the URL.
@@ -1527,12 +1527,13 @@ open func createNudge(title: String, description: String, content: String, hasht
     /**
      * Create a new project (kind:31933 replaceable event).
      */
-open func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_create_project(self.uniffiClonePointer(),
         FfiConverterString.lower(name),
         FfiConverterString.lower(description),
         FfiConverterSequenceString.lower(agentPubkeys),
-        FfiConverterSequenceString.lower(mcpToolIds),$0
+        FfiConverterSequenceString.lower(mcpToolIds),
+        FfiConverterBool.lower(isPrivate),$0
     )
 }
 }
@@ -2688,7 +2689,7 @@ open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [S
      *
      * Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
      */
-open func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_project(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
         FfiConverterString.lower(title),
@@ -2696,7 +2697,8 @@ open func updateProject(projectId: String, title: String, description: String, r
         FfiConverterOptionString.lower(repoUrl),
         FfiConverterOptionString.lower(pictureUrl),
         FfiConverterSequenceString.lower(agentPubkeys),
-        FfiConverterSequenceString.lower(mcpToolIds),$0
+        FfiConverterSequenceString.lower(mcpToolIds),
+        FfiConverterBool.lower(isPrivate),$0
     )
 }
 }
@@ -6839,6 +6841,7 @@ public struct Project {
     public var repoUrl: String?
     public var pictureUrl: String?
     public var isDeleted: Bool
+    public var isPrivate: Bool
     public var pubkey: String
     public var participants: [String]
     public var agentPubkeys: [String]
@@ -6847,13 +6850,14 @@ public struct Project {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, title: String, description: String?, repoUrl: String?, pictureUrl: String?, isDeleted: Bool, pubkey: String, participants: [String], agentPubkeys: [String], mcpToolIds: [String], createdAt: UInt64) {
+    public init(id: String, title: String, description: String?, repoUrl: String?, pictureUrl: String?, isDeleted: Bool, isPrivate: Bool, pubkey: String, participants: [String], agentPubkeys: [String], mcpToolIds: [String], createdAt: UInt64) {
         self.id = id
         self.title = title
         self.description = description
         self.repoUrl = repoUrl
         self.pictureUrl = pictureUrl
         self.isDeleted = isDeleted
+        self.isPrivate = isPrivate
         self.pubkey = pubkey
         self.participants = participants
         self.agentPubkeys = agentPubkeys
@@ -6887,6 +6891,9 @@ extension Project: Equatable, Hashable {
         if lhs.isDeleted != rhs.isDeleted {
             return false
         }
+        if lhs.isPrivate != rhs.isPrivate {
+            return false
+        }
         if lhs.pubkey != rhs.pubkey {
             return false
         }
@@ -6912,6 +6919,7 @@ extension Project: Equatable, Hashable {
         hasher.combine(repoUrl)
         hasher.combine(pictureUrl)
         hasher.combine(isDeleted)
+        hasher.combine(isPrivate)
         hasher.combine(pubkey)
         hasher.combine(participants)
         hasher.combine(agentPubkeys)
@@ -6934,8 +6942,9 @@ public struct FfiConverterTypeProject: FfiConverterRustBuffer {
                 description: FfiConverterOptionString.read(from: &buf), 
                 repoUrl: FfiConverterOptionString.read(from: &buf), 
                 pictureUrl: FfiConverterOptionString.read(from: &buf), 
-                isDeleted: FfiConverterBool.read(from: &buf), 
-                pubkey: FfiConverterString.read(from: &buf), 
+                isDeleted: FfiConverterBool.read(from: &buf),
+                isPrivate: FfiConverterBool.read(from: &buf),
+                pubkey: FfiConverterString.read(from: &buf),
                 participants: FfiConverterSequenceString.read(from: &buf), 
                 agentPubkeys: FfiConverterSequenceString.read(from: &buf), 
                 mcpToolIds: FfiConverterSequenceString.read(from: &buf), 
@@ -6950,6 +6959,7 @@ public struct FfiConverterTypeProject: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.repoUrl, into: &buf)
         FfiConverterOptionString.write(value.pictureUrl, into: &buf)
         FfiConverterBool.write(value.isDeleted, into: &buf)
+        FfiConverterBool.write(value.isPrivate, into: &buf)
         FfiConverterString.write(value.pubkey, into: &buf)
         FfiConverterSequenceString.write(value.participants, into: &buf)
         FfiConverterSequenceString.write(value.agentPubkeys, into: &buf)

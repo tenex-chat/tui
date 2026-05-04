@@ -319,6 +319,7 @@ final class ComposerViewModelTests: XCTestCase {
             repoUrl: nil,
             pictureUrl: nil,
             isDeleted: false,
+            isPrivate: false,
             pubkey: "",
             participants: [],
             agentPubkeys: agentPubkeys,

@@ -83,7 +83,7 @@ fn execute_project_action(
             app.modal_state = ModalState::None;
         }
         ProjectAction::Settings => {
-            let (backend_pubkey, agent_pubkeys, mcp_tool_ids) = {
+            let (backend_pubkey, agent_pubkeys, mcp_tool_ids, is_private) = {
                 let store = app.data_store.borrow();
                 store
                     .get_projects()
@@ -94,6 +94,7 @@ fn execute_project_action(
                             app.project_settings_backend_pubkey(&state.project_a_tag),
                             p.agent_pubkeys.clone(),
                             p.mcp_tool_ids.clone(),
+                            p.is_private,
                         )
                     })
                     .unwrap_or_default()
@@ -104,6 +105,7 @@ fn execute_project_action(
                 backend_pubkey,
                 agent_pubkeys,
                 mcp_tool_ids,
+                is_private,
             ));
         }
         ProjectAction::NewConversation => {
