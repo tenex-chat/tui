@@ -123,15 +123,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         None
     };
 
-    // Handle project settings modal when showing
-    if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
-        handle_project_settings_key(app, key);
-        return Ok(());
-    }
-
-    // Handle create project modal when showing
-    if matches!(app.modal_state, ModalState::CreateProject(_)) {
-        handle_create_project_key(app, key);
+    // Handle unified project dialog (create/edit) when showing
+    if matches!(app.modal_state, ModalState::ProjectDialog(_)) {
+        handle_project_dialog_key(app, key);
         return Ok(());
     }
 
@@ -165,7 +159,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             }
             HotkeyId::CreateProject => {
                 app.modal_state =
-                    ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
+                    ui::modal::ModalState::ProjectDialog(ui::modal::ProjectDialogState::new_creating());
                 return Ok(());
             }
             HotkeyId::NewConversation => {
@@ -351,20 +345,23 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if let Some(project) = all_projects.get(app.sidebar_project_index) {
                 let a_tag = project.a_tag();
                 let project_name = project.title.clone();
-                let backend_pubkey = app.project_settings_backend_pubkey(&a_tag);
+                let description = project.description.clone().unwrap_or_default();
+                let repo_url = project.repo_url.clone();
                 let agent_pubkeys = project.agent_pubkeys.clone();
                 let mcp_tool_ids = project.mcp_tool_ids.clone();
                 let is_private = project.is_private;
 
-                app.modal_state =
-                    ui::modal::ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
+                app.modal_state = ui::modal::ModalState::ProjectDialog(
+                    ui::modal::ProjectDialogState::new_editing(
                         a_tag,
                         project_name,
-                        backend_pubkey,
+                        description,
+                        repo_url,
+                        is_private,
                         agent_pubkeys,
                         mcp_tool_ids,
-                        is_private,
-                    ));
+                    ),
+                );
             }
         }
         KeyCode::Char('S') if app.sidebar_focused && has_shift => {
@@ -745,46 +742,83 @@ fn resolve_npub_to_hex(input: &str) -> Option<String> {
     }
 }
 
-fn save_project_settings_changes(app: &mut App, state: &ui::modal::ProjectSettingsState) {
-    let project_a_tag = state.project_a_tag.clone();
-    let agent_pubkeys = state.pending_agent_pubkeys.clone();
-    let mcp_tool_ids = state.pending_mcp_tool_ids.clone();
-
-    app.apply_project_assignments_locally(&project_a_tag, &agent_pubkeys, &mcp_tool_ids);
-
-    if let Some(ref core_handle) = app.core_handle {
-        if let Err(e) = core_handle.send(NostrCommand::UpdateProjectAgents {
-            project_a_tag,
-            agent_pubkeys,
-            mcp_tool_ids,
-            is_private: state.is_private,
-        }) {
-            app.set_warning_status(&format!("Failed to update agents: {}", e));
-        } else {
-            app.set_warning_status("Project agents updated");
+fn save_project_dialog(app: &mut App, state: &ui::modal::ProjectDialogState) {
+    match &state.mode {
+        ui::modal::ProjectDialogMode::Creating => {
+            if let Some(ref core_handle) = app.core_handle {
+                let repo_url = if state.repo_url.trim().is_empty() {
+                    None
+                } else {
+                    Some(state.repo_url.trim().to_string())
+                };
+                if let Err(e) = core_handle.send(NostrCommand::SaveProject {
+                    slug: None,
+                    name: state.name.clone(),
+                    description: state.description.clone(),
+                    agent_pubkeys: state.pending_agent_pubkeys.clone(),
+                    mcp_tool_ids: state.pending_mcp_tool_ids.clone(),
+                    client: Some("tenex-tui".to_string()),
+                    is_private: state.is_private,
+                    repo_url,
+                }) {
+                    app.set_warning_status(&format!("Failed to save project: {}", e));
+                } else {
+                    app.set_warning_status("Project created");
+                }
+            }
+        }
+        ui::modal::ProjectDialogMode::Editing { project_a_tag } => {
+            let project_a_tag = project_a_tag.clone();
+            let repo_url = if state.repo_url.trim().is_empty() {
+                None
+            } else {
+                Some(state.repo_url.trim().to_string())
+            };
+            app.apply_project_assignments_locally(
+                &project_a_tag,
+                &state.pending_agent_pubkeys,
+                &state.pending_mcp_tool_ids,
+            );
+            if let Some(ref core_handle) = app.core_handle {
+                if let Err(e) = core_handle.send(NostrCommand::UpdateProject {
+                    project_a_tag,
+                    title: state.name.clone(),
+                    description: state.description.clone(),
+                    repo_url,
+                    picture_url: None,
+                    agent_pubkeys: state.pending_agent_pubkeys.clone(),
+                    mcp_tool_ids: state.pending_mcp_tool_ids.clone(),
+                    client: Some("tenex-tui".to_string()),
+                    is_private: state.is_private,
+                }) {
+                    app.set_warning_status(&format!("Failed to update project: {}", e));
+                } else {
+                    app.set_warning_status("Project updated");
+                }
+            }
         }
     }
 }
 
-pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
-    use ui::modal::{ProjectSettingsAddMode, ProjectSettingsFocus};
+pub(crate) fn handle_project_dialog_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::{ProjectDialogDetailsFocus, ProjectDialogTab};
     use ui::views::{
-        available_agent_count, available_mcp_tool_count, get_agent_id_at_index,
-        get_mcp_tool_id_at_index,
+        available_agent_count_dialog, available_mcp_tool_count_dialog,
+        get_agent_id_at_dialog_index, get_mcp_tool_id_at_dialog_index,
     };
 
     let code = key.code;
 
     let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
-        ModalState::ProjectSettings(s) => s,
+        ModalState::ProjectDialog(s) => s,
         other => {
             app.modal_state = other;
             return;
         }
     };
 
-    if let Some(add_mode) = state.in_add_mode {
-        // Pubkey input mode intercepts all keystrokes first
+    // Handle agent add sub-mode
+    if state.in_add_agent_mode {
         if state.pubkey_input_active {
             match code {
                 KeyCode::Esc => {
@@ -800,16 +834,9 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                             state.pubkey_input_active = false;
                             state.pubkey_input.clear();
                             state.pubkey_input_error = None;
-                            if state.is_agent_picker_only() {
-                                if state.auto_publish_on_close && state.has_changes() {
-                                    save_project_settings_changes(app, &state);
-                                }
-                                app.modal_state = ModalState::None;
-                                return;
-                            }
-                            state.in_add_mode = None;
-                            state.add_filter.clear();
-                            state.add_index = 0;
+                            state.in_add_agent_mode = false;
+                            state.add_agent_filter.clear();
+                            state.add_agent_index = 0;
                         }
                         None => {
                             state.pubkey_input_error =
@@ -830,382 +857,274 @@ pub(crate) fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 }
                 _ => {}
             }
-            app.modal_state = ModalState::ProjectSettings(state);
+            app.modal_state = ModalState::ProjectDialog(state);
             return;
         }
 
-        // Ctrl+A: activate pubkey input mode
         if code == KeyCode::Char('a') && key.modifiers.contains(KeyModifiers::CONTROL) {
             state.pubkey_input_active = true;
             state.pubkey_input.clear();
             state.pubkey_input_error = None;
-            app.modal_state = ModalState::ProjectSettings(state);
+            app.modal_state = ModalState::ProjectDialog(state);
             return;
         }
 
         match code {
             KeyCode::Up => {
-                if state.add_index > 0 {
-                    state.add_index -= 1;
+                if state.add_agent_index > 0 {
+                    state.add_agent_index -= 1;
                 }
             }
             KeyCode::Down => {
-                let count = match add_mode {
-                    ProjectSettingsAddMode::Agent => available_agent_count(app, &state),
-                    ProjectSettingsAddMode::McpTool => available_mcp_tool_count(app, &state),
-                };
-                if state.add_index + 1 < count {
-                    state.add_index += 1;
+                let count = available_agent_count_dialog(app, &state);
+                if state.add_agent_index + 1 < count {
+                    state.add_agent_index += 1;
                 }
             }
-            KeyCode::Char(' ') if matches!(add_mode, ProjectSettingsAddMode::Agent) => {
-                if let Some(agent_id) = get_agent_id_at_index(app, &state, state.add_index) {
-                    state.toggle_agent(agent_id);
+            KeyCode::Char(' ') => {
+                if let Some(pk) = get_agent_id_at_dialog_index(app, &state, state.add_agent_index) {
+                    state.toggle_agent(pk);
                 }
             }
-            KeyCode::Esc | KeyCode::Enter if matches!(add_mode, ProjectSettingsAddMode::Agent) => {
-                if state.is_agent_picker_only() {
-                    if state.auto_publish_on_close && state.has_changes() {
-                        save_project_settings_changes(app, &state);
-                    }
-                    app.modal_state = ModalState::None;
-                    return;
-                }
-
-                state.in_add_mode = None;
-                state.add_filter.clear();
-                state.add_index = 0;
+            KeyCode::Esc | KeyCode::Enter => {
+                state.in_add_agent_mode = false;
+                state.add_agent_filter.clear();
+                state.add_agent_index = 0;
             }
-            KeyCode::Esc => {
-                state.in_add_mode = None;
-                state.add_filter.clear();
-                state.add_index = 0;
-            }
-            KeyCode::Enter => match add_mode {
-                ProjectSettingsAddMode::McpTool => {
-                    if let Some(tool_id) = get_mcp_tool_id_at_index(app, &state, state.add_index) {
-                        state.add_mcp_tool(tool_id);
-                        state.in_add_mode = None;
-                        state.add_filter.clear();
-                        state.add_index = 0;
-                    }
-                }
-                ProjectSettingsAddMode::Agent => {}
-            },
             KeyCode::Char(c) => {
-                state.add_filter.push(c);
-                state.add_index = 0;
+                state.add_agent_filter.push(c);
+                state.add_agent_index = 0;
             }
             KeyCode::Backspace => {
-                state.add_filter.pop();
-                state.add_index = 0;
+                state.add_agent_filter.pop();
+                state.add_agent_index = 0;
             }
             _ => {}
         }
-    } else {
-        // Ctrl+D in the Agents pane opens the agent deletion confirmation modal
-        if key.modifiers.contains(KeyModifiers::CONTROL)
-            && code == KeyCode::Char('d')
-            && state.focus == ProjectSettingsFocus::Agents
-            && !state.pending_agent_pubkeys.is_empty()
-        {
-            use ui::modal::AgentDeletionState;
-            let agent_pubkey = state.pending_agent_pubkeys[state.selector_index].clone();
-            let project_a_tag = state.project_a_tag.clone();
+        app.modal_state = ModalState::ProjectDialog(state);
+        return;
+    }
 
-            let agent_name = {
-                let ds = app.data_store.borrow();
-                ds.get_profile_name(&agent_pubkey)
-            };
-
-            app.modal_state = ModalState::AgentDeletion(AgentDeletionState::new(
-                agent_pubkey,
-                agent_name,
-                project_a_tag,
-            ));
-            return;
-        }
-
+    // Handle MCP tool add sub-mode
+    if state.in_add_tool_mode {
         match code {
+            KeyCode::Up => {
+                if state.add_tool_index > 0 {
+                    state.add_tool_index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let count = available_mcp_tool_count_dialog(app, &state);
+                if state.add_tool_index + 1 < count {
+                    state.add_tool_index += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(id) =
+                    get_mcp_tool_id_at_dialog_index(app, &state, state.add_tool_index)
+                {
+                    state.add_mcp_tool(id);
+                    state.in_add_tool_mode = false;
+                    state.add_tool_filter.clear();
+                    state.add_tool_index = 0;
+                }
+            }
+            KeyCode::Esc => {
+                state.in_add_tool_mode = false;
+                state.add_tool_filter.clear();
+                state.add_tool_index = 0;
+            }
+            KeyCode::Char(c) => {
+                state.add_tool_filter.push(c);
+                state.add_tool_index = 0;
+            }
+            KeyCode::Backspace => {
+                state.add_tool_filter.pop();
+                state.add_tool_index = 0;
+            }
+            _ => {}
+        }
+        app.modal_state = ModalState::ProjectDialog(state);
+        return;
+    }
+
+    // Main dialog navigation
+    match state.tab {
+        ProjectDialogTab::Details => match code {
             KeyCode::Esc => {
                 app.modal_state = ModalState::None;
                 return;
             }
-            // Left/Right arrows switch between panes
             KeyCode::Left => {
-                state.focus = ProjectSettingsFocus::Agents;
-                // Re-adjust scroll when switching panes to keep selected item visible
-                state.adjust_agents_scroll(state.visible_height());
+                state.tab = state.tab.prev();
             }
             KeyCode::Right => {
-                state.focus = ProjectSettingsFocus::Tools;
-                // Re-adjust scroll when switching panes to keep selected item visible
-                state.adjust_tools_scroll(state.visible_height());
+                state.tab = state.tab.next();
             }
-            // Up/Down navigate within the focused pane
-            KeyCode::Up => {
-                let visible_height = state.visible_height();
-                match state.focus {
-                    ProjectSettingsFocus::Agents => {
-                        if state.selector_index > 0 {
-                            state.selector_index -= 1;
-                            state.adjust_agents_scroll(visible_height);
-                        }
-                    }
-                    ProjectSettingsFocus::Tools => {
-                        if state.tools_selector_index > 0 {
-                            state.tools_selector_index -= 1;
-                            state.adjust_tools_scroll(visible_height);
-                        }
-                    }
-                }
-            }
-            KeyCode::Down => {
-                let visible_height = state.visible_height();
-                match state.focus {
-                    ProjectSettingsFocus::Agents => {
-                        let count = state.pending_agent_pubkeys.len();
-                        if state.selector_index + 1 < count {
-                            state.selector_index += 1;
-                            state.adjust_agents_scroll(visible_height);
-                        }
-                    }
-                    ProjectSettingsFocus::Tools => {
-                        let count = state.pending_mcp_tool_ids.len();
-                        if state.tools_selector_index + 1 < count {
-                            state.tools_selector_index += 1;
-                            state.adjust_tools_scroll(visible_height);
-                        }
-                    }
-                }
-            }
-            KeyCode::Char('a') => {
-                state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
-                state.add_filter.clear();
-                state.add_index = 0;
-                state.pubkey_input_active = false;
-                state.pubkey_input.clear();
-                state.pubkey_input_error = None;
-            }
-            KeyCode::Char('t') => {
-                state.in_add_mode = Some(ProjectSettingsAddMode::McpTool);
-                state.add_filter.clear();
-                state.add_index = 0;
-            }
-            KeyCode::Char('d') => {
-                // Remove from the currently focused pane
-                let visible_height = state.visible_height();
-                match state.focus {
-                    ProjectSettingsFocus::Agents => {
-                        if !state.pending_agent_pubkeys.is_empty() {
-                            state.remove_agent(state.selector_index);
-                            if state.selector_index >= state.pending_agent_pubkeys.len()
-                                && state.selector_index > 0
-                            {
-                                state.selector_index -= 1;
-                            }
-                            state.adjust_agents_scroll(visible_height);
-                        }
-                    }
-                    ProjectSettingsFocus::Tools => {
-                        if !state.pending_mcp_tool_ids.is_empty() {
-                            state.remove_mcp_tool(state.tools_selector_index);
-                            if state.tools_selector_index >= state.pending_mcp_tool_ids.len()
-                                && state.tools_selector_index > 0
-                            {
-                                state.tools_selector_index -= 1;
-                            }
-                            state.adjust_tools_scroll(visible_height);
-                        }
-                    }
-                }
-            }
-            KeyCode::Char('p') => {
-                // Set PM only works in agents pane
-                if state.focus == ProjectSettingsFocus::Agents
-                    && !state.pending_agent_pubkeys.is_empty()
-                    && state.selector_index > 0
-                {
-                    state.set_pm(state.selector_index);
-                    state.selector_index = 0;
-                    state.agents_scroll_offset = 0;
-                }
-            }
-            KeyCode::Char('P') => {
-                state.is_private = !state.is_private;
+            KeyCode::Tab => {
+                state.details_focus = state.details_focus.next();
             }
             KeyCode::Enter => {
-                if state.has_changes() {
-                    save_project_settings_changes(app, &state);
+                if state.can_save() {
+                    save_project_dialog(app, &state);
                     app.modal_state = ModalState::None;
                     return;
                 }
             }
-            _ => {}
-        }
-    }
-
-    app.modal_state = ModalState::ProjectSettings(state);
-}
-
-fn handle_create_project_key(app: &mut App, key: KeyEvent) {
-    use ui::modal::{CreateProjectFocus, CreateProjectStep};
-
-    let code = key.code;
-
-    let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
-        ModalState::CreateProject(s) => s,
-        other => {
-            app.modal_state = other;
-            return;
-        }
-    };
-
-    match state.step {
-        CreateProjectStep::Details => match code {
-            KeyCode::Esc => {
-                app.modal_state = ModalState::None;
-                return;
+            KeyCode::Char(' ') if state.details_focus == ProjectDialogDetailsFocus::Private => {
+                state.is_private = !state.is_private;
             }
-            KeyCode::Tab => {
-                state.focus = match state.focus {
-                    CreateProjectFocus::Name => CreateProjectFocus::Description,
-                    CreateProjectFocus::Description => CreateProjectFocus::Private,
-                    CreateProjectFocus::Private => CreateProjectFocus::Name,
-                };
-            }
-            KeyCode::Enter => {
-                if state.can_proceed() {
-                    state.step = CreateProjectStep::SelectAgents;
-                }
-            }
-            KeyCode::Char(c) => match state.focus {
-                CreateProjectFocus::Name => state.name.push(c),
-                CreateProjectFocus::Description => state.description.push(c),
-                CreateProjectFocus::Private => {
-                    if c == ' ' {
-                        state.is_private = !state.is_private;
+            KeyCode::Char(c)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                match state.details_focus {
+                    ProjectDialogDetailsFocus::Name => state.name.push(c),
+                    ProjectDialogDetailsFocus::Description => state.description.push(c),
+                    ProjectDialogDetailsFocus::RepoUrl => state.repo_url.push(c),
+                    ProjectDialogDetailsFocus::Private => {
+                        if c == ' ' {
+                            state.is_private = !state.is_private;
+                        }
                     }
                 }
-            },
-            KeyCode::Backspace => match state.focus {
-                CreateProjectFocus::Name => {
+            }
+            KeyCode::Backspace => match state.details_focus {
+                ProjectDialogDetailsFocus::Name => {
                     state.name.pop();
                 }
-                CreateProjectFocus::Description => {
+                ProjectDialogDetailsFocus::Description => {
                     state.description.pop();
                 }
-                CreateProjectFocus::Private => {}
+                ProjectDialogDetailsFocus::RepoUrl => {
+                    state.repo_url.pop();
+                }
+                ProjectDialogDetailsFocus::Private => {}
             },
             _ => {}
         },
-        CreateProjectStep::SelectAgents => {
-            let filtered_agents: Vec<tenex_core::models::AgentDefinition> = Vec::new();
-            let item_count = filtered_agents.len();
+        ProjectDialogTab::Agents => {
+            // Ctrl+D: delete agent from nostr
+            if key.modifiers.contains(KeyModifiers::CONTROL)
+                && code == KeyCode::Char('d')
+                && !state.pending_agent_pubkeys.is_empty()
+            {
+                use ui::modal::AgentDeletionState;
+                let agent_pubkey =
+                    state.pending_agent_pubkeys[state.agents_selector_index].clone();
+                let project_a_tag = state.project_a_tag().unwrap_or("").to_string();
+                let agent_name = {
+                    let ds = app.data_store.borrow();
+                    ds.get_profile_name(&agent_pubkey)
+                };
+                app.modal_state = ModalState::AgentDeletion(AgentDeletionState::new(
+                    agent_pubkey,
+                    agent_name,
+                    project_a_tag,
+                ));
+                return;
+            }
 
             match code {
                 KeyCode::Esc => {
                     app.modal_state = ModalState::None;
                     return;
                 }
-                KeyCode::Backspace if state.agent_selector.filter.is_empty() => {
-                    state.step = CreateProjectStep::Details;
+                KeyCode::Left => {
+                    state.tab = state.tab.prev();
                 }
-                KeyCode::Backspace => {
-                    state.agent_selector.filter.pop();
-                    state.agent_selector.index = 0;
+                KeyCode::Right => {
+                    state.tab = state.tab.next();
                 }
                 KeyCode::Up => {
-                    if state.agent_selector.index > 0 {
-                        state.agent_selector.index -= 1;
+                    let visible = state.agents_visible_height();
+                    if state.agents_selector_index > 0 {
+                        state.agents_selector_index -= 1;
+                        state.adjust_agents_scroll(visible);
                     }
                 }
                 KeyCode::Down => {
-                    if item_count > 0 && state.agent_selector.index + 1 < item_count {
-                        state.agent_selector.index += 1;
+                    let visible = state.agents_visible_height();
+                    let count = state.pending_agent_pubkeys.len();
+                    if state.agents_selector_index + 1 < count {
+                        state.agents_selector_index += 1;
+                        state.adjust_agents_scroll(visible);
                     }
                 }
-                KeyCode::Char(' ') => {
-                    if let Some(agent) = filtered_agents.get(state.agent_selector.index) {
-                        state.toggle_agent(agent.pubkey.clone());
+                KeyCode::Char('a') => {
+                    state.in_add_agent_mode = true;
+                    state.add_agent_filter.clear();
+                    state.add_agent_index = 0;
+                    state.pubkey_input_active = false;
+                    state.pubkey_input.clear();
+                    state.pubkey_input_error = None;
+                }
+                KeyCode::Char('d') => {
+                    let visible = state.agents_visible_height();
+                    if !state.pending_agent_pubkeys.is_empty() {
+                        state.remove_agent(state.agents_selector_index);
+                        state.adjust_agents_scroll(visible);
+                    }
+                }
+                KeyCode::Char('p') => {
+                    if !state.pending_agent_pubkeys.is_empty() && state.agents_selector_index > 0 {
+                        state.set_pm(state.agents_selector_index);
                     }
                 }
                 KeyCode::Enter => {
-                    // Move to tool selection step
-                    state.step = CreateProjectStep::SelectTools;
-                    state.tool_selector.filter.clear();
-                    state.tool_selector.index = 0;
-                }
-                KeyCode::Char(c) => {
-                    state.agent_selector.filter.push(c);
-                    state.agent_selector.index = 0;
+                    if state.can_save() {
+                        save_project_dialog(app, &state);
+                        app.modal_state = ModalState::None;
+                        return;
+                    }
                 }
                 _ => {}
             }
         }
-        CreateProjectStep::SelectTools => {
-            let filtered_tools = app.mcp_tools_filtered_by(&state.tool_selector.filter);
-            let item_count = filtered_tools.len();
-
-            match code {
-                KeyCode::Esc => {
-                    app.modal_state = ModalState::None;
-                    return;
-                }
-                KeyCode::Backspace if state.tool_selector.filter.is_empty() => {
-                    state.step = CreateProjectStep::SelectAgents;
-                }
-                KeyCode::Backspace => {
-                    state.tool_selector.filter.pop();
-                    state.tool_selector.index = 0;
-                }
-                KeyCode::Up => {
-                    if state.tool_selector.index > 0 {
-                        state.tool_selector.index -= 1;
-                    }
-                }
-                KeyCode::Down => {
-                    if item_count > 0 && state.tool_selector.index + 1 < item_count {
-                        state.tool_selector.index += 1;
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    if let Some(tool) = filtered_tools.get(state.tool_selector.index) {
-                        state.toggle_mcp_tool(tool.id.clone());
-                    }
-                }
-                KeyCode::Enter => {
-                    // Save the project with all tool IDs (manual + from agents)
-                    if let Some(ref core_handle) = app.core_handle {
-                        let all_tool_ids = state.all_mcp_tool_ids(app);
-
-                        if let Err(e) = core_handle.send(NostrCommand::SaveProject {
-                            slug: None, // Generate from name
-                            name: state.name.clone(),
-                            description: state.description.clone(),
-                            agent_pubkeys: state.agent_pubkeys.clone(),
-                            mcp_tool_ids: all_tool_ids,
-                            client: Some("tenex-tui".to_string()),
-                            is_private: state.is_private,
-                        }) {
-                            app.set_warning_status(&format!("Failed to save project: {}", e));
-                        } else {
-                            app.set_warning_status("Project saved");
-                        }
-                    }
-                    app.modal_state = ModalState::None;
-                    return;
-                }
-                KeyCode::Char(c) => {
-                    state.tool_selector.filter.push(c);
-                    state.tool_selector.index = 0;
-                }
-                _ => {}
+        ProjectDialogTab::McpServers => match code {
+            KeyCode::Esc => {
+                app.modal_state = ModalState::None;
+                return;
             }
-        }
+            KeyCode::Left => {
+                state.tab = state.tab.prev();
+            }
+            KeyCode::Right => {
+                state.tab = state.tab.next();
+            }
+            KeyCode::Up => {
+                if state.tools_selector_index > 0 {
+                    state.tools_selector_index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let count = state.pending_mcp_tool_ids.len();
+                if state.tools_selector_index + 1 < count {
+                    state.tools_selector_index += 1;
+                }
+            }
+            KeyCode::Char('t') => {
+                state.in_add_tool_mode = true;
+                state.add_tool_filter.clear();
+                state.add_tool_index = 0;
+            }
+            KeyCode::Char('d') => {
+                if !state.pending_mcp_tool_ids.is_empty() {
+                    state.remove_mcp_tool(state.tools_selector_index);
+                }
+            }
+            KeyCode::Enter => {
+                if state.can_save() {
+                    save_project_dialog(app, &state);
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+            }
+            _ => {}
+        },
     }
 
-    app.modal_state = ModalState::CreateProject(state);
+    app.modal_state = ModalState::ProjectDialog(state);
 }
 
 // =============================================================================
@@ -1295,7 +1214,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
             }
             HotkeyId::CreateProject => {
                 app.modal_state =
-                    ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
+                    ui::modal::ModalState::ProjectDialog(ui::modal::ProjectDialogState::new_creating());
                 return Ok(true);
             }
             HotkeyId::NewConversation => {
@@ -1382,8 +1301,8 @@ pub(super) fn handle_normal_mode(
     _login_step: &mut crate::ui::views::login::LoginStep,
     _pending_nsec: &mut Option<String>,
 ) -> Result<()> {
-    if matches!(app.modal_state, ModalState::CreateProject(_)) {
-        handle_create_project_key(app, key);
+    if matches!(app.modal_state, ModalState::ProjectDialog(_)) {
+        handle_project_dialog_key(app, key);
         return Ok(());
     }
 
@@ -1604,12 +1523,13 @@ fn open_create_project_from_agent_browser(app: &mut App) {
         agents.get(app.home.agent_browser_index).cloned()
     };
 
-    let mut state = ui::modal::CreateProjectState::new();
+    let mut state = ui::modal::ProjectDialogState::new_creating();
     if let Some(agent) = selected_agent {
         state.name = format!("{} Team", agent.name);
+        state.pending_agent_pubkeys.push(agent.pubkey.clone());
     }
 
-    app.modal_state = ui::modal::ModalState::CreateProject(state);
+    app.modal_state = ui::modal::ModalState::ProjectDialog(state);
 }
 
 fn install_selected_agent_definition_to_backend(app: &mut App) {

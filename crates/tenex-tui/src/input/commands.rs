@@ -266,7 +266,7 @@ pub static COMMANDS: &[Command] = &[
         section: "Other",
         available: |_| true,
         execute: |app| {
-            app.modal_state = ModalState::CreateProject(modal::CreateProjectState::new());
+            app.modal_state = ModalState::ProjectDialog(modal::ProjectDialogState::new_creating());
         },
     },
     Command {
@@ -787,18 +787,20 @@ fn open_project_settings(app: &mut App) {
     let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
     if let Some(project) = all_projects.get(app.sidebar_project_index) {
         let a_tag = project.a_tag();
-        let project_name = project.title.clone();
-        let backend_pubkey = app.project_settings_backend_pubkey(&a_tag);
+        let name = project.title.clone();
+        let description = project.description.clone().unwrap_or_default();
+        let repo_url = project.repo_url.clone();
         let agent_pubkeys = project.agent_pubkeys.clone();
         let mcp_tool_ids = project.mcp_tool_ids.clone();
         let is_private = project.is_private;
-        app.modal_state = ModalState::ProjectSettings(modal::ProjectSettingsState::new(
+        app.modal_state = ModalState::ProjectDialog(modal::ProjectDialogState::new_editing(
             a_tag,
-            project_name,
-            backend_pubkey,
+            name,
+            description,
+            repo_url,
+            is_private,
             agent_pubkeys,
             mcp_tool_ids,
-            is_private,
         ));
     }
 }

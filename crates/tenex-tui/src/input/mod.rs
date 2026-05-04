@@ -57,8 +57,7 @@ pub(crate) fn handle_key(
                 | ModalState::AgentConfig(_)
                 | ModalState::ProjectsModal { .. }
                 | ModalState::CreateAgent(_)
-                | ModalState::CreateProject(_)
-                | ModalState::ProjectSettings(_)
+                | ModalState::ProjectDialog(_)
                 | ModalState::ExpandedEditor { .. }
                 | ModalState::AskModal(_)
                 | ModalState::ComposerProjectSelector { .. }

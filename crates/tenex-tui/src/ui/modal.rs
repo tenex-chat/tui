@@ -674,147 +674,281 @@ impl AgentDeletionState {
     }
 }
 
-/// What type of item is being added in project settings
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectSettingsAddMode {
-    Agent,
-    McpTool,
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProjectSettingsPresentation {
-    Full,
-    AgentPickerOnly,
-}
 
-/// Which pane is focused in project settings (agents or tools)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ProjectSettingsFocus {
-    #[default]
+/// Which tab is active in the unified project dialog
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectDialogTab {
+    Details,
     Agents,
-    Tools,
+    McpServers,
 }
 
-/// State for project settings modal
-#[derive(Debug, Clone)]
-pub struct ProjectSettingsState {
-    pub project_a_tag: String,
-    pub project_name: String,
-    pub backend_pubkey: Option<String>,
-    pub presentation: ProjectSettingsPresentation,
-    pub auto_publish_on_close: bool,
-    pub original_agent_pubkeys: Vec<String>,
-    pub pending_agent_pubkeys: Vec<String>,
-    pub original_mcp_tool_ids: Vec<String>,
-    pub pending_mcp_tool_ids: Vec<String>,
-    pub is_private: bool,
-    pub original_is_private: bool,
-    pub selector_index: usize,
-    /// Index for tools pane selection
-    pub tools_selector_index: usize,
-    /// Which pane is currently focused (agents or tools)
-    pub focus: ProjectSettingsFocus,
-    /// Scroll offset for the agents list
-    pub agents_scroll_offset: usize,
-    /// Scroll offset for the tools list
-    pub tools_scroll_offset: usize,
-    pub in_add_mode: Option<ProjectSettingsAddMode>,
-    pub add_filter: String,
-    pub add_index: usize,
-    /// Cached visible height for list scrolling (computed during render, used by input handlers)
-    pub cached_visible_height: usize,
-    /// When true, user is typing a pubkey/npub to add directly
-    pub pubkey_input_active: bool,
-    /// Text being typed for pubkey input
-    pub pubkey_input: String,
-    /// Validation error for pubkey input
-    pub pubkey_input_error: Option<String>,
-}
+impl ProjectDialogTab {
+    pub const ALL: &'static [ProjectDialogTab] =
+        &[Self::Details, Self::Agents, Self::McpServers];
 
-/// Step in the create project wizard
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CreateProjectStep {
-    Details,      // name + description
-    SelectAgents, // agent picker
-    SelectTools,  // MCP tool picker
-}
-
-/// Which field is focused in the details step
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CreateProjectFocus {
-    Name,
-    Description,
-    Private,
-}
-
-/// State for the create project modal
-#[derive(Debug, Clone)]
-pub struct CreateProjectState {
-    pub step: CreateProjectStep,
-    pub focus: CreateProjectFocus,
-    pub name: String,
-    pub description: String,
-    pub agent_pubkeys: Vec<String>,
-    pub agent_selector: SelectorState,
-    pub mcp_tool_ids: Vec<String>,
-    pub tool_selector: SelectorState,
-    pub is_private: bool,
-}
-
-impl CreateProjectState {
-    pub fn new() -> Self {
-        Self {
-            step: CreateProjectStep::Details,
-            focus: CreateProjectFocus::Name,
-            name: String::new(),
-            description: String::new(),
-            agent_pubkeys: Vec::new(),
-            agent_selector: SelectorState::default(),
-            mcp_tool_ids: Vec::new(),
-            tool_selector: SelectorState::default(),
-            is_private: false,
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Details => "Details",
+            Self::Agents => "Agents",
+            Self::McpServers => "MCP Servers",
         }
     }
 
-    pub fn can_proceed(&self) -> bool {
-        match self.step {
-            CreateProjectStep::Details => !self.name.trim().is_empty(),
-            CreateProjectStep::SelectAgents => true,
-            CreateProjectStep::SelectTools => true,
+    pub fn next(self) -> Self {
+        match self {
+            Self::Details => Self::Agents,
+            Self::Agents => Self::McpServers,
+            Self::McpServers => Self::Details,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Details => Self::McpServers,
+            Self::Agents => Self::Details,
+            Self::McpServers => Self::Agents,
+        }
+    }
+}
+
+/// Which field is focused in the Details tab
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectDialogDetailsFocus {
+    Name,
+    Description,
+    RepoUrl,
+    Private,
+}
+
+impl ProjectDialogDetailsFocus {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Description,
+            Self::Description => Self::RepoUrl,
+            Self::RepoUrl => Self::Private,
+            Self::Private => Self::Name,
+        }
+    }
+}
+
+/// Mode for the unified project dialog
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectDialogMode {
+    Creating,
+    Editing { project_a_tag: String },
+}
+
+/// State for the unified create/edit project dialog
+#[derive(Debug, Clone)]
+pub struct ProjectDialogState {
+    pub mode: ProjectDialogMode,
+    pub tab: ProjectDialogTab,
+
+    // Details tab fields
+    pub name: String,
+    pub description: String,
+    pub repo_url: String,
+    pub is_private: bool,
+    pub original_is_private: bool,
+    pub details_focus: ProjectDialogDetailsFocus,
+
+    // Agents tab
+    pub original_agent_pubkeys: Vec<String>,
+    pub pending_agent_pubkeys: Vec<String>,
+    pub agents_selector_index: usize,
+    pub agents_scroll_offset: usize,
+    pub cached_agents_visible_height: usize,
+
+    // Agent add sub-mode
+    pub in_add_agent_mode: bool,
+    pub add_agent_filter: String,
+    pub add_agent_index: usize,
+    pub pubkey_input_active: bool,
+    pub pubkey_input: String,
+    pub pubkey_input_error: Option<String>,
+
+    // MCP Servers tab
+    pub original_mcp_tool_ids: Vec<String>,
+    pub pending_mcp_tool_ids: Vec<String>,
+    pub tools_selector_index: usize,
+    pub tools_scroll_offset: usize,
+
+    // Tool add sub-mode
+    pub in_add_tool_mode: bool,
+    pub add_tool_filter: String,
+    pub add_tool_index: usize,
+}
+
+impl ProjectDialogState {
+    pub fn new_creating() -> Self {
+        Self {
+            mode: ProjectDialogMode::Creating,
+            tab: ProjectDialogTab::Details,
+            name: String::new(),
+            description: String::new(),
+            repo_url: String::new(),
+            is_private: false,
+            original_is_private: false,
+            details_focus: ProjectDialogDetailsFocus::Name,
+            original_agent_pubkeys: Vec::new(),
+            pending_agent_pubkeys: Vec::new(),
+            agents_selector_index: 0,
+            agents_scroll_offset: 0,
+            cached_agents_visible_height: 10,
+            in_add_agent_mode: false,
+            add_agent_filter: String::new(),
+            add_agent_index: 0,
+            pubkey_input_active: false,
+            pubkey_input: String::new(),
+            pubkey_input_error: None,
+            original_mcp_tool_ids: Vec::new(),
+            pending_mcp_tool_ids: Vec::new(),
+            tools_selector_index: 0,
+            tools_scroll_offset: 0,
+            in_add_tool_mode: false,
+            add_tool_filter: String::new(),
+            add_tool_index: 0,
+        }
+    }
+
+    pub fn new_editing(
+        project_a_tag: String,
+        name: String,
+        description: String,
+        repo_url: Option<String>,
+        is_private: bool,
+        agent_pubkeys: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+    ) -> Self {
+        Self {
+            mode: ProjectDialogMode::Editing { project_a_tag },
+            tab: ProjectDialogTab::Details,
+            name,
+            description,
+            repo_url: repo_url.unwrap_or_default(),
+            is_private,
+            original_is_private: is_private,
+            details_focus: ProjectDialogDetailsFocus::Name,
+            original_agent_pubkeys: agent_pubkeys.clone(),
+            pending_agent_pubkeys: agent_pubkeys,
+            agents_selector_index: 0,
+            agents_scroll_offset: 0,
+            cached_agents_visible_height: 10,
+            in_add_agent_mode: false,
+            add_agent_filter: String::new(),
+            add_agent_index: 0,
+            pubkey_input_active: false,
+            pubkey_input: String::new(),
+            pubkey_input_error: None,
+            original_mcp_tool_ids: mcp_tool_ids.clone(),
+            pending_mcp_tool_ids: mcp_tool_ids,
+            tools_selector_index: 0,
+            tools_scroll_offset: 0,
+            in_add_tool_mode: false,
+            add_tool_filter: String::new(),
+            add_tool_index: 0,
+        }
+    }
+
+    pub fn is_creating(&self) -> bool {
+        self.mode == ProjectDialogMode::Creating
+    }
+
+    pub fn project_a_tag(&self) -> Option<&str> {
+        match &self.mode {
+            ProjectDialogMode::Editing { project_a_tag } => Some(project_a_tag),
+            ProjectDialogMode::Creating => None,
+        }
+    }
+
+    pub fn can_save(&self) -> bool {
+        !self.name.trim().is_empty()
+    }
+
+    pub fn has_changes(&self) -> bool {
+        self.original_agent_pubkeys != self.pending_agent_pubkeys
+            || self.original_mcp_tool_ids != self.pending_mcp_tool_ids
+            || self.is_private != self.original_is_private
+    }
+
+    pub fn agents_visible_height(&self) -> usize {
+        if self.cached_agents_visible_height > 0 {
+            self.cached_agents_visible_height
+        } else {
+            10
         }
     }
 
     pub fn toggle_agent(&mut self, agent_pubkey: String) {
-        if let Some(pos) = self
-            .agent_pubkeys
+        if let Some(idx) = self
+            .pending_agent_pubkeys
             .iter()
-            .position(|pubkey| pubkey == &agent_pubkey)
+            .position(|pk| pk == &agent_pubkey)
         {
-            self.agent_pubkeys.remove(pos);
+            self.pending_agent_pubkeys.remove(idx);
         } else {
-            self.agent_pubkeys.push(agent_pubkey);
+            self.pending_agent_pubkeys.push(agent_pubkey);
         }
     }
 
-    pub fn toggle_mcp_tool(&mut self, tool_id: String) {
-        if let Some(pos) = self.mcp_tool_ids.iter().position(|id| id == &tool_id) {
-            self.mcp_tool_ids.remove(pos);
-        } else {
-            self.mcp_tool_ids.push(tool_id);
+    pub fn add_agent(&mut self, agent_pubkey: String) {
+        if !self.pending_agent_pubkeys.contains(&agent_pubkey) {
+            self.pending_agent_pubkeys.push(agent_pubkey);
         }
     }
 
-    pub fn all_mcp_tool_ids(&self, _app: &crate::ui::app::App) -> Vec<String> {
-        use std::collections::HashSet;
-
-        let mut tool_ids = HashSet::new();
-
-        // Add manually selected tools
-        for id in &self.mcp_tool_ids {
-            tool_ids.insert(id.clone());
+    pub fn remove_agent(&mut self, index: usize) {
+        if index < self.pending_agent_pubkeys.len() {
+            self.pending_agent_pubkeys.remove(index);
+            if self.agents_selector_index >= self.pending_agent_pubkeys.len()
+                && self.agents_selector_index > 0
+            {
+                self.agents_selector_index -= 1;
+            }
         }
+    }
 
-        tool_ids.into_iter().collect()
+    pub fn set_pm(&mut self, index: usize) {
+        if index < self.pending_agent_pubkeys.len() && index > 0 {
+            let pk = self.pending_agent_pubkeys.remove(index);
+            self.pending_agent_pubkeys.insert(0, pk);
+            self.agents_selector_index = 0;
+        }
+    }
+
+    pub fn add_mcp_tool(&mut self, tool_id: String) {
+        if !self.pending_mcp_tool_ids.contains(&tool_id) {
+            self.pending_mcp_tool_ids.push(tool_id);
+        }
+    }
+
+    pub fn remove_mcp_tool(&mut self, index: usize) {
+        if index < self.pending_mcp_tool_ids.len() {
+            self.pending_mcp_tool_ids.remove(index);
+            if self.tools_selector_index >= self.pending_mcp_tool_ids.len()
+                && self.tools_selector_index > 0
+            {
+                self.tools_selector_index -= 1;
+            }
+        }
+    }
+
+    pub fn adjust_agents_scroll(&mut self, visible_height: usize) {
+        if self.agents_selector_index < self.agents_scroll_offset {
+            self.agents_scroll_offset = self.agents_selector_index;
+        } else if self.agents_selector_index >= self.agents_scroll_offset + visible_height {
+            self.agents_scroll_offset = self.agents_selector_index - visible_height + 1;
+        }
+    }
+
+    pub fn adjust_tools_scroll(&mut self, visible_height: usize) {
+        if self.tools_selector_index < self.tools_scroll_offset {
+            self.tools_scroll_offset = self.tools_selector_index;
+        } else if self.tools_selector_index >= self.tools_scroll_offset + visible_height {
+            self.tools_scroll_offset = self.tools_selector_index - visible_height + 1;
+        }
     }
 }
 
@@ -937,168 +1071,6 @@ impl CreateAgentState {
     }
 }
 
-/// Default visible height fallback when no cached value is available
-pub const DEFAULT_LIST_VISIBLE_HEIGHT: usize = 10;
-
-impl ProjectSettingsState {
-    pub fn new(
-        project_a_tag: String,
-        project_name: String,
-        backend_pubkey: Option<String>,
-        agent_pubkeys: Vec<String>,
-        mcp_tool_ids: Vec<String>,
-        is_private: bool,
-    ) -> Self {
-        Self {
-            project_a_tag,
-            project_name,
-            backend_pubkey,
-            presentation: ProjectSettingsPresentation::Full,
-            auto_publish_on_close: false,
-            original_agent_pubkeys: agent_pubkeys.clone(),
-            pending_agent_pubkeys: agent_pubkeys,
-            original_mcp_tool_ids: mcp_tool_ids.clone(),
-            pending_mcp_tool_ids: mcp_tool_ids,
-            is_private,
-            original_is_private: is_private,
-            selector_index: 0,
-            tools_selector_index: 0,
-            focus: ProjectSettingsFocus::default(),
-            agents_scroll_offset: 0,
-            tools_scroll_offset: 0,
-            in_add_mode: None,
-            add_filter: String::new(),
-            add_index: 0,
-            cached_visible_height: DEFAULT_LIST_VISIBLE_HEIGHT,
-            pubkey_input_active: false,
-            pubkey_input: String::new(),
-            pubkey_input_error: None,
-        }
-    }
-
-    pub fn new_agent_picker(
-        project_a_tag: String,
-        project_name: String,
-        backend_pubkey: Option<String>,
-        agent_pubkeys: Vec<String>,
-        mcp_tool_ids: Vec<String>,
-        is_private: bool,
-    ) -> Self {
-        let mut state = Self::new(
-            project_a_tag,
-            project_name,
-            backend_pubkey,
-            agent_pubkeys,
-            mcp_tool_ids,
-            is_private,
-        );
-        state.presentation = ProjectSettingsPresentation::AgentPickerOnly;
-        state.auto_publish_on_close = true;
-        state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
-        state
-    }
-
-    pub fn is_agent_picker_only(&self) -> bool {
-        self.presentation == ProjectSettingsPresentation::AgentPickerOnly
-    }
-
-    /// Get the visible height to use for scroll calculations.
-    /// Uses cached value from render if available, otherwise falls back to default.
-    pub fn visible_height(&self) -> usize {
-        if self.cached_visible_height > 0 {
-            self.cached_visible_height
-        } else {
-            DEFAULT_LIST_VISIBLE_HEIGHT
-        }
-    }
-
-    /// Update the cached visible height (called during render)
-    pub fn set_visible_height(&mut self, height: usize) {
-        self.cached_visible_height = height;
-    }
-
-    pub fn has_changes(&self) -> bool {
-        self.original_agent_pubkeys != self.pending_agent_pubkeys
-            || self.original_mcp_tool_ids != self.pending_mcp_tool_ids
-            || self.is_private != self.original_is_private
-    }
-
-    pub fn add_agent(&mut self, agent_pubkey: String) {
-        if !self.pending_agent_pubkeys.contains(&agent_pubkey) {
-            self.pending_agent_pubkeys.push(agent_pubkey);
-        }
-    }
-
-    pub fn toggle_agent(&mut self, agent_pubkey: String) {
-        if let Some(index) = self
-            .pending_agent_pubkeys
-            .iter()
-            .position(|pubkey| pubkey == &agent_pubkey)
-        {
-            self.pending_agent_pubkeys.remove(index);
-        } else {
-            self.pending_agent_pubkeys.push(agent_pubkey);
-        }
-    }
-
-    pub fn remove_agent(&mut self, index: usize) {
-        if index < self.pending_agent_pubkeys.len() {
-            self.pending_agent_pubkeys.remove(index);
-            if self.selector_index >= self.pending_agent_pubkeys.len() && self.selector_index > 0 {
-                self.selector_index -= 1;
-            }
-        }
-    }
-
-    pub fn set_pm(&mut self, index: usize) {
-        if index < self.pending_agent_pubkeys.len() && index > 0 {
-            let agent_pubkey = self.pending_agent_pubkeys.remove(index);
-            self.pending_agent_pubkeys.insert(0, agent_pubkey);
-            self.selector_index = 0;
-        }
-    }
-
-    pub fn add_mcp_tool(&mut self, tool_id: String) {
-        if !self.pending_mcp_tool_ids.contains(&tool_id) {
-            self.pending_mcp_tool_ids.push(tool_id);
-        }
-    }
-
-    pub fn remove_mcp_tool(&mut self, index: usize) {
-        if index < self.pending_mcp_tool_ids.len() {
-            self.pending_mcp_tool_ids.remove(index);
-            if self.tools_selector_index >= self.pending_mcp_tool_ids.len()
-                && self.tools_selector_index > 0
-            {
-                self.tools_selector_index -= 1;
-            }
-        }
-    }
-
-    /// Adjust agents scroll offset to keep selector_index visible
-    pub fn adjust_agents_scroll(&mut self, visible_height: usize) {
-        if visible_height == 0 {
-            return;
-        }
-        if self.selector_index < self.agents_scroll_offset {
-            self.agents_scroll_offset = self.selector_index;
-        } else if self.selector_index >= self.agents_scroll_offset + visible_height {
-            self.agents_scroll_offset = self.selector_index.saturating_sub(visible_height - 1);
-        }
-    }
-
-    /// Adjust tools scroll offset to keep tools_selector_index visible
-    pub fn adjust_tools_scroll(&mut self, visible_height: usize) {
-        if visible_height == 0 {
-            return;
-        }
-        if self.tools_selector_index < self.tools_scroll_offset {
-            self.tools_scroll_offset = self.tools_selector_index;
-        } else if self.tools_selector_index >= self.tools_scroll_offset + visible_height {
-            self.tools_scroll_offset = self.tools_selector_index.saturating_sub(visible_height - 1);
-        }
-    }
-}
 
 /// Conversation action types (for Home view)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2249,9 +2221,8 @@ pub enum ModalState {
         for_new_thread: bool,
     },
     AskModal(AskModalState),
-    ProjectSettings(ProjectSettingsState),
-    /// Create new project wizard
-    CreateProject(CreateProjectState),
+    /// Unified project create/edit dialog
+    ProjectDialog(ProjectDialogState),
     /// Skill selector for adding skills to messages
     SkillSelector(SkillSelectorState),
     /// Conversation action menu in Home view - shows actions for selected conversation (via Ctrl+T)

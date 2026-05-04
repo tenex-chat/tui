@@ -83,7 +83,7 @@ fn execute_project_action(
             app.modal_state = ModalState::None;
         }
         ProjectAction::Settings => {
-            let (backend_pubkey, agent_pubkeys, mcp_tool_ids, is_private) = {
+            let (name, description, repo_url, agent_pubkeys, mcp_tool_ids, is_private) = {
                 let store = app.data_store.borrow();
                 store
                     .get_projects()
@@ -91,7 +91,9 @@ fn execute_project_action(
                     .find(|p| p.a_tag() == state.project_a_tag)
                     .map(|p| {
                         (
-                            app.project_settings_backend_pubkey(&state.project_a_tag),
+                            p.title.clone(),
+                            p.description.clone().unwrap_or_default(),
+                            p.repo_url.clone(),
                             p.agent_pubkeys.clone(),
                             p.mcp_tool_ids.clone(),
                             p.is_private,
@@ -99,14 +101,16 @@ fn execute_project_action(
                     })
                     .unwrap_or_default()
             };
-            app.modal_state = ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
-                state.project_a_tag.clone(),
-                state.project_name.clone(),
-                backend_pubkey,
-                agent_pubkeys,
-                mcp_tool_ids,
-                is_private,
-            ));
+            app.modal_state =
+                ModalState::ProjectDialog(ui::modal::ProjectDialogState::new_editing(
+                    state.project_a_tag.clone(),
+                    name,
+                    description,
+                    repo_url,
+                    is_private,
+                    agent_pubkeys,
+                    mcp_tool_ids,
+                ));
         }
         ProjectAction::NewConversation => {
             let project = {

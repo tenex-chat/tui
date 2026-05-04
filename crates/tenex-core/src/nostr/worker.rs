@@ -879,6 +879,8 @@ pub enum NostrCommand {
         #[allow(dead_code)]
         client: Option<String>,
         is_private: bool,
+        /// Optional repository URL for the project
+        repo_url: Option<String>,
     },
     /// Update an existing project (kind:31933 replaceable)
     UpdateProject {
@@ -1315,6 +1317,7 @@ impl NostrWorker {
                         mcp_tool_ids,
                         client,
                         is_private,
+                        repo_url,
                     } => {
                         debug_log(&format!("Worker: Saving project {}", name));
                         if let Err(e) = rt.block_on(self.handle_save_project(
@@ -1325,6 +1328,7 @@ impl NostrWorker {
                             mcp_tool_ids,
                             client,
                             is_private,
+                            repo_url,
                         )) {
                             tlog!("ERROR", "Failed to save project: {}", e);
                         }
@@ -3365,6 +3369,7 @@ impl NostrWorker {
         mcp_tool_ids: Vec<String>,
         client_tag: Option<String>,
         is_private: bool,
+        repo_url: Option<String>,
     ) -> Result<()> {
         use crate::slug::slug_from_name;
 
@@ -3387,7 +3392,7 @@ impl NostrWorker {
             d_tag,
             name,
             description,
-            None,
+            repo_url,
             None,
             &[],
             &agent_pubkeys,

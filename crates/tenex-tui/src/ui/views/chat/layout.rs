@@ -244,14 +244,14 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_skill_selector(f, app, area, state);
     }
 
-    // Render project settings / project agent picker modal if showing
-    if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
+    // Render unified project dialog (create/edit) if showing
+    if matches!(app.modal_state, ModalState::ProjectDialog(_)) {
         let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
-            ModalState::ProjectSettings(state) => state,
+            ModalState::ProjectDialog(s) => s,
             _ => unreachable!(),
         };
-        super::super::render_project_settings(f, app, area, &mut state);
-        app.modal_state = ModalState::ProjectSettings(state);
+        super::super::render_project_dialog(f, app, area, &mut state);
+        app.modal_state = ModalState::ProjectDialog(state);
     }
 
     // Render chat actions modal if showing (Ctrl+T /)

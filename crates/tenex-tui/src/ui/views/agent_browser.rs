@@ -12,7 +12,7 @@ use ratatui::{
 use tenex_core::models::AgentDefinition;
 
 /// Render the agent browser view - list or detail mode
-pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
+pub fn render_agent_browser(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(Clear, area);
 
     if app.home.in_agent_detail() {
@@ -31,9 +31,14 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
         render_agent_list(f, app, area);
     }
 
-    // Render create project/team modal overlay
-    if let ModalState::CreateProject(ref state) = app.modal_state {
-        super::render_create_project(f, app, area, state);
+    // Render unified project dialog modal overlay (create/edit)
+    if matches!(app.modal_state, ModalState::ProjectDialog(_)) {
+        let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+            ModalState::ProjectDialog(s) => s,
+            _ => unreachable!(),
+        };
+        super::render_project_dialog(f, app, area, &mut state);
+        app.modal_state = ModalState::ProjectDialog(state);
     }
 
     // Render create agent modal overlay

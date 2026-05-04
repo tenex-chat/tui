@@ -107,20 +107,14 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
         modals::render_projects_modal(f, app, area);
     }
 
-    // Project settings modal overlay
-    // Take state out to avoid borrow conflict between mutable state and immutable app access
-    if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
+    // Project dialog modal overlay (create/edit)
+    if matches!(app.modal_state, ModalState::ProjectDialog(_)) {
         let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
-            ModalState::ProjectSettings(s) => s,
+            ModalState::ProjectDialog(s) => s,
             _ => unreachable!(),
         };
-        super::render_project_settings(f, app, area, &mut state);
-        app.modal_state = ModalState::ProjectSettings(state);
-    }
-
-    // Create project modal overlay
-    if let ModalState::CreateProject(ref state) = app.modal_state {
-        super::render_create_project(f, app, area, state);
+        super::render_project_dialog(f, app, area, &mut state);
+        app.modal_state = ModalState::ProjectDialog(state);
     }
 
     // Create agent modal overlay

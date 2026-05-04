@@ -5,7 +5,6 @@ pub mod bunker;
 pub mod chat;
 pub mod command_palette;
 pub mod create_agent;
-pub mod create_project;
 pub mod debug_stats;
 pub mod draft_navigator;
 pub mod history_search;
@@ -14,6 +13,7 @@ mod home_helpers;
 pub mod inline_ask;
 pub mod lesson_viewer;
 pub mod login;
+pub mod project_dialog;
 pub mod project_settings;
 pub mod skill_selector;
 pub mod reports;
@@ -29,17 +29,17 @@ pub use bunker::{
 pub use chat::render_chat;
 pub use command_palette::render_command_palette;
 pub use create_agent::render_create_agent;
-pub use create_project::render_create_project;
 pub use debug_stats::render_debug_stats;
 pub use draft_navigator::render_draft_navigator;
 pub use history_search::render_history_search;
 pub use home::{render_composer_project_selector, render_home, render_projects_modal};
 pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
-pub use project_settings::{
-    available_agent_count, available_mcp_tool_count, get_agent_id_at_index,
-    get_mcp_tool_id_at_index, render_agent_deletion_confirm, render_project_settings,
+pub use project_dialog::{
+    available_agent_count_dialog, available_mcp_tool_count_dialog,
+    get_agent_id_at_dialog_index, get_mcp_tool_id_at_dialog_index, render_project_dialog,
 };
+pub use project_settings::render_agent_deletion_confirm;
 pub use skill_selector::render_skill_selector;
 pub use stats::render_stats;
 pub use tts_control::render_tts_control;
