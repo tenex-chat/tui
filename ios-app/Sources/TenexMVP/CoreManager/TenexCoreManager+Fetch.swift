@@ -7,25 +7,6 @@ extension TenexCoreManager {
     func fetchData() async {
         let fetchStartedAt = CFAbsoluteTimeGetCurrent()
         profiler.logEvent("fetchData start", category: .general)
-        #if !os(macOS)
-        // Keep current iOS/iPadOS behavior: auto-approve pending backends.
-        // macOS uses manual approval from Settings > Backends.
-        let approveStartedAt = CFAbsoluteTimeGetCurrent()
-        do {
-            let approvedCount = try await safeCore.approveAllPendingBackends()
-            if approvedCount > 0 {
-                // New trusted backends should receive current APNs registration immediately.
-                await republishCachedApnsRegistrationNow()
-            }
-        } catch {
-        }
-        let approveMs = (CFAbsoluteTimeGetCurrent() - approveStartedAt) * 1000
-        profiler.logEvent(
-            "fetchData approveAllPendingBackends elapsedMs=\(String(format: "%.2f", approveMs))",
-            category: .general,
-            level: approveMs >= 120 ? .error : .info
-        )
-        #endif
 
         do {
             let filterSnapshot = appFilterSnapshot
@@ -55,6 +36,7 @@ extension TenexCoreManager {
             reportsVersion &+= 1
             htmlReports = hr
             htmlReportsVersion &+= 1
+            await reloadPendingBackendApprovalPrompts()
             appFilterConversationScope = sortedConversations(c)
             let now = UInt64(Date().timeIntervalSince1970)
             conversations = sortedConversations(

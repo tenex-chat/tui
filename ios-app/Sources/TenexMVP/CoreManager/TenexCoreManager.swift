@@ -16,6 +16,24 @@ struct PendingStreamingDelta {
     let startedAt: CFAbsoluteTime
 }
 
+struct BackendApprovalProject: Identifiable, Hashable {
+    let aTag: String
+    let projectId: String
+    let title: String
+    let statusCreatedAt: UInt64
+
+    var id: String { aTag }
+}
+
+struct BackendApprovalRequest: Identifiable, Hashable {
+    let backendPubkey: String
+    let firstSeen: UInt64
+    let projects: [BackendApprovalProject]
+
+    var id: String { backendPubkey }
+    var projectATags: Set<String> { Set(projects.map(\.aTag)) }
+}
+
 // MARK: - Profile Picture Cache
 
 /// Thread-safe cache for profile picture URLs to prevent repeated synchronous FFI calls during scroll.
@@ -135,6 +153,10 @@ class TenexCoreManager {
 
     /// Pending NIP-46 bunker signing requests awaiting user approval.
     var pendingBunkerRequests: [FfiBunkerSignRequest] = []
+
+    /// Pending backend trust decisions awaiting explicit user approval.
+    var pendingBackendApprovalRequests: [BackendApprovalRequest] = []
+    @ObservationIgnored var snoozedBackendApprovalProjectTags: [String: Set<String>] = [:]
 
     /// Formatted today's LLM runtime for statusbar display.
     var runtimeText: String = "0m"
@@ -353,6 +375,56 @@ class TenexCoreManager {
         let parts = aTag.split(separator: ":")
         guard parts.count >= 3 else { return "" }
         return parts.dropFirst(2).joined(separator: ":")
+    }
+
+    nonisolated static func backendApprovalRequests(
+        from pending: [PendingBackendInfo],
+        projects: [Project]
+    ) -> [BackendApprovalRequest] {
+        let projectTitlesById = Dictionary(
+            uniqueKeysWithValues: projects.map { ($0.id, $0.title) }
+        )
+        let grouped = Dictionary(grouping: pending) { $0.backendPubkey }
+
+        return grouped.map { backendPubkey, entries in
+            let seenProjects = entries
+                .sorted {
+                    if $0.statusCreatedAt != $1.statusCreatedAt {
+                        return $0.statusCreatedAt > $1.statusCreatedAt
+                    }
+                    return $0.projectATag < $1.projectATag
+                }
+                .map { entry in
+                    let projectId = Self.projectId(fromATag: entry.projectATag)
+                    let knownTitle = projectTitlesById[projectId]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let title: String
+                    if let knownTitle, !knownTitle.isEmpty {
+                        title = knownTitle
+                    } else if projectId.isEmpty {
+                        title = "Unknown Project"
+                    } else {
+                        title = projectId
+                    }
+                    return BackendApprovalProject(
+                        aTag: entry.projectATag,
+                        projectId: projectId,
+                        title: title,
+                        statusCreatedAt: entry.statusCreatedAt
+                    )
+                }
+
+            return BackendApprovalRequest(
+                backendPubkey: backendPubkey,
+                firstSeen: entries.map(\.firstSeen).min() ?? 0,
+                projects: seenProjects
+            )
+        }
+        .sorted {
+            if $0.firstSeen != $1.firstSeen {
+                return $0.firstSeen < $1.firstSeen
+            }
+            return $0.backendPubkey < $1.backendPubkey
+        }
     }
 
     /// Reads the last ffi.init timing block from the Rust log file and returns the lines.

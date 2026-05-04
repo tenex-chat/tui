@@ -183,9 +183,6 @@ struct LoginView: View {
 
                 if loginResult.success {
                     _ = await coreManager.saveCredential(nsec: result.nsec)
-                    if let backend = result.backend, !backend.isEmpty {
-                        try? await coreManager.safeCore.approveBackend(pubkey: backend)
-                    }
                     isLoading = false
                     userNpub = loginResult.npub
                     isLoggedIn = true

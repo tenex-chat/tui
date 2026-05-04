@@ -296,39 +296,9 @@ private struct BackendsSettingsSectionView: View {
             }
 
             Section("Pending") {
-                if let snapshot = viewModel.backendSnapshot, !snapshot.pending.isEmpty {
-                    ForEach(Array(snapshot.pending.enumerated()), id: \.offset) { _, pending in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(pending.backendPubkey)
-                                .font(.caption)
-                                .fontDesign(.monospaced)
-                                .textSelection(.enabled)
-                            Text(pending.projectATag)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .textSelection(.enabled)
-                            HStack {
-                                Button("Approve") {
-                                    Task {
-                                        await viewModel.approveBackend(
-                                            coreManager: coreManager,
-                                            pubkey: pending.backendPubkey
-                                        )
-                                    }
-                                }
-                                .adaptiveProminentGlassButtonStyle()
-                                Button("Block") {
-                                    Task {
-                                        await viewModel.blockBackend(
-                                            coreManager: coreManager,
-                                            pubkey: pending.backendPubkey
-                                        )
-                                    }
-                                }
-                                .adaptiveGlassButtonStyle()
-                            }
-                        }
-                        .padding(.vertical, 2)
+                if !pendingBackendRequests.isEmpty {
+                    ForEach(pendingBackendRequests) { request in
+                        pendingBackendRow(request)
                     }
                 } else {
                     Text("No pending backends")
@@ -372,6 +342,61 @@ private struct BackendsSettingsSectionView: View {
         .task {
             await viewModel.reloadBackends(coreManager: coreManager)
         }
+    }
+
+    private var pendingBackendRequests: [BackendApprovalRequest] {
+        guard let snapshot = viewModel.backendSnapshot else { return [] }
+        return TenexCoreManager.backendApprovalRequests(
+            from: snapshot.pending,
+            projects: coreManager.projects
+        )
+    }
+
+    @ViewBuilder
+    private func pendingBackendRow(_ request: BackendApprovalRequest) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(request.backendPubkey)
+                .font(.caption)
+                .fontDesign(.monospaced)
+                .textSelection(.enabled)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(request.projects) { project in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(project.title)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Text(project.aTag)
+                            .font(.caption2)
+                            .fontDesign(.monospaced)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+
+            HStack {
+                Button("Approve") {
+                    Task {
+                        await viewModel.approveBackend(
+                            coreManager: coreManager,
+                            pubkey: request.backendPubkey
+                        )
+                    }
+                }
+                .adaptiveProminentGlassButtonStyle()
+                Button("Block") {
+                    Task {
+                        await viewModel.blockBackend(
+                            coreManager: coreManager,
+                            pubkey: request.backendPubkey
+                        )
+                    }
+                }
+                .adaptiveGlassButtonStyle()
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder

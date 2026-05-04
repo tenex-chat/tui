@@ -328,21 +328,7 @@ extension TenexCoreManager {
         return
         #else
         Task {
-            do {
-                try await safeCore.approveBackend(pubkey: backendPubkey)
-                await republishCachedApnsRegistrationNow()
-            } catch {
-                return
-            }
-
-            let projectId = Self.projectId(fromATag: projectATag)
-            guard !projectId.isEmpty else { return }
-
-            let isOnline = await safeCore.isProjectOnline(projectId: projectId)
-            let agents = (try? await safeCore.getOnlineAgents(projectId: projectId)) ?? []
-            await MainActor.run {
-                self.applyProjectStatusChanged(projectId: projectId, projectATag: projectATag, isOnline: isOnline, onlineAgents: agents)
-            }
+            await reloadPendingBackendApprovalPrompts()
         }
         #endif
     }

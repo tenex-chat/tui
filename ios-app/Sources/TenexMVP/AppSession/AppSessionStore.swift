@@ -136,10 +136,6 @@ final class AppSessionStore: ObservableObject {
 
                 _ = await coreManager.saveCredential(nsec: nsec)
 
-                if let backendPubkey, !backendPubkey.isEmpty {
-                    try? await coreManager.safeCore.approveBackend(pubkey: backendPubkey)
-                }
-
                 userNpub = result.npub
                 isLoggedIn = true
             } catch {

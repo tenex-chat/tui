@@ -98,6 +98,8 @@ extension TenexCoreManager {
         bookmarkedIds = []
         streamingBuffers = [:]
         pendingBunkerRequests = []
+        pendingBackendApprovalRequests = []
+        snoozedBackendApprovalProjectTags.removeAll()
         hasActiveAgents = false
         runtimeText = "0m"
         setLastDeletedProjectId(nil)

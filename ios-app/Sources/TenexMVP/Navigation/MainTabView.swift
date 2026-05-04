@@ -127,6 +127,13 @@ struct MainTabView: View {
             .environment(coreManager)
         }
         #if os(iOS)
+        .sheet(item: backendApprovalRequestBinding) { request in
+            BackendApprovalSheet(request: request) {
+                coreManager.deferBackendApprovalPrompt(backendPubkey: request.backendPubkey)
+            }
+            .environment(coreManager)
+            .interactiveDismissDisabled()
+        }
         .sheet(isPresented: $showOnboarding) {
             NavigationStack {
                 CreateProjectView(onComplete: { showOnboarding = false })
@@ -146,6 +153,18 @@ struct MainTabView: View {
         #endif
         .ignoresSafeArea(.keyboard)
     }
+
+    #if os(iOS)
+    private var backendApprovalRequestBinding: Binding<BackendApprovalRequest?> {
+        Binding(
+            get: {
+                guard coreManager.pendingBunkerRequests.isEmpty else { return nil }
+                return coreManager.pendingBackendApprovalRequests.first
+            },
+            set: { _ in }
+        )
+    }
+    #endif
 
     private var bunkerRequestBinding: Binding<FfiBunkerSignRequest?> {
         Binding(
