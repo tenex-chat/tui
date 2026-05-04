@@ -480,6 +480,16 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
+    func getSkillsForAgent(projectId: String, agentPubkey: String) throws -> [Skill] {
+        try profiler.measureFFI("getSkillsForAgent") {
+            do {
+                return try core.getSkillsForAgent(projectId: projectId, agentPubkey: agentPubkey)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     /// Legacy project-level configuration options.
     /// Agent configuration UI should prefer per-agent kind:34011 via getAgentConfig.
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions {

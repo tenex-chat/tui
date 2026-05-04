@@ -970,8 +970,9 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getProjectFilters() throws  -> [ProjectFilterInfo]
     
     /**
-     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or
-     * kind:0 agent-config skill lists.
+     * Returns skills (kind:4202) whose d_tag appears in the project's kind:24010
+     * (project-scoped skills) or any kind:0 agent-config skill list (built-in,
+     * agent-home, and user-global skills — backend-specific, per-agent).
      */
     func getProjectSkills(projectId: String) throws  -> [Skill]
     
@@ -1000,6 +1001,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Used by iOS/CLI for skill selection in new conversations.
      */
     func getSkills() throws  -> [Skill]
+    
+    /**
+     * Returns skills available to a specific agent: kind:24010 project-scoped
+     * skills union that agent's kind:0 skills.
+     */
+    func getSkillsForAgent(projectId: String, agentPubkey: String) throws  -> [Skill]
     
     /**
      * Get comprehensive stats snapshot with all data needed for iOS Stats tab.
@@ -2074,8 +2081,9 @@ open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
 }
     
     /**
-     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or
-     * kind:0 agent-config skill lists.
+     * Returns skills (kind:4202) whose d_tag appears in the project's kind:24010
+     * (project-scoped skills) or any kind:0 agent-config skill list (built-in,
+     * agent-home, and user-global skills — backend-specific, per-agent).
      */
 open func getProjectSkills(projectId: String)throws  -> [Skill]  {
     return try  FfiConverterSequenceTypeSkill.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -2129,6 +2137,19 @@ open func getReports(projectId: String) -> [Report]  {
 open func getSkills()throws  -> [Skill]  {
     return try  FfiConverterSequenceTypeSkill.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_skills(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Returns skills available to a specific agent: kind:24010 project-scoped
+     * skills union that agent's kind:0 skills.
+     */
+open func getSkillsForAgent(projectId: String, agentPubkey: String)throws  -> [Skill]  {
+    return try  FfiConverterSequenceTypeSkill.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_skills_for_agent(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),
+        FfiConverterString.lower(agentPubkey),$0
     )
 })
 }
@@ -11884,7 +11905,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_skills() != 9368) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_skills() != 62051) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 30921) {
@@ -11897,6 +11918,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_skills() != 17635) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_skills_for_agent() != 39607) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_stats_snapshot() != 13204) {
