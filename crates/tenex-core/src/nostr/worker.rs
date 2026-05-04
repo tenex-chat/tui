@@ -864,6 +864,7 @@ pub enum NostrCommand {
         project_a_tag: String,
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        is_private: bool,
     },
     /// Save a project - create new or update existing (kind:31933)
     SaveProject {
@@ -877,6 +878,7 @@ pub enum NostrCommand {
         /// Client identifier for the client tag (e.g., "tenex-cli", "tenex-tui")
         #[allow(dead_code)]
         client: Option<String>,
+        is_private: bool,
     },
     /// Update an existing project (kind:31933 replaceable)
     UpdateProject {
@@ -889,6 +891,7 @@ pub enum NostrCommand {
         mcp_tool_ids: Vec<String>,
         /// Client identifier for the client tag
         client: Option<String>,
+        is_private: bool,
     },
     /// Tombstone-delete an existing project by republishing with ["deleted"] tag
     DeleteProject {
@@ -1289,6 +1292,7 @@ impl NostrWorker {
                         project_a_tag,
                         agent_pubkeys,
                         mcp_tool_ids,
+                        is_private,
                     } => {
                         debug_log(&format!(
                             "Worker: Updating project agents for {}",
@@ -1298,6 +1302,7 @@ impl NostrWorker {
                             project_a_tag,
                             agent_pubkeys,
                             mcp_tool_ids,
+                            is_private,
                         )) {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
                         }
@@ -1309,6 +1314,7 @@ impl NostrWorker {
                         agent_pubkeys,
                         mcp_tool_ids,
                         client,
+                        is_private,
                     } => {
                         debug_log(&format!("Worker: Saving project {}", name));
                         if let Err(e) = rt.block_on(self.handle_save_project(
@@ -1318,6 +1324,7 @@ impl NostrWorker {
                             agent_pubkeys,
                             mcp_tool_ids,
                             client,
+                            is_private,
                         )) {
                             tlog!("ERROR", "Failed to save project: {}", e);
                         }
@@ -1331,6 +1338,7 @@ impl NostrWorker {
                         agent_pubkeys,
                         mcp_tool_ids,
                         client,
+                        is_private,
                     } => {
                         debug_log(&format!("Worker: Updating project {}", project_a_tag));
                         if let Err(e) = rt.block_on(self.handle_update_project(
@@ -1342,6 +1350,7 @@ impl NostrWorker {
                             agent_pubkeys,
                             mcp_tool_ids,
                             client,
+                            is_private,
                         )) {
                             tlog!("ERROR", "Failed to update project: {}", e);
                         }
@@ -3211,6 +3220,7 @@ impl NostrWorker {
         mcp_tool_ids: &[String],
         client_name: String,
         is_deleted: bool,
+        is_private: bool,
     ) -> EventBuilder {
         let mut event = EventBuilder::new(Kind::Custom(31933), &description)
             .tag(Tag::custom(
@@ -3244,6 +3254,13 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
                 Vec::<String>::new(),
+            ));
+        }
+
+        if is_private {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("scope")),
+                vec!["private".to_string()],
             ));
         }
 
@@ -3302,6 +3319,7 @@ impl NostrWorker {
         project_a_tag: String,
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        is_private: bool,
     ) -> Result<()> {
         let client = self
             .client
@@ -3330,12 +3348,14 @@ impl NostrWorker {
             &mcp_tool_ids,
             "tenex-tui".to_string(),
             false,
+            is_private,
         );
 
         self.publish_project_event(client, keys, event, "Updated project agents")
             .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_save_project(
         &self,
         slug: Option<String>,
@@ -3344,6 +3364,7 @@ impl NostrWorker {
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
         client_tag: Option<String>,
+        is_private: bool,
     ) -> Result<()> {
         use crate::slug::slug_from_name;
 
@@ -3373,6 +3394,7 @@ impl NostrWorker {
             &mcp_tool_ids,
             client_name,
             false,
+            is_private,
         );
 
         self.publish_project_event(client, keys, event, "Saved project")
@@ -3390,6 +3412,7 @@ impl NostrWorker {
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
         client_tag: Option<String>,
+        is_private: bool,
     ) -> Result<()> {
         let client = self
             .client
@@ -3418,6 +3441,7 @@ impl NostrWorker {
             &mcp_tool_ids,
             client_name,
             false,
+            is_private,
         );
 
         self.publish_project_event(client, keys, event, "Updated project")
@@ -3454,12 +3478,50 @@ impl NostrWorker {
             &project.participants,
             &project.agent_pubkeys,
             &project.mcp_tool_ids,
-            client_name,
+            client_name.clone(),
             true,
+            false,
         );
 
+        // Publish the tombstoned 31933 first
         self.publish_project_event(client, keys, event, "Deleted project")
-            .await
+            .await?;
+
+        // Wait 1 second so the updated 31933 propagates before kind:5 arrives,
+        // preventing relays from recreating the event from the deletion reference.
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        // Publish the kind:5 deletion event referencing the 31933 coordinate
+        let coordinate = Coordinate::parse(&project_a_tag)
+            .map_err(|e| anyhow::anyhow!("Invalid project a-tag: {}", e))?;
+        let deletion_event = EventBuilder::delete(EventDeletionRequest::new().coordinate(coordinate))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec![client_name],
+            ))
+            .sign_with_keys(keys)?;
+
+        ingest_events(&self.ndb, std::slice::from_ref(&deletion_event), None)?;
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&deletion_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => debug_log(&format!(
+                "Published kind:5 deletion for project {}: {}",
+                project_a_tag,
+                output.id()
+            )),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send project deletion event to relay: {}", e),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending project deletion event to relay (saved locally)"
+            ),
+        }
+
+        Ok(())
     }
 
     async fn handle_create_backend_agent(
@@ -5460,6 +5522,7 @@ mod tests {
             &[],
             "tenex-ios".to_string(),
             true,
+            false,
         )
         .sign_with_keys(&keys)
         .unwrap();
