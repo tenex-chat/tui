@@ -595,10 +595,16 @@ struct MessageComposerView: View {
                 workspaceInlineControlRow
             } else {
                 inlineAgentSelectorSection
+                // In the modal (non-inline) case the VStack fills the full sheet height;
+                // Spacer pushes the input row to the bottom like a standard chat app.
+                if !isInlineComposer {
+                    Spacer(minLength: 0)
+                }
                 Divider()
                 telegramStyleComposerRow
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: isInlineComposer ? nil : .infinity, alignment: .top)
         .onChange(of: dictationManager.state) { _, newState in
             // Stream dictated text directly into the editor
             switch newState {

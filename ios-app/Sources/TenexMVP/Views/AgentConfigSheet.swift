@@ -530,7 +530,7 @@ struct AgentConfigSheet: View {
                 selectedMcpServers = []
                 selectedModelIndex = 0
                 toolSearchText = ""
-                loadError = "No kind:34011 configuration has been received for this agent yet."
+                loadError = "No kind:0 configuration has been received for this agent yet."
                 isLoading = false
                 return
             }
