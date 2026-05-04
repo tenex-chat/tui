@@ -1834,8 +1834,6 @@ fn handle_request(
                 agent_slug: String,
                 model: String,
                 #[serde(default)]
-                tools: Vec<String>,
-                #[serde(default)]
                 wait_for_project: bool,
                 #[serde(default)]
                 wait: bool,
@@ -1881,14 +1879,13 @@ fn handle_request(
                         project_a_tag: result.project_a_tag.clone(),
                         agent_pubkey: result.agent_pubkey.clone(),
                         model: Some(params.model.clone()),
-                        tools: params.tools.clone(),
                         skills: result.skills.clone(),
                         mcp_servers: result.mcp_servers.clone(),
                         tags: Vec::new(),
                     }) {
                         Ok(_) => {
                             if params.wait {
-                                // Wait for a new 34011 agent config with the requested model
+                                // Wait for a new kind:0 agent config with the requested model
                                 let start = std::time::Instant::now();
                                 let timeout = std::time::Duration::from_secs(30);
 
@@ -2087,7 +2084,7 @@ struct AgentLookupResult {
 }
 
 /// Find an agent's pubkey by their name within a specific project (identified by slug).
-/// Uses the ordered 31933 roster; 24011 marks availability and 34011 supplies config.
+/// Uses the ordered 31933 roster; 24011 marks availability and kind:0 supplies config.
 /// Also returns the project's a_tag to avoid a second lookup.
 fn find_agent_in_project(
     store: &AppDataStore,

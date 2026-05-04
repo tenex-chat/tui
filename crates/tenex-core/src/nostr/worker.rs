@@ -41,7 +41,7 @@ const KIND_AGENT_SNAPSHOT: u16 = 14199;
 const KIND_PROJECT_DRAFT: u16 = 31933;
 const KIND_TEAM_PACK: u16 = 34199;
 const KIND_AGENT_STATUS: u16 = 24133;
-const KIND_AGENT_CONFIG: u16 = 34011;
+const KIND_AGENT_CONFIG: u16 = 0;
 const KIND_STREAM_TEXT_DELTA: u16 = crate::constants::kinds::STREAM_TEXT_DELTA;
 
 // Stream delta reassembly limits (defensive against relay reordering/missed packets).
@@ -746,11 +746,12 @@ async fn request_profile_if_new(
     }
 }
 
-/// Subscribe to kind:34011 events authored by the given agent pubkeys, deduping
-/// against `subscribed_agent_configs` so each agent is only subscribed once
-/// across the worker's lifetime. Agents are sourced from `p` tags on the user's
-/// kind:31933 project events and approved 24011 backend inventories. NIP-33
-/// addressable, so no `since` filter.
+/// Subscribe to kind:0 (NIP-01 metadata, now also our per-agent config event)
+/// authored by the given agent pubkeys, deduping against
+/// `subscribed_agent_configs` so each agent is only subscribed once across the
+/// worker's lifetime. Agents are sourced from `p` tags on the user's kind:31933
+/// project events and approved 24011 backend inventories. NIP-01 replaceable,
+/// so no `since` filter.
 async fn subscribe_agent_configs(
     client: &Client,
     subscription_stats: &SharedSubscriptionStats,
@@ -777,9 +778,7 @@ async fn subscribe_agent_configs(
         return Ok(());
     }
 
-    let filter = Filter::new()
-        .kind(Kind::Custom(KIND_AGENT_CONFIG))
-        .authors(authors);
+    let filter = Filter::new().kind(Kind::Metadata).authors(authors);
     let filter_json = serde_json::to_string(&filter).ok();
     let output = match client.subscribe(filter, None).await {
         Ok(output) => output,
@@ -796,7 +795,7 @@ async fn subscribe_agent_configs(
         output.val.to_string(),
         SubscriptionInfo::new(
             format!("Agent configs ({} agent(s))", new_pubkeys.len()),
-            vec![KIND_AGENT_CONFIG],
+            vec![0u16],
             None,
         )
         .with_raw_filter(filter_json.unwrap_or_default()),
@@ -933,12 +932,11 @@ pub enum NostrCommand {
     /// Request an agent config change (publishes kind:24020 command).
     ///
     /// kind:24020 is a request/command, not durable state. The agent
-    /// confirms by publishing an updated kind:34011.
+    /// confirms by publishing an updated kind:0 metadata event.
     UpdateAgentConfig {
         project_a_tag: String,
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         /// Additional marker tags (e.g. ["pm"])
@@ -946,11 +944,10 @@ pub enum NostrCommand {
     },
     /// Request a global agent config change (publishes kind:24020 command,
     /// no project a-tag). Same semantics as `UpdateAgentConfig`: the kind:24020
-    /// is a request, not state — confirmation arrives as kind:34011.
+    /// is a request, not state — confirmation arrives as kind:0 from the agent.
     UpdateGlobalAgentConfig {
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         /// Additional marker tags (e.g. ["pm"])
@@ -1141,7 +1138,7 @@ pub struct NostrWorker {
     /// This prevents duplicate subscriptions when projects are rediscovered
     /// Uses tokio::sync::RwLock to avoid blocking the Tokio runtime
     subscribed_projects: Arc<RwLock<HashSet<String>>>,
-    /// Agent pubkeys for which we've already subscribed to kind:34011 configs.
+    /// Agent pubkeys for which we've already subscribed to kind:0 profile/config events.
     /// Agents are derived from the `p` tags on the user's kind:31933 project events.
     subscribed_agent_configs: Arc<RwLock<HashSet<String>>>,
     /// Cancellation token sender - signals background tasks to stop on disconnect
@@ -1438,7 +1435,6 @@ impl NostrWorker {
                         project_a_tag,
                         agent_pubkey,
                         model,
-                        tools,
                         skills,
                         mcp_servers,
                         tags,
@@ -1451,7 +1447,6 @@ impl NostrWorker {
                             project_a_tag,
                             agent_pubkey,
                             model,
-                            tools,
                             skills,
                             mcp_servers,
                             tags,
@@ -1462,7 +1457,6 @@ impl NostrWorker {
                     NostrCommand::UpdateGlobalAgentConfig {
                         agent_pubkey,
                         model,
-                        tools,
                         skills,
                         mcp_servers,
                         tags,
@@ -1474,7 +1468,6 @@ impl NostrWorker {
                         if let Err(e) = rt.block_on(self.handle_update_global_agent_config(
                             agent_pubkey,
                             model,
-                            tools,
                             skills,
                             mcp_servers,
                             tags,
@@ -2167,11 +2160,12 @@ impl NostrWorker {
         // - kind:31933 project events arrive (user discovers/adds project)
         tlog!("CONN", "Skipping bulk project subscriptions - will subscribe to projects on-demand when they come online or are explicitly requested");
 
-        // 5. Bootstrap kind:34011 subscriptions for agents named in cached
-        // kind:31933 project events. Newly arriving 31933 events are handled
-        // in the notification loop; this covers the warm-start case where the
-        // relay short-circuits via RelayMessage::Event (already-saved) instead
-        // of RelayPoolNotification::Event.
+        // 5. Bootstrap kind:0 agent profile/config subscriptions for agents
+        // named in cached kind:31933 project events. Newly arriving 31933
+        // events are handled in the notification loop; this covers the
+        // warm-start case where the relay short-circuits via
+        // RelayMessage::Event (already-saved) instead of
+        // RelayPoolNotification::Event.
         let cached_agent_pubkeys: Vec<String> = match crate::store::get_projects(&self.ndb) {
             Ok(projects) => {
                 let mut pks: Vec<String> = projects
@@ -2185,7 +2179,7 @@ impl NostrWorker {
             Err(e) => {
                 tlog!(
                     "ERROR",
-                    "Failed to enumerate cached projects for 34011 bootstrap: {}",
+                    "Failed to enumerate cached projects for agent profile bootstrap: {}",
                     e
                 );
                 Vec::new()
@@ -2210,7 +2204,11 @@ impl NostrWorker {
             )
             .await
             {
-                tlog!("ERROR", "Failed bootstrap kind:34011 subscription: {}", e);
+                tlog!(
+                    "ERROR",
+                    "Failed bootstrap kind:0 agent profile subscription: {}",
+                    e
+                );
             }
         }
 
@@ -2429,9 +2427,10 @@ impl NostrWorker {
                                             }
 
                                             // For kind:24011 (agent inventory), fetch agent
-                                            // profiles and subscribe to each agent's 34011
-                                            // configuration. Inventory tells us the available
-                                            // agent pubkeys; 34011 tells us current config.
+                                            // profiles and subscribe to each agent's kind:0
+                                            // profile/config event. Inventory tells us the
+                                            // available agent pubkeys; kind:0 carries both
+                                            // NIP-01 metadata and current per-agent config.
                                             if kind == KIND_INSTALLED_AGENT_LIST {
                                                 if let Ok(value) =
                                                     serde_json::from_str::<serde_json::Value>(&json)
@@ -2517,12 +2516,13 @@ impl NostrWorker {
 
                                         // Request kind:0 profile for the author of various event types.
                                         // - kind:1   → conversation participants
-                                        // - kind:34011 → the agent itself, plus its backend (first `p` tag)
+                                        // - kind:0   → the event IS the agent's profile, so
+                                        //               only the backend pubkey (first `p`
+                                        //               tag) needs a separate fetch.
                                         if kind == KIND_TEXT_NOTE {
                                             request_profile_if_new(&client, &requested_profiles, event.pubkey).await;
                                         }
                                         if kind == KIND_AGENT_CONFIG {
-                                            request_profile_if_new(&client, &requested_profiles, event.pubkey).await;
                                             if let Some(backend_hex) = event
                                                 .tags
                                                 .iter()
@@ -2565,7 +2565,7 @@ impl NostrWorker {
                                                 }
                                             }
 
-                                            // Subscribe to kind:34011 configs for the agents (`p` tags)
+                                            // Subscribe to kind:0 profile/configs for the agents (`p` tags)
                                             // listed on this project event. Dedup is handled by
                                             // `subscribed_agent_configs` inside the helper.
                                             let agent_pubkeys: Vec<String> = event
@@ -2638,8 +2638,8 @@ impl NostrWorker {
                                                 }
 
                                                 // For already-saved 31933 project events, also
-                                                // ensure we have kind:0 profiles + 34011 config
-                                                // subscriptions for every roster agent. The
+                                                // ensure we have kind:0 profiles + agent
+                                                // config subscriptions for every roster agent. The
                                                 // primary RelayPoolNotification::Event path
                                                 // handles fresh events; this branch covers the
                                                 // warm-cache case where the relay short-circuits
@@ -3851,7 +3851,6 @@ impl NostrWorker {
         project_a_tag: String,
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         tags: Vec<String>,
@@ -3870,14 +3869,13 @@ impl NostrWorker {
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
         // Build kind:24020 agent config-change *request* event with project
-        // a-tag (durable state arrives later as kind:34011 from the agent).
+        // a-tag (durable state arrives later as kind:0 from the agent).
         let base =
             EventBuilder::new(Kind::Custom(24020), "").tag(Tag::coordinate(coordinate, None));
         let event = build_agent_config_event(
             base,
             &agent_pubkey,
             model,
-            &tools,
             &skills,
             &mcp_servers,
             &tags,
@@ -3904,12 +3902,11 @@ impl NostrWorker {
     }
 
     /// Send a global kind:24020 agent config-change *request* (no a-tag,
-    /// agent-scoped only). Confirmation arrives as kind:34011 from the agent.
+    /// agent-scoped only). Confirmation arrives as kind:0 from the agent.
     async fn handle_update_global_agent_config(
         &self,
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         tags: Vec<String>,
@@ -3929,7 +3926,6 @@ impl NostrWorker {
             base,
             &agent_pubkey,
             model,
-            &tools,
             &skills,
             &mcp_servers,
             &tags,
@@ -4559,19 +4555,17 @@ impl NostrWorker {
 
 /// Attach the common tags to a kind:24020 agent config-change *request*
 /// `EventBuilder`. (kind:24020 is a command/request; durable state lives
-/// in kind:34011.)
+/// in kind:0.)
 ///
 /// Adds (in order):
 /// - NIP-89 `client` tag
 /// - `p` tag for `agent_pubkey` (skipped if the pubkey cannot be parsed)
 /// - `model` tag when `model` is `Some`
-/// - one `tool` tag per entry in `tools`
 /// - one bare marker tag per entry in `tags` (e.g. `"pm"`)
 fn build_agent_config_event(
     mut event: EventBuilder,
     agent_pubkey: &str,
     model: Option<String>,
-    tools: &[String],
     skills: &[String],
     mcp_servers: &[String],
     tags: &[String],
@@ -4593,21 +4587,6 @@ fn build_agent_config_event(
             TagKind::Custom(std::borrow::Cow::Borrowed("model")),
             vec![m],
         ));
-    }
-
-    // Tool tags (exhaustive list — empty emits a raw `["tool"]` tag)
-    if tools.is_empty() {
-        event = event.tag(Tag::custom(
-            TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-            Vec::<String>::new(),
-        ));
-    } else {
-        for tool in tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-                vec![tool.clone()],
-            ));
-        }
     }
 
     // Skill tags (exhaustive list — empty emits a raw `["skill"]` tag)
@@ -5706,7 +5685,6 @@ mod tests {
             &[],
             &[],
             &[],
-            &[],
         )
         .sign_with_keys(&keys)
         .unwrap();
@@ -5717,11 +5695,11 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("event tags should be an array");
 
-        let has_empty_tool_tag = tags.iter().any(|tag| {
+        let has_tool_tag = tags.iter().any(|tag| {
             let Some(arr) = tag.as_array() else {
                 return false;
             };
-            arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("tool")
+            arr.first().and_then(|v| v.as_str()) == Some("tool")
         });
         let has_empty_skill_tag = tags.iter().any(|tag| {
             let Some(arr) = tag.as_array() else {
@@ -5736,7 +5714,7 @@ mod tests {
             arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("mcp")
         });
 
-        assert!(has_empty_tool_tag, "expected raw empty tool tag");
+        assert!(!has_tool_tag, "24020 event must not contain tool tags");
         assert!(has_empty_skill_tag, "expected raw empty skill tag");
         assert!(has_empty_mcp_tag, "expected raw empty mcp tag");
     }
@@ -5748,7 +5726,6 @@ mod tests {
             EventBuilder::new(Kind::Custom(24020), ""),
             &keys.public_key().to_hex(),
             None,
-            &["Read".to_string()],
             &["code-review".to_string(), "testing".to_string()],
             &[],
             &[],

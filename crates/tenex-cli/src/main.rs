@@ -140,7 +140,7 @@ enum Commands {
     /// Use `--skill <ID>` with send-message or create-thread to attach skills.
     ListSkills,
 
-    /// Show detailed project information (from kind:31933 roster and 34011 config)
+    /// Show detailed project information (from kind:31933 roster and kind:0 agent config)
     ShowProject {
         /// Project slug (d-tag)
         project_slug: String,
@@ -185,7 +185,7 @@ enum Commands {
 
     /// Request agent settings change (publishes kind:24020 *config-change
     /// request* to ask the agent to update model/tools; confirmation
-    /// arrives as kind:34011 from the agent).
+    /// arrives as kind:0 from the agent).
     SetAgentSettings {
         /// Project slug (d-tag)
         project_slug: String,
@@ -199,7 +199,7 @@ enum Commands {
         /// Wait for project roster (31933 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
-        /// Wait for confirmation via updated kind:34011 config
+        /// Wait for confirmation via updated kind:0 agent config
         #[arg(long, short)]
         wait: bool,
     },
@@ -454,14 +454,13 @@ fn main() {
             project_slug,
             agent_slug,
             model,
-            tool,
+            tool: _,
             wait_for_project,
             wait,
         }) => CliCommand::SetAgentSettings {
             project_slug,
             agent_slug,
             model,
-            tools: tool,
             wait_for_project,
             wait,
         },

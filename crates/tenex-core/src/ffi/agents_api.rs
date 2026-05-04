@@ -495,7 +495,8 @@ impl TenexCore {
         Ok(())
     }
 
-    /// Returns skills (kind:4202) whose d_tag appears in the project's 24010 or 34011 skill lists.
+    /// Returns skills (kind:4202) whose d_tag appears in the project's 24010 or
+    /// kind:0 agent-config skill lists.
     pub fn get_project_skills(&self, project_id: String) -> Result<Vec<Skill>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
@@ -504,7 +505,7 @@ impl TenexCore {
             message: "Store not initialized".to_string(),
         })?;
 
-        // Collect allowed skill d_tags from 24010 and 34011
+        // Collect allowed skill d_tags from 24010 and kind:0 agent configs
         let mut allowed_dtags: std::collections::HashSet<String> =
             std::collections::HashSet::new();
 
@@ -520,7 +521,7 @@ impl TenexCore {
                     allowed_dtags.insert(s.to_string());
                 }
             }
-            // From 34011 - all agent configs in the store
+            // From kind:0 — all agent configs in the store
             for config in store.agent_configs_by_pubkey.values() {
                 for s in &config.skills {
                     allowed_dtags.insert(s.clone());
@@ -543,7 +544,7 @@ impl TenexCore {
     ///
     /// Membership/order comes from kind:31933. The `is_online` flag comes from
     /// approved kind:24011 backend inventories, and per-agent config is merged
-    /// from kind:34011.
+    /// from kind:0 (NIP-01 metadata authored by the agent).
     ///
     /// Returns empty if the project is not found.
     pub fn get_online_agents(&self, project_id: String) -> Result<Vec<ProjectAgent>, TenexError> {
@@ -635,11 +636,12 @@ impl TenexCore {
     /// Returns the project-level catalog of models/tools/skills that the
     /// project's backend(s) currently advertise. Note: this is project-level
     /// availability, not any agent's *current* config — per-agent active
-    /// config (and per-agent option catalogs) come from kind:34011. Used by
-    /// iOS to populate the agent config modal with selectable options.
+    /// config (and per-agent option catalogs) come from kind:0 (NIP-01
+    /// metadata). Used by iOS to populate the agent config modal with
+    /// selectable options.
     ///
     /// (Implementation currently still aggregates from kind:24010
-    /// `ProjectStatus`; long-term this should move behind the kind:34011
+    /// `ProjectStatus`; long-term this should move behind the kind:0
     /// per-agent catalog. See
     /// `docs/agent-identity-config-implementation-decisions.md`.)
     pub fn get_project_config_options(
@@ -685,18 +687,17 @@ impl TenexCore {
         }
     }
 
-    /// Request an agent configuration change (model and tools).
+    /// Request an agent configuration change (model and skills).
     ///
     /// Publishes a kind:24020 *config-change request* event. This is a
     /// command, not durable state: confirmation arrives as an updated
-    /// kind:34011 authored by the agent. Callers should not treat this
-    /// publish as the new current config.
+    /// kind:0 (NIP-01 metadata) authored by the agent. Callers should not
+    /// treat this publish as the new current config.
     pub fn update_agent_config(
         &self,
         project_id: String,
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         tags: Vec<String>,
@@ -709,7 +710,6 @@ impl TenexCore {
                 project_a_tag,
                 agent_pubkey,
                 model,
-                tools,
                 skills,
                 mcp_servers,
                 tags,
@@ -725,12 +725,11 @@ impl TenexCore {
     ///
     /// Publishes a kind:24020 *config-change request* event without a
     /// project a-tag (agent-scoped only). Confirmation arrives as an
-    /// updated kind:34011 authored by the agent.
+    /// updated kind:0 (NIP-01 metadata) authored by the agent.
     pub fn update_global_agent_config(
         &self,
         agent_pubkey: String,
         model: Option<String>,
-        tools: Vec<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         tags: Vec<String>,
@@ -741,7 +740,6 @@ impl TenexCore {
             .send(NostrCommand::UpdateGlobalAgentConfig {
                 agent_pubkey,
                 model,
-                tools,
                 skills,
                 mcp_servers,
                 tags,

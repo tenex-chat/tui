@@ -915,7 +915,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      *
      * Membership/order comes from kind:31933. The `is_online` flag comes from
      * approved kind:24011 backend inventories, and per-agent config is merged
-     * from kind:34011.
+     * from kind:0 (NIP-01 metadata authored by the agent).
      *
      * Returns empty if the project is not found.
      */
@@ -952,11 +952,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns the project-level catalog of models/tools/skills that the
      * project's backend(s) currently advertise. Note: this is project-level
      * availability, not any agent's *current* config — per-agent active
-     * config (and per-agent option catalogs) come from kind:34011. Used by
-     * iOS to populate the agent config modal with selectable options.
+     * config (and per-agent option catalogs) come from kind:0 (NIP-01
+     * metadata). Used by iOS to populate the agent config modal with
+     * selectable options.
      *
      * (Implementation currently still aggregates from kind:24010
-     * `ProjectStatus`; long-term this should move behind the kind:34011
+     * `ProjectStatus`; long-term this should move behind the kind:0
      * per-agent catalog. See
      * `docs/agent-identity-config-implementation-decisions.md`.)
      */
@@ -969,7 +970,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getProjectFilters() throws  -> [ProjectFilterInfo]
     
     /**
-     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or 34011 skill lists.
+     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or
+     * kind:0 agent-config skill lists.
      */
     func getProjectSkills(projectId: String) throws  -> [Skill]
     
@@ -1263,23 +1265,23 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func unarchiveConversation(conversationId: String) 
     
     /**
-     * Request an agent configuration change (model and tools).
+     * Request an agent configuration change (model and skills).
      *
      * Publishes a kind:24020 *config-change request* event. This is a
      * command, not durable state: confirmation arrives as an updated
-     * kind:34011 authored by the agent. Callers should not treat this
-     * publish as the new current config.
+     * kind:0 (NIP-01 metadata) authored by the agent. Callers should not
+     * treat this publish as the new current config.
      */
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
     
     /**
      * Request a global agent configuration change (all projects).
      *
      * Publishes a kind:24020 *config-change request* event without a
      * project a-tag (agent-scoped only). Confirmation arrives as an
-     * updated kind:34011 authored by the agent.
+     * updated kind:0 (NIP-01 metadata) authored by the agent.
      */
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws 
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
     
     /**
      * Update an existing project (kind:31933 replaceable event).
@@ -1982,7 +1984,7 @@ open func getNudges()throws  -> [Nudge]  {
      *
      * Membership/order comes from kind:31933. The `is_online` flag comes from
      * approved kind:24011 backend inventories, and per-agent config is merged
-     * from kind:34011.
+     * from kind:0 (NIP-01 metadata authored by the agent).
      *
      * Returns empty if the project is not found.
      */
@@ -2043,11 +2045,12 @@ open func getProjectBackendPubkey(projectId: String) -> String?  {
      * Returns the project-level catalog of models/tools/skills that the
      * project's backend(s) currently advertise. Note: this is project-level
      * availability, not any agent's *current* config — per-agent active
-     * config (and per-agent option catalogs) come from kind:34011. Used by
-     * iOS to populate the agent config modal with selectable options.
+     * config (and per-agent option catalogs) come from kind:0 (NIP-01
+     * metadata). Used by iOS to populate the agent config modal with
+     * selectable options.
      *
      * (Implementation currently still aggregates from kind:24010
-     * `ProjectStatus`; long-term this should move behind the kind:34011
+     * `ProjectStatus`; long-term this should move behind the kind:0
      * per-agent catalog. See
      * `docs/agent-identity-config-implementation-decisions.md`.)
      */
@@ -2071,7 +2074,8 @@ open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
 }
     
     /**
-     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or 34011 skill lists.
+     * Returns skills (kind:4202) whose d_tag appears in the project's 24010 or
+     * kind:0 agent-config skill lists.
      */
 open func getProjectSkills(projectId: String)throws  -> [Skill]  {
     return try  FfiConverterSequenceTypeSkill.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -2628,38 +2632,36 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
 }
     
     /**
-     * Request an agent configuration change (model and tools).
+     * Request an agent configuration change (model and skills).
      *
      * Publishes a kind:24020 *config-change request* event. This is a
      * command, not durable state: confirmation arrives as an updated
-     * kind:34011 authored by the agent. Callers should not treat this
-     * publish as the new current config.
+     * kind:0 (NIP-01 metadata) authored by the agent. Callers should not
+     * treat this publish as the new current config.
      */
-open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_agent_config(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
         FfiConverterString.lower(agentPubkey),
         FfiConverterOptionString.lower(model),
-        FfiConverterSequenceString.lower(tools),
         FfiConverterSequenceString.lower(skills),
         FfiConverterSequenceString.lower(mcpServers),
         FfiConverterSequenceString.lower(tags),$0
     )
 }
 }
-    
+
     /**
      * Request a global agent configuration change (all projects).
      *
      * Publishes a kind:24020 *config-change request* event without a
      * project a-tag (agent-scoped only). Confirmation arrives as an
-     * updated kind:34011 authored by the agent.
+     * updated kind:0 (NIP-01 metadata) authored by the agent.
      */
-open func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_global_agent_config(self.uniffiClonePointer(),
         FfiConverterString.lower(agentPubkey),
         FfiConverterOptionString.lower(model),
-        FfiConverterSequenceString.lower(tools),
         FfiConverterSequenceString.lower(skills),
         FfiConverterSequenceString.lower(mcpServers),
         FfiConverterSequenceString.lower(tags),$0
@@ -2775,7 +2777,7 @@ public func FfiConverterTypeTenexCore_lower(_ value: TenexCore) -> UnsafeMutable
 
 
 /**
- * Per-agent configuration derived from a kind:34011 event.
+ * Per-agent configuration derived from a kind:0 event.
  */
 public struct AgentConfig {
     /**
@@ -2783,7 +2785,7 @@ public struct AgentConfig {
      */
     public var pubkey: String
     /**
-     * Human-friendly slug for the agent (the NIP-33 d-tag).
+     * Human-friendly slug for the agent (the `["slug", ...]` tag).
      */
     public var slug: String
     /**
@@ -2792,6 +2794,11 @@ public struct AgentConfig {
      * because the tag may be absent on malformed events.
      */
     public var backendPubkey: String?
+    /**
+     * Free-form text describing when to pick this agent, sourced from the
+     * `["use-criteria", "<text>"]` tag. Optional.
+     */
+    public var useCriteria: String?
     /**
      * Unix timestamp the event was created.
      */
@@ -2836,13 +2843,17 @@ public struct AgentConfig {
          * Hex-encoded public key of the agent — the event signer.
          */pubkey: String, 
         /**
-         * Human-friendly slug for the agent (the NIP-33 d-tag).
+         * Human-friendly slug for the agent (the `["slug", ...]` tag).
          */slug: String, 
         /**
          * Hex-encoded public key of the backend that runs this agent, sourced
          * from the first `["p", "<backend_pubkey>"]` tag on the event. Optional
          * because the tag may be absent on malformed events.
          */backendPubkey: String?, 
+        /**
+         * Free-form text describing when to pick this agent, sourced from the
+         * `["use-criteria", "<text>"]` tag. Optional.
+         */useCriteria: String?, 
         /**
          * Unix timestamp the event was created.
          */createdAt: UInt64, 
@@ -2873,6 +2884,7 @@ public struct AgentConfig {
         self.pubkey = pubkey
         self.slug = slug
         self.backendPubkey = backendPubkey
+        self.useCriteria = useCriteria
         self.createdAt = createdAt
         self.activeModel = activeModel
         self.models = models
@@ -2899,6 +2911,9 @@ extension AgentConfig: Equatable, Hashable {
             return false
         }
         if lhs.backendPubkey != rhs.backendPubkey {
+            return false
+        }
+        if lhs.useCriteria != rhs.useCriteria {
             return false
         }
         if lhs.createdAt != rhs.createdAt {
@@ -2935,6 +2950,7 @@ extension AgentConfig: Equatable, Hashable {
         hasher.combine(pubkey)
         hasher.combine(slug)
         hasher.combine(backendPubkey)
+        hasher.combine(useCriteria)
         hasher.combine(createdAt)
         hasher.combine(activeModel)
         hasher.combine(models)
@@ -2959,6 +2975,7 @@ public struct FfiConverterTypeAgentConfig: FfiConverterRustBuffer {
                 pubkey: FfiConverterString.read(from: &buf), 
                 slug: FfiConverterString.read(from: &buf), 
                 backendPubkey: FfiConverterOptionString.read(from: &buf), 
+                useCriteria: FfiConverterOptionString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf), 
                 activeModel: FfiConverterOptionString.read(from: &buf), 
                 models: FfiConverterSequenceString.read(from: &buf), 
@@ -2975,6 +2992,7 @@ public struct FfiConverterTypeAgentConfig: FfiConverterRustBuffer {
         FfiConverterString.write(value.pubkey, into: &buf)
         FfiConverterString.write(value.slug, into: &buf)
         FfiConverterOptionString.write(value.backendPubkey, into: &buf)
+        FfiConverterOptionString.write(value.useCriteria, into: &buf)
         FfiConverterUInt64.write(value.createdAt, into: &buf)
         FfiConverterOptionString.write(value.activeModel, into: &buf)
         FfiConverterSequenceString.write(value.models, into: &buf)
@@ -6972,7 +6990,7 @@ public func FfiConverterTypeProject_lower(_ value: Project) -> RustBuffer {
  *
  * Roster membership and PM/default status come from ordered kind:31933 `p`
  * tags. kind:24011 inventories set `is_online` and backend availability.
- * kind:34011 configs set current model/tools/skills/MCP fields.
+ * kind:0 (NIP-01 metadata) configs set current model/tools/skills/MCP fields.
  */
 public struct ProjectAgent {
     public var pubkey: String
@@ -11848,7 +11866,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_nudges() != 58735) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 40680) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 27333) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_name() != 49811) {
@@ -11860,13 +11878,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_backend_pubkey() != 53713) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 57303) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 28328) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_skills() != 18855) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_skills() != 9368) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 30921) {
@@ -11998,10 +12016,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 4274) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 52625) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 40554) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 22514) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 57824) {

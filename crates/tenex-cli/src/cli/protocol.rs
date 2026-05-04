@@ -98,7 +98,7 @@ pub enum CliCommand {
     ListMCPTools,
     /// List all skills (kind:4202)
     ListSkills,
-    /// Show detailed project information (kind:31933 roster and 34011 config)
+    /// Show detailed project information (kind:31933 roster and kind:0 agent config)
     ShowProject {
         project_slug: String,
         wait_for_project: bool,
@@ -116,7 +116,6 @@ pub enum CliCommand {
         project_slug: String,
         agent_slug: String,
         model: String,
-        tools: Vec<String>,
         wait_for_project: bool,
         wait: bool,
     },
@@ -250,7 +249,6 @@ impl CliCommand {
                 project_slug,
                 agent_slug,
                 model,
-                tools,
                 wait_for_project,
                 wait,
             } => (
@@ -259,7 +257,6 @@ impl CliCommand {
                     "project_slug": project_slug,
                     "agent_slug": agent_slug,
                     "model": model,
-                    "tools": tools,
                     "wait_for_project": wait_for_project,
                     "wait": wait
                 }),

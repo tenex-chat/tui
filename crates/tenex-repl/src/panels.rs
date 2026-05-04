@@ -185,14 +185,12 @@ impl ConfigPanel {
 
         let config = store_ref.get_agent_config(&self.agent_pubkey);
 
-        // Model: use pending_model if set, otherwise keep the agent's 34011 current model.
+        // Model: use pending_model if set, otherwise keep the agent's kind:0 current model.
         let model = self
             .pending_model
             .clone()
             .or_else(|| config.and_then(|cfg| cfg.active_model.clone()));
 
-        // Tools: from accumulated tools_selected
-        let tools: Vec<String> = self.tools_selected.iter().cloned().collect();
         let skills = config
             .map(|cfg| cfg.active_skills.clone())
             .unwrap_or_default();
@@ -210,7 +208,6 @@ impl ConfigPanel {
                 .send(NostrCommand::UpdateGlobalAgentConfig {
                     agent_pubkey: self.agent_pubkey.clone(),
                     model,
-                    tools,
                     skills,
                     mcp_servers,
                     tags: Vec::new(),
@@ -220,7 +217,6 @@ impl ConfigPanel {
                 project_a_tag: self.project_a_tag.clone(),
                 agent_pubkey: self.agent_pubkey.clone(),
                 model,
-                tools,
                 skills,
                 mcp_servers,
                 tags: Vec::new(),
@@ -252,9 +248,6 @@ impl ConfigPanel {
 
         let config = store_ref.get_agent_config(&self.agent_pubkey);
         let model = self.pending_model.clone();
-        let tools = config
-            .map(|cfg| cfg.active_tools.clone())
-            .unwrap_or_default();
         let skills = config
             .map(|cfg| cfg.active_skills.clone())
             .unwrap_or_default();
@@ -269,7 +262,6 @@ impl ConfigPanel {
                 .send(NostrCommand::UpdateGlobalAgentConfig {
                     agent_pubkey: self.agent_pubkey.clone(),
                     model: model.clone(),
-                    tools,
                     skills,
                     mcp_servers,
                     tags: Vec::new(),
@@ -279,7 +271,6 @@ impl ConfigPanel {
                 project_a_tag: self.project_a_tag.clone(),
                 agent_pubkey: self.agent_pubkey.clone(),
                 model: model.clone(),
-                tools,
                 skills,
                 mcp_servers,
                 tags: Vec::new(),
@@ -307,7 +298,7 @@ impl ConfigPanel {
         self.agent_pubkey = agent.pubkey.clone();
         self.agent_name = agent.name.clone();
 
-        // Reload current config from the agent-published 34011 event.
+        // Reload current config from the agent-published kind:0 event.
         if let Some(config) = store_ref.get_agent_config(&agent.pubkey) {
             self.tools_items = config.tools.clone();
             self.tools_selected = config.active_tools.iter().cloned().collect();
