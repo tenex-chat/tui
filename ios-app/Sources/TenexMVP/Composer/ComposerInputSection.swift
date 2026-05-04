@@ -66,14 +66,35 @@ extension MessageComposerView {
                 }
                 .frame(height: workspaceEditorHeight, alignment: .top)
         } else {
+            #if os(iOS)
+            // Telegram-style: single-line input that grows up to a few lines
+            TextField(
+                "",
+                text: $localText,
+                prompt: Text(composerPlaceholderText).foregroundStyle(.tertiary),
+                axis: .vertical
+            )
+            .focused($composerFieldFocused)
+            .textFieldStyle(.plain)
+            .font(.body)
+            .lineLimit(1...6)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .disabled(isComposerInputDisabled)
+            .opacity(isComposerInputDisabled ? 0.5 : 1.0)
+            .onChange(of: localText) { oldValue, newValue in
+                scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
+                scheduleContentSync(newValue)
+            }
+            #else
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $localText)
                     .font(.body)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .scrollContentBackground(.hidden)
-                    .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
-                    .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
+                    .disabled(isComposerInputDisabled)
+                    .opacity(isComposerInputDisabled ? 0.5 : 1.0)
                     .onChange(of: localText) { oldValue, newValue in
                         scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
                         scheduleContentSync(newValue)
@@ -87,7 +108,8 @@ extension MessageComposerView {
                         .allowsHitTesting(false)
                 }
             }
-            .frame(minHeight: 200)
+            .frame(minHeight: 80)
+            #endif
         }
     }
 
@@ -257,161 +279,99 @@ extension MessageComposerView {
         }
     }
 
-    var toolbarView: some View {
-        standardToolbarView
-    }
-
-    var standardToolbarView: some View {
-        HStack(spacing: 16) {
+    /// Telegram-style single-row composer: attach (left), text field (center, expandable), mic↔send (right).
+    var telegramStyleComposerRow: some View {
+        Group {
             if dictationManager.state.isRecording {
-                DictationRecordingBar(
-                    audioLevelSamples: dictationManager.audioLevelSamples,
-                    recordingStartDate: dictationManager.recordingStartDate,
-                    error: dictationManager.error,
-                    onStop: {
-                        Task {
-                            await dictationManager.stopRecording()
+                HStack(spacing: 12) {
+                    DictationRecordingBar(
+                        audioLevelSamples: dictationManager.audioLevelSamples,
+                        recordingStartDate: dictationManager.recordingStartDate,
+                        error: dictationManager.error,
+                        onStop: {
+                            Task {
+                                await dictationManager.stopRecording()
+                            }
                         }
-                    }
-                )
+                    )
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .modifier(ToolbarGlassBackground())
             } else {
-                if agentsLoadError != nil {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(Color.composerWarning)
-                        .font(.caption)
+                HStack(alignment: .bottom, spacing: 8) {
+                    composerLeadingAttachButton
+                    contentEditorView
+                        .frame(maxWidth: .infinity)
+                    composerTrailingActionButton
                 }
-
-                #if os(iOS)
-                Button {
-                    showImagePicker = true
-                } label: {
-                    if isUploadingImage {
-                        ProgressView()
-                            .scaleEffect(0.8)
-                    } else {
-                        Image(systemName: "photo")
-                            .foregroundStyle(Color.composerAction)
-                    }
-                }
-                .buttonStyle(.borderless)
-                .disabled(selectedProject == nil || isUploadingImage)
-
-                Button {
-                    Task {
-                        preDictationText = localText
-                        try? await dictationManager.startRecording()
-                    }
-                } label: {
-                    Image(systemName: "mic.fill")
-                        .foregroundStyle(Color.composerAction)
-                }
-                .buttonStyle(.borderless)
-                .disabled(!dictationManager.state.isIdle || selectedProject == nil)
-                #endif
-
-                pinnedPromptsToolbarButton
-
-                if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button {
-                        saveDraftAsNamed()
-                    } label: {
-                        Image(systemName: draftSavedConfirmation ? "bookmark.fill" : "bookmark")
-                            .foregroundStyle(draftSavedConfirmation ? Color.accentColor : Color.composerAction)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(selectedProject == nil)
-                    .help("Save as reusable draft")
-                }
-
-                if selectedProject != nil {
-                    Button {
-                        showDraftBrowser = true
-                    } label: {
-                        Image(systemName: "doc.text.magnifyingglass")
-                            .foregroundStyle(Color.composerAction)
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Browse saved drafts")
-                }
-
-                if selectedProject != nil {
-                    Button {
-                        openNudgeSkillSelector(mode: .skills)
-                    } label: {
-                        Text("/")
-                            .font(.body.weight(.bold).monospaced())
-                            .foregroundStyle(Color.composerAction)
-                            .frame(width: 24, height: 24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .strokeBorder(Color.composerAction.opacity(0.5), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Skills")
-                }
-
-                Spacer()
-
-                if !localImageAttachments.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "photo.fill")
-                            .font(.caption2)
-                        Text("\(localImageAttachments.count)")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(Color.composerAction)
-                }
-
-                if !localTextAttachments.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "doc.text.fill")
-                            .font(.caption2)
-                        Text("\(localTextAttachments.count)")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(Color.composerAction)
-                }
-
-                if localText.count > 0 {
-                    Text("\(localText.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty || !localTextAttachments.isEmpty {
-                    Button(action: clearDraft) {
-                        Image(systemName: "trash")
-                            .foregroundStyle(Color.composerDestructive)
-                    }
-                    .buttonStyle(.borderless)
-                }
-            }
-
-            if isInlineComposer {
-                Button(action: sendMessage) {
-                    Image(systemName: "arrow.up")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(canSend ? Color.primary : Color.secondary.opacity(0.9))
-                        .frame(width: 30, height: 30)
-                        .background(
-                            Circle()
-                                .fill(canSend ? Color.secondary.opacity(0.28) : Color.secondary.opacity(0.16))
-                        )
-                }
-                .buttonStyle(.borderless)
-                .disabled(!canSend)
-                #if os(macOS)
-                .keyboardShortcut(.return, modifiers: [.command])
-                .help("Send")
-                #else
-                .help("Send")
-                #endif
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .modifier(ToolbarGlassBackground())
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .modifier(ToolbarGlassBackground())
+    }
+
+    @ViewBuilder
+    var composerLeadingAttachButton: some View {
+        #if os(iOS)
+        Button {
+            showImagePicker = true
+        } label: {
+            if isUploadingImage {
+                ProgressView()
+                    .scaleEffect(0.8)
+                    .frame(width: 32, height: 32)
+            } else {
+                Image(systemName: "plus")
+                    .font(.title3.weight(.medium))
+                    .foregroundStyle(Color.composerAction)
+                    .frame(width: 32, height: 32)
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(selectedProject == nil || isUploadingImage)
+        .help("Attach")
+        #else
+        EmptyView()
+        #endif
+    }
+
+    @ViewBuilder
+    var composerTrailingActionButton: some View {
+        if isInlineComposer && canSend {
+            Button(action: sendMessage) {
+                Image(systemName: "arrow.up")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Color.accentColor))
+            }
+            .buttonStyle(.borderless)
+            #if os(macOS)
+            .keyboardShortcut(.return, modifiers: [.command])
+            #endif
+            .help("Send")
+        } else {
+            #if os(iOS)
+            Button {
+                Task {
+                    preDictationText = localText
+                    try? await dictationManager.startRecording()
+                }
+            } label: {
+                Image(systemName: "mic.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.composerAction)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!dictationManager.state.isIdle || selectedProject == nil)
+            .help("Voice message")
+            #else
+            EmptyView()
+            #endif
+        }
     }
 
     /// Toolbar button that opens the nudge/skill selector sheet.

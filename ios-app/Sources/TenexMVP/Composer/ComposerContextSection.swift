@@ -131,7 +131,7 @@ extension MessageComposerView {
 
     func agentChipView(_ agent: ProjectAgent) -> some View {
         HStack(spacing: 8) {
-            OnlineAgentChipView(agent: agent) {
+            RosterAgentChipView(agent: agent) {
                 openAgentSelector()
             }
             Spacer()
@@ -141,7 +141,7 @@ extension MessageComposerView {
         .background(.bar)
     }
 
-    /// Shows the reply target agent (used when replying and the agent isn't in online agents list)
+    /// Shows the reply target agent when it is outside the current project roster.
     func replyTargetChipView(name: String, pubkey: String, onChange: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             Button(action: onChange) {
@@ -210,56 +210,51 @@ extension MessageComposerView {
             } else {
                 workspaceProjectControl
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 16) {
-                        if selectedProject != nil {
-                            agentPopoverToken
-                        }
+                Spacer(minLength: 0)
 
-                        if let agent = selectedAgent, let model = agent.model, !model.isEmpty {
-                            inlineContextToken(text: model, showChevron: false) {
-                                workspaceAgentToConfig = agent
-                            }
-                        }
-
-                        nudgeSkillToken
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                workspaceMicGlyph
                 #if os(macOS)
                 if shouldShowWorkspaceReferenceConversationButton {
                     workspaceReferenceConversationButton
                 }
                 #endif
-                workspacePinnedPromptsControl
             }
 
-            Button(action: sendMessage) {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: workspaceIconSize, weight: .semibold))
-                    #if os(macOS)
-                    .foregroundStyle(canSend ? Color.white : Color.secondary.opacity(0.9))
-                    #else
-                    .foregroundStyle(canSend ? workspaceComposerShellColor : Color.secondary.opacity(0.9))
-                    #endif
-                    .frame(width: workspaceSendButtonSize, height: workspaceSendButtonSize)
-                    .background(
-                        Circle()
-                            #if os(macOS)
-                            .fill(canSend ? Color.accentColor : Color.secondary.opacity(0.14))
-                            #else
-                            .fill(canSend ? Color.white.opacity(0.78) : Color.white.opacity(0.14))
-                            #endif
-                    )
+            // Telegram-style mic ↔ send swap (Liquid Glass: single tinted primary action)
+            if canSend {
+                workspaceSendButton
+            } else if !dictationManager.state.isRecording {
+                workspaceMicGlyph
             }
-            .buttonStyle(.borderless)
-            .disabled(!canSend)
-            .help("Send")
         }
         .frame(height: max(workspaceContextRowHeight, workspaceBottomRowHeight))
         .padding(.horizontal, 18)
+    }
+
+    var workspaceSendButton: some View {
+        Button(action: sendMessage) {
+            Image(systemName: "arrow.up")
+                .font(.system(size: workspaceIconSize, weight: .semibold))
+                #if os(macOS)
+                .foregroundStyle(canSend ? Color.white : Color.secondary.opacity(0.9))
+                #else
+                .foregroundStyle(canSend ? workspaceComposerShellColor : Color.secondary.opacity(0.9))
+                #endif
+                .frame(width: workspaceSendButtonSize, height: workspaceSendButtonSize)
+                .background(
+                    Circle()
+                        #if os(macOS)
+                        .fill(canSend ? Color.accentColor : Color.secondary.opacity(0.14))
+                        #else
+                        .fill(canSend ? Color.white.opacity(0.78) : Color.white.opacity(0.14))
+                        #endif
+                )
+        }
+        .buttonStyle(.borderless)
+        .disabled(!canSend)
+        #if os(macOS)
+        .keyboardShortcut(.return, modifiers: [.command])
+        #endif
+        .help("Send")
     }
 
     @ViewBuilder
@@ -537,7 +532,7 @@ extension MessageComposerView {
             Text("No projects available")
         } else {
             if !projectMenuState.booted.isEmpty {
-                Section("Booted Projects") {
+                Section("Available Projects") {
                     ForEach(projectMenuState.booted, id: \.id) { project in
                         projectSelectionButton(for: project)
                     }
@@ -545,7 +540,7 @@ extension MessageComposerView {
             }
 
             if !projectMenuState.unbooted.isEmpty {
-                Menu("Unbooted Projects") {
+                Menu("Unavailable Projects") {
                     ForEach(projectMenuState.unbooted, id: \.id) { project in
                         projectSelectionButton(for: project)
                     }
@@ -640,7 +635,7 @@ struct ProjectChipView: View {
     }
 }
 
-struct OnlineAgentChipView: View {
+struct RosterAgentChipView: View {
     @Environment(TenexCoreManager.self) var coreManager
     let agent: ProjectAgent
     let onChange: () -> Void
@@ -694,19 +689,7 @@ struct WorkspaceAgentPopoverContent: View {
                     coreManager: coreManager
                 )
             }
-        return list.sorted { a, b in
-            if a.isPm != b.isPm { return a.isPm }
-            if a.isOnline != b.isOnline { return a.isOnline && !b.isOnline }
-            let nameComparison = AgentDisplayName
-                .resolve(pubkey: a.pubkey, coreManager: coreManager)
-                .localizedCaseInsensitiveCompare(
-                    AgentDisplayName.resolve(pubkey: b.pubkey, coreManager: coreManager)
-                )
-            if nameComparison != .orderedSame {
-                return nameComparison == .orderedAscending
-            }
-            return a.pubkey < b.pubkey
-        }
+        return list
     }
 
     var body: some View {
@@ -794,12 +777,9 @@ struct WorkspaceAgentPopoverContent: View {
                                 .background(Capsule().fill(Color.agentBrand))
                         }
                     }
-                    let statusText = agent.isOnline ? agent.model : "Offline"
-                    if let statusText, !statusText.isEmpty {
-                        Text(statusText)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(availabilityLabel(for: agent))
+                        .font(.caption2)
+                        .foregroundStyle(agent.isOnline ? Color.presenceOnline : .secondary)
                 }
 
                 Spacer()
@@ -826,5 +806,13 @@ struct WorkspaceAgentPopoverContent: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
+    }
+
+    private func availabilityLabel(for agent: ProjectAgent) -> String {
+        guard agent.isOnline else { return "Unavailable" }
+        if let model = agent.model, !model.isEmpty {
+            return model
+        }
+        return "Available"
     }
 }

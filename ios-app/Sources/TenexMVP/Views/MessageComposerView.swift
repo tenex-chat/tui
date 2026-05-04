@@ -551,24 +551,10 @@ struct MessageComposerView: View {
                 await loadAgents()
             }
         }
-        .onChange(of: coreManager.onlineAgents) { _, newAgents in
-            // Reactively update availableAgents when centralized state changes
-            // This eliminates the need for manual refresh() calls
+        .onChange(of: coreManager.projectRosterAgents) { _, newRosters in
+            // Reactively update availableAgents when the 31933/24011-backed roster changes.
             if let projectId = selectedProject?.id {
-                let onlineAgents = newAgents[projectId] ?? []
-                let onlinePubkeys = Set(onlineAgents.map(\.pubkey))
-                let offlineAgents = coreManager.projects
-                    .first(where: { $0.id == projectId })?
-                    .agentPubkeys
-                    .compactMap { pubkey -> ProjectAgent? in
-                        guard !onlinePubkeys.contains(pubkey) else { return nil }
-                        let name = ComposerViewModel.agentDisplayName(
-                            coreManager.displayName(for: pubkey),
-                            fallbackPubkey: pubkey
-                        )
-                        return ProjectAgent(pubkey: pubkey, name: name, backendPubkey: "", isPm: false, isOnline: false, model: nil, tools: [], skills: [], mcpServers: [])
-                    } ?? []
-                availableAgents = ComposerViewModel.mergeProjectAgents(onlineAgents: onlineAgents, offlineAgents: offlineAgents)
+                availableAgents = ComposerViewModel.orderedProjectRosterAgents(newRosters[projectId] ?? [])
             }
         }
     }
@@ -576,52 +562,16 @@ struct MessageComposerView: View {
     @ViewBuilder
     var composerContent: some View {
         VStack(spacing: 0) {
-            if !usesWorkspaceInlineLayout {
-                // Project and Agent row (for new conversations)
-                if isNewConversation {
-                    HStack(spacing: 8) {
-                        if let project = selectedProject {
-                            projectChipView(project)
-                        } else {
-                            projectPromptButton
-                        }
-
-                        if selectedProject != nil {
-                            if let agent = selectedAgent {
-                                OnlineAgentChipView(agent: agent) {
-                                    openAgentSelector()
-                                }
-                                .environment(coreManager)
-                            } else {
-                                agentPromptButton
-                            }
-                        }
-
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.bar)
+            if !usesWorkspaceInlineLayout && isNewConversation && selectedProject == nil {
+                // Only show the project picker when a project hasn't been selected yet
+                // (sending requires a project; once chosen, it's implicit)
+                HStack(spacing: 8) {
+                    projectPromptButton
+                    Spacer()
                 }
-
-                // Agent chip for replies (not new conversations)
-                if !isNewConversation {
-                    if let agent = selectedAgent {
-                        agentChipView(agent)
-                    } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
-                        // Show the reply target even if they're not in online agents list
-                        replyTargetChipView(name: targetName, pubkey: targetPubkey) {
-                            openAgentSelector()
-                        }
-                    } else if selectedProject != nil {
-                        agentPromptView
-                    }
-                }
-
-                // Skill chips (for all conversations)
-                if selectedProject != nil && !selectedSkills.isEmpty {
-                    skillChipsView
-                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.bar)
             }
 
             // Image attachment chips (for all conversations)
@@ -640,14 +590,7 @@ struct MessageComposerView: View {
                 workspaceInlineControlRow
             } else {
                 Divider()
-
-                // Content editor
-                contentEditorView
-
-                Divider()
-
-                // Toolbar
-                toolbarView
+                telegramStyleComposerRow
             }
         }
         .onChange(of: dictationManager.state) { _, newState in
