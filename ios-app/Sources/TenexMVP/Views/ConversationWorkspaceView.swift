@@ -7,18 +7,11 @@ import AppKit
 import UIKit
 #endif
 
-/// Adaptive conversation destination:
-/// - macOS: always workspace layout
-/// - iPad (regular width): workspace layout
-/// - iPhone (compact): existing overview-first detail layout
 struct ConversationAdaptiveDetailView: View {
     let conversation: ConversationFullInfo
     let onOpenConversationId: ((String) -> Void)?
     let onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)?
     @Environment(TenexCoreManager.self) private var coreManager
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    #endif
 
     init(
         conversation: ConversationFullInfo,
@@ -31,26 +24,12 @@ struct ConversationAdaptiveDetailView: View {
     }
 
     var body: some View {
-        #if os(macOS)
         ConversationWorkspaceView(
             source: .existing(conversation: conversation),
             onReferenceConversationRequested: onReferenceConversationRequested,
             onOpenConversationId: onOpenConversationId
         )
             .environment(coreManager)
-        #else
-        if horizontalSizeClass == .regular {
-            ConversationWorkspaceView(
-                source: .existing(conversation: conversation),
-                onReferenceConversationRequested: onReferenceConversationRequested,
-                onOpenConversationId: onOpenConversationId
-            )
-                .environment(coreManager)
-        } else {
-            ConversationDetailView(conversation: conversation)
-                .environment(coreManager)
-        }
-        #endif
     }
 }
 

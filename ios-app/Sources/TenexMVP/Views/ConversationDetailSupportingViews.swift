@@ -884,7 +884,7 @@ private struct DelegationSheetFromId: View {
         NavigationStack {
             Group {
                 if let conv = conversation {
-                    ConversationDetailView(conversation: conv)
+                    ConversationWorkspaceView(conversation: conv)
                         .environment(coreManager)
                 } else {
                     VStack(spacing: 16) {
@@ -993,31 +993,3 @@ private struct FullConversationStreamingSection: View {
     }
 }
 
-#Preview {
-    ConversationDetailView(conversation: ConversationFullInfo(
-        thread: Thread(
-            id: "test-123",
-            title: "Implement User Authentication",
-            content: "",
-            pubkey: "abc123def456",
-            lastActivity: UInt64(Date().timeIntervalSince1970) - 3600,
-            effectiveLastActivity: UInt64(Date().timeIntervalSince1970) - 60,
-            statusLabel: "In Progress",
-            statusCurrentActivity: "Reviewing security requirements",
-            summary: "Add OAuth2 authentication flow with Google and GitHub providers",
-            hashtags: [],
-            parentConversationId: nil,
-            pTags: [],
-            askEvent: nil,
-            isScheduled: false,
-            isInterventionReview: false
-        ),
-        author: "architect-orchestrator",
-        messageCount: 15,
-        isActive: true,
-        isArchived: false,
-        hasChildren: true,
-        projectATag: "project-123"
-    ))
-    .environment(TenexCoreManager())
-}

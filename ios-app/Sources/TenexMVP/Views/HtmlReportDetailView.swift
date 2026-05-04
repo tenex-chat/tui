@@ -49,7 +49,7 @@ struct HtmlReportDetailView: View {
             }
             .navigationDestination(isPresented: $showConversation) {
                 if let conversation = resolvedConversation {
-                    ConversationDetailView(conversation: conversation)
+                    ConversationWorkspaceView(conversation: conversation)
                         .environment(coreManager)
                 } else {
                     Text("Conversation not available")

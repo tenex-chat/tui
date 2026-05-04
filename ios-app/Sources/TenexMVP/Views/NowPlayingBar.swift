@@ -159,7 +159,7 @@ struct NowPlayingBar: View {
             .sheet(isPresented: $showConversationDetail) {
                 if let conversation {
                     NavigationStack {
-                        ConversationDetailView(conversation: conversation)
+                        ConversationWorkspaceView(conversation: conversation)
                             .environment(coreManager)
                             .toolbar {
                                 ToolbarItem(placement: .confirmationAction) {

@@ -3,7 +3,7 @@ import SwiftUI
 
 // MARK: - Conversation Summary Window
 
-/// Wrapper view that resolves a conversation ID and displays ConversationDetailView in a macOS window.
+/// Wrapper view that resolves a conversation ID and displays the conversation workspace in a macOS window.
 /// Used as the content for the "conversation-summary" WindowGroup.
 struct ConversationSummaryWindow: View {
     let conversationId: String
