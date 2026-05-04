@@ -21,6 +21,25 @@ enum ReportEntry: Identifiable {
     }
 }
 
+enum ReportListEntry: Identifiable {
+    case html(HtmlReport)
+    case markdown(ReportEntry)
+
+    var id: String {
+        switch self {
+        case .html(let report): return "html:\(report.eventId)"
+        case .markdown(let entry): return "markdown:\(entry.id)"
+        }
+    }
+
+    var createdAt: UInt64 {
+        switch self {
+        case .html(let report): return report.createdAt
+        case .markdown(let entry): return entry.mostRecentCreatedAt
+        }
+    }
+}
+
 // MARK: - ReportsTabView
 
 struct ReportsTabView: View {
@@ -133,57 +152,63 @@ struct ReportsTabView: View {
         coreManager.htmlReports.sorted { $0.createdAt > $1.createdAt }
     }
 
+    private var chronologicalEntries: [ReportListEntry] {
+        let entries = sortedHtmlReports.map(ReportListEntry.html)
+            + reportEntries.map(ReportListEntry.markdown)
+
+        return entries.sorted {
+            if $0.createdAt != $1.createdAt {
+                return $0.createdAt > $1.createdAt
+            }
+            return $0.id < $1.id
+        }
+    }
+
     private var listContent: some View {
         Group {
             if coreManager.reports.isEmpty && coreManager.htmlReports.isEmpty {
                 emptyStateView
             } else {
                 List {
-                    if !sortedHtmlReports.isEmpty {
-                        Section("HTML Reports") {
-                            ForEach(sortedHtmlReports, id: \.eventId) { htmlReport in
+                    ForEach(chronologicalEntries) { entry in
+                        switch entry {
+                        case .html(let htmlReport):
+                            Button {
+                                selectedReport = nil
+                                selectedHtmlReport = htmlReport
+                            } label: {
+                                HtmlReportRowView(
+                                    report: htmlReport,
+                                    project: project(for: htmlReport.projectATag)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("html_report_row_\(htmlReport.eventId)")
+
+                        case .markdown(let markdownEntry):
+                            switch markdownEntry {
+                            case .single(let report):
                                 Button {
-                                    selectedReport = nil
-                                    selectedHtmlReport = htmlReport
+                                    selectedHtmlReport = nil
+                                    selectedReport = report
                                 } label: {
-                                    HtmlReportRowView(
-                                        report: htmlReport,
-                                        project: project(for: htmlReport.projectATag)
-                                    )
+                                    ReportRowView(report: report, project: project(for: report.projectATag))
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityIdentifier("html_report_row_\(htmlReport.eventId)")
-                            }
-                        }
-                    }
+                                .accessibilityIdentifier("report_row_\(report.id)")
 
-                    if !reportEntries.isEmpty {
-                        Section(sortedHtmlReports.isEmpty ? "" : "Markdown Reports") {
-                            ForEach(reportEntries) { entry in
-                                switch entry {
-                                case .single(let report):
-                                    Button {
-                                        selectedHtmlReport = nil
-                                        selectedReport = report
-                                    } label: {
-                                        ReportRowView(report: report, project: project(for: report.projectATag))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityIdentifier("report_row_\(report.id)")
-
-                                case .group(let projectATag, let docTag, let reports):
-                                    NavigationLink {
-                                        ReportGroupView(
-                                            docTag: docTag,
-                                            reports: reports,
-                                            selectedReport: $selectedReport,
-                                            project: project(for: projectATag)
-                                        )
-                                    } label: {
-                                        ReportGroupRowView(docTag: docTag, count: reports.count, project: project(for: projectATag))
-                                    }
-                                    .accessibilityIdentifier("report_group_\(projectATag)_\(docTag)")
+                            case .group(let projectATag, let docTag, let reports):
+                                NavigationLink {
+                                    ReportGroupView(
+                                        docTag: docTag,
+                                        reports: reports,
+                                        selectedReport: $selectedReport,
+                                        project: project(for: projectATag)
+                                    )
+                                } label: {
+                                    ReportGroupRowView(docTag: docTag, count: reports.count, project: project(for: projectATag))
                                 }
+                                .accessibilityIdentifier("report_group_\(projectATag)_\(docTag)")
                             }
                         }
                     }
