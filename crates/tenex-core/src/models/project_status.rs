@@ -930,6 +930,64 @@ mod tests {
         assert!(status.pm_agent().is_none());
     }
 
+    /// Acceptance criterion (`docs/agent-identity-config-implementation-decisions.md`):
+    /// "24010 parsing does not set current model/tools/skills/MCPs."
+    /// All four shapes (`model`, `tool`, `skill`, `mcp`) with agent-style
+    /// 3rd elements must remain at the project level only and never seed
+    /// per-agent current config records.
+    #[test]
+    fn test_24010_model_tool_skill_mcp_tags_never_seed_per_agent_config() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pk",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pk:project_id"],
+                ["agent", "agent1_pk", "claude-code"],
+                ["model", "opus", "agent1_pk"],
+                ["model", "sonnet"],
+                ["tool", "shell", "agent1_pk"],
+                ["tool", "rag_query"],
+                ["skill", "code-review", "agent1_pk"],
+                ["skill", "deployment"],
+                ["mcp", "github", "agent1_pk"],
+                ["mcp", "linear"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).expect("parse 24010");
+
+        // Project-level option lists are still extracted.
+        let models = status.models();
+        assert!(models.contains(&"opus"));
+        assert!(models.contains(&"sonnet"));
+        let tools = status.all_tools();
+        assert!(tools.contains(&"shell"));
+        assert!(tools.contains(&"rag_query"));
+        let skills = status.all_skills();
+        assert!(skills.contains(&"code-review"));
+        assert!(skills.contains(&"deployment"));
+        let mcps = status.all_mcp_servers();
+        assert!(mcps.contains(&"github"));
+        assert!(mcps.contains(&"linear"));
+
+        // No roster, no PM, no per-agent assignments — *all* current
+        // per-agent state must come from kind:34011, never 24010.
+        assert!(
+            status.agents.is_empty(),
+            "24010 must not produce ProjectAgent roster entries"
+        );
+        assert!(status.pm_agent().is_none());
+        assert!(
+            status.agent_assigned_tools().is_empty(),
+            "current per-agent tools must not be sourced from 24010"
+        );
+        assert!(
+            status.agent_assigned_skills().is_empty(),
+            "current per-agent skills must not be sourced from 24010"
+        );
+    }
+
     #[test]
     fn test_skill_tags_parsing() {
         let json = r#"{

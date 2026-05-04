@@ -175,6 +175,82 @@ mod tests {
         assert!(roster[1].backend_pubkey.is_empty());
     }
 
+    /// Two distinct agent pubkeys may share the same effective display name
+    /// (their 24011 slug or 34011 slug, or downstream a kind:0 display_name).
+    /// The roster identifies entries by *pubkey*, so a duplicate name must
+    /// still leave two distinct roster entries that each round-trip back to
+    /// the right pubkey.
+    #[test]
+    fn duplicate_display_names_remain_distinct_by_pubkey() {
+        let mut installed = HashMap::new();
+        installed.insert(
+            "approved-backend".to_string(),
+            vec![
+                installed_agent("approved-backend", "agent-a", "duplicate-name"),
+                installed_agent("approved-backend", "agent-b", "duplicate-name"),
+            ],
+        );
+
+        let roster = build_project_roster(
+            &project(vec!["agent-a", "agent-b"]),
+            &installed,
+            &HashMap::new(),
+            |backend| backend == "approved-backend",
+        );
+
+        assert_eq!(roster.len(), 2, "two distinct pubkeys must yield two entries");
+
+        // Both rows have the same display name…
+        assert_eq!(roster[0].name, "duplicate-name");
+        assert_eq!(roster[1].name, "duplicate-name");
+
+        // …but the underlying pubkeys are distinct and order is preserved
+        // from the project's 31933 `p` tags.
+        assert_eq!(roster[0].pubkey, "agent-a");
+        assert_eq!(roster[1].pubkey, "agent-b");
+
+        // Lookup-by-pubkey: each query returns exactly the right record.
+        let by_pubkey = |pk: &str| {
+            roster
+                .iter()
+                .filter(|a| a.pubkey == pk)
+                .collect::<Vec<_>>()
+        };
+        let only_a = by_pubkey("agent-a");
+        let only_b = by_pubkey("agent-b");
+        assert_eq!(only_a.len(), 1);
+        assert_eq!(only_b.len(), 1);
+        assert_eq!(only_a[0].pubkey, "agent-a");
+        assert_eq!(only_b[0].pubkey, "agent-b");
+    }
+
+    /// Acceptance: 34011 config slugs may collide just like 24011 slugs.
+    /// Even when both pubkeys publish a 34011 with the same slug, the roster
+    /// must treat them as separate identities.
+    #[test]
+    fn duplicate_34011_config_slugs_remain_distinct_by_pubkey() {
+        let mut configs = HashMap::new();
+        configs.insert("agent-a".to_string(), agent_config("agent-a"));
+        configs.insert("agent-b".to_string(), agent_config("agent-b"));
+        // Both configs share the slug "config-name" (set in `agent_config`).
+
+        let roster = build_project_roster(
+            &project(vec!["agent-a", "agent-b"]),
+            &HashMap::new(),
+            &configs,
+            |_| false,
+        );
+
+        assert_eq!(roster.len(), 2);
+        assert_eq!(roster[0].name, "config-name");
+        assert_eq!(roster[1].name, "config-name");
+        assert_eq!(roster[0].pubkey, "agent-a");
+        assert_eq!(roster[1].pubkey, "agent-b");
+        // First slot is PM; identity is pubkey-keyed.
+        assert!(roster[0].is_pm);
+        assert!(!roster[1].is_pm);
+    }
+
     #[test]
     fn enriches_roster_from_34011_config() {
         let mut configs = HashMap::new();
