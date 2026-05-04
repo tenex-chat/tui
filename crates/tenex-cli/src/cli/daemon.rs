@@ -1812,6 +1812,7 @@ fn handle_request(
                     agent_pubkeys: params.agent_pubkeys,
                     mcp_tool_ids: params.mcp_tool_ids,
                     client: Some(client_tag),
+                    is_private: false,
                 })
                 .is_ok()
             {

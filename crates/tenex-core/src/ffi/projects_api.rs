@@ -9,6 +9,7 @@ impl TenexCore {
         description: String,
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        is_private: bool,
     ) -> Result<(), TenexError> {
         let core_handle = get_core_handle(&self.core_handle)?;
 
@@ -20,6 +21,7 @@ impl TenexCore {
                 agent_pubkeys,
                 mcp_tool_ids,
                 client: Some("tenex-ios".to_string()),
+                is_private,
             })
             .map_err(|e| TenexError::Internal {
                 message: format!("Failed to send create project command: {}", e),
@@ -40,6 +42,7 @@ impl TenexCore {
         picture_url: Option<String>,
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        is_private: bool,
     ) -> Result<(), TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -54,6 +57,7 @@ impl TenexCore {
                 agent_pubkeys,
                 mcp_tool_ids,
                 client: Some("tenex-ios".to_string()),
+                is_private,
             })
             .map_err(|e| TenexError::Internal {
                 message: format!("Failed to send update project command: {}", e),

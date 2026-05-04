@@ -755,6 +755,7 @@ fn save_project_settings_changes(app: &mut App, state: &ui::modal::ProjectSettin
             project_a_tag,
             agent_pubkeys,
             mcp_tool_ids,
+            is_private: false,
         }) {
             app.set_warning_status(&format!("Failed to update agents: {}", e));
         } else {
@@ -1173,6 +1174,7 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                             agent_pubkeys: state.agent_pubkeys.clone(),
                             mcp_tool_ids: all_tool_ids,
                             client: Some("tenex-tui".to_string()),
+                            is_private: false,
                         }) {
                             app.set_warning_status(&format!("Failed to save project: {}", e));
                         } else {

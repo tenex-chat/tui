@@ -8,6 +8,7 @@ pub struct Project {
     pub repo_url: Option<String>,
     pub picture_url: Option<String>,
     pub is_deleted: bool,
+    pub is_private: bool,
     pub pubkey: String,
     pub participants: Vec<String>,
     pub agent_pubkeys: Vec<String>,
@@ -30,6 +31,7 @@ impl Project {
         let mut repo_url: Option<String> = None;
         let mut picture_url: Option<String> = None;
         let mut is_deleted = false;
+        let mut is_private = false;
         let mut participants = Vec::new();
         let mut agent_pubkeys = Vec::new();
         let mut mcp_tool_ids = Vec::new();
@@ -69,6 +71,11 @@ impl Project {
                 }
                 Some("deleted") => {
                     is_deleted = true;
+                }
+                Some("scope") => {
+                    if tag.get(1).and_then(|t| t.variant().str()) == Some("private") {
+                        is_private = true;
+                    }
                 }
                 Some("P") => {
                     if let Some(p) = tag.get(1).and_then(|t| t.variant().str()) {
@@ -116,6 +123,7 @@ impl Project {
             repo_url,
             picture_url,
             is_deleted,
+            is_private,
             pubkey,
             participants,
             agent_pubkeys,
@@ -164,6 +172,7 @@ mod tests {
             repo_url: None,
             picture_url: None,
             is_deleted: false,
+            is_private: false,
             pubkey: "a".repeat(64),
             participants: vec![],
             agent_pubkeys: vec![],
@@ -293,5 +302,30 @@ mod tests {
         );
         assert_eq!(project.description, None);
         assert!(project.is_deleted);
+    }
+
+    #[test]
+    fn test_from_note_parses_private_scope_tag() {
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(31933), "Private project")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
+                vec!["proj-private".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Private Project".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("scope")),
+                vec!["private".to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let project = parse_project_from_event(event);
+        assert_eq!(project.id, "proj-private");
+        assert!(project.is_private);
+        assert!(!project.is_deleted);
     }
 }

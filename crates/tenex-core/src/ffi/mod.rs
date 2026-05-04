@@ -1933,6 +1933,7 @@ mod tests {
             repo_url: None,
             picture_url: None,
             is_deleted: false,
+            is_private: false,
             pubkey: "owner".to_string(),
             participants: Vec::new(),
             agent_pubkeys: agent_pubkeys.into_iter().map(str::to_string).collect(),
