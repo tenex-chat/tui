@@ -216,7 +216,8 @@ The primary use case is integrating ElevenLabs conversational AI with TENEX agen
 ### "Agent not available" Error
 
 - The project kind:31933 event must include at least one agent `p` tag
-- The PM/default agent is the first project `p` tag and must be advertised by approved kind:24011 backend inventory
+- The PM/default agent is the first project `p` tag and must be advertised by an approved kind:24011 backend inventory (availability comes from kind:24011, not kind:24010)
+- A backend must currently be online for the project (recent kind:24010 runtime/status traffic; kind:24010 is heartbeat-only, not roster or config)
 - Check backend inventory and project roster state in diagnostics
 
 ### Connection Issues

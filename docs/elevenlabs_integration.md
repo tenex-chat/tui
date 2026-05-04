@@ -154,8 +154,9 @@ ElevenLabs may send a `model` field. TENEX accepts but ignores this field.
 
 **Solutions**:
 - Check the project kind:31933 event has an ordered agent `p` tag roster
-- Verify approved kind:24011 backend inventory advertises the PM/default agent
-- Check backend inventory and roster diagnostics
+- Verify approved kind:24011 backend inventory advertises the PM/default agent (agent availability comes from kind:24011, not kind:24010)
+- Confirm a backend is currently online for the project (recent kind:24010 runtime/status traffic; kind:24010 is heartbeat-only, not roster or config)
+- Check agent is not stale (STALENESS_THRESHOLD_SECS)
 
 ### Slow Response Times
 

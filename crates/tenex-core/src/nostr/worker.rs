@@ -926,7 +926,10 @@ pub enum NostrCommand {
         /// Human-readable reason for debugging (included as "reason" tag in the event)
         reason: String,
     },
-    /// Update agent configuration (kind:24020)
+    /// Request an agent config change (publishes kind:24020 command).
+    ///
+    /// kind:24020 is a request/command, not durable state. The agent
+    /// confirms by publishing an updated kind:34011.
     UpdateAgentConfig {
         project_a_tag: String,
         agent_pubkey: String,
@@ -937,7 +940,9 @@ pub enum NostrCommand {
         /// Additional marker tags (e.g. ["pm"])
         tags: Vec<String>,
     },
-    /// Update global agent configuration (kind:24020) without a project a-tag
+    /// Request a global agent config change (publishes kind:24020 command,
+    /// no project a-tag). Same semantics as `UpdateAgentConfig`: the kind:24020
+    /// is a request, not state — confirmation arrives as kind:34011.
     UpdateGlobalAgentConfig {
         agent_pubkey: String,
         model: Option<String>,
@@ -3842,7 +3847,8 @@ impl NostrWorker {
         let coordinate = Coordinate::parse(&project_a_tag)
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
-        // Build kind:24020 agent config update event with project a-tag
+        // Build kind:24020 agent config-change *request* event with project
+        // a-tag (durable state arrives later as kind:34011 from the agent).
         let base =
             EventBuilder::new(Kind::Custom(24020), "").tag(Tag::coordinate(coordinate, None));
         let event = build_agent_config_event(
@@ -3875,7 +3881,8 @@ impl NostrWorker {
         Ok(())
     }
 
-    /// Send a global kind:24020 agent config event (no a-tag, agent-scoped only).
+    /// Send a global kind:24020 agent config-change *request* (no a-tag,
+    /// agent-scoped only). Confirmation arrives as kind:34011 from the agent.
     async fn handle_update_global_agent_config(
         &self,
         agent_pubkey: String,
@@ -3894,7 +3901,7 @@ impl NostrWorker {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
-        // Build kind:24020 global agent config event (no a-tag)
+        // Build kind:24020 global agent config-change *request* (no a-tag).
         let base = EventBuilder::new(Kind::Custom(24020), "");
         let event = build_agent_config_event(
             base,
@@ -4578,7 +4585,9 @@ impl NostrWorker {
     }
 }
 
-/// Attach the common tags to a kind:24020 agent config `EventBuilder`.
+/// Attach the common tags to a kind:24020 agent config-change *request*
+/// `EventBuilder`. (kind:24020 is a command/request; durable state lives
+/// in kind:34011.)
 ///
 /// Adds (in order):
 /// - NIP-89 `client` tag

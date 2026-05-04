@@ -63,10 +63,26 @@ pub mod kinds {
     pub const COMMENT: u16 = 1111;
     /// Boot request
     pub const BOOT_REQUEST: u16 = 24000;
-    /// Project status
+    /// Project runtime/status advertisement (ephemeral).
+    ///
+    /// Owned by a backend. This is heartbeat/runtime traffic only: it is
+    /// **not** roster membership, PM/default state, agent availability, or
+    /// any agent's current config. Roster comes from kind:31933, agent
+    /// availability from kind:24011, per-agent config state from kind:34011.
+    /// See `docs/agent-identity-config-implementation-decisions.md`.
     pub const PROJECT_STATUS: u16 = 24010;
-    /// Agent config update
-    pub const AGENT_CONFIG: u16 = 24020;
+    /// Backend agent inventory (ephemeral).
+    ///
+    /// Advertises which agent pubkeys are available from a given backend.
+    /// Source of truth for agent availability/online labels.
+    pub const BACKEND_INVENTORY: u16 = 24011;
+    /// Agent config change *request/command* (ephemeral).
+    ///
+    /// This event asks an agent to update its configuration. It is **not**
+    /// durable config state — durable per-agent config lives in kind:34011,
+    /// authored by the agent. UIs publish `AGENT_CONFIG_REQUEST` and confirm
+    /// the change only when a matching/new kind:34011 arrives.
+    pub const AGENT_CONFIG_REQUEST: u16 = 24020;
     /// Operations status
     pub const OPERATIONS_STATUS: u16 = 24133;
     /// Stop operations command
@@ -77,6 +93,13 @@ pub mod kinds {
     pub const REPORT: u16 = 30023;
     /// Project definition (NIP-33 replaceable)
     pub const PROJECT: u16 = 31933;
+    /// Per-agent durable config state (NIP-33 replaceable).
+    ///
+    /// Authored by the agent. Source of truth for the agent's currently
+    /// active model/tools/skills/MCP servers and the catalog of available
+    /// options. Config UIs read from this kind and publish
+    /// `AGENT_CONFIG_REQUEST` (kind:24020) to request changes.
+    pub const AGENT_CONFIG_STATE: u16 = 34011;
     /// Team pack definition (NIP-33 replaceable)
     pub const TEAM_PACK: u16 = 34199;
     /// Blossom upload authorization

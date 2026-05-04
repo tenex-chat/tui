@@ -183,7 +183,9 @@ enum Commands {
         mcp_tool_ids: Vec<String>,
     },
 
-    /// Set agent settings (publishes kind:24020 event to override model/tools)
+    /// Request agent settings change (publishes kind:24020 *config-change
+    /// request* to ask the agent to update model/tools; confirmation
+    /// arrives as kind:34011 from the agent).
     SetAgentSettings {
         /// Project slug (d-tag)
         project_slug: String,

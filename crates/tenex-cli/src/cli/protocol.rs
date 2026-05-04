@@ -111,7 +111,7 @@ pub enum CliCommand {
         agent_pubkeys: Vec<String>,
         mcp_tool_ids: Vec<String>,
     },
-    /// Set agent settings (kind:24020)
+    /// Set agent settings (publishes kind:24020 config-change request)
     SetAgentSettings {
         project_slug: String,
         agent_slug: String,
