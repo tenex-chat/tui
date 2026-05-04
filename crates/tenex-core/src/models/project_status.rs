@@ -8,7 +8,7 @@ use crate::constants::STALENESS_THRESHOLD_SECS;
 ///
 /// Roster membership and PM/default status come from ordered kind:31933 `p`
 /// tags. kind:24011 inventories set `is_online` and backend availability.
-/// kind:34011 configs set current model/tools/skills/MCP fields.
+/// kind:0 (NIP-01 metadata) configs set current model/tools/skills/MCP fields.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProjectAgent {
     pub pubkey: String,
@@ -35,7 +35,7 @@ pub struct ProjectStatus {
     /// All available models from model tags (including unassigned ones)
     pub all_models: Vec<String>,
     /// All project-level tools from tool tags.
-    /// Current per-agent tools are sourced from kind:34011.
+    /// Current per-agent tools are sourced from kind:0 (NIP-01 metadata).
     pub(crate) all_tools: Vec<String>,
     /// All available skills from skill tags (including unassigned ones).
     pub(crate) all_skills: Vec<String>,
@@ -179,7 +179,8 @@ impl ProjectStatus {
 
         // Agent roster and current configuration are not derived from 24010.
         // Membership/defaults come from 31933, availability comes from 24011,
-        // and per-agent model/tool/skill/MCP state comes from 34011.
+        // and per-agent model/tool/skill/MCP state comes from kind:0
+        // (NIP-01 metadata, authored by the agent).
 
         let project_coordinate = project_coordinate?;
 
@@ -727,7 +728,8 @@ mod tests {
     }
 
     /// 24010 exposes project-level tool availability, but does not define
-    /// current per-agent tool configuration. Per-agent config comes from 34011.
+    /// current per-agent tool configuration. Per-agent config comes from
+    /// kind:0 (NIP-01 metadata authored by the agent).
     #[test]
     fn test_24010_tools_are_project_level_only() {
         let json = r#"{
@@ -972,7 +974,7 @@ mod tests {
         assert!(mcps.contains(&"linear"));
 
         // No roster, no PM, no per-agent assignments — *all* current
-        // per-agent state must come from kind:34011, never 24010.
+        // per-agent state must come from kind:0 (NIP-01 metadata), never 24010.
         assert!(
             status.agents.is_empty(),
             "24010 must not produce ProjectAgent roster entries"

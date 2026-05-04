@@ -1,42 +1,45 @@
-//! Per-agent configuration event (Nostr kind:34011, NIP-33 addressable).
+//! Per-agent configuration event (Nostr kind:0, NIP-01 metadata).
 //!
-//! Each agent publishes its own kind:34011 event, signed by the agent's own
-//! key. The event enumerates every model/skill/mcp visible to the agent;
-//! the currently-active selection is marked with `"active"` as the tag's
-//! third element (inactive entries omit it).
+//! Each agent publishes its own kind:0 event, signed by the agent's own
+//! key. The event's `content` carries the standard NIP-01 metadata JSON
+//! (`name`, `about`, …); the tags enumerate every model/skill/mcp visible
+//! to the agent. The currently-active selection is marked with `"active"`
+//! as the tag's third element (inactive entries omit it).
 //!
 //! Example tag order:
 //!
 //! ```text
-//! ["d", "<agent_slug>"]                            // NIP-33 d-tag = slug
-//! ["p", "<backend_pubkey>"]                        // backend that runs this agent
-//! ["model", "opus", "active"]                      // currently-selected model
-//! ["model", "sonnet"]                              // other available models
-//! ["tool", "shell", "active"]                       // enabled tool
-//! ["tool", "web-search"]                            // visible but inactive tool
-//! ["skill", "read-access", "active"]               // enabled skill
-//! ["skill", "shell"]                               // visible but inactive skill
-//! ["mcp", "github", "active"]                      // mcp server in mcpAccess
-//! ["mcp", "linear"]                                // configured but inactive mcp
+//! ["slug", "<agent_slug>"]                           // human-friendly slug
+//! ["use-criteria", "<text>"]                         // when to pick this agent
+//! ["p", "<backend_pubkey>"]                          // backend that runs this agent
+//! ["model", "opus", "active"]                        // currently-selected model
+//! ["model", "sonnet"]                                // other available models
+//! ["skill", "read-access", "active"]                 // enabled skill
+//! ["skill", "shell"]                                 // visible but inactive skill
+//! ["mcp", "github", "active"]                        // mcp server in mcpAccess
+//! ["mcp", "linear"]                                  // configured but inactive mcp
 //! ```
 //!
-//! Agent identity = the event's signer (`pubkey` field). Slug = the d-tag.
-//! The first `p` tag carries the backend pubkey that hosts this agent
-//! (traceability only — not identity).
+//! Agent identity = the event's signer (`pubkey` field). Slug = the
+//! `["slug", ...]` tag. The first `p` tag carries the backend pubkey
+//! that hosts this agent (traceability only — not identity).
 
 use nostrdb::Note;
 
-/// Per-agent configuration derived from a kind:34011 event.
+/// Per-agent configuration derived from a kind:0 event.
 #[derive(Debug, Clone, uniffi::Record, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {
     /// Hex-encoded public key of the agent — the event signer.
     pub pubkey: String,
-    /// Human-friendly slug for the agent (the NIP-33 d-tag).
+    /// Human-friendly slug for the agent (the `["slug", ...]` tag).
     pub slug: String,
     /// Hex-encoded public key of the backend that runs this agent, sourced
     /// from the first `["p", "<backend_pubkey>"]` tag on the event. Optional
     /// because the tag may be absent on malformed events.
     pub backend_pubkey: Option<String>,
+    /// Free-form text describing when to pick this agent, sourced from the
+    /// `["use-criteria", "<text>"]` tag. Optional.
+    pub use_criteria: Option<String>,
     /// Unix timestamp the event was created.
     pub created_at: u64,
     /// Currently-selected model slug, if any model is active.
@@ -60,11 +63,11 @@ pub struct AgentConfig {
 impl AgentConfig {
     /// Parse an `AgentConfig` from a JSON event value.
     ///
-    /// Returns `None` when the event is not a kind:34011 or when the required
-    /// `d` tag (slug) is missing.
+    /// Returns `None` when the event is not a kind:0 or when the required
+    /// `slug` tag is missing.
     pub fn from_value(event: &serde_json::Value) -> Option<Self> {
         let kind = event.get("kind")?.as_u64()?;
-        if kind != 34011 {
+        if kind != 0 {
             return None;
         }
 
@@ -89,7 +92,7 @@ impl AgentConfig {
 
     /// Parse an `AgentConfig` from a nostrdb `Note`.
     pub fn from_note(note: &Note) -> Option<Self> {
-        if note.kind() != 34011 {
+        if note.kind() != 0 {
             return None;
         }
 
@@ -115,6 +118,7 @@ impl AgentConfig {
     fn from_tags(created_at: u64, tags: Vec<Vec<String>>, pubkey: String) -> Option<Self> {
         let mut slug: Option<String> = None;
         let mut backend_pubkey: Option<String> = None;
+        let mut use_criteria: Option<String> = None;
         let mut active_model: Option<String> = None;
         let mut models: Vec<String> = Vec::new();
         let mut active_tools: Vec<String> = Vec::new();
@@ -130,11 +134,20 @@ impl AgentConfig {
                 None => continue,
             };
             match name {
-                "d" => {
+                "slug" => {
                     if slug.is_none() {
                         if let Some(s) = tag.get(1) {
                             if !s.is_empty() {
                                 slug = Some(s.clone());
+                            }
+                        }
+                    }
+                }
+                "use-criteria" => {
+                    if use_criteria.is_none() {
+                        if let Some(s) = tag.get(1) {
+                            if !s.is_empty() {
+                                use_criteria = Some(s.clone());
                             }
                         }
                     }
@@ -217,6 +230,7 @@ impl AgentConfig {
             pubkey,
             slug: slug?,
             backend_pubkey,
+            use_criteria,
             created_at,
             active_model,
             models,
@@ -240,11 +254,12 @@ mod tests {
         // Under the new design the agent signs the event, so `pubkey` ==
         // agent pubkey. The first `p` tag carries the backend pubkey.
         let event = json!({
-            "kind": 34011,
+            "kind": 0,
             "pubkey": "agent_pk",
             "created_at": 1_700_000_000,
             "tags": [
-                ["d", "planner"],
+                ["slug", "planner"],
+                ["use-criteria", "Pick when planning multi-step work"],
                 ["p", "backend_pk"],
                 ["p", "extra_pk"],
                 ["model", "opus", "active"],
@@ -263,6 +278,10 @@ mod tests {
         assert_eq!(config.pubkey, "agent_pk");
         assert_eq!(config.slug, "planner");
         assert_eq!(config.backend_pubkey.as_deref(), Some("backend_pk"));
+        assert_eq!(
+            config.use_criteria.as_deref(),
+            Some("Pick when planning multi-step work")
+        );
         assert_eq!(config.active_model.as_deref(), Some("opus"));
         assert_eq!(config.models, vec!["opus", "sonnet"]);
         assert_eq!(config.active_tools, vec!["shell"]);
@@ -276,17 +295,18 @@ mod tests {
     #[test]
     fn backend_pubkey_is_none_when_no_p_tag() {
         let event = json!({
-            "kind": 34011,
+            "kind": 0,
             "pubkey": "agent_pk",
             "created_at": 1,
             "tags": [
-                ["d", "planner"],
+                ["slug", "planner"],
                 ["model", "opus", "active"],
             ]
         });
         let config = AgentConfig::from_value(&event).expect("should parse");
         assert_eq!(config.pubkey, "agent_pk");
         assert!(config.backend_pubkey.is_none());
+        assert!(config.use_criteria.is_none());
     }
 
     #[test]
@@ -295,15 +315,15 @@ mod tests {
             "kind": 24010,
             "pubkey": "backend_pk",
             "created_at": 1,
-            "tags": [["d", "planner"]]
+            "tags": [["slug", "planner"]]
         });
         assert!(AgentConfig::from_value(&event).is_none());
     }
 
     #[test]
-    fn requires_d_tag() {
+    fn requires_slug_tag() {
         let event = json!({
-            "kind": 34011,
+            "kind": 0,
             "pubkey": "agent_pk",
             "created_at": 1,
             "tags": [["p", "backend_pk"]]
@@ -316,11 +336,11 @@ mod tests {
         // The agent pubkey must come from the event's `pubkey` field (signer);
         // the first `p` tag is captured as the backend pubkey.
         let event = json!({
-            "kind": 34011,
+            "kind": 0,
             "pubkey": "real_agent_pk",
             "created_at": 1,
             "tags": [
-                ["d", "planner"],
+                ["slug", "planner"],
                 ["p", "backend_pk"],
             ]
         });

@@ -1192,7 +1192,7 @@ pub(crate) fn handle_config_command(
     if panel.tools_items.is_empty() && !open_agent_select && !open_model {
         drop(store_ref);
         return CommandResult::Lines(vec![print_error_raw(
-            "No kind:34011 tool config available for this agent",
+            "No kind:0 tool config available for this agent",
         )]);
     }
 

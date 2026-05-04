@@ -34,8 +34,9 @@ where
 ///
 /// Membership and order come from the project's kind:31933 `p` tags. The first
 /// roster entry is the PM/default. kind:24011 inventories from approved
-/// backends mark entries online and provide backend-hosted slugs. kind:34011
-/// configs enrich entries with the agent's current model/tools/skills/MCP.
+/// backends mark entries online and provide backend-hosted slugs. kind:0
+/// (NIP-01 metadata) configs enrich entries with the agent's current
+/// model/tools/skills/MCP.
 pub fn build_project_roster<F>(
     project: &Project,
     installed_agents_by_backend: &HashMap<String, Vec<InstalledAgent>>,
@@ -120,6 +121,7 @@ mod tests {
             pubkey: pubkey.to_string(),
             slug: "config-name".to_string(),
             backend_pubkey: Some("backend".to_string()),
+            use_criteria: None,
             created_at: 2,
             active_model: Some("model-active".to_string()),
             models: vec!["model-active".to_string()],
@@ -177,7 +179,7 @@ mod tests {
     }
 
     /// Two distinct agent pubkeys may share the same effective display name
-    /// (their 24011 slug or 34011 slug, or downstream a kind:0 display_name).
+    /// (their 24011 slug or kind:0 slug/display_name).
     /// The roster identifies entries by *pubkey*, so a duplicate name must
     /// still leave two distinct roster entries that each round-trip back to
     /// the right pubkey.
@@ -225,11 +227,11 @@ mod tests {
         assert_eq!(only_b[0].pubkey, "agent-b");
     }
 
-    /// Acceptance: 34011 config slugs may collide just like 24011 slugs.
-    /// Even when both pubkeys publish a 34011 with the same slug, the roster
+    /// Acceptance: kind:0 config slugs may collide just like 24011 slugs.
+    /// Even when both pubkeys publish a kind:0 with the same slug, the roster
     /// must treat them as separate identities.
     #[test]
-    fn duplicate_34011_config_slugs_remain_distinct_by_pubkey() {
+    fn duplicate_kind0_config_slugs_remain_distinct_by_pubkey() {
         let mut configs = HashMap::new();
         configs.insert("agent-a".to_string(), agent_config("agent-a"));
         configs.insert("agent-b".to_string(), agent_config("agent-b"));
@@ -253,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn enriches_roster_from_34011_config() {
+    fn enriches_roster_from_kind0_config() {
         let mut configs = HashMap::new();
         configs.insert("agent-a".to_string(), agent_config("agent-a"));
 

@@ -10,6 +10,7 @@ pub enum SettingsTab {
     AI,
     Appearance,
     Bunker,
+    Backends,
 }
 
 impl SettingsTab {
@@ -18,6 +19,7 @@ impl SettingsTab {
         SettingsTab::AI,
         SettingsTab::Appearance,
         SettingsTab::Bunker,
+        SettingsTab::Backends,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -26,6 +28,7 @@ impl SettingsTab {
             SettingsTab::AI => "AI",
             SettingsTab::Appearance => "Appearance",
             SettingsTab::Bunker => "Bunker",
+            SettingsTab::Backends => "Backends",
         }
     }
 }
@@ -360,6 +363,8 @@ pub struct AppSettingsState {
     pub appearance_index: usize,
     /// Selected setting index in Bunker tab
     pub bunker_index: usize,
+    /// Selected item index in Backends tab (flat list: pending, approved, blocked)
+    pub backends_index: usize,
     /// Whether a field is currently being edited
     pub editing: bool,
     /// The current value being edited for relay URL
@@ -386,6 +391,7 @@ impl AppSettingsState {
             ai_index: 0,
             appearance_index: 0,
             bunker_index: 0,
+            backends_index: 0,
             editing: false,
             relay_url_input: preferences.configured_relay_url().unwrap_or("").to_string(),
             jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
@@ -518,6 +524,11 @@ impl AppSettingsState {
                     self.bunker_index -= 1;
                 }
             }
+            SettingsTab::Backends => {
+                if self.backends_index > 0 {
+                    self.backends_index -= 1;
+                }
+            }
         }
     }
 
@@ -543,6 +554,15 @@ impl AppSettingsState {
                     self.bunker_index += 1;
                 }
             }
+            SettingsTab::Backends => {
+                // bounds checked externally via move_backends_down(total)
+            }
+        }
+    }
+
+    pub fn move_backends_down(&mut self, total: usize) {
+        if self.backends_index + 1 < total {
+            self.backends_index += 1;
         }
     }
 

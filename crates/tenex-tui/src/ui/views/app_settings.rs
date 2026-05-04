@@ -49,6 +49,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
         SettingsTab::AI => render_ai_tab(f, content_area, state),
         SettingsTab::Appearance => render_appearance_tab(f, app, content_area, state),
         SettingsTab::Bunker => render_bunker_tab(f, app, content_area, state),
+        SettingsTab::Backends => render_backends_tab(f, app, content_area, state),
     };
 
     // Hints at bottom
@@ -369,6 +370,112 @@ fn render_bunker_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsSt
         &format!("{}", app.bunker_audit_entries.len()),
         audit_selected,
     );
+}
+
+/// Truncate a pubkey hex to a readable short form: first 8 + "…" + last 6.
+fn short_pubkey(pk: &str) -> String {
+    if pk.len() <= 16 {
+        return pk.to_string();
+    }
+    format!("{}…{}", &pk[..8], &pk[pk.len() - 6..])
+}
+
+/// Build the flat selectable item list for the Backends tab.
+/// Order: pending first, then approved (sorted), then blocked (sorted).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendListItem {
+    Pending(String),
+    Approved(String),
+    Blocked(String),
+}
+
+pub fn build_backends_list(store: &crate::ui::app::AppDataStore) -> Vec<BackendListItem> {
+    let mut items = Vec::new();
+    for p in &store.trust.pending_backend_approvals {
+        items.push(BackendListItem::Pending(p.backend_pubkey.clone()));
+    }
+    let mut approved: Vec<String> = store.trust.approved_backends.iter().cloned().collect();
+    approved.sort();
+    for pk in approved {
+        items.push(BackendListItem::Approved(pk));
+    }
+    let mut blocked: Vec<String> = store.trust.blocked_backends.iter().cloned().collect();
+    blocked.sort();
+    for pk in blocked {
+        items.push(BackendListItem::Blocked(pk));
+    }
+    items
+}
+
+/// Render the Backends tab content
+fn render_backends_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {
+    let store = app.data_store.borrow();
+    let items = build_backends_list(&store);
+    drop(store);
+
+    let mut y_offset = area.y;
+    let max_y = area.y + area.height;
+
+    // Helper to render one item row
+    let render_item = |f: &mut Frame, y: u16, label: &str, badge: &str, badge_color, is_selected: bool| {
+        if y >= max_y {
+            return;
+        }
+        let row_area = Rect::new(area.x, y, area.width, 1);
+        let border_char = if is_selected { "▌" } else { "│" };
+        let border_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
+
+        let badge_style = Style::default().fg(badge_color);
+        let label_style = if is_selected {
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_SECONDARY)
+        };
+
+        let spans = vec![
+            Span::styled(border_char, Style::default().fg(border_color)),
+            Span::styled(format!(" {} ", badge), badge_style),
+            Span::styled(label, label_style),
+        ];
+        f.render_widget(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE)), row_area);
+    };
+
+    if items.is_empty() {
+        if y_offset < max_y {
+            let msg = Paragraph::new("No backends known yet.")
+                .style(Style::default().fg(theme::TEXT_DIM));
+            f.render_widget(msg, Rect::new(area.x, y_offset, area.width, 1));
+        }
+        return;
+    }
+
+    let mut item_idx = 0usize;
+    let mut last_kind: Option<&str> = None;
+
+    for item in &items {
+        let (section, badge, badge_color, pubkey) = match item {
+            BackendListItem::Pending(pk) => ("Pending", "pending", theme::ACCENT_WARNING, pk),
+            BackendListItem::Approved(pk) => ("Approved", "approved", theme::ACCENT_SUCCESS, pk),
+            BackendListItem::Blocked(pk) => ("Blocked", "blocked", theme::ACCENT_ERROR, pk),
+        };
+
+        // Section header
+        if last_kind != Some(section) {
+            if last_kind.is_some() && y_offset < max_y {
+                y_offset += 1; // blank line between sections
+            }
+            if y_offset < max_y {
+                render_section_header(f, area.x, y_offset, area.width, section);
+                y_offset += 1;
+            }
+            last_kind = Some(section);
+        }
+
+        let is_selected = state.backends_index == item_idx;
+        render_item(f, y_offset, &short_pubkey(pubkey), badge, badge_color, is_selected);
+        y_offset += 1;
+        item_idx += 1;
+    }
 }
 
 /// Render a select field (read-only value with cycling)
@@ -710,6 +817,17 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
                 " action",
                 Style::default().fg(theme::TEXT_MUTED),
             ));
+        } else if state.current_tab == SettingsTab::Backends {
+            hints.push(Span::styled(
+                " approve",
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
+            hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled("d", Style::default().fg(theme::ACCENT_WARNING)));
+            hints.push(Span::styled(" block", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled("u", Style::default().fg(theme::ACCENT_WARNING)));
+            hints.push(Span::styled(" unblock", Style::default().fg(theme::TEXT_MUTED)));
         } else {
             hints.push(Span::styled(
                 " edit",

@@ -10,12 +10,14 @@
 //! 1. Same kind:0 display name across two pubkeys keeps them distinct in the
 //!    `AppDataStore` and in pubkey-keyed lookups.
 //! 2. A kind:24010 carrying model/tool/skill/MCP-like tags must not set any
-//!    per-agent current model/tools/skills/MCP — that is a kind:34011 job.
-//! 3. The set of agent pubkeys eligible for kind:34011 subscription is the
-//!    deduplicated union of every project's 31933 `p` tags and every approved
-//!    24011 inventory entry (regression test on the inputs the worker uses).
-//! 4. Receiving a kind:34011 for an agent fans out to every project whose
-//!    31933 membership lists that agent — even projects with no current 24010
+//!    per-agent current model/tools/skills/MCP — that is a kind:0
+//!    (NIP-01 metadata) job.
+//! 3. The set of agent pubkeys eligible for kind:0 agent-config subscription
+//!    is the deduplicated union of every project's 31933 `p` tags and every
+//!    approved 24011 inventory entry (regression test on the inputs the
+//!    worker uses).
+//! 4. Receiving a kind:0 agent config fans out to every project whose 31933
+//!    membership lists that agent — even projects with no current 24010
 //!    runtime advertisement.
 
 use nostr_sdk::prelude::*;
@@ -158,7 +160,7 @@ fn make_24011_inventory_json(backend_pubkey: &str, agents: &[(&str, &str)], crea
     )
 }
 
-fn make_34011_event_json(
+fn make_agent_config_event_json(
     agent_pubkey: &str,
     slug: &str,
     backend_pubkey: &str,
@@ -166,12 +168,13 @@ fn make_34011_event_json(
 ) -> String {
     format!(
         r#"{{
-            "kind": 34011,
+            "kind": 0,
             "id": "cfg-{}",
             "pubkey": "{}",
             "created_at": {},
+            "content": "{{\"name\":\"{}\"}}",
             "tags": [
-                ["d", "{}"],
+                ["slug", "{}"],
                 ["p", "{}"],
                 ["model", "opus", "active"],
                 ["model", "sonnet"],
@@ -180,7 +183,7 @@ fn make_34011_event_json(
                 ["mcp", "github", "active"]
             ]
         }}"#,
-        agent_pubkey, agent_pubkey, created_at, slug, backend_pubkey
+        agent_pubkey, agent_pubkey, created_at, slug, slug, backend_pubkey
     )
 }
 
@@ -301,7 +304,7 @@ fn kind_24010_does_not_populate_per_agent_current_config() {
     // 24010 must not seed an agent config.
     assert!(
         store.get_agent_config(&agent_pk).is_none(),
-        "24010 must not produce a per-agent kind:34011 config"
+        "24010 must not produce a per-agent kind:0 agent config"
     );
 
     // The roster for that agent has none of the 24010 model/tool/skill/MCP
@@ -315,19 +318,19 @@ fn kind_24010_does_not_populate_per_agent_current_config() {
         .expect("agent should be in roster");
     assert!(
         entry.model.is_none(),
-        "current model must come from 34011, not 24010"
+        "current model must come from kind:0, not 24010"
     );
     assert!(
         entry.tools.is_empty(),
-        "current tools must come from 34011, not 24010"
+        "current tools must come from kind:0, not 24010"
     );
     assert!(
         entry.skills.is_empty(),
-        "current skills must come from 34011, not 24010"
+        "current skills must come from kind:0, not 24010"
     );
     assert!(
         entry.mcp_servers.is_empty(),
-        "current MCP servers must come from 34011, not 24010"
+        "current MCP servers must come from kind:0, not 24010"
     );
 
     // The 24010 still gets stored as the project-level status, with the
@@ -345,10 +348,10 @@ fn kind_24010_does_not_populate_per_agent_current_config() {
 }
 
 // ---------------------------------------------------------------------------
-// Acceptance #3: roster + approved inventory yields the deduped 34011 sub set
+// Acceptance #3: roster + approved inventory yields the deduped kind:0 sub set
 // ---------------------------------------------------------------------------
 
-/// The worker subscribes to kind:34011 for the union of agent pubkeys it sees in
+/// The worker subscribes to kind:0 for the union of agent pubkeys it sees in
 /// (a) project 31933 `p` tags and (b) approved 24011 inventories.
 /// Subscription dedup is a `HashSet`-driven helper inside the worker. We can
 /// verify the *inputs* the worker derives from the public store API: every
@@ -362,7 +365,7 @@ fn kind_24010_does_not_populate_per_agent_current_config() {
 /// hook that intercepts the subscribe call. See the report for which hook
 /// would make this test more direct.
 #[test]
-fn agent_pubkey_set_for_34011_subscriptions_is_deduplicated_union_of_31933_and_24011() {
+fn agent_pubkey_set_for_kind0_subscriptions_is_deduplicated_union_of_31933_and_24011() {
     let dir = tempdir().unwrap();
     let db = Database::new(dir.path()).unwrap();
     let mut store = AppDataStore::new(db.ndb.clone());
@@ -473,11 +476,11 @@ fn agent_pubkey_set_for_34011_subscriptions_is_deduplicated_union_of_31933_and_2
 }
 
 // ---------------------------------------------------------------------------
-// Acceptance #4: 34011 refreshes every project where the agent is in 31933
+// Acceptance #4: kind:0 refreshes every project where the agent is in 31933
 // ---------------------------------------------------------------------------
 
 #[test]
-fn kind_34011_refreshes_every_project_where_agent_is_in_31933_membership() {
+fn kind_0_refreshes_every_project_where_agent_is_in_31933_membership() {
     let dir = tempdir().unwrap();
     let db = Database::new(dir.path()).unwrap();
     let mut store = AppDataStore::new(db.ndb.clone());
@@ -523,14 +526,14 @@ fn kind_34011_refreshes_every_project_where_agent_is_in_31933_membership() {
     // explicitly says refresh must not be gated on "currently running" 24010
     // status.
 
-    // 34011 arrives for `agent`.
-    let cfg_json = make_34011_event_json(&agent_pk, "planner", &backend_pk, 1_700_000_100);
+    // kind:0 agent config arrives for `agent`.
+    let cfg_json = make_agent_config_event_json(&agent_pk, "planner", &backend_pk, 1_700_000_100);
     store.handle_status_event_json(&cfg_json);
 
     // The store must now know the config.
     let cfg = store
         .get_agent_config(&agent_pk)
-        .expect("34011 must populate agent config");
+        .expect("kind:0 must populate agent config");
     assert_eq!(cfg.active_model.as_deref(), Some("opus"));
     assert_eq!(cfg.active_tools, vec!["shell"]);
     assert_eq!(cfg.active_skills, vec!["rag"]);
@@ -561,7 +564,7 @@ fn kind_34011_refreshes_every_project_where_agent_is_in_31933_membership() {
         "exactly two projects have this agent in 31933 membership"
     );
 
-    // Both affected projects' rosters now reflect the new 34011 config.
+    // Both affected projects' rosters now reflect the new kind:0 config.
     for a_tag in [&a_tag_running_a, &a_tag_running_b] {
         let roster = store
             .get_project_roster(a_tag)
@@ -573,7 +576,7 @@ fn kind_34011_refreshes_every_project_where_agent_is_in_31933_membership() {
         assert_eq!(
             entry.model.as_deref(),
             Some("opus"),
-            "current model must come from the just-arrived 34011"
+            "current model must come from the just-arrived kind:0 agent config"
         );
         assert_eq!(entry.tools, vec!["shell"]);
         assert_eq!(entry.skills, vec!["rag"]);

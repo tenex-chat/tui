@@ -579,7 +579,6 @@ struct AgentConfigSheet: View {
                 try await coreManager.core.updateGlobalAgentConfig(
                     agentPubkey: agent.pubkey,
                     model: selectedModel,
-                    tools: Array(selectedTools),
                     skills: Array(selectedSkills),
                     mcpServers: selectedMcpServers,
                     tags: tags
@@ -589,7 +588,6 @@ struct AgentConfigSheet: View {
                     projectId: projectId,
                     agentPubkey: agent.pubkey,
                     model: selectedModel,
-                    tools: Array(selectedTools),
                     skills: Array(selectedSkills),
                     mcpServers: selectedMcpServers,
                     tags: tags

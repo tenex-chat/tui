@@ -1272,7 +1272,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * kind:0 (NIP-01 metadata) authored by the agent. Callers should not
      * treat this publish as the new current config.
      */
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
      * Request a global agent configuration change (all projects).
@@ -1281,7 +1281,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * project a-tag (agent-scoped only). Confirmation arrives as an
      * updated kind:0 (NIP-01 metadata) authored by the agent.
      */
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
      * Update an existing project (kind:31933 replaceable event).
@@ -2650,7 +2650,7 @@ open func updateAgentConfig(projectId: String, agentPubkey: String, model: Strin
     )
 }
 }
-
+    
     /**
      * Request a global agent configuration change (all projects).
      *
@@ -12016,10 +12016,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 52625) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 51955) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 22514) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 59818) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 57824) {

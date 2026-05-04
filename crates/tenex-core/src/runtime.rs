@@ -212,11 +212,11 @@ impl CoreRuntime {
         // They are processed directly via DataChange channel, not through nostrdb.
         // Include content-definition kinds so UI tabs can react live to newly
         // published agent definitions, nudges, skills, team packs, and MCP tools.
-        // kind:34011 (per-agent capability announcement) is NIP-33 replaceable
-        // (30000-39999), so it lives in nostrdb and is observed via this filter.
+        // kind:0 (NIP-01 metadata + per-agent capability announcement) is
+        // replaceable, so it lives in nostrdb and is observed via this filter.
         let ndb_filter = FilterBuilder::new()
             .kinds([
-                31933, 1, 0, 513, 4129, 30023, 34199, 4199, 4200, 4201, 4202, 34011,
+                31933, 1, 0, 513, 4129, 30023, 34199, 4199, 4200, 4201, 4202,
             ])
             .build();
         let ndb_subscription = ndb.subscribe(&[ndb_filter])?;

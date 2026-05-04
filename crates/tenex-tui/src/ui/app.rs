@@ -391,7 +391,7 @@ pub struct App {
 /// Pure value-object that holds the merged inputs flowing into
 /// `AgentSettingsState::new` for a given agent.
 ///
-/// Computed from the per-agent kind:34011 `AgentConfig`. Extracted for direct
+/// Computed from the per-agent kind:0 `AgentConfig`. Extracted for direct
 /// unit-testing without standing up an `App`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergedAgentSettingsInputs {
@@ -409,7 +409,8 @@ impl MergedAgentSettingsInputs {
     /// Compute the merge from the data sources for `agent`.
     ///
     /// Agent current configuration and available choices come exclusively from
-    /// kind:34011. Roster membership/defaults come from ordered 31933 p-tags.
+    /// kind:0 (NIP-01 metadata, authored by the agent). Roster
+    /// membership/defaults come from ordered 31933 p-tags.
     pub fn compute(
         _agent: &crate::models::ProjectAgent,
         agent_config: Option<&AgentConfig>,
@@ -1805,7 +1806,7 @@ impl App {
     }
 
     /// Refresh selected_agent from the selected project's 31933 roster.
-    /// Ensures 24011 availability and 34011 config changes are reflected.
+    /// Ensures 24011 availability and kind:0 config changes are reflected.
     pub fn refresh_selected_agent_from_roster(&mut self) {
         let roster = self.available_agents();
         let current = self.selected_agent().cloned();
@@ -1936,7 +1937,7 @@ impl App {
 
     /// Get roster agents for the selected project.
     /// The 31933 p-tag order is authoritative; 24011 inventory only marks
-    /// availability, and 34011 supplies per-agent config.
+    /// availability, and kind:0 supplies per-agent config.
     pub fn available_agents(&self) -> Vec<crate::models::ProjectAgent> {
         let Some(project) = self.selected_project.as_ref() else {
             return vec![];
@@ -2067,7 +2068,7 @@ impl App {
         self.filtered_agents_with_filter(filter)
     }
 
-    /// Compute the 34011-derived settings inputs for the agent. Returns
+    /// Compute the kind:0-derived settings inputs for the agent. Returns
     /// `None` only when no project is selected. The merge logic itself is
     /// pure — see `MergedAgentSettingsInputs::compute` for unit tests.
     fn merged_agent_settings_inputs_for(
@@ -2105,7 +2106,7 @@ impl App {
             return;
         }
 
-        // Compute the 34011 inputs once so `settings` and the original
+        // Compute the kind:0 inputs once so `settings` and the original
         // snapshot fed into `load_agent_settings` agree. If they diverge,
         // `has_config_changes` would always report a phantom diff.
         let inputs = self.merged_agent_settings_inputs_for(agent);
@@ -3731,14 +3732,14 @@ impl App {
 
     /// Get filtered skills for the skill selector.
     ///
-    /// Filters by the project's allowed skill d_tags (from kind:24010 / kind:34011) and
-    /// the active text search filter.
+    /// Filters by the project's allowed skill d_tags (from kind:24010 / kind:0
+    /// agent configs) and the active text search filter.
     pub fn filtered_skill_selector_items(&self) -> Vec<tenex_core::models::Skill> {
         let filter = self.skill_selector_filter();
         let store = self.data_store.borrow();
 
-        // Build the union of allowed skill d_tags from 24010 (project status) and 34011
-        // (per-agent configs) for the currently selected project.
+        // Build the union of allowed skill d_tags from 24010 (project status) and
+        // kind:0 (per-agent configs) for the currently selected project.
         let allowed_dtags: Option<std::collections::HashSet<String>> = self
             .selected_project
             .as_ref()
@@ -4828,7 +4829,7 @@ mod merged_agent_settings_tests {
             backend_pubkey: "backend-pk".to_string(),
             is_pm: false,
             is_online: true,
-            // Stale 24010 fallback values — should be overridden by 34011 below.
+            // Stale 24010 fallback values — should be overridden by kind:0 below.
             model: Some("legacy-model".to_string()),
             tools: vec!["shell".to_string()],
             skills: vec!["legacy-skill".to_string()],
@@ -4846,7 +4847,7 @@ mod merged_agent_settings_tests {
         active_mcps: &[&str],
     ) -> AgentConfig {
         let mut tags: Vec<Vec<String>> = vec![
-            vec!["d".to_string(), "planner".to_string()],
+            vec!["slug".to_string(), "planner".to_string()],
             vec!["p".to_string(), "backend-pk".to_string()],
         ];
         for m in models {
@@ -4874,7 +4875,7 @@ mod merged_agent_settings_tests {
             tags.push(t);
         }
         let event = json!({
-            "kind": 34011,
+            "kind": 0,
             "pubkey": "agent-pk",
             "created_at": 1_000,
             "tags": tags,
@@ -4882,10 +4883,10 @@ mod merged_agent_settings_tests {
         AgentConfig::from_value(&event).expect("agent config fixture should parse")
     }
 
-    /// Agent settings are derived exclusively from 34011. Project heartbeat
+    /// Agent settings are derived exclusively from kind:0. Project heartbeat
     /// fields on ProjectAgent are intentionally ignored.
     #[test]
-    fn derives_agent_settings_from_34011_only() {
+    fn derives_agent_settings_from_kind0_only() {
         let agent = make_agent();
         let config = make_agent_config(
             &["m1"],
@@ -4934,7 +4935,7 @@ mod merged_agent_settings_tests {
     }
 
     #[test]
-    fn no_34011_means_no_current_config() {
+    fn no_kind0_means_no_current_config() {
         let agent = make_agent();
 
         let inputs = MergedAgentSettingsInputs::compute(&agent, None);
@@ -4950,17 +4951,17 @@ mod merged_agent_settings_tests {
     }
 
     #[test]
-    fn active_model_comes_from_34011() {
+    fn active_model_comes_from_kind0() {
         let agent = make_agent();
         let config = make_agent_config(&["m1", "m2"], &[], &[], &[], &[], &[], &[]);
         // Manually mark m2 active by rebuilding via tags (helper above doesn't
         // mark models active — keep things explicit here).
         let event = json!({
-            "kind": 34011,
+            "kind": 0,
             "pubkey": "agent-pk",
             "created_at": 2_000,
             "tags": [
-                ["d", "planner"],
+                ["slug", "planner"],
                 ["p", "backend-pk"],
                 ["model", "m1"],
                 ["model", "m2", "active"],

@@ -492,16 +492,15 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
-    /// Update an agent's configuration (model and tools).
+    /// Update an agent's configuration (model and skills).
     /// Publishes a kind:24020 event to update the agent's config.
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateAgentConfig") {
             do {
                 try core.updateAgentConfig(
                     projectId: projectId,
                     agentPubkey: agentPubkey,
                     model: model,
-                    tools: tools,
                     skills: skills,
                     mcpServers: mcpServers,
                     tags: tags
@@ -512,13 +511,12 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, tools: [String], skills: [String], mcpServers: [String], tags: [String]) throws {
+    func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateGlobalAgentConfig") {
             do {
                 try core.updateGlobalAgentConfig(
                     agentPubkey: agentPubkey,
                     model: model,
-                    tools: tools,
                     skills: skills,
                     mcpServers: mcpServers,
                     tags: tags
