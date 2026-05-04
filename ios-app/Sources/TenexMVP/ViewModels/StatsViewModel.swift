@@ -33,7 +33,7 @@ class StatsViewModel: ObservableObject {
 
     // MARK: - Public Methods
 
-    /// Load stats data from Rust core using SafeTenexCore
+    /// Load stats data from Rust core using TenexCoreActor
     /// Shows cached data immediately using the local store
     func loadStats() async {
         await reloadSnapshot()
@@ -67,7 +67,7 @@ class StatsViewModel: ObservableObject {
 
             do {
                 try Task.checkCancellation()
-                let freshSnapshot = try await coreManager.safeCore.getStatsSnapshot()
+                let freshSnapshot = try await coreManager.core.getStatsSnapshot()
                 await MainActor.run { [weak self] in
                     guard self?.currentFetchID == fetchID else { return }
                     self?.snapshot = freshSnapshot

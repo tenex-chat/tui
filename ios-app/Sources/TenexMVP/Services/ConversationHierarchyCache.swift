@@ -163,15 +163,15 @@ final class ConversationHierarchyCache: ObservableObject {
             // Load p-tagged recipient
             var pTaggedRecipientInfo: AgentAvatarInfo?
             if let pTaggedPubkey = conversation.thread.pTags.first {
-                let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
+                let name = await coreManager.core.getProfileName(pubkey: pTaggedPubkey)
                 pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
             }
 
             // Get all descendants
-            let descendantIds = await coreManager.safeCore.getDescendantConversationIds(
+            let descendantIds = await coreManager.core.getDescendantConversationIds(
                 conversationId: conversation.thread.id
             )
-            let descendants = await coreManager.safeCore.getConversationsByIds(
+            let descendants = await coreManager.core.getConversationsByIds(
                 conversationIds: descendantIds
             )
 

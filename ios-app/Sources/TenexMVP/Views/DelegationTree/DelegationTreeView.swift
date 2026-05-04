@@ -29,7 +29,7 @@ struct DelegationTreeView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .task {
-            viewModel.safeCore = coreManager.safeCore
+            viewModel.core = coreManager.core
             await viewModel.loadTree(rootConversationId: rootConversationId)
         }
         .navigationTitle(viewModel.rootNode?.conversation.thread.title ?? "Delegation Tree")

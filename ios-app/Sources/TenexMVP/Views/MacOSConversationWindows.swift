@@ -48,7 +48,7 @@ struct ConversationSummaryWindow: View {
         }
 
         // Fall back to fetching by ID
-        let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
+        let fetched = await coreManager.core.getConversationsByIds(conversationIds: [conversationId])
         conversation = fetched.first
         isLoading = false
     }
@@ -108,7 +108,7 @@ struct FullConversationWindow: View {
             return
         }
 
-        let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
+        let fetched = await coreManager.core.getConversationsByIds(conversationIds: [conversationId])
         conversation = fetched.first
         isLoading = false
     }

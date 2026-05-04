@@ -301,7 +301,7 @@ private struct QTagReferenceRow: View {
     }
 
     private func resolveAskEvent() async {
-        askLookupInfo = await coreManager.safeCore.getAskEventById(eventId: qTag)
+        askLookupInfo = await coreManager.core.getAskEventById(eventId: qTag)
     }
 }
 

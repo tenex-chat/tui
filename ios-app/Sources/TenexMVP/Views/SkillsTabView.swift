@@ -211,7 +211,7 @@ struct SkillsTabView: View {
 
         Task {
             do {
-                let updated = try await coreManager.safeCore.toggleBookmark(itemId: itemId)
+                let updated = try await coreManager.core.toggleBookmark(itemId: itemId)
                 let updatedSet = Set(updated)
                 await MainActor.run {
                     coreManager.bookmarkedIds = updatedSet

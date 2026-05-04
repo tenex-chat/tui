@@ -228,7 +228,7 @@ struct MainShellView: View {
     }
 
     private func refreshCurrentUserIdentity() async {
-        let currentUser = await coreManager.safeCore.getCurrentUser()
+        let currentUser = await coreManager.core.getCurrentUser()
         let resolvedPubkey = currentUser?.pubkey
             ?? Bech32.npubToHex(userNpub)
 
@@ -248,7 +248,7 @@ struct MainShellView: View {
 
         var resolvedName = fallbackName
         if !hasCurrentUserName, let pubkey = resolvedPubkey {
-            let profileName = await coreManager.safeCore
+            let profileName = await coreManager.core
                 .getProfileName(pubkey: pubkey)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !profileName.isEmpty, profileName != pubkey {

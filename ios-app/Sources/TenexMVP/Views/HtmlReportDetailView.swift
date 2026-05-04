@@ -137,7 +137,7 @@ struct HtmlReportDetailView: View {
     private func resolveConversation() async {
         let conversationId = report.conversationId
         guard !conversationId.isEmpty else { return }
-        let matches = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
+        let matches = await coreManager.core.getConversationsByIds(conversationIds: [conversationId])
         await MainActor.run { resolvedConversation = matches.first }
     }
 

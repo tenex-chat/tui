@@ -497,7 +497,7 @@ struct NewAgentDefinitionSheet: View {
 
         Task {
             do {
-                try await coreManager.safeCore.createAgentDefinition(
+                try await coreManager.core.createAgentDefinition(
                     name: trimmedName,
                     description: trimmedDescription,
                     role: trimmedRole.isEmpty ? "assistant" : trimmedRole,
@@ -846,7 +846,7 @@ private struct AIAssistedPromptRewriteSheet: View {
 
     private func loadPreferredModel() {
         Task {
-            guard let settings = try? await coreManager.safeCore.getAiAudioSettings() else {
+            guard let settings = try? await coreManager.core.getAiAudioSettings() else {
                 return
             }
             guard let configuredModel = OpenRouterModelSelectionCodec.selectedModel(

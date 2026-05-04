@@ -677,7 +677,7 @@ private struct AgentDefinitionDetailView: View {
         }
         .task {
             if currentUserPubkey == nil {
-                currentUserPubkey = coreManager.safeCore.getCurrentUser()?.pubkey
+                currentUserPubkey = coreManager.core.getCurrentUser()?.pubkey
             }
             recomputeOwnedTeams()
         }
@@ -1095,7 +1095,7 @@ private struct AgentDefinitionProjectAssignmentSheet: View {
 
         for backend in targetBackends {
             do {
-                try await coreManager.safeCore.createBackendAgent(
+                try await coreManager.core.createBackendAgent(
                     backendPubkey: backend.pubkey,
                     definitionEventId: item.agent.id,
                     slugOverride: nil

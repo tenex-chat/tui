@@ -452,7 +452,7 @@ struct AgentDeletionSheet: View {
         let trimmedReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
 
         do {
-            try await coreManager.safeCore.deleteAgent(
+            try await coreManager.core.deleteAgent(
                 agentPubkey: agent.pubkey,
                 projectATag: projectATag,
                 reason: trimmedReason.isEmpty ? nil : trimmedReason

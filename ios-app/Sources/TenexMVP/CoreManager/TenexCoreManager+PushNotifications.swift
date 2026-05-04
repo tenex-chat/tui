@@ -89,22 +89,22 @@ extension TenexCoreManager {
         }
     }
 
-    private nonisolated static func approvedBackendPubkeys(safeCore: SafeTenexCore) async throws -> [String] {
-        let snapshot = try await safeCore.getBackendTrustSnapshot()
+    private nonisolated static func approvedBackendPubkeys(core: TenexCoreActor) async throws -> [String] {
+        let snapshot = try await core.getBackendTrustSnapshot()
         return normalizedBackendPubkeys(snapshot.approved)
     }
 
     private nonisolated static func publishApnsEventToApprovedBackends(
-        safeCore: SafeTenexCore,
+        core: TenexCoreActor,
         deviceToken: String,
         enable: Bool,
         deviceId: String
     ) async throws -> [String] {
-        let backendPubkeys = try await approvedBackendPubkeys(safeCore: safeCore)
+        let backendPubkeys = try await approvedBackendPubkeys(core: core)
         guard !backendPubkeys.isEmpty else { return [] }
 
         for backendPubkey in backendPubkeys {
-            try await safeCore.registerApnsToken(
+            try await core.registerApnsToken(
                 deviceToken: deviceToken,
                 enable: enable,
                 backendPubkey: backendPubkey,
@@ -264,13 +264,13 @@ extension TenexCoreManager {
         }
 
         let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "unknown"
-        let safeCore = self.safeCore
+        let core = self.core
         let action = enable ? "registration" : "deregistration"
         Self.pushLogger.info("Publishing APNs \(action), device: \(deviceId.prefix(8))...")
 
         do {
             let backendPubkeys = try await Self.publishApnsEventToApprovedBackends(
-                safeCore: safeCore,
+                core: core,
                 deviceToken: deviceToken,
                 enable: enable,
                 deviceId: deviceId

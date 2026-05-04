@@ -69,9 +69,9 @@ extension TenexCoreManager {
         do {
             try await withCheckedThrowingContinuation {
                 (continuation: CheckedContinuation<Void, Error>) in
-                Task.detached(priority: .utility) { [safeCore] in
+                Task.detached(priority: .utility) { [core] in
                     do {
-                        try await safeCore.logout()
+                        try await core.logout()
                         continuation.resume(returning: ())
                     } catch {
                         continuation.resume(throwing: error)

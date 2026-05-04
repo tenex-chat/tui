@@ -87,7 +87,7 @@ class DiagnosticsViewModel: ObservableObject {
 
     // MARK: - Public Methods
 
-    /// Load diagnostics data from Rust core using SafeTenexCore
+    /// Load diagnostics data from Rust core using TenexCoreActor
     ///
     /// Implements latest-wins + deduplication concurrency strategy with fetch identity:
     /// - If in-flight request already covers new request (includeDB=true covers false), ignore new call
@@ -120,8 +120,8 @@ class DiagnosticsViewModel: ObservableObject {
         isLoading = true
         currentFetchIncludesDB = includeDB
 
-        // Capture safeCore for actor-isolated access
-        let safeCore = self.coreManager.safeCore
+        // Capture core for actor-isolated access
+        let core = self.coreManager.core
 
         // Create a new cancellable task
         let task = Task { [weak self] in
@@ -143,7 +143,7 @@ class DiagnosticsViewModel: ObservableObject {
                 try Task.checkCancellation()
 
                 // PHASE 1: Show cached data immediately (no blocking on network)
-                let cachedSnapshot = await safeCore.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
+                let cachedSnapshot = await core.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
                 await MainActor.run { [weak self] in
                     guard self?.currentFetchID == fetchID else { return }
                     self?.snapshot = cachedSnapshot
@@ -155,7 +155,7 @@ class DiagnosticsViewModel: ObservableObject {
                 try Task.checkCancellation()
 
                 // PHASE 2: Get fresh data from local store
-                let freshSnapshot = await safeCore.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
+                let freshSnapshot = await core.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
 
                 // IDENTITY CHECK: Guard UI updates - only apply if this is still the current fetch
                 await MainActor.run { [weak self] in
@@ -185,9 +185,9 @@ class DiagnosticsViewModel: ObservableObject {
 
     /// Load bunker audit log from Rust core
     func loadBunkerAuditLog() async {
-        let safeCore = self.coreManager.safeCore
+        let core = self.coreManager.core
         do {
-            let entries = try await safeCore.getBunkerAuditLog()
+            let entries = try await core.getBunkerAuditLog()
             self.bunkerAuditLog = entries
         } catch {
             // Silently fail - empty log is fine

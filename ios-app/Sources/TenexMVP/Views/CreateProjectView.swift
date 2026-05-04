@@ -659,7 +659,7 @@ struct CreateProjectView: View {
 
     private func loadTools() async {
         do {
-            let tools = try await coreManager.safeCore.getAllMcpTools()
+            let tools = try await coreManager.core.getAllMcpTools()
             await MainActor.run {
                 allMcpTools = tools
                 toolGroups = ToolGroup.buildGroups(from: tools.map(\.name))
@@ -676,7 +676,7 @@ struct CreateProjectView: View {
         isCreating = true
         Task {
             do {
-                try await coreManager.safeCore.createProject(
+                try await coreManager.core.createProject(
                     name: trimmedName,
                     description: trimmedDescription,
                     agentPubkeys: [],

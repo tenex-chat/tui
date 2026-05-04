@@ -112,7 +112,7 @@ final class AppSettingsViewModel: ObservableObject {
         }
 
         do {
-            let settings = try await coreManager.safeCore.getAiAudioSettings()
+            let settings = try await coreManager.core.getAiAudioSettings()
             audioEnabled = settings.enabled
             audioPrompt = settings.audioPrompt
             selectedModelsByRole = OpenRouterModelSelectionCodec.decodeRoleSelections(from: settings.openrouterModel)
@@ -130,14 +130,14 @@ final class AppSettingsViewModel: ObservableObject {
     }
 
     func reloadRelays(coreManager: TenexCoreManager) async {
-        relayUrls = await coreManager.safeCore.getConfiguredRelays()
-        diagnosticsSnapshot = await coreManager.safeCore.getDiagnosticsSnapshot(includeDatabaseStats: false)
+        relayUrls = await coreManager.core.getConfiguredRelays()
+        diagnosticsSnapshot = await coreManager.core.getDiagnosticsSnapshot(includeDatabaseStats: false)
         diagnosticsSnapshotCapturedAt = Date()
     }
 
     func reconnectRelays(coreManager: TenexCoreManager) async {
         do {
-            try await coreManager.safeCore.forceReconnect()
+            try await coreManager.core.forceReconnect()
             await coreManager.fetchData()
             await reloadRelays(coreManager: coreManager)
         } catch {
@@ -152,7 +152,7 @@ final class AppSettingsViewModel: ObservableObject {
 
     func reloadBackends(coreManager: TenexCoreManager) async {
         do {
-            backendSnapshot = try await coreManager.safeCore.getBackendTrustSnapshot()
+            backendSnapshot = try await coreManager.core.getBackendTrustSnapshot()
         } catch {
             errorMessage = "Failed to load backend trust state: \(error.localizedDescription)"
         }
@@ -184,7 +184,7 @@ final class AppSettingsViewModel: ObservableObject {
 
     func approveBackend(coreManager: TenexCoreManager, pubkey: String) async {
         do {
-            try await coreManager.safeCore.approveBackend(pubkey: pubkey)
+            try await coreManager.core.approveBackend(pubkey: pubkey)
             await coreManager.republishCachedApnsRegistrationNow()
             await coreManager.fetchData()
             await reloadPush(coreManager: coreManager)
@@ -195,7 +195,7 @@ final class AppSettingsViewModel: ObservableObject {
 
     func blockBackend(coreManager: TenexCoreManager, pubkey: String) async {
         do {
-            try await coreManager.safeCore.blockBackend(pubkey: pubkey)
+            try await coreManager.core.blockBackend(pubkey: pubkey)
             await coreManager.fetchData()
             await reloadPush(coreManager: coreManager)
         } catch {
@@ -209,7 +209,7 @@ final class AppSettingsViewModel: ObservableObject {
         let blocked = snapshot.blocked.filter { $0 != pubkey }
 
         do {
-            try await coreManager.safeCore.setTrustedBackends(approved: approved, blocked: blocked)
+            try await coreManager.core.setTrustedBackends(approved: approved, blocked: blocked)
             await coreManager.fetchData()
             await reloadPush(coreManager: coreManager)
         } catch {
@@ -227,12 +227,12 @@ final class AppSettingsViewModel: ObservableObject {
 
     func loadBunkerRulesAndLog(coreManager: TenexCoreManager) async {
         do {
-            bunkerAutoApproveRules = try await coreManager.safeCore.getBunkerAutoApproveRules()
+            bunkerAutoApproveRules = try await coreManager.core.getBunkerAutoApproveRules()
         } catch {
             bunkerAutoApproveRules = []
         }
         do {
-            bunkerAuditLog = try await coreManager.safeCore.getBunkerAuditLog()
+            bunkerAuditLog = try await coreManager.core.getBunkerAuditLog()
         } catch {
             bunkerAuditLog = []
         }
@@ -240,7 +240,7 @@ final class AppSettingsViewModel: ObservableObject {
 
     func removeBunkerAutoApproveRule(coreManager: TenexCoreManager, rule: FfiBunkerAutoApproveRule) async {
         do {
-            try await coreManager.safeCore.removeBunkerAutoApproveRule(
+            try await coreManager.core.removeBunkerAutoApproveRule(
                 requesterPubkey: rule.requesterPubkey,
                 eventKind: rule.eventKind
             )
@@ -293,7 +293,7 @@ final class AppSettingsViewModel: ObservableObject {
         }
 
         do {
-            availableModels = try await coreManager.safeCore.fetchOpenrouterModels(apiKey: apiKey)
+            availableModels = try await coreManager.core.fetchOpenrouterModels(apiKey: apiKey)
         } catch {
             errorMessage = "Failed to fetch models: \(error.localizedDescription)"
         }
@@ -309,7 +309,7 @@ final class AppSettingsViewModel: ObservableObject {
         }
 
         do {
-            availableVoices = try await coreManager.safeCore.fetchElevenlabsVoices(apiKey: apiKey)
+            availableVoices = try await coreManager.core.fetchElevenlabsVoices(apiKey: apiKey)
         } catch {
             errorMessage = "Failed to fetch voices: \(error.localizedDescription)"
         }
@@ -358,7 +358,7 @@ final class AppSettingsViewModel: ObservableObject {
         let previous = audioEnabled
         audioEnabled = enabled
         do {
-            try await coreManager.safeCore.setAudioNotificationsEnabled(enabled: enabled)
+            try await coreManager.core.setAudioNotificationsEnabled(enabled: enabled)
         } catch {
             audioEnabled = previous
             errorMessage = "Failed to save setting: \(error.localizedDescription)"
@@ -369,7 +369,7 @@ final class AppSettingsViewModel: ObservableObject {
         let previous = ttsInactivityThresholdSecs
         ttsInactivityThresholdSecs = secs
         do {
-            try await coreManager.safeCore.setTtsInactivityThreshold(secs: secs)
+            try await coreManager.core.setTtsInactivityThreshold(secs: secs)
         } catch {
             ttsInactivityThresholdSecs = previous
             errorMessage = "Failed to save inactivity threshold: \(error.localizedDescription)"
@@ -378,7 +378,7 @@ final class AppSettingsViewModel: ObservableObject {
 
     func saveAudioPrompt(coreManager: TenexCoreManager) async {
         do {
-            try await coreManager.safeCore.setAudioPrompt(prompt: audioPrompt)
+            try await coreManager.core.setAudioPrompt(prompt: audioPrompt)
         } catch {
             errorMessage = "Failed to save prompt: \(error.localizedDescription)"
         }
@@ -386,7 +386,7 @@ final class AppSettingsViewModel: ObservableObject {
 
     func resetAudioPrompt(coreManager: TenexCoreManager) async {
         do {
-            try await coreManager.safeCore.setAudioPrompt(prompt: Self.defaultAudioPrompt)
+            try await coreManager.core.setAudioPrompt(prompt: Self.defaultAudioPrompt)
             audioPrompt = Self.defaultAudioPrompt
         } catch {
             errorMessage = "Failed to reset prompt: \(error.localizedDescription)"
@@ -402,7 +402,7 @@ final class AppSettingsViewModel: ObservableObject {
         }
 
         do {
-            try await coreManager.safeCore.setSelectedVoiceIds(voiceIds: Array(selectedVoiceIds))
+            try await coreManager.core.setSelectedVoiceIds(voiceIds: Array(selectedVoiceIds))
         } catch {
             if wasSelected {
                 selectedVoiceIds.insert(voiceId)
@@ -419,7 +419,7 @@ final class AppSettingsViewModel: ObservableObject {
     ) async {
         do {
             let encoded = OpenRouterModelSelectionCodec.encodeRoleSelections(selectedModelsByRole)
-            try await coreManager.safeCore.setOpenRouterModel(model: encoded)
+            try await coreManager.core.setOpenRouterModel(model: encoded)
         } catch {
             selectedModelsByRole = previous
             errorMessage = "Failed to save model selection: \(error.localizedDescription)"
@@ -452,11 +452,11 @@ final class AppSettingsViewModel: ObservableObject {
         do {
             if enabled {
                 if !previousRunning || previousUri.isEmpty {
-                    bunkerUri = try await coreManager.safeCore.startBunker()
+                    bunkerUri = try await coreManager.core.startBunker()
 
                     // Sync persisted auto-approve rules to the Rust core
                     for rule in BunkerAutoApproveStorage.loadRules() {
-                        try? await coreManager.safeCore.addBunkerAutoApproveRule(
+                        try? await coreManager.core.addBunkerAutoApproveRule(
                             requesterPubkey: rule.requesterPubkey,
                             eventKind: rule.eventKind
                         )
@@ -466,7 +466,7 @@ final class AppSettingsViewModel: ObservableObject {
                 await loadBunkerRulesAndLog(coreManager: coreManager)
             } else {
                 if previousRunning || !previousUri.isEmpty {
-                    try await coreManager.safeCore.stopBunker()
+                    try await coreManager.core.stopBunker()
                 }
                 bunkerRunning = false
                 bunkerUri = ""

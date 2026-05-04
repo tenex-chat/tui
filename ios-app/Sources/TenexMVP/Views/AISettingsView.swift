@@ -351,7 +351,7 @@ struct AISettingsView: View {
 
             var settings: AiAudioSettings?
             do {
-                settings = try await coreManager.safeCore.getAiAudioSettings()
+                settings = try await coreManager.core.getAiAudioSettings()
             } catch {
                 // Settings may not exist yet
             }
@@ -448,7 +448,7 @@ struct AISettingsView: View {
         let previousValue = !enabled
         Task {
             do {
-                try await coreManager.safeCore.setAudioNotificationsEnabled(enabled: enabled)
+                try await coreManager.core.setAudioNotificationsEnabled(enabled: enabled)
             } catch {
                 await MainActor.run {
                     audioEnabled = previousValue
@@ -462,7 +462,7 @@ struct AISettingsView: View {
     private func saveAudioPrompt() {
         Task {
             do {
-                try await coreManager.safeCore.setAudioPrompt(prompt: audioPrompt)
+                try await coreManager.core.setAudioPrompt(prompt: audioPrompt)
             } catch {
                 await MainActor.run {
                     errorMessage = "Failed to save prompt: \(error.localizedDescription)"
@@ -483,7 +483,7 @@ struct AISettingsView: View {
         let defaultPrompt = Self.defaultAudioPrompt
         Task {
             do {
-                try await coreManager.safeCore.setAudioPrompt(prompt: defaultPrompt)
+                try await coreManager.core.setAudioPrompt(prompt: defaultPrompt)
                 await MainActor.run {
                     audioPrompt = defaultPrompt
                 }
@@ -499,7 +499,7 @@ struct AISettingsView: View {
     private func saveSelectedModel(previousModel: String?) {
         Task {
             do {
-                try await coreManager.safeCore.setOpenRouterModel(model: selectedModel)
+                try await coreManager.core.setOpenRouterModel(model: selectedModel)
             } catch {
                 await MainActor.run {
                     selectedModel = previousModel
@@ -521,7 +521,7 @@ struct AISettingsView: View {
 
         Task {
             do {
-                try await coreManager.safeCore.setSelectedVoiceIds(voiceIds: Array(selectedVoiceIds))
+                try await coreManager.core.setSelectedVoiceIds(voiceIds: Array(selectedVoiceIds))
             } catch {
                 await MainActor.run {
                     if wasSelected {
@@ -553,7 +553,7 @@ struct AISettingsView: View {
             }
 
             do {
-                let voices = try await coreManager.safeCore.fetchElevenlabsVoices(apiKey: apiKey)
+                let voices = try await coreManager.core.fetchElevenlabsVoices(apiKey: apiKey)
                 await MainActor.run {
                     availableVoices = voices
                     isLoadingVoices = false
@@ -583,7 +583,7 @@ struct AISettingsView: View {
             }
 
             do {
-                let models = try await coreManager.safeCore.fetchOpenrouterModels(apiKey: apiKey)
+                let models = try await coreManager.core.fetchOpenrouterModels(apiKey: apiKey)
                 await MainActor.run {
                     availableModels = models
                     isLoadingModels = false

@@ -125,10 +125,10 @@ final class AppSessionStore: ObservableObject {
         Task {
             do {
                 if let relay {
-                    try await coreManager.safeCore.setRelayUrls(urls: [relay])
+                    try await coreManager.core.setRelayUrls(urls: [relay])
                 }
 
-                let result = try await coreManager.safeCore.login(nsec: nsec)
+                let result = try await coreManager.core.login(nsec: nsec)
                 guard result.success else {
                     autoLoginError = "Deep link login failed"
                     return

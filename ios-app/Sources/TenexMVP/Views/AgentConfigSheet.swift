@@ -521,7 +521,7 @@ struct AgentConfigSheet: View {
         saveError = nil
 
         do {
-            guard let config = try await coreManager.safeCore.getAgentConfig(agentPubkey: agent.pubkey) else {
+            guard let config = try await coreManager.core.getAgentConfig(agentPubkey: agent.pubkey) else {
                 allModels = []
                 toolGroups = []
                 allSkills = []
@@ -566,7 +566,7 @@ struct AgentConfigSheet: View {
             let tags: [String] = []
 
             if saveGlobally {
-                try await coreManager.safeCore.updateGlobalAgentConfig(
+                try await coreManager.core.updateGlobalAgentConfig(
                     agentPubkey: agent.pubkey,
                     model: selectedModel,
                     tools: Array(selectedTools),
@@ -575,7 +575,7 @@ struct AgentConfigSheet: View {
                     tags: tags
                 )
             } else {
-                try await coreManager.safeCore.updateAgentConfig(
+                try await coreManager.core.updateAgentConfig(
                     projectId: projectId,
                     agentPubkey: agent.pubkey,
                     model: selectedModel,

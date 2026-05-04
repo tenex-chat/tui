@@ -18,12 +18,12 @@ final class DelegationTreeViewModel: ObservableObject {
     @Published var nodePositions: [String: CGPoint] = [:]
     @Published var canvasSize: CGSize = CGSize(width: 800, height: 600)
 
-    var safeCore: SafeTenexCore?
+    var core: TenexCoreActor?
 
     init() {}
 
     func loadTree(rootConversationId: String) async {
-        guard let safeCore else {
+        guard let core else {
             loadError = "Core not initialized"
             isLoading = false
             return
@@ -33,7 +33,7 @@ final class DelegationTreeViewModel: ObservableObject {
         loadError = nil
 
         // Step 1: Get known descendants from runtime hierarchy
-        let descendantIds = await safeCore.getDescendantConversationIds(conversationId: rootConversationId)
+        let descendantIds = await core.getDescendantConversationIds(conversationId: rootConversationId)
 
         // Step 1b: Build a lightweight parent->children index from all visible conversations.
         // This backfills delegations that may be missing from runtime descendant traversal.
@@ -41,7 +41,7 @@ final class DelegationTreeViewModel: ObservableObject {
         do {
             var allConversationsById: [String: ConversationFullInfo] = [:]
 
-            let allConversations = try await safeCore.getAllConversations(
+            let allConversations = try await core.getAllConversations(
                 filter: ConversationFilter(
                     projectIds: [],
                     showArchived: true,
@@ -54,14 +54,14 @@ final class DelegationTreeViewModel: ObservableObject {
                 allConversationsById[conversation.thread.id] = conversation
             }
 
-            let projects = await safeCore.getProjects()
+            let projects = await core.getProjects()
             let perProjectConversations = await withTaskGroup(
                 of: [ConversationFullInfo].self,
                 returning: [ConversationFullInfo].self
             ) { group in
                 for project in projects {
-                    group.addTask { [safeCore] in
-                        await safeCore.getConversations(projectId: project.id)
+                    group.addTask { [core] in
+                        await core.getConversations(projectId: project.id)
                     }
                 }
 
@@ -111,7 +111,7 @@ final class DelegationTreeViewModel: ObservableObject {
             }
             attemptedConversationIds.formUnion(idsToFetch)
 
-            let fetchedConversations = await safeCore.getConversationsByIds(
+            let fetchedConversations = await core.getConversationsByIds(
                 conversationIds: Array(idsToFetch).sorted()
             )
             let newConversations = fetchedConversations.filter { conversationById[$0.thread.id] == nil }
@@ -125,8 +125,8 @@ final class DelegationTreeViewModel: ObservableObject {
 
             await withTaskGroup(of: (String, [Message]).self) { group in
                 for conversation in newConversations {
-                    group.addTask { [safeCore] in
-                        let messages = await safeCore.getMessages(conversationId: conversation.thread.id)
+                    group.addTask { [core] in
+                        let messages = await core.getMessages(conversationId: conversation.thread.id)
                         return (conversation.thread.id, messages)
                     }
                 }

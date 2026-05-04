@@ -38,8 +38,8 @@ final class SkillsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            async let fetchedSkills = coreManager.safeCore.getSkills()
-            async let fetchedCurrentUser = coreManager.safeCore.getCurrentUser()
+            async let fetchedSkills = coreManager.core.getSkills()
+            async let fetchedCurrentUser = coreManager.core.getCurrentUser()
 
             let (skills, currentUser) = try await (fetchedSkills, fetchedCurrentUser)
             currentUserPubkey = currentUser?.pubkey
@@ -112,7 +112,7 @@ final class SkillsViewModel: ObservableObject {
 
         for pubkey in uniquePubkeys {
             if !resolvedAuthorPictures.contains(pubkey) {
-                if let picture = try? await coreManager.safeCore.getProfilePicture(pubkey: pubkey),
+                if let picture = try? await coreManager.core.getProfilePicture(pubkey: pubkey),
                    !picture.isEmpty {
                     authorPictureCache[pubkey] = picture
                 }

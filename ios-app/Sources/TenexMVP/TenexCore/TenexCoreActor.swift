@@ -1,7 +1,7 @@
 import Foundation
 
 // MARK: - FFI Top-Level Function Wrappers
-// These private wrappers provide access to UniFFI top-level functions from within SafeTenexCore.
+// These private wrappers provide access to UniFFI top-level functions from within TenexCoreActor.
 // They're needed because the actor's methods with the same names would otherwise shadow them.
 
 private func _listAudioNotifications() throws -> [AudioNotificationInfo] {
@@ -20,7 +20,7 @@ private func _fetchOpenrouterModels(apiKey: String) throws -> [ModelInfo] {
     try fetchOpenrouterModels(apiKey: apiKey)
 }
 
-/// Thread-safe actor wrapper around TenexCore that provides:
+/// Actor wrapper around the raw TenexCore FFI binding that provides:
 /// - Serialized FFI access (thread safety via actor isolation)
 /// - Proper error handling (no force unwraps exposed to callers)
 /// - Async interface for modern Swift concurrency
@@ -28,8 +28,8 @@ private func _fetchOpenrouterModels(apiKey: String) throws -> [ModelInfo] {
 ///
 /// ## Usage
 /// ```swift
-/// let safeCore = SafeTenexCore(core: tenexCore)
-/// let projects = try await safeCore.getProjects()
+/// let core = TenexCoreActor(rawCore: tenexCore)
+/// let projects = try await core.getProjects()
 /// ```
 ///
 /// ## Profiling
@@ -46,12 +46,12 @@ private func _fetchOpenrouterModels(apiKey: String) throws -> [ModelInfo] {
 /// - `getProjects()`, `getMessages()`, `getConversations()`, `getInbox()`
 /// - `getConversationRuntimeMs()`, `getTodayRuntimeMs()`
 /// - `getDiagnosticsSnapshot()`, `refresh()`, `init()`
-actor SafeTenexCore: SafeTenexCoreProtocol {
+actor TenexCoreActor: TenexCoreActorProtocol {
     private let core: TenexCore
     private let profiler = PerformanceProfiler.shared
 
-    init(core: TenexCore) {
-        self.core = core
+    init(rawCore: TenexCore) {
+        self.core = rawCore
     }
 
     // MARK: - Core Lifecycle

@@ -348,10 +348,10 @@ struct BunkerApprovalSheet: View {
 
     private func startSignedElsewhereWatch() {
         guard let eventId = extractEventId() else { return }
-        let safeCore = coreManager.safeCore
+        let core = coreManager.core
 
         signedElsewhereTask = Task {
-            let relays = await safeCore.getConfiguredRelays()
+            let relays = await core.getConfiguredRelays()
             guard !relays.isEmpty, !Task.isCancelled else { return }
 
             await withTaskGroup(of: Bool.self) { group in
@@ -452,7 +452,7 @@ struct BunkerApprovalSheet: View {
         if approved && alwaysApprove, let kind = request.eventKind {
             persistAutoApproveRule(requesterPubkey: request.requesterPubkey, eventKind: kind)
             Task {
-                try? await coreManager.safeCore.addBunkerAutoApproveRule(
+                try? await coreManager.core.addBunkerAutoApproveRule(
                     requesterPubkey: request.requesterPubkey,
                     eventKind: kind
                 )

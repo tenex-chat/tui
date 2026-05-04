@@ -38,8 +38,8 @@ final class AgentDefinitionsViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            async let fetchedAgents = coreManager.safeCore.getAllAgents()
-            async let fetchedCurrentUser = coreManager.safeCore.getCurrentUser()
+            async let fetchedAgents = coreManager.core.getAllAgents()
+            async let fetchedCurrentUser = coreManager.core.getCurrentUser()
 
             let (agents, user) = try await (fetchedAgents, fetchedCurrentUser)
             currentUserPubkey = user?.pubkey
@@ -118,7 +118,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
         }
 
         do {
-            try await coreManager.safeCore.deleteAgentDefinition(agentId: id)
+            try await coreManager.core.deleteAgentDefinition(agentId: id)
 
             mine.removeAll { $0.id == id }
             community.removeAll { $0.id == id }
@@ -205,7 +205,7 @@ final class AgentDefinitionsViewModel: ObservableObject {
 
         for pubkey in uniquePubkeys {
             if !resolvedAuthorPictures.contains(pubkey) {
-                if let picture = try? await coreManager.safeCore.getProfilePicture(pubkey: pubkey),
+                if let picture = try? await coreManager.core.getProfilePicture(pubkey: pubkey),
                    !picture.isEmpty {
                     authorPictureCache[pubkey] = picture
                 }

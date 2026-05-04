@@ -126,7 +126,7 @@ struct InlineDelegationCard: View {
     private func loadConversationInfo() async {
         isLoading = true
         let startedAt = CFAbsoluteTimeGetCurrent()
-        let infos = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
+        let infos = await coreManager.core.getConversationsByIds(conversationIds: [conversationId])
         await MainActor.run {
             conversationInfo = infos.first
             isLoading = false

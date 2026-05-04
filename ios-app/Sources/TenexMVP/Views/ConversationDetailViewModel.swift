@@ -258,8 +258,8 @@ final class ConversationDetailViewModel {
 
         // Get all descendants
         let descendantsLookupStartedAt = CFAbsoluteTimeGetCurrent()
-        let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversationId)
-        let allDescendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
+        let descendantIds = await coreManager.core.getDescendantConversationIds(conversationId: conversationId)
+        let allDescendants = await coreManager.core.getConversationsByIds(conversationIds: descendantIds)
         let descendantsLookupMs = (CFAbsoluteTimeGetCurrent() - descendantsLookupStartedAt) * 1000
 
         // Get direct children from descendants
@@ -273,7 +273,7 @@ final class ConversationDetailViewModel {
         ) { group in
             for descendant in allDescendants {
                 group.addTask {
-                    let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.thread.id)
+                    let msgs = await coreManager.core.getMessages(conversationId: descendant.thread.id)
                     return (descendant.thread.id, msgs)
                 }
             }
@@ -412,7 +412,7 @@ final class ConversationDetailViewModel {
             ) { group in
                 for descendant in missing {
                     group.addTask {
-                        let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.thread.id)
+                        let msgs = await coreManager.core.getMessages(conversationId: descendant.thread.id)
                         return (descendant.thread.id, msgs)
                     }
                 }
@@ -466,7 +466,7 @@ final class ConversationDetailViewModel {
         if let cached = profileNameCache[pubkey] {
             return cached
         }
-        let name = await coreManager.safeCore.getProfileName(pubkey: pubkey)
+        let name = await coreManager.core.getProfileName(pubkey: pubkey)
         profileNameCache[pubkey] = name
         return name
     }
@@ -666,7 +666,7 @@ final class ConversationDetailViewModel {
         guard let coreManager = coreManager else { return 0 }
 
         // Get runtime in milliseconds from the FFI
-        let runtimeMs = await coreManager.safeCore.getConversationRuntimeMs(conversationId: conversation.thread.id)
+        let runtimeMs = await coreManager.core.getConversationRuntimeMs(conversationId: conversation.thread.id)
 
         // Convert milliseconds to seconds
         return TimeInterval(runtimeMs) / 1000.0

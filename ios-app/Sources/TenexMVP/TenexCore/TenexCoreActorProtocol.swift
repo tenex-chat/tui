@@ -1,8 +1,8 @@
 import Foundation
 
-/// Protocol matching SafeTenexCore's interface for mock testing.
+/// Protocol matching TenexCoreActor's interface for mock testing.
 /// All methods are async to match the actor-based implementation.
-protocol SafeTenexCoreProtocol: Actor {
+protocol TenexCoreActorProtocol: Actor {
     // MARK: - Core Lifecycle
     func refresh() -> Bool
     func forceReconnect() throws

@@ -86,9 +86,8 @@ final class ProfilePictureCache: @unchecked Sendable {
 /// eliminating whole-tree invalidation on any single property change.
 @Observable @MainActor
 class TenexCoreManager {
-    @ObservationIgnored let core: TenexCore
-    /// Thread-safe async wrapper for FFI access with proper error handling
-    @ObservationIgnored let safeCore: SafeTenexCore
+    @ObservationIgnored let rawCore: TenexCore
+    @ObservationIgnored let core: TenexCoreActor
     @ObservationIgnored let profiler = PerformanceProfiler.shared
     var isInitialized = false
     var initializationError: String?
@@ -291,9 +290,9 @@ class TenexCoreManager {
         appFilterShowArchived = persistedFilter.showArchived
 
         // Create core immediately (lightweight)
-        let tenexCore = TenexCore()
-        core = tenexCore
-        safeCore = SafeTenexCore(core: tenexCore)
+        let ffiCore = TenexCore()
+        rawCore = ffiCore
+        core = TenexCoreActor(rawCore: ffiCore)
 
         // Set up hierarchy cache with reference to self
         // Note: This creates a retain cycle that we break on logout
@@ -306,7 +305,7 @@ class TenexCoreManager {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             print("[TENEX PERF] core.init starting")
             let startedAt = CFAbsoluteTimeGetCurrent()
-            let success = tenexCore.`init`()
+            let success = ffiCore.`init`()
             let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
             print("[TENEX PERF] core.init finished success=\(success) totalMs=\(String(format: "%.0f", elapsedMs))")
 
@@ -333,12 +332,12 @@ class TenexCoreManager {
     }
 
     /// Trigger a manual sync with relays (optional, user-initiated).
-    /// Runs refresh() via Task.detached to avoid blocking the SafeTenexCore actor queue,
+    /// Runs refresh() via Task.detached to avoid blocking the TenexCoreActor queue,
     /// which would cause priority inversion for lightweight reads like getTodayRuntimeMs().
     func syncNow() async {
-        let core = self.core
+        let rawCore = self.rawCore
         await Task.detached {
-            _ = core.refresh()
+            _ = rawCore.refresh()
         }.value
     }
 
@@ -481,9 +480,9 @@ class TenexCoreManager {
     /// so the FFI call runs on a detached task to avoid blocking the main thread.
     @MainActor
     func refreshRuntimeText() {
-        let core = self.core
+        let rawCore = self.rawCore
         Task.detached {
-            let totalMs = core.getTodayRuntimeMs()
+            let totalMs = rawCore.getTodayRuntimeMs()
             let totalSeconds = totalMs / 1000
             let text: String
             if totalSeconds < 60 {

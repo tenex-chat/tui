@@ -346,7 +346,7 @@ struct AskAnswerView: View {
 
         Task {
             do {
-                _ = try await coreManager.safeCore.answerAsk(
+                _ = try await coreManager.core.answerAsk(
                     askEventId: askEventId,
                     askAuthorPubkey: askAuthorPubkey,
                     conversationId: conversationId,

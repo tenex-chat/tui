@@ -78,7 +78,7 @@ final class TeamsViewModel: ObservableObject {
             isLoading = true
 
             do {
-                let teams = try await coreManager.safeCore.getAllTeams()
+                let teams = try await coreManager.core.getAllTeams()
                 await resolveAuthorPictures(pubkeys: Set(teams.map(\.pubkey)), coreManager: coreManager)
 
                 let sortedTeams = teams.sorted { lhs, rhs in
@@ -122,7 +122,7 @@ final class TeamsViewModel: ObservableObject {
         let willLike = !current.team.likedByMe
 
         do {
-            _ = try await coreManager.safeCore.reactToTeam(
+            _ = try await coreManager.core.reactToTeam(
                 teamCoordinate: current.team.coordinate,
                 teamEventId: current.team.id,
                 teamPubkey: current.team.pubkey,
@@ -150,7 +150,7 @@ final class TeamsViewModel: ObservableObject {
     func loadCommentThread(for team: TeamInfo) async throws -> [TeamCommentThread] {
         guard let coreManager else { return [] }
 
-        let comments = try await coreManager.safeCore.getTeamComments(
+        let comments = try await coreManager.core.getTeamComments(
             teamCoordinate: team.coordinate,
             teamEventId: team.id
         )
@@ -172,7 +172,7 @@ final class TeamsViewModel: ObservableObject {
         guard let coreManager else { return [] }
         guard !team.agentDefinitionIds.isEmpty else { return [] }
 
-        let allAgents = try await coreManager.safeCore.getAllAgents()
+        let allAgents = try await coreManager.core.getAllAgents()
         let matchingIds = Set(team.agentDefinitionIds)
         let matching = allAgents.filter { matchingIds.contains($0.id) }
 
@@ -205,7 +205,7 @@ final class TeamsViewModel: ObservableObject {
         }
 
         do {
-            _ = try await coreManager.safeCore.postTeamComment(
+            _ = try await coreManager.core.postTeamComment(
                 teamCoordinate: team.coordinate,
                 teamEventId: team.id,
                 teamPubkey: team.pubkey,
@@ -343,7 +343,7 @@ final class TeamsViewModel: ObservableObject {
     private func resolveAuthorPictures(pubkeys: Set<String>, coreManager: TenexCoreManager) async {
         for pubkey in pubkeys {
             if !resolvedAuthorPictures.contains(pubkey) {
-                if let picture = try? await coreManager.safeCore.getProfilePicture(pubkey: pubkey),
+                if let picture = try? await coreManager.core.getProfilePicture(pubkey: pubkey),
                    !picture.isEmpty {
                     authorPictureCache[pubkey] = picture
                 }

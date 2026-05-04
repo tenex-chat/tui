@@ -342,7 +342,7 @@ struct SearchView: View {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
 
-            let searchResults = await coreManager.safeCore.search(query: query, limit: 50)
+            let searchResults = await coreManager.core.search(query: query, limit: 50)
 
             guard !Task.isCancelled else { return }
 
@@ -362,11 +362,11 @@ struct SearchView: View {
 
             // Fetch conversation info for titles
             let conversationIds = Array(grouped.keys)
-            let conversations = await coreManager.safeCore.getConversationsByIds(conversationIds: conversationIds)
+            let conversations = await coreManager.core.getConversationsByIds(conversationIds: conversationIds)
             let conversationMap = Dictionary(uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) })
 
             // Get projects for project name lookup
-            let projects = await coreManager.safeCore.getProjects()
+            let projects = await coreManager.core.getProjects()
             let projectMap = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0.title) })
 
             // Build grouped results
@@ -441,7 +441,7 @@ struct SearchView: View {
             isLoadingConversation = true
         }
 
-        let conversations = await coreManager.safeCore.getConversationsByIds(conversationIds: [id])
+        let conversations = await coreManager.core.getConversationsByIds(conversationIds: [id])
 
         await MainActor.run {
             // Only process if this is still the latest request (prevents race condition)

@@ -4,7 +4,7 @@ extension TenexCoreManager {
     @MainActor
     func reloadPendingBackendApprovalPrompts() async {
         do {
-            let snapshot = try await safeCore.getBackendTrustSnapshot()
+            let snapshot = try await core.getBackendTrustSnapshot()
             applyPendingBackendApprovalSnapshot(snapshot.pending)
         } catch {
             profiler.logEvent(
@@ -35,7 +35,7 @@ extension TenexCoreManager {
     @MainActor
     func approvePendingBackend(backendPubkey: String) async {
         do {
-            try await safeCore.approveBackend(pubkey: backendPubkey)
+            try await core.approveBackend(pubkey: backendPubkey)
             snoozedBackendApprovalProjectTags.removeValue(forKey: backendPubkey)
             pendingBackendApprovalRequests.removeAll { $0.backendPubkey == backendPubkey }
             await republishCachedApnsRegistrationNow()
@@ -52,7 +52,7 @@ extension TenexCoreManager {
     @MainActor
     func blockPendingBackend(backendPubkey: String) async {
         do {
-            try await safeCore.blockBackend(pubkey: backendPubkey)
+            try await core.blockBackend(pubkey: backendPubkey)
             snoozedBackendApprovalProjectTags.removeValue(forKey: backendPubkey)
             pendingBackendApprovalRequests.removeAll { $0.backendPubkey == backendPubkey }
             await fetchData()

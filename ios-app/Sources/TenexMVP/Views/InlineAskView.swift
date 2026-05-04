@@ -38,7 +38,7 @@ struct InlineAskView: View {
             }
         }
         .task {
-            let messages = await coreManager.safeCore.getMessages(conversationId: askEventId)
+            let messages = await coreManager.core.getMessages(conversationId: askEventId)
             if let reply = messages.first(where: { $0.replyTo == askEventId }) {
                 isAlreadyAnswered = true
                 replyContent = reply.content

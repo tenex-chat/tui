@@ -13,12 +13,12 @@ extension TenexCoreManager {
             let loadStartedAt = CFAbsoluteTimeGetCurrent()
 
             // Fetch all data concurrently
-            async let fetchedProjects = safeCore.getProjects()
+            async let fetchedProjects = core.getProjects()
             async let fetchedConversations = try fetchConversations(for: filterSnapshot)
-            async let fetchedInbox = safeCore.getInbox()
-            async let fetchedBookmarkedIds = try? safeCore.getBookmarkedIds()
-            async let fetchedReports = safeCore.getReports(projectId: "")
-            async let fetchedHtmlReports = safeCore.getHtmlReports(projectId: "")
+            async let fetchedInbox = core.getInbox()
+            async let fetchedBookmarkedIds = try? core.getBookmarkedIds()
+            async let fetchedReports = core.getReports(projectId: "")
+            async let fetchedHtmlReports = core.getHtmlReports(projectId: "")
 
             let (p, c, i) = try await (fetchedProjects, fetchedConversations, fetchedInbox)
             let bIds = await fetchedBookmarkedIds
@@ -102,7 +102,7 @@ extension TenexCoreManager {
             guard let self else { return }
 
             // Fetch projects
-            let projects = await safeCore.getProjects()
+            let projects = await core.getProjects()
 
             // Check for cancellation before continuing
             if Task.isCancelled { return }
@@ -129,7 +129,7 @@ extension TenexCoreManager {
     func refreshProjectRosterState(for projects: [Project]? = nil) async {
         let startedAt = CFAbsoluteTimeGetCurrent()
         let projects = projects ?? self.projects
-        let inventory = (try? await safeCore.getAgentInventory()) ?? []
+        let inventory = (try? await core.getAgentInventory()) ?? []
         let inventoryByPubkey = inventory.reduce(into: [String: AgentInventoryItem]()) { result, item in
             result[item.pubkey] = item
         }
@@ -238,7 +238,7 @@ extension TenexCoreManager {
             return
         }
         let startedAt = CFAbsoluteTimeGetCurrent()
-        let fetched = await safeCore.getMessages(conversationId: conversationId)
+        let fetched = await core.getMessages(conversationId: conversationId)
         mergeMessagesCache(fetched, for: conversationId)
         let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
         profiler.logEvent(
@@ -309,8 +309,8 @@ extension TenexCoreManager {
 
         for (index, pubkey) in project.agentPubkeys.enumerated() {
             let inventoryItem = inventoryByPubkey[pubkey]
-            let config = try? await safeCore.getAgentConfig(agentPubkey: pubkey)
-            let profileName = await safeCore.getProfileName(pubkey: pubkey)
+            let config = try? await core.getAgentConfig(agentPubkey: pubkey)
+            let profileName = await core.getProfileName(pubkey: pubkey)
             let displayName = Self.displayName(pubkey: pubkey, profileName: profileName)
             let backendPubkey = Self.preferredBackendPubkey(inventoryItem: inventoryItem, config: config)
 
@@ -412,7 +412,7 @@ extension TenexCoreManager {
             hideInterventionReview: snapshot.interventionReviewFilter == .hide,
             timeFilter: snapshot.timeWindow.coreTimeFilter
         )
-        let fetched = try await safeCore.getAllConversations(filter: filter)
+        let fetched = try await core.getAllConversations(filter: filter)
         guard !Task.isCancelled else { return [] }
         let now = UInt64(Date().timeIntervalSince1970)
         let baseFiltered = fetched.filter { conversation in

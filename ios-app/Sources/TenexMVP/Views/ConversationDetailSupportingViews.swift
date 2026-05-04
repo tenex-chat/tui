@@ -464,7 +464,7 @@ struct FullConversationSheet: View {
         }
         .navigationTitle("Full Conversation")
         .task(id: conversation.thread.id) {
-            currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
+            currentUserPubkey = await coreManager.core.getCurrentUser()?.pubkey
         }
         .task(id: "\(conversation.thread.id)-minute-tick") {
             await runTranscriptMinuteTicker()
@@ -761,7 +761,7 @@ struct FullConversationSheet: View {
 
     private func viewRawEvent(for messageId: String) {
         Task {
-            let rawEvent = await coreManager.safeCore.getRawEventJson(eventId: messageId)
+            let rawEvent = await coreManager.core.getRawEventJson(eventId: messageId)
             await MainActor.run {
                 if let rawEvent, !rawEvent.isEmpty {
                     rawEventDestination = FullConversationRawEventDestination(
@@ -918,7 +918,7 @@ private struct DelegationSheetFromId: View {
 
     private func loadConversation() async {
         isLoading = true
-        let convs = await coreManager.safeCore.getConversationsByIds(conversationIds: [delegationId])
+        let convs = await coreManager.core.getConversationsByIds(conversationIds: [delegationId])
         await MainActor.run {
             conversation = convs.first
             isLoading = false

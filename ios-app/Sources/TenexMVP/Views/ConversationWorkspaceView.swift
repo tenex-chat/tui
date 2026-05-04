@@ -109,7 +109,7 @@ struct ConversationByIdAdaptiveDetailView: View {
                 return
             }
 
-            let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: [conversationId])
+            let fetched = await coreManager.core.getConversationsByIds(conversationIds: [conversationId])
             if let resolved = fetched.first {
                 conversation = resolved
                 isLoading = false
@@ -117,7 +117,7 @@ struct ConversationByIdAdaptiveDetailView: View {
             }
 
             if !forcedRefresh {
-                _ = await coreManager.safeCore.refresh()
+                _ = await coreManager.core.refresh()
                 forcedRefresh = true
             }
 
@@ -722,7 +722,7 @@ struct ConversationWorkspaceView: View {
             viewModel.setCoreManager(coreManager)
             await viewModel.loadData()
         }
-        let currentUserPubkey = await coreManager.safeCore.getCurrentUser()?.pubkey
+        let currentUserPubkey = await coreManager.core.getCurrentUser()?.pubkey
         viewModel.setCurrentUserPubkey(currentUserPubkey)
         // Warm display-name and profile-picture caches so the first transcript
         // render doesn't hit cold FFI lookups for every unique author.
@@ -777,7 +777,7 @@ struct ConversationWorkspaceView: View {
     private func viewRawEvent(for messageId: String) {
         Task {
             let startedAt = CFAbsoluteTimeGetCurrent()
-            let rawEvent = await coreManager.safeCore.getRawEventJson(eventId: messageId)
+            let rawEvent = await coreManager.core.getRawEventJson(eventId: messageId)
 
             await MainActor.run {
                 if let rawEvent, !rawEvent.isEmpty {
@@ -857,7 +857,7 @@ struct ConversationWorkspaceView: View {
 
         Task {
             let startedAt = CFAbsoluteTimeGetCurrent()
-            let convs = await coreManager.safeCore.getConversationsByIds(conversationIds: [delegationId])
+            let convs = await coreManager.core.getConversationsByIds(conversationIds: [delegationId])
             await MainActor.run {
                 if let conv = convs.first {
                     navigateToDelegation(conv)

@@ -47,7 +47,7 @@ extension TenexCoreManager {
     /// 5. Refreshes all data from the store
     func manualRefresh() async {
         let startedAt = CFAbsoluteTimeGetCurrent()
-        // Run refresh() via Task.detached to avoid blocking the SafeTenexCore actor queue,
+        // Run refresh() via Task.detached to avoid blocking the TenexCoreActor actor queue,
         // which would cause priority inversion for lightweight reads.
         let core = self.core
         await Task.detached {
@@ -177,7 +177,7 @@ extension TenexCoreManager {
         lastConversationMessageRefreshAt[conversationId] = now
         Task {
             let startedAt = CFAbsoluteTimeGetCurrent()
-            let messages = await safeCore.getMessages(conversationId: conversationId)
+            let messages = await core.getMessages(conversationId: conversationId)
             await MainActor.run {
                 self.setMessagesCache(messages, for: conversationId)
                 self.inflightConversationMessageRefreshes.remove(conversationId)
@@ -384,8 +384,8 @@ extension TenexCoreManager {
         Task {
             let startedAt = CFAbsoluteTimeGetCurrent()
             // Refresh messages for this specific conversation
-            let messages = await safeCore.getMessages(conversationId: conversationId)
-            let refreshedConversation = await safeCore.getConversationsByIds(conversationIds: [conversationId]).first
+            let messages = await core.getMessages(conversationId: conversationId)
+            let refreshedConversation = await core.getConversationsByIds(conversationIds: [conversationId]).first
             await MainActor.run {
                 self.setMessagesCache(messages, for: conversationId)
                 if let refreshedConversation {
@@ -481,7 +481,7 @@ extension TenexCoreManager {
         pendingBunkerRequests.removeAll { $0.requestId == requestId }
         signalDiagnosticsUpdate()
         Task {
-            try? await safeCore.respondToBunkerRequest(requestId: requestId, approved: true)
+            try? await core.respondToBunkerRequest(requestId: requestId, approved: true)
             await MainActor.run {
                 self.signalDiagnosticsUpdate()
             }
@@ -493,7 +493,7 @@ extension TenexCoreManager {
         pendingBunkerRequests.removeAll { $0.requestId == requestId }
         signalDiagnosticsUpdate()
         Task {
-            try? await safeCore.respondToBunkerRequest(requestId: requestId, approved: false)
+            try? await core.respondToBunkerRequest(requestId: requestId, approved: false)
             await MainActor.run {
                 self.signalDiagnosticsUpdate()
             }

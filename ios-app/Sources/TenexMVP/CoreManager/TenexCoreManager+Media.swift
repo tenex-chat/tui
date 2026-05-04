@@ -30,7 +30,7 @@ extension TenexCoreManager {
         }
 
         do {
-            let notification = try await safeCore.generateAudioNotification(
+            let notification = try await core.generateAudioNotification(
                 agentPubkey: agentPubkey,
                 conversationTitle: conversationTitle,
                 messageText: messageText,

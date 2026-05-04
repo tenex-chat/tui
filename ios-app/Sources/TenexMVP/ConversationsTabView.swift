@@ -150,7 +150,7 @@ struct ConversationsTabView: View {
             rebuildHierarchy()
             rebuildProjectCaches()
             await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
-            if let settings = try? await coreManager.safeCore.getAiAudioSettings() {
+            if let settings = try? await coreManager.core.getAiAudioSettings() {
                 audioNotificationsEnabled = settings.enabled
             }
         }
@@ -665,7 +665,7 @@ struct ConversationsTabView: View {
             }
             .onChange(of: audioNotificationsEnabled) { _, enabled in
                 Task {
-                    try? await coreManager.safeCore.setAudioNotificationsEnabled(enabled: enabled)
+                    try? await coreManager.core.setAudioNotificationsEnabled(enabled: enabled)
                 }
             }
 
@@ -741,7 +741,7 @@ struct ConversationsTabView: View {
         }
 
         Task {
-            let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: [eventId])
+            let fetched = await coreManager.core.getConversationsByIds(conversationIds: [eventId])
             await MainActor.run {
                 if let conversation = fetched.first {
                     selectCreatedConversation(conversation)
@@ -776,7 +776,7 @@ struct ConversationsTabView: View {
     }
 
     private func toggleArchive(_ conversation: ConversationFullInfo) {
-        _ = coreManager.safeCore.toggleConversationArchived(conversationId: conversation.thread.id)
+        _ = coreManager.core.toggleConversationArchived(conversationId: conversation.thread.id)
         scheduleHierarchyRebuild()
     }
 

@@ -176,10 +176,10 @@ struct LoginView: View {
             do {
                 // Set relay URL if provided
                 if let relay = result.relay {
-                    try await coreManager.safeCore.setRelayUrls(urls: [relay])
+                    try await coreManager.core.setRelayUrls(urls: [relay])
                 }
 
-                let loginResult = try await coreManager.safeCore.login(nsec: result.nsec)
+                let loginResult = try await coreManager.core.login(nsec: result.nsec)
 
                 if loginResult.success {
                     _ = await coreManager.saveCredential(nsec: result.nsec)
@@ -230,10 +230,10 @@ struct LoginView: View {
             return
         }
 
-        // Perform login using async/await with SafeTenexCore
+        // Perform login using async/await with TenexCoreActor
         Task {
             do {
-                let result = try await coreManager.safeCore.login(nsec: trimmedInput)
+                let result = try await coreManager.core.login(nsec: trimmedInput)
 
                 if result.success {
                     // Save credential for future auto-login.

@@ -94,11 +94,11 @@ struct ComposerDependencies {
 
 extension TenexCoreManager: CoreGateway {
     func getSkills() async throws -> [Skill] {
-        try await safeCore.getSkills()
+        try await core.getSkills()
     }
 
     func getProfileName(pubkey: String) async -> String {
-        await safeCore.getProfileName(pubkey: pubkey)
+        await core.getProfileName(pubkey: pubkey)
     }
 
     func sendThread(
@@ -110,7 +110,7 @@ extension TenexCoreManager: CoreGateway {
         referenceConversationId: String?,
         referenceReportATag: String?
     ) async throws -> SendMessageResult {
-        try await safeCore.sendThread(
+        try await core.sendThread(
             projectId: projectId,
             title: title,
             content: content,
@@ -129,7 +129,7 @@ extension TenexCoreManager: CoreGateway {
         agentPubkey: String?,
         skillIds: [String]
     ) async throws -> SendMessageResult {
-        try await safeCore.sendMessage(
+        try await core.sendMessage(
             conversationId: conversationId,
             projectId: projectId,
             content: content,
@@ -140,7 +140,7 @@ extension TenexCoreManager: CoreGateway {
     }
 
     func uploadImage(data: Data, mimeType: String) async throws -> String {
-        try await safeCore.uploadImage(data: data, mimeType: mimeType)
+        try await core.uploadImage(data: data, mimeType: mimeType)
     }
 }
 

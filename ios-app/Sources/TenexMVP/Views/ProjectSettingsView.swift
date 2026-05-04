@@ -471,7 +471,7 @@ struct ProjectSettingsView: View {
 
     private func reloadSelectionData() async {
         do {
-            let inventory = try await coreManager.safeCore.getAgentInventory()
+            let inventory = try await coreManager.core.getAgentInventory()
 
             await MainActor.run {
                 self.agentInventory = inventory.sorted {
@@ -495,7 +495,7 @@ struct ProjectSettingsView: View {
         defer { isBooting = false }
 
         do {
-            try await coreManager.safeCore.bootProject(projectId: project.id)
+            try await coreManager.core.bootProject(projectId: project.id)
         } catch {
             presentError(error)
         }
@@ -506,7 +506,7 @@ struct ProjectSettingsView: View {
         defer { isSavingGeneral = false }
 
         do {
-            try await coreManager.safeCore.updateProject(
+            try await coreManager.core.updateProject(
                 projectId: project.id,
                 title: generalDraft.title.trimmingCharacters(in: .whitespacesAndNewlines),
                 description: generalDraft.description,
@@ -527,7 +527,7 @@ struct ProjectSettingsView: View {
         defer { isSavingAgents = false }
 
         do {
-            try await coreManager.safeCore.updateProject(
+            try await coreManager.core.updateProject(
                 projectId: project.id,
                 title: project.title,
                 description: project.description ?? "",
@@ -549,7 +549,7 @@ struct ProjectSettingsView: View {
         defer { isDeleting = false }
 
         do {
-            try await coreManager.safeCore.deleteProject(projectId: project.id)
+            try await coreManager.core.deleteProject(projectId: project.id)
             selectedProjectId = nil
         } catch {
             presentError(error)

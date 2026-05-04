@@ -665,7 +665,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Create a new project (kind:31933 replaceable event).
      */
-    func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool) throws
+    func createProject(name: String, description: String, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool) throws 
     
     /**
      * Delete an agent from a project or globally by publishing a kind:24030 event.
@@ -1289,7 +1289,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      *
      * Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
      */
-    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool) throws
+    func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool) throws 
     
     /**
      * Upload an image to Blossom and return the URL.
@@ -6942,9 +6942,9 @@ public struct FfiConverterTypeProject: FfiConverterRustBuffer {
                 description: FfiConverterOptionString.read(from: &buf), 
                 repoUrl: FfiConverterOptionString.read(from: &buf), 
                 pictureUrl: FfiConverterOptionString.read(from: &buf), 
-                isDeleted: FfiConverterBool.read(from: &buf),
-                isPrivate: FfiConverterBool.read(from: &buf),
-                pubkey: FfiConverterString.read(from: &buf),
+                isDeleted: FfiConverterBool.read(from: &buf), 
+                isPrivate: FfiConverterBool.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
                 participants: FfiConverterSequenceString.read(from: &buf), 
                 agentPubkeys: FfiConverterSequenceString.read(from: &buf), 
                 mcpToolIds: FfiConverterSequenceString.read(from: &buf), 
@@ -11767,7 +11767,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_create_nudge() != 31059) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_create_project() != 2435) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_create_project() != 44785) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_delete_agent() != 3202) {
@@ -12040,7 +12040,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 40554) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 26050) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 57824) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_upload_image() != 35002) {

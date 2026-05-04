@@ -760,7 +760,7 @@ struct InboxConversationView: View {
         .toolbarTitleDisplayMode(.inline)
         #endif
         .task {
-            userPubkey = (await coreManager.safeCore.getCurrentUser())?.pubkey ?? ""
+            userPubkey = (await coreManager.core.getCurrentUser())?.pubkey ?? ""
             await loadMessages()
         }
         .onChange(of: coreManager.messagesByConversation) { _, _ in

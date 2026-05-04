@@ -161,12 +161,12 @@ struct AppRootSceneView: View {
         guard enabled else { return }
 
         do {
-            let _ = try await coreManager.safeCore.startBunker()
+            let _ = try await coreManager.core.startBunker()
 
             // Restore persisted auto-approve rules into the Rust core
             let persistedRules = BunkerAutoApproveStorage.loadRules()
             for rule in persistedRules {
-                try? await coreManager.safeCore.addBunkerAutoApproveRule(
+                try? await coreManager.core.addBunkerAutoApproveRule(
                     requesterPubkey: rule.requesterPubkey,
                     eventKind: rule.eventKind
                 )

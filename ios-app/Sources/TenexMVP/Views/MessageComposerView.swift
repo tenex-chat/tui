@@ -471,7 +471,7 @@ struct MessageComposerView: View {
                 },
                 onToggleBookmark: { itemId in
                     Task {
-                        _ = try? await coreManager.safeCore.toggleBookmark(itemId: itemId)
+                        _ = try? await coreManager.core.toggleBookmark(itemId: itemId)
                     }
                 }
             )

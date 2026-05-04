@@ -206,7 +206,7 @@ private struct ProjectsSheetRow: View {
 
         Task {
             do {
-                try await coreManager.safeCore.bootProject(projectId: project.id)
+                try await coreManager.core.bootProject(projectId: project.id)
             } catch {
                 await MainActor.run {
                     bootError = error.localizedDescription
