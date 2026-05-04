@@ -4579,6 +4579,11 @@ impl App {
     }
 
     /// Block a backend pubkey (persist to preferences and update data store)
+    pub fn remove_backend(&mut self, pubkey: &str) {
+        self.preferences.borrow_mut().remove_backend(pubkey);
+        self.data_store.borrow_mut().trust.remove_backend(pubkey);
+    }
+
     pub fn block_backend(&mut self, pubkey: &str) {
         self.preferences.borrow_mut().block_backend(pubkey);
         self.data_store.borrow_mut().add_blocked_backend(pubkey);

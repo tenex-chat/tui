@@ -835,11 +835,11 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
                 Style::default().fg(theme::TEXT_MUTED),
             ));
             hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-            hints.push(Span::styled("d", Style::default().fg(theme::ACCENT_WARNING)));
+            hints.push(Span::styled("b", Style::default().fg(theme::ACCENT_WARNING)));
             hints.push(Span::styled(" block", Style::default().fg(theme::TEXT_MUTED)));
             hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-            hints.push(Span::styled("u", Style::default().fg(theme::ACCENT_WARNING)));
-            hints.push(Span::styled(" unblock", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled("d", Style::default().fg(theme::ACCENT_WARNING)));
+            hints.push(Span::styled(" delete", Style::default().fg(theme::TEXT_MUTED)));
         } else {
             hints.push(Span::styled(
                 " edit",

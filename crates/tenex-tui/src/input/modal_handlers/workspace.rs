@@ -617,22 +617,22 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         None => {}
                     }
                 } else if state.current_tab == ui::modal::SettingsTab::Backends {
-                    // Enter approves the selected item if it is pending
+                    // Enter approves pending or blocked backends
                     let items = {
                         let store = app.data_store.borrow();
                         build_backends_list(&store)
                     };
-                    if let Some(item) = items.get(state.backends_index) {
-                        if let BackendListItem::Pending(pk) = item {
+                    match items.get(state.backends_index) {
+                        Some(BackendListItem::Pending(pk)) | Some(BackendListItem::Blocked(pk)) => {
                             let pk = pk.clone();
                             app.approve_backend(&pk);
                             app.set_warning_status(&format!("Approved backend {}", &pk[..8.min(pk.len())]));
-                            // Clamp index in case list shrank
                             let new_len = items.len().saturating_sub(1);
                             if state.backends_index > new_len {
                                 state.backends_index = new_len;
                             }
                         }
+                        _ => {}
                     }
                 } else {
                     state.start_editing();
@@ -812,17 +812,20 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 let store = app.data_store.borrow();
                 build_backends_list(&store)
             };
-            if let Some(BackendListItem::Pending(pk)) = items.get(state.backends_index) {
-                let pk = pk.clone();
-                app.approve_backend(&pk);
-                app.set_warning_status(&format!("Approved backend {}", &pk[..8.min(pk.len())]));
-                let new_len = items.len().saturating_sub(1);
-                if state.backends_index > new_len {
-                    state.backends_index = new_len;
+            match items.get(state.backends_index) {
+                Some(BackendListItem::Pending(pk)) | Some(BackendListItem::Blocked(pk)) => {
+                    let pk = pk.clone();
+                    app.approve_backend(&pk);
+                    app.set_warning_status(&format!("Approved backend {}", &pk[..8.min(pk.len())]));
+                    let new_len = items.len().saturating_sub(1);
+                    if state.backends_index > new_len {
+                        state.backends_index = new_len;
+                    }
                 }
+                _ => {}
             }
         }
-        KeyCode::Char('d') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+        KeyCode::Char('b') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
             let items = {
                 let store = app.data_store.borrow();
                 build_backends_list(&store)
@@ -840,15 +843,15 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 _ => {}
             }
         }
-        KeyCode::Char('u') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+        KeyCode::Char('d') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
             let items = {
                 let store = app.data_store.borrow();
                 build_backends_list(&store)
             };
-            if let Some(BackendListItem::Blocked(pk)) = items.get(state.backends_index) {
-                let pk = pk.clone();
-                app.approve_backend(&pk);
-                app.set_warning_status(&format!("Unblocked backend {}", &pk[..8.min(pk.len())]));
+            if let Some(item) = items.get(state.backends_index) {
+                let pk = item.pubkey().to_string();
+                app.remove_backend(&pk);
+                app.set_warning_status(&format!("Removed backend {}", &pk[..8.min(pk.len())]));
                 let new_len = items.len().saturating_sub(1);
                 if state.backends_index > new_len {
                     state.backends_index = new_len;

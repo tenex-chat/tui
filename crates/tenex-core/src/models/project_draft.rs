@@ -492,6 +492,12 @@ impl PreferencesStorage {
         self.save_to_file();
     }
 
+    pub fn remove_backend(&mut self, pubkey: &str) {
+        self.prefs.approved_backend_pubkeys.remove(pubkey);
+        self.prefs.blocked_backend_pubkeys.remove(pubkey);
+        self.save_to_file();
+    }
+
     pub fn block_backend(&mut self, pubkey: &str) {
         // Remove from approved if present
         self.prefs.approved_backend_pubkeys.remove(pubkey);

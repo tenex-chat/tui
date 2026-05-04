@@ -57,6 +57,14 @@ impl TrustStore {
         self.blocked_backends = blocked;
     }
 
+    /// Remove a backend from both approved and blocked lists, and drop any pending approval.
+    pub fn remove_backend(&mut self, pubkey: &str) {
+        self.approved_backends.remove(pubkey);
+        self.blocked_backends.remove(pubkey);
+        self.pending_backend_approvals
+            .retain(|p| p.backend_pubkey != pubkey);
+    }
+
     /// Add a backend to the approved list. Removes from blocked and pending.
     /// Returns pending statuses that were waiting for this backend (for cross-cutting application).
     pub fn add_approved(&mut self, pubkey: &str) -> Vec<ProjectStatus> {
