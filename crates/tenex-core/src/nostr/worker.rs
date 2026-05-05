@@ -4791,6 +4791,7 @@ async fn sync_filter(
     let opts = SyncOptions::default();
     let mut total_count = 0u64;
     let mut page = 0;
+    let mut succeeded = false;
 
     // Add limit to filter
     filter = filter.limit(LIMIT);
@@ -4805,6 +4806,7 @@ async fn sync_filter(
                 label,
                 MAX_PAGES
             );
+            succeeded = true;
             break;
         }
 
@@ -4847,7 +4849,7 @@ async fn sync_filter(
                 if page == 1 && count == 0 {
                     tlog!(
                         "SYNC_DEBUG",
-                        "kind:{} -> 0 new (DB already had them)",
+                        "kind:{} -> 0 new (already in sync)",
                         label
                     );
                 } else if page > 1 {
@@ -4860,6 +4862,7 @@ async fn sync_filter(
                     );
                 }
 
+                succeeded = true;
                 break; // Done paginating
             }
             Err(e) => {
@@ -4877,8 +4880,7 @@ async fn sync_filter(
         }
     }
 
-    // Record total success
-    if total_count > 0 {
+    if succeeded {
         stats.record_success(label, total_count);
     }
 
