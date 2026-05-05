@@ -26,6 +26,7 @@ struct ProjectSettingsView: View {
     @State private var showDeleteDialog = false
 
     @State private var agentSearch = ""
+    @State private var selectedAddBackendIndex: Int = 0
     @State private var manualPubkeyInput: String = ""
     @State private var manualPubkeyError: String? = nil
 
@@ -57,8 +58,35 @@ struct ProjectSettingsView: View {
         coreManager.projectRosterAgents[projectId]?.filter(\.isOnline).count ?? 0
     }
 
+    private var addAgentBackends: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for agent in agentInventory {
+            for backend in agent.backends {
+                if seen.insert(backend.backendPubkey).inserted {
+                    result.append(backend.backendPubkey)
+                }
+            }
+        }
+        return result.sorted {
+            let a = AgentDisplayName.resolve(pubkey: $0, coreManager: coreManager)
+            let b = AgentDisplayName.resolve(pubkey: $1, coreManager: coreManager)
+            return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        }
+    }
+
     private var filteredAvailableAgents: [AgentInventoryItem] {
-        let remaining = agentInventory.filter { !pendingAgentPubkeys.contains($0.pubkey) }
+        let backends = addAgentBackends
+        let clampedIndex = backends.isEmpty ? 0 : min(selectedAddBackendIndex, backends.count - 1)
+        let selectedBackend: String? = backends.isEmpty ? nil : backends[clampedIndex]
+
+        var remaining = agentInventory.filter { !pendingAgentPubkeys.contains($0.pubkey) }
+        if let backend = selectedBackend {
+            remaining = remaining.filter { agent in
+                agent.backends.contains { $0.backendPubkey == backend }
+            }
+        }
+
         guard !agentSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return remaining
         }
@@ -69,7 +97,6 @@ struct ProjectSettingsView: View {
                 .lowercased()
                 .contains(query)
                 || agent.pubkey.lowercased().contains(query)
-                || agent.backends.contains { $0.backendPubkey.lowercased().contains(query) }
         }
     }
 
@@ -282,16 +309,12 @@ struct ProjectSettingsView: View {
                             Text(agentName(for: agentPubkey))
                                 .font(.body.weight(.medium))
                                 .lineLimit(1)
-                            Text(shortPubkey(agentPubkey))
-                                .font(.caption2.monospaced())
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
                             if let inventoryAgent = inventoryAgent(for: agentPubkey) {
-                                Text(agentBackendSummary(inventoryAgent))
+                                Text(agentBackendLabel(inventoryAgent))
                                     .font(.caption2)
                                     .foregroundStyle(inventoryAgent.isMultiBackend ? .orange : .secondary)
                             } else {
-                                Text("Unavailable in approved backend inventory")
+                                Text("Not in backend inventory")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
@@ -402,6 +425,19 @@ struct ProjectSettingsView: View {
                     .disabled(manualPubkeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
+                if !addAgentBackends.isEmpty {
+                    Section {
+                        Picker("Backend", selection: $selectedAddBackendIndex) {
+                            ForEach(Array(addAgentBackends.enumerated()), id: \.offset) { index, pubkey in
+                                Text(AgentDisplayName.resolve(pubkey: pubkey, coreManager: coreManager))
+                                    .tag(index)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    }
+                }
+
                 Section("Installed Agents") {
                     if filteredAvailableAgents.isEmpty {
                         ContentUnavailableView(
@@ -415,18 +451,10 @@ struct ProjectSettingsView: View {
                                 addAgent(agentPubkey: agent.pubkey)
                                 showAddAgentSheet = false
                             } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager))
-                                        .font(.body.weight(.medium))
-                                        .foregroundStyle(.primary)
-                                    Text(shortPubkey(agent.pubkey))
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.secondary)
-                                    Text(agentBackendSummary(agent))
-                                        .font(.caption2)
-                                        .foregroundStyle(agent.isMultiBackend ? .orange : .secondary)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager))
+                                    .font(.body.weight(.medium))
+                                    .foregroundStyle(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
                         }
@@ -440,6 +468,7 @@ struct ProjectSettingsView: View {
                     Button("Done") {
                         showAddAgentSheet = false
                         agentSearch = ""
+                        selectedAddBackendIndex = 0
                         manualPubkeyInput = ""
                         manualPubkeyError = nil
                     }
@@ -603,14 +632,12 @@ struct ProjectSettingsView: View {
         agentInventory.first { $0.pubkey == pubkey }
     }
 
-    private func agentBackendSummary(_ agent: AgentInventoryItem) -> String {
+    private func agentBackendLabel(_ agent: AgentInventoryItem) -> String {
         if agent.isMultiBackend {
-            return "Warning: available on \(agent.backends.count) backends"
+            return "⚠ \(agent.backends.count) backends"
         }
-        guard let backend = agent.backends.first else {
-            return "Backend: unknown"
-        }
-        return "Backend: \(AgentDisplayName.resolve(pubkey: backend.backendPubkey, coreManager: coreManager))"
+        guard let backend = agent.backends.first else { return "unknown backend" }
+        return AgentDisplayName.resolve(pubkey: backend.backendPubkey, coreManager: coreManager)
     }
 
     private func shortPubkey(_ pubkey: String) -> String {
