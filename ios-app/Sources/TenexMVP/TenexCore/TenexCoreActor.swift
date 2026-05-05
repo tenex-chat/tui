@@ -490,12 +490,25 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
-    /// Legacy project-level configuration options.
-    /// Agent configuration UI should prefer per-agent kind:34011 via getAgentConfig.
+    /// Project-level configuration options. Models come from approved
+    /// kind:24011 inventories (union across the project's backends);
+    /// tools/skills come from kind:24010.
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions {
         try profiler.measureFFI("getProjectConfigOptions") {
             do {
                 return try core.getProjectConfigOptions(projectId: projectId)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Available models for an agent — sourced from the agent's backend's
+    /// kind:24011 inventory.
+    func getModelsForAgent(agentPubkey: String) throws -> [String] {
+        try profiler.measureFFI("getModelsForAgent") {
+            do {
+                return try core.getModelsForAgent(agentPubkey: agentPubkey)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

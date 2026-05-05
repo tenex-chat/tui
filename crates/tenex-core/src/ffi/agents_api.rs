@@ -682,16 +682,10 @@ impl TenexCore {
     /// Get available configuration options for a project.
     ///
     /// Returns the project-level catalog of models/tools/skills that the
-    /// project's backend(s) currently advertise. Note: this is project-level
-    /// availability, not any agent's *current* config — per-agent active
-    /// config (and per-agent option catalogs) come from kind:0 (NIP-01
-    /// metadata). Used by iOS to populate the agent config modal with
-    /// selectable options.
-    ///
-    /// (Implementation currently still aggregates from kind:24010
-    /// `ProjectStatus`; long-term this should move behind the kind:0
-    /// per-agent catalog. See
-    /// `docs/agent-identity-config-implementation-decisions.md`.)
+    /// project's backend(s) currently advertise. Models are sourced from
+    /// approved kind:24011 inventories (union across the project's
+    /// backends); tools/skills come from kind:24010. Used to populate
+    /// agent-config modals with selectable options.
     pub fn get_project_config_options(
         &self,
         project_id: String,
@@ -719,20 +713,36 @@ impl TenexCore {
             }
         };
 
-        // Get project status to extract all_models and all_tools
-        let status = store.get_project_status(&project.a_tag());
-        match status {
-            Some(s) => Ok(ProjectConfigOptions {
-                all_models: s.all_models.clone(),
-                all_tools: s.all_tools.to_vec(),
-                all_skills: s.all_skills.to_vec(),
-            }),
-            None => Ok(ProjectConfigOptions {
-                all_models: Vec::new(),
-                all_tools: Vec::new(),
-                all_skills: Vec::new(),
-            }),
-        }
+        let a_tag = project.a_tag();
+        let all_models = store.get_models_for_project(&a_tag);
+        let status = store.get_project_status(&a_tag);
+        let (all_tools, all_skills) = match status {
+            Some(s) => (s.all_tools.to_vec(), s.all_skills.to_vec()),
+            None => (Vec::new(), Vec::new()),
+        };
+
+        Ok(ProjectConfigOptions {
+            all_models,
+            all_tools,
+            all_skills,
+        })
+    }
+
+    /// Available models for a specific agent.
+    ///
+    /// Resolves the agent's backend (via its kind:0 `p` tag) and returns
+    /// the model slugs that backend advertises on its kind:24011 inventory.
+    pub fn get_models_for_agent(
+        &self,
+        agent_pubkey: String,
+    ) -> Result<Vec<String>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+        Ok(store.get_models_for_agent(&agent_pubkey))
     }
 
     /// Request an agent configuration change (model and skills).

@@ -124,7 +124,6 @@ mod tests {
             use_criteria: None,
             created_at: 2,
             active_model: Some("model-active".to_string()),
-            models: vec!["model-active".to_string()],
             active_tools: vec!["tool-active".to_string()],
             tools: vec!["tool-active".to_string()],
             active_skills: vec!["skill-active".to_string()],

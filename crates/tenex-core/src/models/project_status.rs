@@ -32,8 +32,6 @@ pub struct ProjectStatus {
     pub project_coordinate: String,
     pub agents: Vec<ProjectAgent>,
     pub branches: Vec<String>,
-    /// All available models from model tags (including unassigned ones)
-    pub all_models: Vec<String>,
     /// All project-level tools from tool tags.
     /// Current per-agent tools are sourced from kind:0 (NIP-01 metadata).
     pub(crate) all_tools: Vec<String>,
@@ -116,7 +114,6 @@ impl ProjectStatus {
     fn from_tags(created_at: u64, tags: Vec<Vec<String>>, backend_pubkey: String) -> Option<Self> {
         let mut project_coordinate: Option<String> = None;
         let mut branches: Vec<String> = Vec::new();
-        let mut all_models: Vec<String> = Vec::new();
         let mut all_tools: Vec<String> = Vec::new();
         let mut all_skills: Vec<String> = Vec::new();
         let mut all_mcp_servers: Vec<String> = Vec::new();
@@ -137,12 +134,6 @@ impl ProjectStatus {
                 "branch" => {
                     if tag.len() > 1 {
                         branches.push(tag[1].clone());
-                    }
-                }
-                "model" => {
-                    // Collect model name (tag[1]) regardless of agent assignments
-                    if tag.len() >= 2 {
-                        all_models.push(tag[1].clone());
                     }
                 }
                 "tool" => {
@@ -167,9 +158,7 @@ impl ProjectStatus {
             }
         }
 
-        // Deduplicate and sort models and tools
-        all_models.sort();
-        all_models.dedup();
+        // Deduplicate and sort tools
         all_tools.sort();
         all_tools.dedup();
         all_skills.sort();
@@ -188,7 +177,6 @@ impl ProjectStatus {
             project_coordinate,
             agents: Vec::new(),
             branches,
-            all_models,
             all_tools,
             all_skills,
             all_mcp_servers,
@@ -265,11 +253,6 @@ impl ProjectStatus {
         self.all_mcp_servers.iter().map(|s| s.as_str()).collect()
     }
 
-    /// All available models from the project (including unassigned ones)
-    pub fn models(&self) -> Vec<&str> {
-        self.all_models.iter().map(|s| s.as_str()).collect()
-    }
-
     /// Get the PM (project manager) agent
     pub fn pm_agent(&self) -> Option<&ProjectAgent> {
         self.agents.iter().find(|a| a.is_pm)
@@ -282,7 +265,6 @@ impl ProjectStatus {
     {
         let mut agent_map: HashMap<String, (u64, u64, ProjectAgent)> = HashMap::new();
         let mut branches: Vec<String> = Vec::new();
-        let mut all_models: Vec<String> = Vec::new();
         let mut all_tools: Vec<String> = Vec::new();
         let mut all_skills: Vec<String> = Vec::new();
         let mut all_mcp_servers: Vec<String> = Vec::new();
@@ -304,7 +286,6 @@ impl ProjectStatus {
             newest_last_seen_at = newest_last_seen_at.max(status.last_seen_at);
 
             branches.extend(status.branches.iter().cloned());
-            all_models.extend(status.all_models.iter().cloned());
             all_tools.extend(status.all_tools.iter().cloned());
             all_skills.extend(status.all_skills.iter().cloned());
             all_mcp_servers.extend(status.all_mcp_servers.iter().cloned());
@@ -333,8 +314,6 @@ impl ProjectStatus {
 
         branches.sort();
         branches.dedup();
-        all_models.sort();
-        all_models.dedup();
         all_tools.sort();
         all_tools.dedup();
         all_skills.sort();
@@ -350,7 +329,6 @@ impl ProjectStatus {
             project_coordinate,
             agents,
             branches,
-            all_models,
             all_tools,
             all_skills,
             all_mcp_servers,
@@ -476,7 +454,6 @@ mod tests {
                 mcp_servers: Vec::new(),
             }],
             branches: Vec::new(),
-            all_models: Vec::new(),
             all_tools: Vec::new(),
             all_skills: Vec::new(),
             all_mcp_servers: Vec::new(),
@@ -498,7 +475,6 @@ mod tests {
                 mcp_servers: Vec::new(),
             }],
             branches: Vec::new(),
-            all_models: Vec::new(),
             all_tools: Vec::new(),
             all_skills: Vec::new(),
             all_mcp_servers: Vec::new(),
@@ -552,7 +528,6 @@ mod tests {
                 },
             ],
             branches: Vec::new(),
-            all_models: Vec::new(),
             all_tools: Vec::new(),
             all_skills: Vec::new(),
             all_mcp_servers: Vec::new(),
@@ -934,11 +909,12 @@ mod tests {
 
     /// Acceptance criterion (`docs/agent-identity-config-implementation-decisions.md`):
     /// "24010 parsing does not set current model/tools/skills/MCPs."
-    /// All four shapes (`model`, `tool`, `skill`, `mcp`) with agent-style
-    /// 3rd elements must remain at the project level only and never seed
-    /// per-agent current config records.
+    /// `tool`, `skill`, and `mcp` tags must remain at the project level
+    /// only and never seed per-agent current config records. `model` tags
+    /// no longer live on 24010 at all — backends publish available models
+    /// on kind:24011.
     #[test]
-    fn test_24010_model_tool_skill_mcp_tags_never_seed_per_agent_config() {
+    fn test_24010_tool_skill_mcp_tags_never_seed_per_agent_config() {
         let json = r#"{
             "kind": 24010,
             "pubkey": "backend_pk",
@@ -946,8 +922,6 @@ mod tests {
             "tags": [
                 ["a", "31933:user_pk:project_id"],
                 ["agent", "agent1_pk", "claude-code"],
-                ["model", "opus", "agent1_pk"],
-                ["model", "sonnet"],
                 ["tool", "shell", "agent1_pk"],
                 ["tool", "rag_query"],
                 ["skill", "code-review", "agent1_pk"],
@@ -959,10 +933,6 @@ mod tests {
 
         let status = ProjectStatus::from_json(json).expect("parse 24010");
 
-        // Project-level option lists are still extracted.
-        let models = status.models();
-        assert!(models.contains(&"opus"));
-        assert!(models.contains(&"sonnet"));
         let tools = status.all_tools();
         assert!(tools.contains(&"shell"));
         assert!(tools.contains(&"rag_query"));

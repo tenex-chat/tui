@@ -100,10 +100,7 @@ impl ConfigPanel {
 
         let store = runtime.data_store();
         let store_ref = store.borrow();
-        self.items = store_ref
-            .get_agent_config(&self.agent_pubkey)
-            .map(|cfg| cfg.models.clone())
-            .unwrap_or_default();
+        self.items = store_ref.get_models_for_agent(&self.agent_pubkey);
     }
 
     /// Returns filtered items as (original_index, &item) pairs.

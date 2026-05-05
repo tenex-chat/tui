@@ -48,6 +48,7 @@ protocol TenexCoreActorProtocol: Actor {
     func getAllMcpTools() throws -> [McpTool]
     func getOnlineAgents(projectId: String) throws -> [ProjectAgent]
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
+    func getModelsForAgent(agentPubkey: String) throws -> [String]
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
     func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
     func createAgentDefinition(

@@ -408,14 +408,17 @@ pub struct MergedAgentSettingsInputs {
 impl MergedAgentSettingsInputs {
     /// Compute the merge from the data sources for `agent`.
     ///
-    /// Agent current configuration and available choices come exclusively from
-    /// kind:0 (NIP-01 metadata, authored by the agent). Roster
-    /// membership/defaults come from ordered 31933 p-tags.
+    /// Per-agent current configuration (active model/tools/skills/MCPs) and
+    /// per-agent option catalogues for tools/skills/MCPs come from the
+    /// agent's kind:0 (NIP-01 metadata) config. Available *models* come
+    /// from the agent's backend's kind:24011 inventory and must be passed
+    /// in by the caller (the parameter list keeps `compute` purely
+    /// functional for unit testing).
     pub fn compute(
         _agent: &crate::models::ProjectAgent,
         agent_config: Option<&AgentConfig>,
+        available_models: Vec<String>,
     ) -> Self {
-        let available_models = agent_config.map(|c| c.models.clone()).unwrap_or_default();
         let available_tools = agent_config.map(|c| c.tools.clone()).unwrap_or_default();
         let all_available_skills = agent_config.map(|c| c.skills.clone()).unwrap_or_default();
         let all_available_mcp_servers = agent_config.map(|c| c.mcps.clone()).unwrap_or_default();
@@ -2078,9 +2081,11 @@ impl App {
         self.selected_project.as_ref()?;
         let store = self.data_store.borrow();
         let agent_config = store.get_agent_config(&agent.pubkey).cloned();
+        let available_models = store.get_models_for_agent(&agent.pubkey);
         Some(MergedAgentSettingsInputs::compute(
             agent,
             agent_config.as_ref(),
+            available_models,
         ))
     }
 
@@ -4852,7 +4857,7 @@ mod merged_agent_settings_tests {
     }
 
     fn make_agent_config(
-        models: &[&str],
+        active_model: Option<&str>,
         tools: &[&str],
         active_tools: &[&str],
         skills: &[&str],
@@ -4864,8 +4869,8 @@ mod merged_agent_settings_tests {
             vec!["slug".to_string(), "planner".to_string()],
             vec!["p".to_string(), "backend-pk".to_string()],
         ];
-        for m in models {
-            tags.push(vec!["model".to_string(), (*m).to_string()]);
+        if let Some(m) = active_model {
+            tags.push(vec!["model".to_string(), m.to_string()]);
         }
         for tool in tools {
             let mut t = vec!["tool".to_string(), (*tool).to_string()];
@@ -4897,13 +4902,15 @@ mod merged_agent_settings_tests {
         AgentConfig::from_value(&event).expect("agent config fixture should parse")
     }
 
-    /// Agent settings are derived exclusively from kind:0. Project heartbeat
-    /// fields on ProjectAgent are intentionally ignored.
+    /// Agent current settings come from kind:0; available *models* come
+    /// from the agent's backend's kind:24011 inventory (passed in by the
+    /// caller). Project heartbeat fields on ProjectAgent are intentionally
+    /// ignored.
     #[test]
-    fn derives_agent_settings_from_kind0_only() {
+    fn derives_agent_settings_from_kind0_and_inventory_models() {
         let agent = make_agent();
         let config = make_agent_config(
-            &["m1"],
+            Some("m1"),
             &["shell", "web-search"],
             &["shell"],
             &["s2", "s3"],
@@ -4911,10 +4918,15 @@ mod merged_agent_settings_tests {
             &["mcp1"],
             &["mcp1"],
         );
+        let available_models = vec!["m1".to_string(), "m2".to_string()];
 
-        let inputs = MergedAgentSettingsInputs::compute(&agent, Some(&config));
+        let inputs = MergedAgentSettingsInputs::compute(
+            &agent,
+            Some(&config),
+            available_models.clone(),
+        );
 
-        assert_eq!(inputs.available_models, vec!["m1".to_string()]);
+        assert_eq!(inputs.available_models, available_models);
         assert_eq!(
             inputs.available_tools,
             vec!["shell".to_string(), "web-search".to_string()],
@@ -4923,6 +4935,7 @@ mod merged_agent_settings_tests {
             inputs.all_available_skills,
             vec!["s2".to_string(), "s3".to_string()],
         );
+        assert_eq!(inputs.current_model.as_deref(), Some("m1"));
         assert_eq!(inputs.current_tools, vec!["shell".to_string()]);
         assert_eq!(inputs.current_skills, vec!["s2".to_string()]);
         assert_eq!(inputs.all_available_mcp_servers, vec!["mcp1".to_string()]);
@@ -4930,7 +4943,7 @@ mod merged_agent_settings_tests {
 
         // Verify the produced AgentSettingsState honours the same merge.
         let state = inputs.into_state(&agent, "Profile Agent".to_string());
-        assert_eq!(state.available_models, vec!["m1".to_string()]);
+        assert_eq!(state.available_models, available_models);
         assert_eq!(
             state.available_skills,
             vec!["s2".to_string(), "s3".to_string()]
@@ -4952,7 +4965,7 @@ mod merged_agent_settings_tests {
     fn no_kind0_means_no_current_config() {
         let agent = make_agent();
 
-        let inputs = MergedAgentSettingsInputs::compute(&agent, None);
+        let inputs = MergedAgentSettingsInputs::compute(&agent, None, Vec::new());
 
         assert!(inputs.available_models.is_empty());
         assert!(inputs.available_tools.is_empty());
@@ -4967,9 +4980,6 @@ mod merged_agent_settings_tests {
     #[test]
     fn active_model_comes_from_kind0() {
         let agent = make_agent();
-        let config = make_agent_config(&["m1", "m2"], &[], &[], &[], &[], &[], &[]);
-        // Manually mark m2 active by rebuilding via tags (helper above doesn't
-        // mark models active — keep things explicit here).
         let event = json!({
             "kind": 0,
             "pubkey": "agent-pk",
@@ -4977,16 +4987,14 @@ mod merged_agent_settings_tests {
             "tags": [
                 ["slug", "planner"],
                 ["p", "backend-pk"],
-                ["model", "m1"],
-                ["model", "m2", "active"],
+                ["model", "m2"],
             ],
         });
-        let cfg2 = AgentConfig::from_value(&event).expect("parses");
-        // sanity
-        assert_eq!(config.active_model, None);
-        assert_eq!(cfg2.active_model.as_deref(), Some("m2"));
+        let cfg = AgentConfig::from_value(&event).expect("parses");
+        assert_eq!(cfg.active_model.as_deref(), Some("m2"));
 
-        let inputs = MergedAgentSettingsInputs::compute(&agent, Some(&cfg2));
+        let available_models = vec!["m1".to_string(), "m2".to_string()];
+        let inputs = MergedAgentSettingsInputs::compute(&agent, Some(&cfg), available_models);
         assert_eq!(inputs.current_model.as_deref(), Some("m2"));
     }
 }

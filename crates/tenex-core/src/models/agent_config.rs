@@ -2,9 +2,14 @@
 //!
 //! Each agent publishes its own kind:0 event, signed by the agent's own
 //! key. The event's `content` carries the standard NIP-01 metadata JSON
-//! (`name`, `about`, …); the tags enumerate every model/skill/mcp visible
-//! to the agent. The currently-active selection is marked with `"active"`
-//! as the tag's third element (inactive entries omit it).
+//! (`name`, `about`, …); the tags enumerate the agent's currently-active
+//! model plus every skill/mcp visible to the agent. The currently-active
+//! selection is marked with `"active"` as the tag's third element
+//! (inactive entries omit it).
+//!
+//! The catalogue of models available to the agent's backend is published
+//! on kind:24011, *not* on this kind:0 event — kind:0 only carries the
+//! single active model.
 //!
 //! Example tag order:
 //!
@@ -12,8 +17,7 @@
 //! ["slug", "<agent_slug>"]                           // human-friendly slug
 //! ["use-criteria", "<text>"]                         // when to pick this agent
 //! ["p", "<backend_pubkey>"]                          // backend that runs this agent
-//! ["model", "opus", "active"]                        // currently-selected model
-//! ["model", "sonnet"]                                // other available models
+//! ["model", "opus"]                                  // currently-selected model
 //! ["skill", "read-access", "active"]                 // enabled skill
 //! ["skill", "shell"]                                 // visible but inactive skill
 //! ["mcp", "github", "active"]                        // mcp server in mcpAccess
@@ -42,10 +46,10 @@ pub struct AgentConfig {
     pub use_criteria: Option<String>,
     /// Unix timestamp the event was created.
     pub created_at: u64,
-    /// Currently-selected model slug, if any model is active.
+    /// Currently-selected model slug, if any model is active. Sourced from
+    /// the `["model", "<slug>"]` tag (the `"active"` marker is no longer
+    /// required — kind:0 carries only the active model).
     pub active_model: Option<String>,
-    /// Every available model slug (includes `active_model`).
-    pub models: Vec<String>,
     /// Enabled tool IDs.
     pub active_tools: Vec<String>,
     /// Every visible tool ID (includes `active_tools`).
@@ -120,7 +124,6 @@ impl AgentConfig {
         let mut backend_pubkey: Option<String> = None;
         let mut use_criteria: Option<String> = None;
         let mut active_model: Option<String> = None;
-        let mut models: Vec<String> = Vec::new();
         let mut active_tools: Vec<String> = Vec::new();
         let mut tools: Vec<String> = Vec::new();
         let mut active_skills: Vec<String> = Vec::new();
@@ -164,13 +167,11 @@ impl AgentConfig {
                     }
                 }
                 "model" => {
-                    if let Some(slug) = tag.get(1) {
-                        if !slug.is_empty() {
-                            let is_active = tag.get(2).map(String::as_str) == Some("active");
-                            if is_active {
-                                active_model = Some(slug.clone());
+                    if active_model.is_none() {
+                        if let Some(model_slug) = tag.get(1) {
+                            if !model_slug.is_empty() {
+                                active_model = Some(model_slug.clone());
                             }
-                            models.push(slug.clone());
                         }
                     }
                 }
@@ -211,8 +212,6 @@ impl AgentConfig {
             }
         }
 
-        models.sort();
-        models.dedup();
         active_tools.sort();
         active_tools.dedup();
         tools.sort();
@@ -233,7 +232,6 @@ impl AgentConfig {
             use_criteria,
             created_at,
             active_model,
-            models,
             active_tools,
             tools,
             active_skills,
@@ -262,8 +260,7 @@ mod tests {
                 ["use-criteria", "Pick when planning multi-step work"],
                 ["p", "backend_pk"],
                 ["p", "extra_pk"],
-                ["model", "opus", "active"],
-                ["model", "sonnet"],
+                ["model", "opus"],
                 ["tool", "shell", "active"],
                 ["tool", "web-search"],
                 ["skill", "read-access", "active"],
@@ -283,13 +280,30 @@ mod tests {
             Some("Pick when planning multi-step work")
         );
         assert_eq!(config.active_model.as_deref(), Some("opus"));
-        assert_eq!(config.models, vec!["opus", "sonnet"]);
         assert_eq!(config.active_tools, vec!["shell"]);
         assert_eq!(config.tools, vec!["shell", "web-search"]);
         assert_eq!(config.active_skills, vec!["read-access", "write-access"]);
         assert_eq!(config.skills, vec!["read-access", "shell", "write-access"]);
         assert_eq!(config.active_mcps, vec!["github"]);
         assert_eq!(config.mcps, vec!["github", "linear"]);
+    }
+
+    #[test]
+    fn ignores_active_marker_on_model_tag() {
+        // Backwards-compatible parsing: if a backend ever still emits the
+        // legacy `"active"` marker on the kind:0 model tag, we still pick
+        // up the slug — the marker is treated as redundant.
+        let event = json!({
+            "kind": 0,
+            "pubkey": "agent_pk",
+            "created_at": 1,
+            "tags": [
+                ["slug", "planner"],
+                ["model", "opus", "active"],
+            ]
+        });
+        let config = AgentConfig::from_value(&event).expect("should parse");
+        assert_eq!(config.active_model.as_deref(), Some("opus"));
     }
 
     #[test]
@@ -300,7 +314,7 @@ mod tests {
             "created_at": 1,
             "tags": [
                 ["slug", "planner"],
-                ["model", "opus", "active"],
+                ["model", "opus"],
             ]
         });
         let config = AgentConfig::from_value(&event).expect("should parse");

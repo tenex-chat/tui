@@ -39,6 +39,10 @@ pub struct AppDataStore {
     pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
     pub project_statuses_by_backend: HashMap<String, HashMap<String, ProjectStatus>>, // project a_tag -> backend pubkey -> status
     pub installed_agents_by_backend: HashMap<String, Vec<InstalledAgent>>,
+    /// Models advertised on each backend's kind:24011 inventory, keyed by
+    /// backend pubkey. Updated/cleared in lock-step with
+    /// `installed_agents_by_backend`.
+    pub installed_models_by_backend: HashMap<String, Vec<String>>,
     /// Per-agent capability configs (kind:0 NIP-01 metadata), keyed by agent
     /// pubkey hex. Replaceable: only the latest `created_at` per agent is
     /// retained.
@@ -93,6 +97,7 @@ impl AppDataStore {
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
             installed_agents_by_backend: HashMap::new(),
+            installed_models_by_backend: HashMap::new(),
             agent_configs_by_pubkey: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
@@ -131,6 +136,7 @@ impl AppDataStore {
             project_statuses: HashMap::new(),
             project_statuses_by_backend: HashMap::new(),
             installed_agents_by_backend: HashMap::new(),
+            installed_models_by_backend: HashMap::new(),
             agent_configs_by_pubkey: HashMap::new(),
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
@@ -216,6 +222,7 @@ impl AppDataStore {
         self.project_statuses.clear();
         self.project_statuses_by_backend.clear();
         self.installed_agents_by_backend.clear();
+        self.installed_models_by_backend.clear();
         self.agent_configs_by_pubkey.clear();
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
@@ -1636,10 +1643,14 @@ impl AppDataStore {
             .and_then(|v| v.as_str())
             .unwrap_or("?")
             .to_string();
-        let Some((backend_pubkey, installed_agents)) = InstalledAgent::from_value(event) else {
+        let Some(inventory) = InstalledAgent::from_value(event) else {
             crate::tlog!("INV24011", "parse failed for event id={}", event_id);
             return;
         };
+
+        let backend_pubkey = inventory.backend_pubkey;
+        let installed_agents = inventory.agents;
+        let installed_models = inventory.models;
 
         let backend_short = &backend_pubkey[..8.min(backend_pubkey.len())];
         let slugs: Vec<&str> = installed_agents.iter().map(|a| a.slug.as_str()).collect();
@@ -1647,11 +1658,12 @@ impl AppDataStore {
         if self.trust.is_blocked(&backend_pubkey) {
             crate::tlog!(
                 "INV24011",
-                "BLOCKED id={} backend={} count={} slugs={:?}",
+                "BLOCKED id={} backend={} count={} slugs={:?} models={:?}",
                 event_id,
                 backend_short,
                 installed_agents.len(),
-                slugs
+                slugs,
+                installed_models
             );
             return;
         }
@@ -1659,22 +1671,26 @@ impl AppDataStore {
         if self.trust.is_approved(&backend_pubkey) {
             crate::tlog!(
                 "INV24011",
-                "APPROVED id={} backend={} count={} slugs={:?}",
+                "APPROVED id={} backend={} count={} slugs={:?} models={:?}",
                 event_id,
                 backend_short,
                 installed_agents.len(),
-                slugs
+                slugs,
+                installed_models
             );
             self.installed_agents_by_backend
-                .insert(backend_pubkey, installed_agents);
+                .insert(backend_pubkey.clone(), installed_agents);
+            self.installed_models_by_backend
+                .insert(backend_pubkey, installed_models);
         } else {
             crate::tlog!(
                 "INV24011",
-                "NOT_APPROVED id={} backend={} count={} slugs={:?}",
+                "NOT_APPROVED id={} backend={} count={} slugs={:?} models={:?}",
                 event_id,
                 backend_short,
                 installed_agents.len(),
-                slugs
+                slugs,
+                installed_models
             );
         }
     }
@@ -2215,6 +2231,57 @@ impl AppDataStore {
             .get(backend_pubkey)
             .map(|agents| agents.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// Models advertised by a backend on its kind:24011 inventory.
+    pub fn get_installed_models_for_backend(&self, backend_pubkey: &str) -> &[String] {
+        self.installed_models_by_backend
+            .get(backend_pubkey)
+            .map(|models| models.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Models available to an agent — sourced from the agent's backend's
+    /// kind:24011 inventory. The agent's backend is identified via the
+    /// `backend_pubkey` on its kind:0 (NIP-01) config.
+    pub fn get_models_for_agent(&self, agent_pubkey: &str) -> Vec<String> {
+        let Some(backend_pubkey) = self
+            .agent_configs_by_pubkey
+            .get(agent_pubkey)
+            .and_then(|cfg| cfg.backend_pubkey.as_deref())
+        else {
+            return Vec::new();
+        };
+        self.get_installed_models_for_backend(backend_pubkey)
+            .to_vec()
+    }
+
+    /// Union of models advertised by every approved, non-blocked backend
+    /// whose 24011 inventory contributes an agent to the project's roster.
+    pub fn get_models_for_project(&self, a_tag: &str) -> Vec<String> {
+        let Some(roster) = self.get_project_roster(a_tag) else {
+            return Vec::new();
+        };
+        let mut seen_backends: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut models: Vec<String> = Vec::new();
+        for agent in &roster {
+            if !seen_backends.insert(agent.backend_pubkey.as_str()) {
+                continue;
+            }
+            if !self.trust.is_approved(&agent.backend_pubkey)
+                || self.trust.is_blocked(&agent.backend_pubkey)
+            {
+                continue;
+            }
+            models.extend(
+                self.get_installed_models_for_backend(&agent.backend_pubkey)
+                    .iter()
+                    .cloned(),
+            );
+        }
+        models.sort();
+        models.dedup();
+        models
     }
 
     pub fn available_install_backends(&self) -> Vec<String> {
@@ -3298,7 +3365,6 @@ mod tests {
             use_criteria: None,
             created_at: 2,
             active_model: Some("model-active".to_string()),
-            models: vec!["model-active".to_string()],
             active_tools: vec!["tool-active".to_string()],
             tools: vec!["tool-active".to_string()],
             active_skills: vec!["skill-active".to_string()],
@@ -3741,7 +3807,6 @@ mod tests {
                 mcp_servers: vec![],
             }],
             branches: vec![],
-            all_models: vec![],
             all_tools: vec![],
             all_skills: vec![],
             all_mcp_servers: vec![],
@@ -4023,7 +4088,6 @@ mod tests {
             "tags": [
                 ["a", "31933:user:project"],
                 ["agent", "agentpk1", "agent1", "pm"],
-                ["model", "model-a", "agent1"],
                 ["tool", "tool-a", "agent1"],
                 ["skill", "skill-a", "agent1"],
                 ["branch", "main"]
@@ -4037,7 +4101,6 @@ mod tests {
             "tags": [
                 ["a", "31933:user:project"],
                 ["agent", "agentpk2", "agent2"],
-                ["model", "model-b", "agent2"],
                 ["tool", "tool-b", "agent2"],
                 ["skill", "skill-b", "agent2"],
                 ["mcp", "mcp-b", "agent2"],
@@ -4056,8 +4119,6 @@ mod tests {
             status.agents.is_empty(),
             "24010 must not define project roster agents"
         );
-        assert!(status.models().contains(&"model-a"));
-        assert!(status.models().contains(&"model-b"));
         assert!(status.all_tools().contains(&"tool-a"));
         assert!(status.all_tools().contains(&"tool-b"));
         assert!(status.all_skills().contains(&"skill-a"));
@@ -5888,7 +5949,6 @@ mod tests {
                 project_coordinate: "31933:pk:proj1".to_string(),
                 agents: vec![],
                 branches: vec![],
-                all_models: vec![],
                 all_tools: vec![],
                 all_skills: vec![],
                 all_mcp_servers: vec![],
@@ -5927,7 +5987,6 @@ mod tests {
                     project_coordinate: "proj1".to_string(),
                     agents: vec![],
                     branches: vec![],
-                    all_models: vec![],
                     all_tools: vec![],
                     all_skills: vec![],
                     all_mcp_servers: vec![],
@@ -5960,7 +6019,6 @@ mod tests {
                     project_coordinate: "31933:pk:proj1".to_string(),
                     agents: vec![],
                     branches: vec![],
-                    all_models: vec![],
                     all_tools: vec![],
                     all_skills: vec![],
                     all_mcp_servers: vec![],
@@ -5996,7 +6054,6 @@ mod tests {
                     project_coordinate: "proj".to_string(),
                     agents: vec![],
                     branches: vec![],
-                    all_models: vec![],
                     all_tools: vec![],
                     all_skills: vec![],
                     all_mcp_servers: vec![],
@@ -6937,7 +6994,6 @@ mod tests {
             .expect("newer event should replace older");
         assert_eq!(after_newer.created_at, 2_000);
         assert_eq!(after_newer.active_model.as_deref(), Some("opus"));
-        assert_eq!(after_newer.models, vec!["opus", "sonnet"]);
         assert_eq!(after_newer.active_skills, vec!["rag"]);
         assert_eq!(after_newer.skills, vec!["rag", "shell"]);
         assert_eq!(after_newer.active_mcps, vec!["linear"]);

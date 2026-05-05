@@ -535,7 +535,10 @@ struct AgentConfigSheet: View {
                 return
             }
 
-            allModels = config.models
+            // Available models come from the agent's backend's kind:24011
+            // inventory, not from kind:0 (which now carries only the
+            // currently-active model).
+            allModels = try await coreManager.core.getModelsForAgent(agentPubkey: agent.pubkey)
             toolGroups = ToolGroup.buildGroups(from: config.tools)
             allSkills = config.skills
 

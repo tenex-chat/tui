@@ -2435,10 +2435,11 @@ impl NostrWorker {
                                                 if let Ok(value) =
                                                     serde_json::from_str::<serde_json::Value>(&json)
                                                 {
-                                                    if let Some((_backend, agents)) =
+                                                    if let Some(inventory) =
                                                         InstalledAgent::from_value(&value)
                                                     {
-                                                        let agent_pubkeys: Vec<String> = agents
+                                                        let agent_pubkeys: Vec<String> = inventory
+                                                            .agents
                                                             .iter()
                                                             .map(|agent| agent.pubkey.clone())
                                                             .collect();

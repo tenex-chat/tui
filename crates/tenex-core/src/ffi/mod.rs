@@ -842,16 +842,17 @@ fn process_data_changes_with_deltas(
             DataChange::InstalledAgentList { json } => {
                 installed_agent_changes += 1;
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
-                    if let Some((backend_pubkey, installed_agents)) =
+                    if let Some(inventory) =
                         crate::models::InstalledAgent::from_value(&event)
                     {
+                        let backend_pubkey = inventory.backend_pubkey;
                         let mut affected_agent_pubkeys: HashSet<String> = store
                             .get_installed_agents(&backend_pubkey)
                             .iter()
                             .map(|agent| agent.pubkey.clone())
                             .collect();
                         affected_agent_pubkeys
-                            .extend(installed_agents.into_iter().map(|agent| agent.pubkey));
+                            .extend(inventory.agents.into_iter().map(|agent| agent.pubkey));
                         let should_refresh_rosters = store.trust.is_approved(&backend_pubkey)
                             && !store.trust.is_blocked(&backend_pubkey);
 

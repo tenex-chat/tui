@@ -287,7 +287,6 @@ fn kind_24010_does_not_populate_per_agent_current_config() {
             "tags": [
                 ["a", "{a_tag}"],
                 ["agent", "{agent}", "slug"],
-                ["model", "claude-opus", "{agent}"],
                 ["tool", "shell", "{agent}"],
                 ["tool", "rag_query"],
                 ["skill", "code-review", "{agent}"],
@@ -339,7 +338,6 @@ fn kind_24010_does_not_populate_per_agent_current_config() {
     let status = store
         .get_project_status(&a_tag)
         .expect("project status should be aggregated");
-    assert!(status.models().contains(&"claude-opus"));
     assert!(status.all_tools().contains(&"rag_query"));
     assert!(
         status.agents.is_empty(),
