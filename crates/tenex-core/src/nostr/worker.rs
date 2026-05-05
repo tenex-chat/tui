@@ -4698,16 +4698,50 @@ async fn run_negentropy_sync(
     tlog!("SYNC", "Negentropy sync loop stopped");
 }
 
+/// Collect unique author pubkeys from all kind:0 events stored in the local ndb.
+fn collect_kind0_authors(ndb: &Ndb) -> Vec<PublicKey> {
+    let txn = match Transaction::new(ndb) {
+        Ok(t) => t,
+        Err(_) => return vec![],
+    };
+    let filter = nostrdb::Filter::new().kinds([0u64]).build();
+    let results = match ndb.query(&txn, &[filter], 50_000) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    let mut seen = HashSet::new();
+    let mut authors = Vec::new();
+    for r in results.iter() {
+        if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
+            let hex = hex::encode(note.pubkey());
+            if seen.insert(hex.clone()) {
+                if let Ok(pk) = PublicKey::parse(&hex) {
+                    authors.push(pk);
+                }
+            }
+        }
+    }
+    authors
+}
+
 /// Sync all non-ephemeral kinds using negentropy reconciliation
 async fn sync_all_filters(
     client: &Client,
-    _ndb: &Ndb,
+    ndb: &Ndb,
     user_pubkey: &PublicKey,
     stats: &SharedNegentropySyncStats,
     subscribed_projects: &Arc<RwLock<HashSet<String>>>,
 ) -> u64 {
     let mut total_new: u64 = 0;
     let user_pubkey_hex = user_pubkey.to_hex();
+
+    // kind:0 (user metadata/profiles) - reconcile all profiles we have locally
+    let known_authors = collect_kind0_authors(ndb);
+    if !known_authors.is_empty() {
+        let metadata_filter = Filter::new().kind(Kind::Metadata).authors(known_authors);
+        total_new += sync_filter(client, metadata_filter, "0", stats).await;
+    }
 
     // User's projects (kind 31933) - authored by user
     let project_filter = Filter::new().kind(Kind::Custom(31933)).author(*user_pubkey);

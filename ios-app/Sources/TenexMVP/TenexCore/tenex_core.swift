@@ -902,6 +902,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getMessages(conversationId: String)  -> [Message]
     
     /**
+     * Available models for a specific agent.
+     *
+     * Resolves the agent's backend (via its kind:0 `p` tag) and returns
+     * the model slugs that backend advertises on its kind:24011 inventory.
+     */
+    func getModelsForAgent(agentPubkey: String) throws  -> [String]
+    
+    /**
      * Get all nudges (kind:4201 events).
      *
      * Returns nudges deduplicated by `author + d-tag`, sorted by created_at
@@ -950,16 +958,10 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Get available configuration options for a project.
      *
      * Returns the project-level catalog of models/tools/skills that the
-     * project's backend(s) currently advertise. Note: this is project-level
-     * availability, not any agent's *current* config — per-agent active
-     * config (and per-agent option catalogs) come from kind:0 (NIP-01
-     * metadata). Used by iOS to populate the agent config modal with
-     * selectable options.
-     *
-     * (Implementation currently still aggregates from kind:24010
-     * `ProjectStatus`; long-term this should move behind the kind:0
-     * per-agent catalog. See
-     * `docs/agent-identity-config-implementation-decisions.md`.)
+     * project's backend(s) currently advertise. Models are sourced from
+     * approved kind:24011 inventories (union across the project's
+     * backends); tools/skills come from kind:24010. Used to populate
+     * agent-config modals with selectable options.
      */
     func getProjectConfigOptions(projectId: String) throws  -> ProjectConfigOptions
     
@@ -1973,6 +1975,20 @@ open func getMessages(conversationId: String) -> [Message]  {
 }
     
     /**
+     * Available models for a specific agent.
+     *
+     * Resolves the agent's backend (via its kind:0 `p` tag) and returns
+     * the model slugs that backend advertises on its kind:24011 inventory.
+     */
+open func getModelsForAgent(agentPubkey: String)throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_models_for_agent(self.uniffiClonePointer(),
+        FfiConverterString.lower(agentPubkey),$0
+    )
+})
+}
+    
+    /**
      * Get all nudges (kind:4201 events).
      *
      * Returns nudges deduplicated by `author + d-tag`, sorted by created_at
@@ -2050,16 +2066,10 @@ open func getProjectBackendPubkey(projectId: String) -> String?  {
      * Get available configuration options for a project.
      *
      * Returns the project-level catalog of models/tools/skills that the
-     * project's backend(s) currently advertise. Note: this is project-level
-     * availability, not any agent's *current* config — per-agent active
-     * config (and per-agent option catalogs) come from kind:0 (NIP-01
-     * metadata). Used by iOS to populate the agent config modal with
-     * selectable options.
-     *
-     * (Implementation currently still aggregates from kind:24010
-     * `ProjectStatus`; long-term this should move behind the kind:0
-     * per-agent catalog. See
-     * `docs/agent-identity-config-implementation-decisions.md`.)
+     * project's backend(s) currently advertise. Models are sourced from
+     * approved kind:24011 inventories (union across the project's
+     * backends); tools/skills come from kind:24010. Used to populate
+     * agent-config modals with selectable options.
      */
 open func getProjectConfigOptions(projectId: String)throws  -> ProjectConfigOptions  {
     return try  FfiConverterTypeProjectConfigOptions_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -2825,13 +2835,11 @@ public struct AgentConfig {
      */
     public var createdAt: UInt64
     /**
-     * Currently-selected model slug, if any model is active.
+     * Currently-selected model slug, if any model is active. Sourced from
+     * the `["model", "<slug>"]` tag (the `"active"` marker is no longer
+     * required — kind:0 carries only the active model).
      */
     public var activeModel: String?
-    /**
-     * Every available model slug (includes `active_model`).
-     */
-    public var models: [String]
     /**
      * Enabled tool IDs.
      */
@@ -2879,11 +2887,10 @@ public struct AgentConfig {
          * Unix timestamp the event was created.
          */createdAt: UInt64, 
         /**
-         * Currently-selected model slug, if any model is active.
+         * Currently-selected model slug, if any model is active. Sourced from
+         * the `["model", "<slug>"]` tag (the `"active"` marker is no longer
+         * required — kind:0 carries only the active model).
          */activeModel: String?, 
-        /**
-         * Every available model slug (includes `active_model`).
-         */models: [String], 
         /**
          * Enabled tool IDs.
          */activeTools: [String], 
@@ -2908,7 +2915,6 @@ public struct AgentConfig {
         self.useCriteria = useCriteria
         self.createdAt = createdAt
         self.activeModel = activeModel
-        self.models = models
         self.activeTools = activeTools
         self.tools = tools
         self.activeSkills = activeSkills
@@ -2943,9 +2949,6 @@ extension AgentConfig: Equatable, Hashable {
         if lhs.activeModel != rhs.activeModel {
             return false
         }
-        if lhs.models != rhs.models {
-            return false
-        }
         if lhs.activeTools != rhs.activeTools {
             return false
         }
@@ -2974,7 +2977,6 @@ extension AgentConfig: Equatable, Hashable {
         hasher.combine(useCriteria)
         hasher.combine(createdAt)
         hasher.combine(activeModel)
-        hasher.combine(models)
         hasher.combine(activeTools)
         hasher.combine(tools)
         hasher.combine(activeSkills)
@@ -2999,7 +3001,6 @@ public struct FfiConverterTypeAgentConfig: FfiConverterRustBuffer {
                 useCriteria: FfiConverterOptionString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf), 
                 activeModel: FfiConverterOptionString.read(from: &buf), 
-                models: FfiConverterSequenceString.read(from: &buf), 
                 activeTools: FfiConverterSequenceString.read(from: &buf), 
                 tools: FfiConverterSequenceString.read(from: &buf), 
                 activeSkills: FfiConverterSequenceString.read(from: &buf), 
@@ -3016,7 +3017,6 @@ public struct FfiConverterTypeAgentConfig: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.useCriteria, into: &buf)
         FfiConverterUInt64.write(value.createdAt, into: &buf)
         FfiConverterOptionString.write(value.activeModel, into: &buf)
-        FfiConverterSequenceString.write(value.models, into: &buf)
         FfiConverterSequenceString.write(value.activeTools, into: &buf)
         FfiConverterSequenceString.write(value.tools, into: &buf)
         FfiConverterSequenceString.write(value.activeSkills, into: &buf)
@@ -11884,6 +11884,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 37498) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_models_for_agent() != 27735) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_nudges() != 58735) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11899,7 +11902,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_backend_pubkey() != 53713) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 28328) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 15674) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
