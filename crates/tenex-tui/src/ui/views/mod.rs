@@ -37,7 +37,8 @@ pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
 pub use project_dialog::{
     available_agent_count_dialog, available_mcp_tool_count_dialog,
-    get_agent_id_at_dialog_index, get_mcp_tool_id_at_dialog_index, render_project_dialog,
+    get_agent_id_at_dialog_index, get_backends_for_add_mode, get_mcp_tool_id_at_dialog_index,
+    render_project_dialog,
 };
 pub use project_settings::render_agent_deletion_confirm;
 pub use skill_selector::render_skill_selector;

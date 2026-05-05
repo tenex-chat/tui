@@ -805,6 +805,7 @@ pub(crate) fn handle_project_dialog_key(app: &mut App, key: KeyEvent) {
     use ui::views::{
         available_agent_count_dialog, available_mcp_tool_count_dialog,
         get_agent_id_at_dialog_index, get_mcp_tool_id_at_dialog_index,
+        get_backends_for_add_mode,
     };
 
     let code = key.code;
@@ -837,6 +838,7 @@ pub(crate) fn handle_project_dialog_key(app: &mut App, key: KeyEvent) {
                             state.in_add_agent_mode = false;
                             state.add_agent_filter.clear();
                             state.add_agent_index = 0;
+                            state.add_agent_backend_index = 0;
                         }
                         None => {
                             state.pubkey_input_error =
@@ -886,10 +888,25 @@ pub(crate) fn handle_project_dialog_key(app: &mut App, key: KeyEvent) {
                     state.toggle_agent(pk);
                 }
             }
+            KeyCode::Left => {
+                let backends = get_backends_for_add_mode(app);
+                if !backends.is_empty() && state.add_agent_backend_index > 0 {
+                    state.add_agent_backend_index -= 1;
+                    state.add_agent_index = 0;
+                }
+            }
+            KeyCode::Right => {
+                let backends = get_backends_for_add_mode(app);
+                if state.add_agent_backend_index + 1 < backends.len() {
+                    state.add_agent_backend_index += 1;
+                    state.add_agent_index = 0;
+                }
+            }
             KeyCode::Esc | KeyCode::Enter => {
                 state.in_add_agent_mode = false;
                 state.add_agent_filter.clear();
                 state.add_agent_index = 0;
+                state.add_agent_backend_index = 0;
             }
             KeyCode::Char(c) => {
                 state.add_agent_filter.push(c);

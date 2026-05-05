@@ -28,9 +28,32 @@ fn inventory_agent_for_pubkey(app: &App, agent_pubkey: &str) -> Option<AgentInve
     app.agent_inventory_item(agent_pubkey)
 }
 
+/// Returns the ordered list of backend pubkeys visible in the add-agent tab bar.
+/// Sorted by display name, then by pubkey for stability.
+pub fn get_backends_for_add_mode(app: &App) -> Vec<String> {
+    let store = app.data_store.borrow();
+    let inventory = store.agent_inventory();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for agent in &inventory {
+        for backend in &agent.backends {
+            seen.insert(backend.backend_pubkey.clone());
+        }
+    }
+    let mut backends: Vec<String> = seen.into_iter().collect();
+    backends.sort_by(|a, b| {
+        let name_a = store.get_profile_name(a);
+        let name_b = store.get_profile_name(b);
+        name_a.cmp(&name_b).then_with(|| a.cmp(b))
+    });
+    backends
+}
+
 /// Get agents for the add-agent picker, sorted with selected first.
 fn add_mode_agents_dialog(app: &App, state: &ProjectDialogState) -> Vec<AgentInventoryItem> {
     let filter = &state.add_agent_filter;
+    let backends = get_backends_for_add_mode(app);
+    let selected_backend = backends.get(state.add_agent_backend_index).cloned();
+
     let pending_positions: HashMap<&str, usize> = state
         .pending_agent_pubkeys
         .iter()
@@ -39,6 +62,14 @@ fn add_mode_agents_dialog(app: &App, state: &ProjectDialogState) -> Vec<AgentInv
         .collect();
 
     let mut agents = app.agent_inventory_filtered_by(filter);
+    if let Some(ref backend_pubkey) = selected_backend {
+        agents.retain(|agent| {
+            agent
+                .backends
+                .iter()
+                .any(|b| &b.backend_pubkey == backend_pubkey)
+        });
+    }
     agents.sort_by(|left, right| {
         let left_pending = pending_positions.get(left.pubkey.as_str()).copied();
         let right_pending = pending_positions.get(right.pubkey.as_str()).copied();
@@ -714,13 +745,46 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectDi
         content_area.height,
     );
 
+    // Backend tab bar
+    let backends = get_backends_for_add_mode(app);
+    let tab_area = Rect::new(remaining.x, remaining.y, remaining.width, 1);
+    if !backends.is_empty() {
+        let selected_backend_index = state
+            .add_agent_backend_index
+            .min(backends.len().saturating_sub(1));
+        let mut tab_spans: Vec<Span> = Vec::new();
+        for (i, backend_pubkey) in backends.iter().enumerate() {
+            let name = app.backend_display_name(backend_pubkey);
+            let label = format!(" {} ", name);
+            if i == selected_backend_index {
+                tab_spans.push(Span::styled(
+                    label,
+                    Style::default()
+                        .fg(theme::ACCENT_PRIMARY)
+                        .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+                ));
+            } else {
+                tab_spans.push(Span::styled(
+                    label,
+                    Style::default().fg(theme::TEXT_MUTED),
+                ));
+            }
+            if i + 1 < backends.len() {
+                tab_spans.push(Span::styled(" ", Style::default()));
+            }
+        }
+        f.render_widget(Paragraph::new(Line::from(tab_spans)), tab_area);
+    }
+
     let available_agents = add_mode_agents_dialog(app, state);
 
+    // Shift list down 1 row for tab bar (only when backends exist)
+    let tab_offset = if backends.is_empty() { 0 } else { 1 };
     let list_area = Rect::new(
         remaining.x,
-        remaining.y + 1,
+        remaining.y + 1 + tab_offset,
         remaining.width,
-        remaining.height.saturating_sub(4),
+        remaining.height.saturating_sub(4 + tab_offset),
     );
 
     if available_agents.is_empty() {
@@ -896,6 +960,9 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectDi
         vec![
             Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("←→", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" backend", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
