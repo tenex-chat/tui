@@ -34,6 +34,7 @@ extension TenexCoreManager {
             reportsVersion &+= 1
             htmlReports = hr
             htmlReportsVersion &+= 1
+            prefetchHtmlReports(hr)
             await reloadPendingBackendApprovalPrompts()
             appFilterConversationScope = sortedConversations(c)
             let now = UInt64(Date().timeIntervalSince1970)

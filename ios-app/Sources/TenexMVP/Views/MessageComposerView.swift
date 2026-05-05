@@ -596,11 +596,13 @@ struct MessageComposerView: View {
             } else {
                 inlineAgentSelectorSection
                 // In the modal (non-inline) case the VStack fills the full sheet height;
-                // Spacer pushes the input row to the bottom like a standard chat app.
-                if !isInlineComposer {
+                // Spacer pushes the input row down when there is no flexible picker above it.
+                if !isInlineComposer && !showsInlineAgentSelector {
                     Spacer(minLength: 0)
                 }
+                #if os(macOS)
                 Divider()
+                #endif
                 telegramStyleComposerRow
             }
         }

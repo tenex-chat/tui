@@ -436,6 +436,7 @@ impl DeltaSummary {
             DataChangeType::ProjectUpsert { .. } => self.project_upsert += 1,
             DataChangeType::InboxUpsert { .. } => self.inbox_upsert += 1,
             DataChangeType::ReportUpsert { .. } => self.report_upsert += 1,
+            DataChangeType::HtmlReportUpsert { .. } => self.report_upsert += 1,
             DataChangeType::ProjectStatusChanged { .. } => self.project_status_changed += 1,
             DataChangeType::PendingBackendApproval { .. } => self.pending_backend_approval += 1,
             DataChangeType::ActiveConversationsChanged { .. } => {
@@ -618,6 +619,12 @@ fn process_note_keys_with_deltas(
                     }
                 }
                 1 => {
+                    if let Some(report) = HtmlReport::from_note(&note) {
+                        deltas.push(DataChangeType::HtmlReportUpsert {
+                            report: report.clone(),
+                        });
+                    }
+
                     // Message (kind:1 with e-tags)
                     if let Some(message) = Message::from_note(&note) {
                         deltas.push(DataChangeType::MessageAppended {
@@ -949,7 +956,8 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
             | DataChangeType::ConversationUpsert { .. }
             | DataChangeType::ProjectUpsert { .. }
             | DataChangeType::InboxUpsert { .. }
-            | DataChangeType::ReportUpsert { .. } => {
+            | DataChangeType::ReportUpsert { .. }
+            | DataChangeType::HtmlReportUpsert { .. } => {
                 stats_changed = true;
                 diagnostics_changed = true;
             }
@@ -1755,6 +1763,10 @@ pub enum DataChangeType {
     /// A report was created or updated (kind:30023)
     ReportUpsert {
         report: Report,
+    },
+    /// An HTML report was created or updated (kind:1 tagged t:html-report)
+    HtmlReportUpsert {
+        report: HtmlReport,
     },
     /// Project roster/status changed.
     ProjectStatusChanged {

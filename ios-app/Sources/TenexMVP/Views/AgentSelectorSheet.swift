@@ -87,7 +87,7 @@ struct AgentSelectorSheet: View {
             #endif
         }
         #if os(iOS)
-        .tenexModalPresentation(detents: [.medium, .large])
+        .tenexModalPresentation(detents: [.large])
         #else
         .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
         #endif

@@ -9784,6 +9784,11 @@ public enum DataChangeType {
     case reportUpsert(report: Report
     )
     /**
+     * An HTML report was created or updated (kind:1 tagged t:html-report)
+     */
+    case htmlReportUpsert(report: HtmlReport
+    )
+    /**
      * Project roster/status changed.
      */
     case projectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [ProjectAgent]
@@ -9867,34 +9872,37 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case 5: return .reportUpsert(report: try FfiConverterTypeReport.read(from: &buf)
         )
         
-        case 6: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf), onlineAgents: try FfiConverterSequenceTypeProjectAgent.read(from: &buf)
+        case 6: return .htmlReportUpsert(report: try FfiConverterTypeHtmlReport.read(from: &buf)
+        )
+
+        case 7: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf), onlineAgents: try FfiConverterSequenceTypeProjectAgent.read(from: &buf)
         )
         
-        case 7: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
+        case 8: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
         )
         
-        case 8: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
+        case 9: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
         )
         
-        case 9: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
+        case 10: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
-        case 10: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        case 11: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 11: return .mcpToolsChanged
+        case 12: return .mcpToolsChanged
         
-        case 12: return .teamsChanged
+        case 13: return .teamsChanged
         
-        case 13: return .contentCatalogChanged
+        case 14: return .contentCatalogChanged
         
-        case 14: return .statsUpdated
+        case 15: return .statsUpdated
         
-        case 15: return .diagnosticsUpdated
+        case 16: return .diagnosticsUpdated
         
-        case 16: return .general
+        case 17: return .general
         
-        case 17: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
+        case 18: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -9931,8 +9939,13 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
             FfiConverterTypeReport.write(report, into: &buf)
             
         
-        case let .projectStatusChanged(projectId,projectATag,isOnline,onlineAgents):
+        case let .htmlReportUpsert(report):
             writeInt(&buf, Int32(6))
+            FfiConverterTypeHtmlReport.write(report, into: &buf)
+
+
+        case let .projectStatusChanged(projectId,projectATag,isOnline,onlineAgents):
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterBool.write(isOnline, into: &buf)
@@ -9940,56 +9953,56 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
             
         
         case let .pendingBackendApproval(backendPubkey,projectATag):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(backendPubkey, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             
         
         case let .installedAgentsChanged(backendPubkey):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(backendPubkey, into: &buf)
             
         
         case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterSequenceString.write(activeConversationIds, into: &buf)
             
         
         case let .streamChunk(agentPubkey,conversationId,textDelta):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterOptionString.write(textDelta, into: &buf)
             
         
         case .mcpToolsChanged:
-            writeInt(&buf, Int32(11))
-        
-        
-        case .teamsChanged:
             writeInt(&buf, Int32(12))
         
         
-        case .contentCatalogChanged:
+        case .teamsChanged:
             writeInt(&buf, Int32(13))
         
         
-        case .statsUpdated:
+        case .contentCatalogChanged:
             writeInt(&buf, Int32(14))
         
         
-        case .diagnosticsUpdated:
+        case .statsUpdated:
             writeInt(&buf, Int32(15))
         
         
-        case .general:
+        case .diagnosticsUpdated:
             writeInt(&buf, Int32(16))
         
         
-        case let .bunkerSignRequest(request):
+        case .general:
             writeInt(&buf, Int32(17))
+        
+        
+        case let .bunkerSignRequest(request):
+            writeInt(&buf, Int32(18))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
             
         }

@@ -80,6 +80,14 @@ extension MessageComposerView {
             .lineLimit(1...6)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.systemGray6)
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.systemGray4.opacity(0.55), lineWidth: 1)
+                    )
+            )
             .disabled(isComposerInputDisabled)
             .opacity(isComposerInputDisabled ? 0.5 : 1.0)
             .onChange(of: localText) { oldValue, newValue in
@@ -296,7 +304,8 @@ extension MessageComposerView {
                     )
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
                 .modifier(ToolbarGlassBackground())
             } else {
                 HStack(alignment: .bottom, spacing: 8) {
@@ -305,8 +314,9 @@ extension MessageComposerView {
                         .frame(maxWidth: .infinity)
                     composerTrailingActionButton
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
                 .modifier(ToolbarGlassBackground())
             }
         }
@@ -540,14 +550,10 @@ private struct ToolbarGlassBackground: ViewModifier {
                 .background(Color.systemBackground)
         } else if #available(iOS 26.0, macOS 26.0, *) {
             content
-                .background(
-                    RoundedRectangle(cornerRadius: 0, style: .continuous)
-                        .fill(Color.systemBackground.opacity(0.56))
-                        .glassEffect(.regular)
-                )
+                .background(Color.systemBackground.opacity(0.82))
         } else {
             content
-                .background(.ultraThinMaterial)
+                .background(Color.systemBackground.opacity(0.94))
         }
     }
 }

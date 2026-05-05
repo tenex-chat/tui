@@ -110,6 +110,23 @@ class TenexCoreManager {
         reportsVersion &+= 1
     }
 
+    func applyHtmlReportUpsert(report: HtmlReport) {
+        if let index = htmlReports.firstIndex(where: { $0.eventId == report.eventId }) {
+            htmlReports[index] = report
+        } else {
+            htmlReports.append(report)
+        }
+        htmlReportsVersion &+= 1
+        prefetchHtmlReports([report])
+    }
+
+    func prefetchHtmlReports(_ reports: [HtmlReport]) {
+        guard !reports.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            await HtmlReportCache.shared.prefetch(reports)
+        }
+    }
+
     var conversations: [ConversationFullInfo] = [] {
         didSet { rebuildConversationById() }
     }

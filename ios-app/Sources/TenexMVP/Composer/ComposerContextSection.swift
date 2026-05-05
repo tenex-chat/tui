@@ -194,15 +194,17 @@ extension MessageComposerView {
 
     // MARK: - Inline Agent Selector (new conversations)
 
+    var showsInlineAgentSelector: Bool {
+        isNewConversation
+            && selectedProject != nil
+            && !hasPickedAgentInlineSelector
+            && !availableAgents.isEmpty
+    }
+
     /// Shown above the text field when starting a new conversation and no agent is selected yet.
     @ViewBuilder
     var inlineAgentSelectorSection: some View {
-        if isNewConversation,
-           selectedProject != nil,
-           !hasPickedAgentInlineSelector,
-           !availableAgents.isEmpty
-        {
-            Divider()
+        if showsInlineAgentSelector {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(availableAgents, id: \.pubkey) { agent in
@@ -232,7 +234,7 @@ extension MessageComposerView {
                     }
                 }
             }
-            .frame(maxHeight: 240)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(.bar)
         }
     }
