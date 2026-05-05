@@ -364,6 +364,9 @@ extension TenexCoreManager {
     @MainActor
     func applyInstalledAgentsChanged() {
         bumpAgentInventoryVersion()
+        // Clear cached profile names so that kind:0 events arriving via the
+        // subscriptions set up after inventory changes are picked up on next render.
+        invalidateProfileNameCache()
         Task {
             await refreshProjectRosterState()
         }

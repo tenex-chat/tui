@@ -263,6 +263,7 @@ class TenexCoreManager {
     // MARK: - Profile Name Resolution
 
     @ObservationIgnored private var profileNameCache: [String: String] = [:]
+    @ObservationIgnored private var profileNameFetchInFlight: Set<String> = []
 
     /// Resolves a display name for a pubkey via kind:0 profile metadata (cached).
     func displayName(for pubkey: String) -> String {
@@ -270,19 +271,28 @@ class TenexCoreManager {
         if let cached = profileNameCache[pubkey] {
             return cached
         }
-        profileNameCache[pubkey] = "" // placeholder to avoid duplicate Tasks
+        guard !profileNameFetchInFlight.contains(pubkey) else { return "" }
+        profileNameFetchInFlight.insert(pubkey)
         Task { @MainActor [weak self] in
             guard let self else { return }
             let name = await self.core.getProfileName(pubkey: pubkey)
-            self.profileNameCache[pubkey] = name
-            self.profileNamesVersion += 1
+            self.profileNameFetchInFlight.remove(pubkey)
+            // Only cache real display names. Fallbacks (e.g. "0eb926fe...") are not
+            // cached so the next render retries once kind:0 arrives in nostrdb.
+            let isFallback = name.hasSuffix("...")
+                && pubkey.lowercased().hasPrefix(name.dropLast(3).lowercased())
+            if !isFallback {
+                self.profileNameCache[pubkey] = name
+                self.profileNamesVersion += 1
+            }
         }
-        return pubkey
+        return ""
     }
 
     /// Invalidates the profile name cache so next access re-fetches from core.
     func invalidateProfileNameCache() {
         profileNameCache.removeAll()
+        profileNameFetchInFlight.removeAll()
         profileNamesVersion += 1
     }
 
