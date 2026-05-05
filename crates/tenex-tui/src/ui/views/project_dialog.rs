@@ -489,18 +489,19 @@ fn render_agents_tab(f: &mut Frame, app: &App, area: Rect, state: &mut ProjectDi
             };
             spans.push(Span::styled(agent_name, name_style));
 
-            spans.push(Span::styled(
-                format!(" [{}]", short_pubkey(agent_pubkey)),
-                Style::default().fg(theme::ACCENT_SPECIAL),
-            ));
-
             if let Some(agent) = &inventory_agent {
-                if agent.is_multi_backend {
-                    spans.push(Span::styled(
+                let (backend_label, backend_style) = if agent.is_multi_backend {
+                    (
                         format!(" [⚠ {} backends]", agent.backends.len()),
                         Style::default().fg(theme::ACCENT_ERROR),
-                    ));
-                }
+                    )
+                } else {
+                    (
+                        format!(" [{}]", app.agent_inventory_backend_label(agent)),
+                        Style::default().fg(theme::TEXT_MUTED),
+                    )
+                };
+                spans.push(Span::styled(backend_label, backend_style));
             }
 
             ListItem::new(Line::from(spans))
@@ -872,19 +873,6 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectDi
                     app.agent_display_name(&agent.pubkey),
                     name_style,
                 ));
-                let backend_count = agent.backends.len();
-                let (backend_label, backend_label_style) = if agent.is_multi_backend {
-                    (
-                        format!(" [⚠ {} backends]", backend_count),
-                        Style::default().fg(theme::ACCENT_ERROR),
-                    )
-                } else {
-                    (
-                        format!(" [{}]", app.agent_inventory_backend_label(agent)),
-                        Style::default().fg(theme::TEXT_MUTED),
-                    )
-                };
-                spans.push(Span::styled(backend_label, backend_label_style));
 
                 let row_style = if is_cursor {
                     Style::default().bg(theme::BG_SELECTED)
@@ -922,19 +910,8 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectDi
             } else {
                 "Not selected"
             };
-            let backend_count = agent.backends.len();
-            let backend_info = if agent.is_multi_backend {
-                format!("⚠ {} backends have this agent", backend_count)
-            } else {
-                format!("Backend: {}", app.agent_inventory_backend_label(agent))
-            };
-            let desc_style = if agent.is_multi_backend {
-                Style::default().fg(theme::ACCENT_ERROR)
-            } else {
-                Style::default().fg(theme::TEXT_DIM)
-            };
-            let desc = Paragraph::new(format!("{} · {}", status, backend_info))
-                .style(desc_style)
+            let desc = Paragraph::new(status)
+                .style(Style::default().fg(theme::TEXT_DIM))
                 .block(Block::default().borders(Borders::NONE));
             f.render_widget(desc, desc_area);
         }
