@@ -2539,6 +2539,15 @@ impl NostrWorker {
                                                     request_profile_if_new(&client, &requested_profiles, backend_pk).await;
                                                 }
                                             }
+                                            // Notify the UI so it calls handle_event(0) and
+                                            // populates agent_configs_by_pubkey. Fresh events
+                                            // only reach nostrdb via handle_incoming_event above;
+                                            // the data_store never sees them otherwise.
+                                            if let Ok(txn) = Transaction::new(&ndb) {
+                                                if let Ok(note_key) = ndb.get_notekey_by_id(&txn, event.id.as_bytes()) {
+                                                    let _ = data_tx.send(DataChange::NoteKeys(vec![note_key.as_u64()]));
+                                                }
+                                            }
                                         }
 
                                         // For kind:31933 (project), immediately subscribe to its messages

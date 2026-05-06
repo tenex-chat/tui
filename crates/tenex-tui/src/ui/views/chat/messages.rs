@@ -863,9 +863,16 @@ pub(crate) fn render_messages_panel(
                                     .iter()
                                     .find(|m| m.id == *thread_id)
                                     .and_then(|m| m.branch.clone());
-                                // t.pubkey is the author of the thread root = the target agent.
-                                // p_tags are just "mentioned pubkeys" (user, delegator, etc.) — not the target.
-                                let to_name = store.get_profile_name(&t.pubkey);
+                                // When the delegator posts the thread root, t.pubkey == parent_pubkey.
+                                // In that case the actual target is in p_tags (the @-mentioned agents).
+                                let to_name = if t.pubkey == *parent_pubkey {
+                                    t.p_tags
+                                        .first()
+                                        .map(|pk| store.get_profile_name(pk))
+                                        .unwrap_or_else(|| store.get_profile_name(&t.pubkey))
+                                } else {
+                                    store.get_profile_name(&t.pubkey)
+                                };
                                 (
                                     title,
                                     from_name,

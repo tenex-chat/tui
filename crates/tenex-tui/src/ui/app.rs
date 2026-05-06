@@ -413,15 +413,27 @@ impl MergedAgentSettingsInputs {
     /// agent's kind:0 (NIP-01 metadata) config. Available *models* come
     /// from the agent's backend's kind:24011 inventory and must be passed
     /// in by the caller (the parameter list keeps `compute` purely
-    /// functional for unit testing).
+    /// functional for unit testing). Available *MCPs* are the union of the
+    /// agent's kind:0 `mcps` list and the backend's kind:24010
+    /// `project_mcp_servers` — the latter is what the backend advertises as
+    /// installed; the former may contain MCPs the agent already has active
+    /// that aren't (yet) in the heartbeat.
     pub fn compute(
         _agent: &crate::models::ProjectAgent,
         agent_config: Option<&AgentConfig>,
         available_models: Vec<String>,
+        project_mcp_servers: Vec<String>,
     ) -> Self {
         let available_tools = agent_config.map(|c| c.tools.clone()).unwrap_or_default();
         let all_available_skills = agent_config.map(|c| c.skills.clone()).unwrap_or_default();
-        let all_available_mcp_servers = agent_config.map(|c| c.mcps.clone()).unwrap_or_default();
+        let mut all_available_mcp_servers =
+            agent_config.map(|c| c.mcps.clone()).unwrap_or_default();
+        for mcp in project_mcp_servers {
+            if !all_available_mcp_servers.contains(&mcp) {
+                all_available_mcp_servers.push(mcp);
+            }
+        }
+        all_available_mcp_servers.sort();
 
         let current_model = agent_config.and_then(|c| c.active_model.clone());
 
@@ -1801,6 +1813,28 @@ impl App {
                                 }
                             }
                         }
+                        // If the AgentConfig modal is open and one of the processed notes was a
+                        // kind:0 for the displayed agent, clear the agent lock so the next render
+                        // re-reads the now-populated agent_configs_by_pubkey.
+                        if let ModalState::AgentConfig(ref mut state) = self.modal_state {
+                            if let Some(active_pk) = state.active_agent_pubkey.clone() {
+                                let pubkeys_updated: Vec<String> = keys
+                                    .iter()
+                                    .filter_map(|&k| {
+                                        let txn = nostrdb::Transaction::new(&self.db.ndb).ok()?;
+                                        let note = self.db.ndb.get_note_by_key(&txn, nostrdb::NoteKey::new(k)).ok()?;
+                                        if note.kind() == 0 {
+                                            Some(hex::encode(note.pubkey()))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+                                if pubkeys_updated.iter().any(|pk| pk == &active_pk) {
+                                    state.active_agent_pubkey = None;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2078,14 +2112,19 @@ impl App {
         &self,
         agent: &crate::models::ProjectAgent,
     ) -> Option<MergedAgentSettingsInputs> {
-        self.selected_project.as_ref()?;
+        let project = self.selected_project.as_ref()?;
         let store = self.data_store.borrow();
         let agent_config = store.get_agent_config(&agent.pubkey).cloned();
         let available_models = store.get_models_for_agent(&agent.pubkey);
+        let project_mcp_servers = store
+            .get_project_status(&project.a_tag())
+            .map(|s| s.all_mcp_servers().iter().map(|s| s.to_string()).collect())
+            .unwrap_or_default();
         Some(MergedAgentSettingsInputs::compute(
             agent,
             agent_config.as_ref(),
             available_models,
+            project_mcp_servers,
         ))
     }
 
@@ -4924,6 +4963,7 @@ mod merged_agent_settings_tests {
             &agent,
             Some(&config),
             available_models.clone(),
+            Vec::new(),
         );
 
         assert_eq!(inputs.available_models, available_models);
@@ -4962,10 +5002,66 @@ mod merged_agent_settings_tests {
     }
 
     #[test]
+    fn project_mcp_servers_appear_in_available_list() {
+        // Reproduces: testflight-deployer has ["mcp","xcode"] in the backend's
+        // kind:24010 (PROJECT_STATUS) but its own kind:0 has no mcp tags, so
+        // the agent config UI was showing "No MCP servers".
+        let agent = make_agent();
+        let config = make_agent_config(
+            Some("m1"),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],  // agent kind:0 has no mcp tags
+            &[],
+        );
+        let project_mcps = vec!["xcode".to_string()];
+
+        let inputs = MergedAgentSettingsInputs::compute(
+            &agent,
+            Some(&config),
+            Vec::new(),
+            project_mcps,
+        );
+
+        assert_eq!(inputs.all_available_mcp_servers, vec!["xcode".to_string()]);
+        assert!(inputs.current_mcp_servers.is_empty());
+    }
+
+    #[test]
+    fn project_mcps_merged_with_agent_mcps_without_duplicates() {
+        let agent = make_agent();
+        let config = make_agent_config(
+            Some("m1"),
+            &[],
+            &[],
+            &[],
+            &[],
+            &["github", "xcode"],
+            &["github"],
+        );
+        let project_mcps = vec!["linear".to_string(), "xcode".to_string()];
+
+        let inputs = MergedAgentSettingsInputs::compute(
+            &agent,
+            Some(&config),
+            Vec::new(),
+            project_mcps,
+        );
+
+        assert_eq!(
+            inputs.all_available_mcp_servers,
+            vec!["github".to_string(), "linear".to_string(), "xcode".to_string()]
+        );
+        assert_eq!(inputs.current_mcp_servers, vec!["github".to_string()]);
+    }
+
+    #[test]
     fn no_kind0_means_no_current_config() {
         let agent = make_agent();
 
-        let inputs = MergedAgentSettingsInputs::compute(&agent, None, Vec::new());
+        let inputs = MergedAgentSettingsInputs::compute(&agent, None, Vec::new(), Vec::new());
 
         assert!(inputs.available_models.is_empty());
         assert!(inputs.available_tools.is_empty());
@@ -4994,7 +5090,8 @@ mod merged_agent_settings_tests {
         assert_eq!(cfg.active_model.as_deref(), Some("m2"));
 
         let available_models = vec!["m1".to_string(), "m2".to_string()];
-        let inputs = MergedAgentSettingsInputs::compute(&agent, Some(&cfg), available_models);
+        let inputs =
+            MergedAgentSettingsInputs::compute(&agent, Some(&cfg), available_models, Vec::new());
         assert_eq!(inputs.current_model.as_deref(), Some("m2"));
     }
 }

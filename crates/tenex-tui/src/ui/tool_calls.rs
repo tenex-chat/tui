@@ -128,6 +128,7 @@ pub fn tool_verb(name: &str) -> &'static str {
         "grep" | "search" | "fs_grep" => "Searching",
         "task" | "agent" => "",
         "web_search" | "websearch" => "Searching",
+        "delegate" | "delegate_followup" | "delegate_crossproject" => "",
         _ => "Executing",
     }
 }
@@ -267,6 +268,16 @@ pub fn render_tool_line(
                     .and_then(|v| v.as_str())
                     .unwrap_or("agent");
                 format!("▶ {}", truncate_with_ellipsis(desc, 40))
+            }
+
+            // Delegation: show recipient
+            "delegate" | "delegate_followup" | "delegate_crossproject" => {
+                let recipient = tool_call
+                    .parameters
+                    .get("recipient")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("agent");
+                format!("→ @{}", recipient)
             }
 
             // Self-delegation: show prompt
