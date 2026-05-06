@@ -3107,12 +3107,37 @@ impl App {
         is_finish: bool,
     ) {
         self.conversation.handle_local_stream_chunk(
-            agent_pubkey,
-            conversation_id,
+            agent_pubkey.clone(),
+            conversation_id.clone(),
             text_delta,
             reasoning_delta,
             is_finish,
         );
+        // Fix race: kind:1 may arrive (and call handoff) before the buffer is created.
+        // If buffer exists but hasn't been handed off yet, check if kind:1 is already in
+        // the store and apply the handoff now.
+        let buffer_needs_handoff = self
+            .conversation
+            .local_stream_buffers
+            .get(&conversation_id)
+            .map(|b| b.superseded_message_id.is_none() && !b.is_complete)
+            .unwrap_or(false);
+        if buffer_needs_handoff {
+            let handoff = self
+                .data_store
+                .borrow()
+                .messages_by_thread
+                .get(&conversation_id)
+                .and_then(|msgs| msgs.iter().rev().find(|m| m.pubkey == agent_pubkey).map(|m| (m.id.clone(), m.pubkey.clone(), m.content.clone())));
+            if let Some((id, pubkey, content)) = handoff {
+                self.conversation.handoff_local_stream_to_kind1(
+                    &conversation_id,
+                    &id,
+                    &pubkey,
+                    &content,
+                );
+            }
+        }
     }
 
     /// Convert live stream buffer into authoritative kind:1 content and animate
