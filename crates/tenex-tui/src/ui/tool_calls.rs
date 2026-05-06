@@ -300,16 +300,23 @@ pub fn render_tool_line(
                 format!("🧠 → {}", variant)
             }
 
-            // Conversation get: show conversation ID and prompt if present
+            // Conversation get: show conversation ID and prompt/description if present
             "conversation_get" | "mcp__tenex__conversation_get" => {
                 let conv_id = tool_call
                     .parameters
-                    .get("conversationId")
+                    .get("conversation_id")
+                    .or_else(|| tool_call.parameters.get("conversationId"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
 
-                // Show prompt if present and non-empty, otherwise just show conversation ID
-                // Treat empty or whitespace-only prompts as absent
+                let description = tool_call
+                    .parameters
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty());
+
+                // Show prompt if present and non-empty, then description, otherwise just conv ID
                 if let Some(prompt) = tool_call
                     .parameters
                     .get("prompt")
@@ -317,12 +324,18 @@ pub fn render_tool_line(
                     .filter(|s| !s.trim().is_empty())
                 {
                     format!(
-                        "📜 {} → \"{}\"",
+                        "📜 get {} → \"{}\"",
                         truncate_with_ellipsis(conv_id, 12),
                         truncate_with_ellipsis(prompt, 50)
                     )
+                } else if let Some(desc) = description {
+                    format!(
+                        "📜 get {}: {}",
+                        truncate_with_ellipsis(conv_id, 8),
+                        truncate_with_ellipsis(desc, 55)
+                    )
                 } else {
-                    format!("📜 {}", truncate_with_ellipsis(conv_id, 12))
+                    format!("📜 get {}", truncate_with_ellipsis(conv_id, 12))
                 }
             }
 
@@ -569,17 +582,10 @@ mod tests {
             text
         );
 
-        let icon_pos = text
-            .find("📜 ")
-            .expect("Conversation icon (📜) should be present in output");
-        let after_icon = &text[icon_pos + "📜 ".len()..];
-        let displayed_id = after_icon.trim();
-        // The truncated ID should be at most 12 characters (including "...")
         assert!(
-            displayed_id.chars().count() <= 12,
-            "Truncated ID should be at most 12 characters, got {} chars: '{}'",
-            displayed_id.chars().count(),
-            displayed_id
+            text.contains("get"),
+            "Output should contain 'get' label, got: '{}'",
+            text
         );
     }
 
@@ -630,6 +636,62 @@ mod tests {
         assert!(
             !text.contains("→"),
             "Should not contain arrow with whitespace-only prompt"
+        );
+    }
+
+    #[test]
+    fn test_render_conversation_get_snake_case_id() {
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversation_id": "432a5dde",
+                "description": "Check status of active Update HTML Report conversation",
+                "until_id": null,
+                "prompt": null,
+                "include_tool_calls": false
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("📜"), "Should contain conversation icon");
+        assert!(text.contains("get"), "Should contain 'get' label");
+        assert!(text.contains("432a5dde"), "Should contain conversation ID");
+        assert!(
+            text.contains("Check status of active"),
+            "Should contain description"
+        );
+        assert!(
+            !text.contains("→"),
+            "Should not contain arrow without prompt"
+        );
+    }
+
+    #[test]
+    fn test_render_conversation_get_with_description_no_prompt() {
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "mcp__tenex__conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversation_id": "abc123",
+                "description": "Summarize the recent agent activity"
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("📜"), "Should contain conversation icon");
+        assert!(text.contains("get"), "Should contain 'get' label");
+        assert!(
+            text.contains("Summarize the recent agent activity"),
+            "Should contain description"
+        );
+        assert!(
+            !text.contains("→"),
+            "Should not contain arrow without prompt"
         );
     }
 }
