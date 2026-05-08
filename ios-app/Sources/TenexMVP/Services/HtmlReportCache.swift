@@ -63,21 +63,23 @@ actor HtmlReportCache {
         let htmlURL = directory.appendingPathComponent("report.html")
         try data.write(to: htmlURL, options: .atomic)
         let htmlString = decodeHTML(data)
-        return .html(content: htmlString, baseURL: htmlURL)
+        return .html(content: htmlString, baseURL: url)
     }
 
     private func cachedSource(for report: HtmlReport, in directory: URL) throws -> HtmlReportSource? {
         guard fileManager.fileExists(atPath: directory.path) else { return nil }
 
         if report.isZip {
-            guard let indexURL = locateIndexHTML(in: directory) else { return nil }
+            guard let indexURL = locateIndexHTML(in: directory), hasContent(at: indexURL) else { return nil }
             return .local(indexURL: indexURL, baseDirectory: directory)
         }
 
         let htmlURL = directory.appendingPathComponent("report.html")
         guard fileManager.fileExists(atPath: htmlURL.path) else { return nil }
         let data = try Data(contentsOf: htmlURL)
-        return .html(content: decodeHTML(data), baseURL: htmlURL)
+        guard !data.isEmpty else { return nil }
+        let baseURL = URL(string: report.url) ?? htmlURL
+        return .html(content: decodeHTML(data), baseURL: baseURL)
     }
 
     private func extractZip(data: Data, into directory: URL) throws -> HtmlReportSource {
@@ -159,6 +161,11 @@ actor HtmlReportCache {
 
     private func decodeHTML(_ data: Data) -> String {
         String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? ""
+    }
+
+    private func hasContent(at url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]) else { return false }
+        return (values.fileSize ?? 0) > 0
     }
 }
 

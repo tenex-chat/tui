@@ -296,11 +296,7 @@ struct SearchView: View {
         #else
         .listStyle(.inset)
         #endif
-        #if os(iOS)
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
-        #else
-        .searchable(text: $searchText)
-        #endif
+        .searchable(text: $searchText, placement: .toolbar, prompt: "Search messages and drafts")
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
@@ -310,7 +306,6 @@ struct SearchView: View {
                     Label("Include Drafts", systemImage: "doc.text")
                 }
                 .toggleStyle(.button)
-                .buttonStyle(.borderless)
                 .tint(includesDrafts ? .accentColor : .secondary)
             }
         }

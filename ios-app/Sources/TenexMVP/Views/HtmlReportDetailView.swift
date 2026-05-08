@@ -200,9 +200,9 @@ extension HtmlReportWebView: NSViewRepresentable {
         switch source {
         case .html(let content, let baseURL):
             webView.loadHTMLString(content, baseURL: baseURL)
-        case .local(_, let baseDirectory):
+        case .local(let indexURL, let baseDirectory):
             coordinator.schemeHandler.baseDirectory = baseDirectory
-            webView.load(URLRequest(url: URL(string: "tenex-file://localhost/index.html")!))
+            webView.load(URLRequest(url: coordinator.schemeHandler.url(for: indexURL)))
         }
     }
 }
@@ -225,7 +225,14 @@ final class TenexBundleSchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
         let relative = requestURL.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let fileURL = relative.isEmpty ? base.appendingPathComponent("index.html") : base.appendingPathComponent(relative)
+        let fileURL = (relative.isEmpty ? base.appendingPathComponent("index.html") : base.appendingPathComponent(relative))
+            .standardizedFileURL
+        let basePath = base.standardizedFileURL.path
+        let readablePath = basePath.hasSuffix("/") ? basePath : basePath + "/"
+        guard fileURL.path == basePath || fileURL.path.hasPrefix(readablePath) else {
+            urlSchemeTask.didFailWithError(URLError(.noPermissionsToReadFile))
+            return
+        }
         do {
             let data = try Data(contentsOf: fileURL)
             let ext = fileURL.pathExtension.lowercased()
@@ -240,6 +247,22 @@ final class TenexBundleSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {}
+
+    func url(for fileURL: URL) -> URL {
+        guard let base = baseDirectory?.standardizedFileURL else {
+            return URL(string: "tenex-file://localhost/index.html")!
+        }
+        let standardizedFile = fileURL.standardizedFileURL
+        let basePath = base.path.hasSuffix("/") ? base.path : base.path + "/"
+        let relativePath = standardizedFile.path.hasPrefix(basePath)
+            ? String(standardizedFile.path.dropFirst(basePath.count))
+            : standardizedFile.lastPathComponent
+        var components = URLComponents()
+        components.scheme = "tenex-file"
+        components.host = "localhost"
+        components.path = "/" + relativePath
+        return components.url ?? URL(string: "tenex-file://localhost/index.html")!
+    }
 }
 #endif
 
