@@ -2226,6 +2226,37 @@ impl AppDataStore {
         self.agent_configs_by_pubkey.get(agent_pubkey)
     }
 
+    /// Return the latest per-agent capability config, falling back to local
+    /// nostrdb when the in-memory cache has not processed the kind:0 event yet.
+    pub fn get_agent_config_snapshot(&self, agent_pubkey: &str) -> Option<AgentConfig> {
+        self.get_agent_config(agent_pubkey)
+            .cloned()
+            .or_else(|| self.get_agent_config_from_ndb(agent_pubkey))
+    }
+
+    fn get_agent_config_from_ndb(&self, agent_pubkey: &str) -> Option<AgentConfig> {
+        let pubkey_bytes = hex::decode(agent_pubkey)
+            .ok()
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())?;
+        let txn = Transaction::new(&self.ndb).ok()?;
+        let filter = Filter::new()
+            .kinds([0])
+            .authors([&pubkey_bytes])
+            .limit(20)
+            .build();
+
+        let results = self.ndb.query(&txn, &[filter], 20).ok()?;
+        results
+            .into_iter()
+            .filter_map(|result| {
+                self.ndb
+                    .get_note_by_key(&txn, result.note_key)
+                    .ok()
+                    .and_then(|note| AgentConfig::from_note(&note))
+            })
+            .max_by_key(|config| config.created_at)
+    }
+
     pub fn get_installed_agents(&self, backend_pubkey: &str) -> &[InstalledAgent] {
         self.installed_agents_by_backend
             .get(backend_pubkey)
@@ -7021,5 +7052,84 @@ mod tests {
             "stale event must not overwrite newer state"
         );
         assert_eq!(after_stale.active_model.as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn test_get_agent_config_snapshot_falls_back_to_ndb_kind0() {
+        use crate::store::events::{ingest_events, wait_for_event_processing};
+        use nostr_sdk::prelude::*;
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+        let agent_keys = Keys::generate();
+        let backend_keys = Keys::generate();
+        let agent_pubkey = agent_keys.public_key().to_hex();
+        let backend_pubkey = backend_keys.public_key().to_hex();
+
+        let profile_content = serde_json::json!({
+            "name": "human-replica",
+            "display_name": "Human Replica"
+        })
+        .to_string();
+
+        let config_event = EventBuilder::new(Kind::Metadata, profile_content)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("slug")),
+                vec!["human-replica".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+                vec![backend_pubkey.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("model")),
+                vec!["opus".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
+                vec!["agent-management".to_string(), "active".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
+                vec!["shell".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
+                vec!["github".to_string(), "active".to_string()],
+            ))
+            .sign_with_keys(&agent_keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&config_event), None).unwrap();
+
+        let agent_author = agent_keys.public_key().to_bytes();
+        let filter = nostrdb::Filter::new()
+            .kinds([0])
+            .authors([&agent_author])
+            .build();
+        assert!(
+            wait_for_event_processing(&db.ndb, filter, 5000),
+            "kind:0 agent config was not processed within timeout"
+        );
+
+        assert!(
+            store.get_agent_config(&agent_pubkey).is_none(),
+            "test requires an empty in-memory config cache"
+        );
+
+        let config = store
+            .get_agent_config_snapshot(&agent_pubkey)
+            .expect("kind:0 config should be recovered from nostrdb");
+        assert_eq!(config.pubkey, agent_pubkey);
+        assert_eq!(config.slug, "human-replica");
+        assert_eq!(
+            config.backend_pubkey.as_deref(),
+            Some(backend_pubkey.as_str())
+        );
+        assert_eq!(config.active_model.as_deref(), Some("opus"));
+        assert_eq!(config.active_skills, vec!["agent-management"]);
+        assert_eq!(config.skills, vec!["agent-management", "shell"]);
+        assert_eq!(config.active_mcps, vec!["github"]);
     }
 }

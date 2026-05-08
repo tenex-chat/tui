@@ -73,7 +73,7 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store.get_agent_config(&agent_pubkey).cloned())
+        Ok(store.get_agent_config_snapshot(&agent_pubkey))
     }
 
     pub fn create_backend_agent(
