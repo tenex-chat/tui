@@ -20,7 +20,7 @@
 //! ["model", "opus"]                                  // currently-selected model
 //! ["skill", "read-access", "active"]                 // enabled skill
 //! ["skill", "shell"]                                 // visible but inactive skill
-//! ["mcp", "github", "active"]                        // mcp server in mcpAccess
+//! ["mcp", "github", "active"]                        // active mcp server
 //! ["mcp", "linear"]                                  // configured but inactive mcp
 //! ```
 //!

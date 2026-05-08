@@ -56,7 +56,7 @@ extension TenexCoreManager {
             }
             refreshUnansweredAskCount(reason: "fetchData")
 
-            // Initialize project availability and ordered rosters from 31933 + 24011/34011 state.
+            // Initialize project liveness and ordered roster projections from core.
             let statusStartedAt = CFAbsoluteTimeGetCurrent()
             await refreshProjectRosterState(for: p)
             let statusMs = (CFAbsoluteTimeGetCurrent() - statusStartedAt) * 1000
@@ -89,7 +89,7 @@ extension TenexCoreManager {
     }
 
     /// Signal that project-related cached data should be refreshed.
-    /// The roster remains 31933-driven; availability is derived from 24011 inventory.
+    /// The roster remains core-projected; liveness is updated from project status.
     /// Uses task cancellation to prevent stale overwrites from overlapping refreshes.
     @MainActor
     func signalProjectStatusUpdate() {
@@ -120,30 +120,27 @@ extension TenexCoreManager {
         }
     }
 
-    /// Refresh the ordered project roster cache.
-    /// Membership and PM/default ordering come from kind:31933 `p` tags. Project online status
-    /// comes from the kind:24010 heartbeat (45s staleness). Roster row metadata (display name,
-    /// agent capability) comes from kind:24011 inventory and kind:34011 configs.
+    /// Refresh the ordered project roster cache from the core projection.
+    /// Core owns the merge of kind:31933 membership/order, kind:24011 per-agent availability,
+    /// and kind:0 config/display metadata. Swift only caches the projected rows and the separate
+    /// project liveness bit from kind:24010.
     /// - Parameter projects: Array of projects to rebuild roster rows for.
     func refreshProjectRosterState(for projects: [Project]? = nil) async {
         let startedAt = CFAbsoluteTimeGetCurrent()
         let projects = projects ?? self.projects
         let inventory = (try? await core.getAgentInventory()) ?? []
-        let inventoryByPubkey = inventory.reduce(into: [String: AgentInventoryItem]()) { result, item in
-            result[item.pubkey] = item
-        }
         var statusUpdates: [String: Bool] = [:]
         var rosterUpdates: [String: [ProjectAgent]] = [:]
 
-        // Build one ordered roster per project. The returned row order is exactly the 31933 p-tag order.
+        // Fetch one projected roster per project. The returned row order is exactly the 31933 p-tag order.
         for project in projects {
             if Task.isCancelled { break }
-            let roster = await rosterAgents(for: project, inventoryByPubkey: inventoryByPubkey)
-            // Project online ⇔ a backend has sent a fresh kind:24010 heartbeat. Do NOT use the
-            // per-agent isOnline flag — that reflects 24011 inventory presence (capability), not
-            // liveness, and a backend can publish 24011 once and never run the project.
+            if let roster = try? await core.getProjectRoster(projectId: project.id) {
+                rosterUpdates[project.id] = Self.canonicalRosterAgents(roster)
+            }
+            // Project online ⇔ a backend has sent a fresh kind:24010 heartbeat. Do not use the
+            // per-agent isOnline flag; that reflects approved 24011 inventory availability.
             statusUpdates[project.id] = await core.isProjectOnline(projectId: project.id)
-            rosterUpdates[project.id] = roster
         }
 
         if !Task.isCancelled {
@@ -167,10 +164,7 @@ extension TenexCoreManager {
 
                 // Re-sort projects: available first, then alphabetical.
                 self.projects.sort { a, b in
-                    let aOnline = nextProjectOnlineStatus[a.id] ?? false
-                    let bOnline = nextProjectOnlineStatus[b.id] ?? false
-                    if aOnline != bOnline { return aOnline }
-                    return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                    Self.projectSortPrecedes(a, b, onlineStatus: nextProjectOnlineStatus)
                 }
             }
         }
@@ -302,34 +296,22 @@ extension TenexCoreManager {
         }
     }
 
-    private func rosterAgents(
-        for project: Project,
-        inventoryByPubkey: [String: AgentInventoryItem]
-    ) async -> [ProjectAgent] {
-        var result: [ProjectAgent] = []
-        result.reserveCapacity(project.agentPubkeys.count)
+    nonisolated static func projectSortPrecedes(
+        _ lhs: Project,
+        _ rhs: Project,
+        onlineStatus: [String: Bool]
+    ) -> Bool {
+        let lhsOnline = onlineStatus[lhs.id] ?? false
+        let rhsOnline = onlineStatus[rhs.id] ?? false
+        if lhsOnline != rhsOnline { return lhsOnline }
+        return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+    }
 
-        for (index, pubkey) in project.agentPubkeys.enumerated() {
-            let inventoryItem = inventoryByPubkey[pubkey]
-            let config = try? await core.getAgentConfig(agentPubkey: pubkey)
-            let profileName = await core.getProfileName(pubkey: pubkey)
-            let displayName = Self.displayName(pubkey: pubkey, profileName: profileName)
-            let backendPubkey = Self.preferredBackendPubkey(inventoryItem: inventoryItem, config: config)
-
-            result.append(ProjectAgent(
-                pubkey: pubkey,
-                name: displayName,
-                backendPubkey: backendPubkey,
-                isPm: index == 0,
-                isOnline: inventoryItem?.backends.isEmpty == false,
-                model: config?.activeModel,
-                tools: config?.activeTools ?? [],
-                skills: config?.activeSkills ?? [],
-                mcpServers: config?.activeMcps ?? []
-            ))
+    @MainActor
+    func sortProjectsByAvailability() {
+        projects.sort { lhs, rhs in
+            Self.projectSortPrecedes(lhs, rhs, onlineStatus: projectOnlineStatus)
         }
-
-        return Self.canonicalRosterAgents(result)
     }
 
     private func sortedAgentInventory(_ inventory: [AgentInventoryItem]) -> [AgentInventoryItem] {
@@ -342,29 +324,6 @@ extension TenexCoreManager {
             }
             return $0.pubkey < $1.pubkey
         }
-    }
-
-    nonisolated private static func displayName(pubkey: String, profileName: String) -> String {
-        return AgentDisplayName.text(profileName, fallbackPubkey: pubkey)
-    }
-
-    nonisolated private static func preferredBackendPubkey(
-        inventoryItem: AgentInventoryItem?,
-        config: AgentConfig?
-    ) -> String {
-        if let backendPubkey = config?.backendPubkey, !backendPubkey.isEmpty {
-            return backendPubkey
-        }
-        return inventoryItem?
-            .backends
-            .sorted {
-                if $0.createdAt != $1.createdAt {
-                    return $0.createdAt > $1.createdAt
-                }
-                return $0.backendPubkey < $1.backendPubkey
-            }
-            .first?
-            .backendPubkey ?? ""
     }
 
     @MainActor

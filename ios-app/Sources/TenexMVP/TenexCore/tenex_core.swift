@@ -917,24 +917,13 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Used by iOS for nudge selection in new conversations.
      */
     func getNudges() throws  -> [Nudge]
-    
-    /**
-     * Get project roster agents for a project.
-     *
-     * Membership/order comes from kind:31933. The `is_online` flag comes from
-     * approved kind:24011 backend inventories, and per-agent config is merged
-     * from kind:0 (NIP-01 metadata authored by the agent).
-     *
-     * Returns empty if the project is not found.
-     */
-    func getOnlineAgents(projectId: String) throws  -> [ProjectAgent]
-    
+
     /**
      * Get the display name for a pubkey.
      * Returns the kind:0 profile name if available, otherwise a shortened pubkey.
      */
     func getProfileName(pubkey: String)  -> String
-    
+
     /**
      * Get profile picture URL for a pubkey from kind:0 metadata.
      *
@@ -964,37 +953,48 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * agent-config modals with selectable options.
      */
     func getProjectConfigOptions(projectId: String) throws  -> ProjectConfigOptions
-    
+
     /**
      * Get all projects with filter info (visibility, counts).
      * Returns Result to distinguish "no data" from "core error".
      */
     func getProjectFilters() throws  -> [ProjectFilterInfo]
-    
+
+    /**
+     * Get project roster agents for a project.
+     *
+     * Membership/order comes from kind:31933. The `is_online` flag comes from
+     * approved kind:24011 backend inventories, and per-agent config is merged
+     * from kind:0 (NIP-01 metadata authored by the agent).
+     *
+     * Returns empty if the project is not found.
+     */
+    func getProjectRoster(projectId: String) throws  -> [ProjectAgent]
+
     /**
      * Returns skills (kind:4202) whose d_tag appears in the project's kind:24010
      * (project-scoped skills) or any kind:0 agent-config skill list (built-in,
      * agent-home, and user-global skills — backend-specific, per-agent).
      */
     func getProjectSkills(projectId: String) throws  -> [Skill]
-    
+
     /**
      * Get a list of projects.
      *
      * Queries nostrdb for kind 31933 events and returns them as Project.
      */
     func getProjects()  -> [Project]
-    
+
     /**
      * Get raw Nostr event JSON for an event ID.
      */
     func getRawEventJson(eventId: String)  -> String?
-    
+
     /**
      * Get reports for a project.
      */
     func getReports(projectId: String)  -> [Report]
-    
+
     /**
      * Get all skills (kind:4202 events).
      *
@@ -2001,24 +2001,7 @@ open func getNudges()throws  -> [Nudge]  {
     )
 })
 }
-    
-    /**
-     * Get project roster agents for a project.
-     *
-     * Membership/order comes from kind:31933. The `is_online` flag comes from
-     * approved kind:24011 backend inventories, and per-agent config is merged
-     * from kind:0 (NIP-01 metadata authored by the agent).
-     *
-     * Returns empty if the project is not found.
-     */
-open func getOnlineAgents(projectId: String)throws  -> [ProjectAgent]  {
-    return try  FfiConverterSequenceTypeProjectAgent.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_get_online_agents(self.uniffiClonePointer(),
-        FfiConverterString.lower(projectId),$0
-    )
-})
-}
-    
+
     /**
      * Get the display name for a pubkey.
      * Returns the kind:0 profile name if available, otherwise a shortened pubkey.
@@ -2089,7 +2072,24 @@ open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
     )
 })
 }
-    
+
+    /**
+     * Get project roster agents for a project.
+     *
+     * Membership/order comes from kind:31933. The `is_online` flag comes from
+     * approved kind:24011 backend inventories, and per-agent config is merged
+     * from kind:0 (NIP-01 metadata authored by the agent).
+     *
+     * Returns empty if the project is not found.
+     */
+open func getProjectRoster(projectId: String)throws  -> [ProjectAgent]  {
+    return try  FfiConverterSequenceTypeProjectAgent.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_project_roster(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
+    )
+})
+}
+
     /**
      * Returns skills (kind:4202) whose d_tag appears in the project's kind:24010
      * (project-scoped skills) or any kind:0 agent-config skill list (built-in,
@@ -9791,7 +9791,20 @@ public enum DataChangeType {
     /**
      * Project roster/status changed.
      */
-    case projectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [ProjectAgent]
+    case projectStatusChanged(projectId: String, projectATag: String, isOnline: Bool
+    )
+    /**
+     * Canonical project roster projection changed.
+     *
+     * Membership/order comes from kind:31933, availability from approved
+     * kind:24011 inventories, and per-agent config from fresh kind:0 events.
+     */
+    case projectRosterChanged(projectId: String, projectATag: String, agents: [ProjectAgent]
+    )
+    /**
+     * A fresh kind:0 per-agent config was ingested.
+     */
+    case agentConfigChanged(agentPubkey: String, config: AgentConfig
     )
     /**
      * Backend approval required for a project status event
@@ -9856,155 +9869,173 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DataChangeType {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .messageAppended(conversationId: try FfiConverterString.read(from: &buf), message: try FfiConverterTypeMessage.read(from: &buf)
         )
-        
+
         case 2: return .conversationUpsert(conversation: try FfiConverterTypeConversationFullInfo.read(from: &buf)
         )
-        
+
         case 3: return .projectUpsert(project: try FfiConverterTypeProject.read(from: &buf)
         )
-        
+
         case 4: return .inboxUpsert(item: try FfiConverterTypeInboxItem.read(from: &buf)
         )
-        
+
         case 5: return .reportUpsert(report: try FfiConverterTypeReport.read(from: &buf)
         )
-        
+
         case 6: return .htmlReportUpsert(report: try FfiConverterTypeHtmlReport.read(from: &buf)
         )
 
-        case 7: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf), onlineAgents: try FfiConverterSequenceTypeProjectAgent.read(from: &buf)
+        case 7: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf)
         )
-        
-        case 8: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
+
+        case 8: return .projectRosterChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), agents: try FfiConverterSequenceTypeProjectAgent.read(from: &buf)
         )
-        
-        case 9: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
+
+        case 9: return .agentConfigChanged(agentPubkey: try FfiConverterString.read(from: &buf), config: try FfiConverterTypeAgentConfig.read(from: &buf)
         )
-        
-        case 10: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
+
+        case 10: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
         )
-        
-        case 11: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+
+        case 11: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
         )
-        
-        case 12: return .mcpToolsChanged
-        
-        case 13: return .teamsChanged
-        
-        case 14: return .contentCatalogChanged
-        
-        case 15: return .statsUpdated
-        
-        case 16: return .diagnosticsUpdated
-        
-        case 17: return .general
-        
-        case 18: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
+
+        case 12: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
         )
-        
+
+        case 13: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        )
+
+        case 14: return .mcpToolsChanged
+
+        case 15: return .teamsChanged
+
+        case 16: return .contentCatalogChanged
+
+        case 17: return .statsUpdated
+
+        case 18: return .diagnosticsUpdated
+
+        case 19: return .general
+
+        case 20: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
+        )
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: DataChangeType, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case let .messageAppended(conversationId,message):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterTypeMessage.write(message, into: &buf)
-            
-        
+
+
         case let .conversationUpsert(conversation):
             writeInt(&buf, Int32(2))
             FfiConverterTypeConversationFullInfo.write(conversation, into: &buf)
-            
-        
+
+
         case let .projectUpsert(project):
             writeInt(&buf, Int32(3))
             FfiConverterTypeProject.write(project, into: &buf)
-            
-        
+
+
         case let .inboxUpsert(item):
             writeInt(&buf, Int32(4))
             FfiConverterTypeInboxItem.write(item, into: &buf)
-            
-        
+
+
         case let .reportUpsert(report):
             writeInt(&buf, Int32(5))
             FfiConverterTypeReport.write(report, into: &buf)
-            
-        
+
+
         case let .htmlReportUpsert(report):
             writeInt(&buf, Int32(6))
             FfiConverterTypeHtmlReport.write(report, into: &buf)
 
 
-        case let .projectStatusChanged(projectId,projectATag,isOnline,onlineAgents):
+        case let .projectStatusChanged(projectId,projectATag,isOnline):
             writeInt(&buf, Int32(7))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterBool.write(isOnline, into: &buf)
-            FfiConverterSequenceTypeProjectAgent.write(onlineAgents, into: &buf)
-            
-        
-        case let .pendingBackendApproval(backendPubkey,projectATag):
+
+
+        case let .projectRosterChanged(projectId,projectATag,agents):
             writeInt(&buf, Int32(8))
+            FfiConverterString.write(projectId, into: &buf)
+            FfiConverterString.write(projectATag, into: &buf)
+            FfiConverterSequenceTypeProjectAgent.write(agents, into: &buf)
+
+
+        case let .agentConfigChanged(agentPubkey,config):
+            writeInt(&buf, Int32(9))
+            FfiConverterString.write(agentPubkey, into: &buf)
+            FfiConverterTypeAgentConfig.write(config, into: &buf)
+
+
+        case let .pendingBackendApproval(backendPubkey,projectATag):
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(backendPubkey, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
-            
-        
+
+
         case let .installedAgentsChanged(backendPubkey):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(backendPubkey, into: &buf)
-            
-        
+
+
         case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterSequenceString.write(activeConversationIds, into: &buf)
-            
-        
+
+
         case let .streamChunk(agentPubkey,conversationId,textDelta):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterOptionString.write(textDelta, into: &buf)
-            
-        
+
+
         case .mcpToolsChanged:
-            writeInt(&buf, Int32(12))
-        
-        
-        case .teamsChanged:
-            writeInt(&buf, Int32(13))
-        
-        
-        case .contentCatalogChanged:
             writeInt(&buf, Int32(14))
-        
-        
-        case .statsUpdated:
+
+
+        case .teamsChanged:
             writeInt(&buf, Int32(15))
-        
-        
-        case .diagnosticsUpdated:
+
+
+        case .contentCatalogChanged:
             writeInt(&buf, Int32(16))
-        
-        
-        case .general:
+
+
+        case .statsUpdated:
             writeInt(&buf, Int32(17))
-        
-        
-        case let .bunkerSignRequest(request):
+
+
+        case .diagnosticsUpdated:
             writeInt(&buf, Int32(18))
+
+
+        case .general:
+            writeInt(&buf, Int32(19))
+
+
+        case let .bunkerSignRequest(request):
+            writeInt(&buf, Int32(20))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
-            
+
         }
     }
 }
@@ -11903,9 +11934,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_nudges() != 58735) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 27333) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_name() != 49811) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11919,6 +11947,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_roster() != 35579) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_skills() != 62051) {

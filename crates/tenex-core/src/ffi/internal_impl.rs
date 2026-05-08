@@ -329,9 +329,18 @@ impl TenexCore {
 
                 let process_started_at = Instant::now();
                 let mut deltas: Vec<DataChangeType> = Vec::new();
+                let note_context = NoteKeyProcessingContext {
+                    ndb: ndb.as_ref(),
+                    core_handle: &core_handle,
+                    archived_ids: &archived_ids,
+                };
 
                 if !data_changes.is_empty() {
-                    deltas.extend(process_data_changes_with_deltas(store_ref, &data_changes));
+                    deltas.extend(process_data_changes_with_deltas(
+                        store_ref,
+                        &data_changes,
+                        Some(&note_context),
+                    ));
                 }
 
                 for note_keys in note_batches {

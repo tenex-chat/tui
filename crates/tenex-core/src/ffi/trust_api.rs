@@ -79,10 +79,10 @@ impl TenexCore {
         affected_project_a_tags.extend(updates.into_iter().map(|(project_a_tag, _)| project_a_tag));
         affected_project_a_tags.sort();
         affected_project_a_tags.dedup();
-        let deltas: Vec<DataChangeType> = affected_project_a_tags
-            .into_iter()
-            .map(|project_a_tag| project_status_changed_delta(store, project_a_tag, true))
-            .collect();
+        let mut deltas: Vec<DataChangeType> = Vec::new();
+        for project_a_tag in affected_project_a_tags {
+            push_project_roster_deltas(store, &mut deltas, project_a_tag);
+        }
         drop(store_guard);
         self.persist_current_trusted_backends()?;
         if let Ok(callback_guard) = self.event_callback.read() {

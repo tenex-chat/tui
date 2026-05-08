@@ -508,8 +508,7 @@ impl TenexCore {
 
         // Collect allowed skill d_tags from kind:24010 (project-scoped) and
         // kind:0 (per-agent: built-in + agent-home + user-global)
-        let mut allowed_dtags: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut allowed_dtags: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         let project = store
             .get_projects()
@@ -556,8 +555,7 @@ impl TenexCore {
             message: "Store not initialized".to_string(),
         })?;
 
-        let mut allowed_dtags: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut allowed_dtags: std::collections::HashSet<String> = std::collections::HashSet::new();
 
         let project = store
             .get_projects()
@@ -595,11 +593,11 @@ impl TenexCore {
     /// from kind:0 (NIP-01 metadata authored by the agent).
     ///
     /// Returns empty if the project is not found.
-    pub fn get_online_agents(&self, project_id: String) -> Result<Vec<ProjectAgent>, TenexError> {
+    pub fn get_project_roster(&self, project_id: String) -> Result<Vec<ProjectAgent>, TenexError> {
         use crate::tlog;
         tlog!(
             "FFI",
-            "get_online_agents called with project_id: {}",
+            "get_project_roster called with project_id: {}",
             project_id
         );
 
@@ -662,7 +660,7 @@ impl TenexCore {
         }
 
         let agents: Vec<ProjectAgent> = store
-            .get_online_agents(&project.a_tag())
+            .get_project_roster(&project.a_tag())
             .map(|agents| {
                 tlog!("FFI", "Found {} roster agents", agents.len());
                 for agent in &agents {
@@ -732,10 +730,7 @@ impl TenexCore {
     ///
     /// Resolves the agent's backend (via its kind:0 `p` tag) and returns
     /// the model slugs that backend advertises on its kind:24011 inventory.
-    pub fn get_models_for_agent(
-        &self,
-        agent_pubkey: String,
-    ) -> Result<Vec<String>, TenexError> {
+    pub fn get_models_for_agent(&self, agent_pubkey: String) -> Result<Vec<String>, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;

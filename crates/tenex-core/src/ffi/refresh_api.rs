@@ -107,9 +107,18 @@ impl TenexCore {
 
         let initial_process_started_at = Instant::now();
         let mut deltas: Vec<DataChangeType> = Vec::new();
+        let note_context = NoteKeyProcessingContext {
+            ndb: ndb.as_ref(),
+            core_handle: &core_handle,
+            archived_ids: &archived_ids,
+        };
 
         if !data_changes.is_empty() {
-            deltas.extend(process_data_changes_with_deltas(store, &data_changes));
+            deltas.extend(process_data_changes_with_deltas(
+                store,
+                &data_changes,
+                Some(&note_context),
+            ));
         }
 
         for note_keys in note_batches {
@@ -262,11 +271,6 @@ impl TenexCore {
             additional_delta_summary.compact()
         );
 
-        // Preserve previous refresh semantics (full rebuild)
-        let rebuild_started_at = Instant::now();
-        store.rebuild_from_ndb();
-        let rebuild_elapsed_ms = rebuild_started_at.elapsed().as_millis();
-
         // Update lock-free runtime cache while we still hold the store write lock
         let (runtime_ms, _, _) = store.get_statusbar_runtime_ms();
         self.cached_today_runtime_ms
@@ -274,8 +278,7 @@ impl TenexCore {
 
         tlog!(
             "PERF",
-            "ffi.refresh complete rebuildMs={} totalMs={}",
-            rebuild_elapsed_ms,
+            "ffi.refresh complete totalMs={}",
             refresh_started_at.elapsed().as_millis()
         );
         ok

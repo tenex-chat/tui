@@ -2,7 +2,15 @@
 
 Date: 2026-05-04
 
-Status: Draft for product and technical clarification
+Status: **HISTORICAL / SUPERSEDED 2026-05-07.** Decisions 2 and 3 below
+discuss a "kind:34011" direction that was never implemented and was
+abandoned. The actual current architecture uses **kind:0 NIP-01 metadata
+with extra tags** for per-agent config. Treat the `[x]` checkboxes in this
+file as records of *intent at the time*, not as accurate descriptions of
+the current code. See `AGENT_ARCHITECTURE.md` and `docs/2026-05-07-
+inconsistency-audit-findings.md` for the up-to-date picture.
+
+Original status: Draft for product and technical clarification
 
 Scope: TENEX TUI Client, shared Rust core, TUI, iOS app, Mac app, and CLI surfaces where agent identity, agent configuration, `24010` semantics, skills, nudges, and MCP access overlap.
 
@@ -10,21 +18,24 @@ Use this document as a review form. Check one option in each decision block, add
 
 ## Executive Summary
 
-The codebase has several concepts that changed direction over time but were not fully renamed, migrated, or separated. Initial clarification has settled several key definitions:
+The codebase has several concepts that changed direction over time but were not
+fully renamed, migrated, or separated. The current 2026-05-07 clarification has
+settled several key definitions:
 
 - Agent identity is a Nostr pubkey. Display name is presentation only.
 - Project agent membership is encoded by agent pubkey `p` tags on the user-signed `31933` project event.
 - Backend inventory and availability are encoded by approved backend-authored `24011` inventory.
-- Durable per-agent configuration state is `34011`.
+- Durable per-agent configuration state is agent-authored kind:0 NIP-01 metadata with TENEX-specific tags.
 - Agent configuration command/request is currently `24020`.
+- `34011` is historical/unused and must not be treated as current config state.
 - MCP server access is agent-level.
 - Nudges should be entirely removed and cleaned up.
 
 The remaining highest-risk mixups are:
 
 - Existing code still sometimes treats agent display name as an identity key.
-- Agent configuration behavior is split across `34011`, `24020`, and older code paths that treated `24010` as more than runtime status.
-- UI refresh behavior for `34011` appears incomplete or inconsistent.
+- Agent configuration behavior must stay split between durable kind:0 state and `24020` requests, with no fallback to `24010` or historical `34011`.
+- UI refresh behavior for kind:0 config updates appears incomplete or inconsistent.
 - TUI and iOS expose different parts of the same agent configuration surface.
 - "Nudge" remains in code and UI names even though it should be removed.
 - Some operational docs still describe older command shapes.
@@ -42,7 +53,7 @@ Fill this in before implementation. These definitions should become the language
 | Project agent membership | Agent pubkeys tagged by the user on the user-signed `31933` project event. | [x] Yes [ ] No |  |
 | Backend inventory | Approved backend-authored `24011` events advertise which agent pubkeys are available from which backend. | [x] Yes [ ] No | This is availability/online truth for roster UI. |
 | Project runtime status | `24010`: runtime/status traffic only. | [x] Yes [ ] No | It does not publish roster membership, PM/default state, or agent configuration. |
-| Agent config state | Durable per-agent configuration, carried by `34011`. | [x] Yes [ ] No |  |
+| Agent config state | Durable per-agent configuration, carried by agent-authored kind:0 metadata tags. | [x] Yes [ ] No | Historical `34011` is unused. |
 | Agent config command | A request to change config, currently represented by `24020`. | [x] Yes [ ] No |  |
 | Skill | A prompt-facing capability that can be attached to a message or enabled for an agent. | [x] Yes [ ] No |  |
 | Nudge | Remove entirely and clean up stale code, UI labels, event paths, and naming. | [x] Yes [ ] No | Chosen direction: deletion, not restoration. |
@@ -89,29 +100,31 @@ Acceptance criteria:
 
 Problem: The code uses multiple event kinds for related ideas:
 
-- `34011`: durable per-agent signed config state.
+- kind:0: durable per-agent signed profile/config state.
+- `34011`: historical durable-config direction that was abandoned.
 - `24020`: currently named `AGENT_CONFIG`, used as a config update command.
 - `24010`: runtime status only; not roster, PM/default, availability, or agent configuration.
 
 Confirmed:
 
-- [x] `34011` is durable per-agent configuration state.
+- [x] kind:0 is durable per-agent configuration state.
+- [x] `34011` is historical/unused.
 - [x] `24020` is an agent configuration command/request.
 
 Remaining clarifications:
 
 - When a user changes an agent model, the UI should publish:
-  - [x] `24020` command, then wait for the agent to publish `34011`.
-  - [ ] Direct `34011` update signed by the agent identity.
+  - [x] `24020` command, then wait for the agent to publish kind:0.
+  - [ ] Direct kind:0 update signed by the agent identity.
   - [ ] Direct local store update plus async publish.
   - [ ] Other:
 - Confirmation should come from:
-  - [x] Receiving updated `34011`.
+  - [x] Receiving updated kind:0.
   - [ ] Receiving updated `24010`.
   - [ ] Local optimistic state only.
   - [ ] Other:
 - Available model/tool/skill catalogs should come from:
-  - [x] Agent `34011`.
+  - [x] Current tool/skill/MCP visibility from agent kind:0; available model catalog from approved 24011 inventory.
   - [ ] Backend/provider catalog.
   - [ ] `24010`, if its clarified role includes catalogs. OBSOLETE: 24010 must not carry roster/config catalog truth.
   - [ ] Separate catalog event/API.
@@ -123,7 +136,7 @@ Remaining clarifications:
 
 Decision notes:
 
-> Do not call `24020` durable config state. It is a command/request: update this agent to use this configuration.
+> Do not call `24020` durable config state. It is a command/request: update this agent to use this configuration. Do not call `34011` current config state; it is historical/unused.
 
 Acceptance criteria:
 
@@ -132,22 +145,26 @@ Acceptance criteria:
 - [x] API comments match runtime behavior.
 - [x] Tests cover model change propagation from publish to UI refresh.
 
-## Decision 3: `34011` Subscription And UI Refresh
+## Decision 3: kind:0 Subscription And UI Refresh
 
-Problem: Some code handles `34011` as a data-change event that can emit `ProjectStatusChanged`, but worker routing appears to send non-ephemeral saved events through note-key processing. That path does not clearly produce agent config UI deltas. Project membership is now confirmed as agent pubkey `p` tags on the user-signed `31933`; any other subscription source needs a separate justification.
+Problem: Agent config is carried by kind:0, but not every client surface has a
+dedicated live-update signal when relevant kind:0 events arrive. Project
+membership is confirmed as agent pubkey `p` tags on the user-signed `31933`;
+approved 24011 inventory can add agent pubkeys that also need kind:0 fetches.
+Historical kind:34011 must not drive subscriptions or UI refresh.
 
 Choose the desired flow:
 
-- [ ] A. Worker emits a dedicated `AgentConfigChanged` delta for `34011`. Recommended.
-- [ ] B. Worker emits `ProjectStatusChanged` for any `34011` that affects current project agents.
+- [ ] A. Worker emits a dedicated `AgentConfigChanged` delta for relevant kind:0. Recommended.
+- [ ] B. Worker emits `ProjectStatusChanged` for any kind:0 that affects current project agents.
 - [ ] C. UIs poll/reload config after relevant note-key events.
-- [x] D. Other: event-driven reactive UI updates when new `34011` events arrive.
+- [x] D. Other: event-driven reactive UI updates when relevant kind:0 events arrive.
 
 Clarifications:
 
-- Subscribe to `34011` for agents from:
+- Subscribe to kind:0 for agents from:
   - [x] Project membership `p` tags on user-signed `31933`.
-  - [ ] Another source, if needed:
+  - [x] Approved backend inventory from kind:24011.
   - [ ] Installed agent list.
   - [ ] Currently opened config sheet only.
 - If the selected agent config changes while the modal is open:
@@ -162,8 +179,8 @@ Decision notes:
 
 Acceptance criteria:
 
-- [x] Receiving `34011` causes visible config updates without app restart.
-- [ ] Any non-`31933` source for relevant agents is explicitly justified and subscribed.
+- [x] Receiving relevant kind:0 causes visible config updates without app restart.
+- [ ] Any non-`31933` source for relevant agents is explicitly justified and subscribed; approved 24011 inventory is the current justified source.
 - [x] Same active agent can refresh while selected.
 - [x] TUI and iOS use the same core event semantics.
 
@@ -184,7 +201,7 @@ Confirmed:
 Remaining clarifications:
 
 - Saving a partial config form should:
-  - [ ] Preserve unknown fields from latest `34011`.
+  - [ ] Preserve unknown fields from latest kind:0.
   - [x] Replace the whole config.
   - [ ] Patch only changed fields.
   - [ ] Other:
@@ -251,7 +268,7 @@ Use this section to decide which boundaries should become code boundaries.
 User action in client
   -> command/request event, for example 24020
   -> backend or agent processes request
-  -> durable state event, for example 34011
+  -> durable state event, kind:0 NIP-01 metadata with TENEX-specific tags
   -> status/catalog/other event, for example 24010 if clarified
   -> UI delta and local store refresh
 ```
@@ -265,7 +282,7 @@ Questions:
 - Which event kinds are commands rather than state?
   - Answer: `24020` is confirmed as an agent config command/request. Others still need review.
 - Which event kinds are state rather than commands?
-  - Answer: `34011` is confirmed as durable per-agent config state. Others still need review.
+  - Answer: kind:0 is confirmed as durable per-agent profile/config state. Historical `34011` is unused.
 - Which event kinds should never be used as UI source of truth?
   - Answer:
 
@@ -275,8 +292,8 @@ This order keeps identity and data flow fixes ahead of UI cleanup.
 
 1. [ ] Write the final glossary and update comments/constants to match it.
 2. [ ] Make pubkey the only durable agent identity key.
-3. [ ] Rename or separate `24020` command concepts from `34011` state concepts.
-4. [ ] Add a dedicated `34011` refresh path and test it.
+3. [ ] Rename or separate `24020` command concepts from kind:0 state concepts.
+4. [ ] Add a dedicated kind:0 refresh path and test it.
 5. [ ] Align config catalogs/options across CLI, TUI, iOS, and Mac.
 6. [ ] Implement agent-level MCP parity or explicit read-only preservation on iOS/Mac.
 7. [ ] Remove nudge concepts, stale names, UI labels, and dead send parameters.
@@ -290,20 +307,20 @@ This order keeps identity and data flow fixes ahead of UI cleanup.
 | Same-name agents collapse into one UI/action target | High | Medium | Key by pubkey and add duplicate-name fixture |
 | iOS saves stale partial config and loses MCP changes | High | Medium | Patch semantics or preserve unknown latest fields |
 | CLI waits for the wrong confirmation event | Medium | Medium | Confirm against chosen source of truth |
-| UI shows stale model/skill data after `34011` | Medium | High | Dedicated config delta and live modal refresh |
+| UI shows stale model/skill data after kind:0 | Medium | High | Dedicated config delta and live modal refresh |
 | Users see nudge UI that cannot affect messages | Medium | High | Remove nudge concepts and labels entirely |
 | Docs send contributors down stale command path | Low | Medium | Run and update command examples |
 
 ## Open Questions For Pablo
 
-- Is `24020` still part of the desired protocol, or should clients write `34011` directly?
-  - Answer: `24020` is confirmed as the agent config command/request; clarify whether clients publish it directly and wait for `34011`.
+- Is `24020` still part of the desired protocol, or should clients write kind:0 directly?
+  - Answer: `24020` is confirmed as the agent config command/request; clients wait for agent-authored kind:0 confirmation.
 - What is the exact definition of `24010` now?
   - Answer: Runtime/status traffic only; not roster, PM/default, availability, or config truth.
 - Should `24010` carry available model/tool/skill catalogs?
-  - Answer: No. Use `34011` for per-agent config/catalog state and `24011` for backend inventory availability.
-- For agent config changes, should UI confirmation come from updated `34011`, updated `24010`, or optimistic local state?
-  - Answer: Updated `34011`.
+  - Answer: No. Use kind:0 for per-agent current config and visible tool/skill/MCP state; use `24011` for backend inventory availability and available model catalog.
+- For agent config changes, should UI confirmation come from updated kind:0, updated `24010`, or optimistic local state?
+  - Answer: Updated kind:0.
 - Should iOS/Mac match all TUI agent configuration controls, or intentionally expose a smaller surface?
   - Answer:
 - Should old events without pubkeys be migrated, hidden, or displayed as read-only legacy data?

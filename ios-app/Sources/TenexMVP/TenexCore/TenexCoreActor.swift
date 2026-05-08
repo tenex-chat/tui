@@ -445,12 +445,11 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
-    /// Legacy project-status agent payload from kind:24010.
-    /// UI roster surfaces should use TenexCoreManager.projectRosterAgents instead.
-    func getOnlineAgents(projectId: String) throws -> [ProjectAgent] {
-        try profiler.measureFFI("getOnlineAgents") {
+    /// Core-projected project roster with 24011 availability and kind:0 config merged into each row.
+    func getProjectRoster(projectId: String) throws -> [ProjectAgent] {
+        try profiler.measureFFI("getProjectRoster") {
             do {
-                return try core.getOnlineAgents(projectId: projectId)
+                return try core.getProjectRoster(projectId: projectId)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -469,7 +468,8 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
-    /// Get skills (kind:4202) whose `d_tag` appears in the project's 24010 or 34011 skill tags.
+    /// Get skills (kind:4202) whose `d_tag` appears in the project's 24010 skill tags or in the
+    /// per-agent kind:0 metadata of any roster agent.
     func getProjectSkills(projectId: String) throws -> [Skill] {
         try profiler.measureFFI("getProjectSkills") {
             do {

@@ -245,7 +245,7 @@ extension TenexCoreManager {
     }
 
     @MainActor
-    func applyProjectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [ProjectAgent]) {
+    func applyProjectStatusChanged(projectId: String, projectATag: String, isOnline: Bool) {
         let resolvedProjectId: String = {
             if !projectId.isEmpty {
                 return projectId
@@ -255,11 +255,29 @@ extension TenexCoreManager {
 
         guard !resolvedProjectId.isEmpty else { return }
 
+        setProjectOnlineStatus(isOnline, for: resolvedProjectId)
+
+        sortProjectsByAvailability()
         profiler.logEvent(
-            "applyProjectStatusChanged ignoredRosterPayload projectId=\(resolvedProjectId) isOnline=\(isOnline) agentCount=\(onlineAgents.count)",
+            "applyProjectStatusChanged projectId=\(resolvedProjectId) isOnline=\(isOnline)",
             category: .general,
             level: .debug
         )
+        signalDiagnosticsUpdate()
+    }
+
+    @MainActor
+    func applyProjectRosterChanged(projectId: String, projectATag: String, agents: [ProjectAgent]) {
+        let resolvedProjectId: String = {
+            if !projectId.isEmpty {
+                return projectId
+            }
+            return Self.projectId(fromATag: projectATag)
+        }()
+
+        guard !resolvedProjectId.isEmpty else { return }
+
+        setProjectRosterCache(agents, for: resolvedProjectId)
         signalDiagnosticsUpdate()
     }
 

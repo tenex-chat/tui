@@ -16,7 +16,8 @@
 //! `handle_event`, keeping the in-memory state fully up to date.
 
 use crate::models::{
-    AgentDefinition, Lesson, MCPTool, Message, Nudge, Project, Report, Skill, TeamPack, Thread,
+    AgentConfig, AgentDefinition, Lesson, MCPTool, Message, Nudge, Project, Report, Skill,
+    TeamPack, Thread,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -29,7 +30,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// Setting this to a new value causes all existing caches to be silently discarded
 /// and rebuilt from nostrdb on the next startup.
-pub const CACHE_SCHEMA_VERSION: u32 = 3;
+pub const CACHE_SCHEMA_VERSION: u32 = 4;
 
 /// Maximum cache age in seconds (7 days).
 /// Caches older than this are discarded and rebuilt from nostrdb.
@@ -62,6 +63,7 @@ pub struct CachedState {
     pub threads_by_project: HashMap<String, Vec<Thread>>,
     pub messages_by_thread: HashMap<String, Vec<Message>>,
     pub profiles: HashMap<String, String>,
+    pub agent_configs_by_pubkey: HashMap<String, AgentConfig>,
     /// Thread root IDs keyed by project a_tag — drives get_threads_by_ids().
     pub thread_root_index: HashMap<String, HashSet<String>>,
 

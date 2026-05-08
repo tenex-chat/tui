@@ -376,6 +376,10 @@ impl AppDataStore {
 
         let a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
 
+        let load_agent_configs_started_at = Instant::now();
+        let loaded_agent_config_count = self.load_agent_configs_for_project_rosters_from_ndb();
+        let load_agent_configs_elapsed_ms = load_agent_configs_started_at.elapsed().as_millis();
+
         // Step 1: Build thread root index for all projects
         // This scans kind:1 events once and identifies thread roots (no e-tags)
         let build_thread_index_started_at = Instant::now();
@@ -495,11 +499,13 @@ impl AppDataStore {
         self.needs_rebuild = false;
         crate::tlog!(
             "PERF",
-            "AppDataStore::rebuild_from_ndb complete projects={} threads={} messages={} loadProjectsMs={} buildIndexMs={} loadThreadsMs={} loadMessagesMs={} statsMs={} metadataMs={} hierarchyMs={} contentMs={} reportsMs={} totalMs={}",
+            "AppDataStore::rebuild_from_ndb complete projects={} agentConfigs={} threads={} messages={} loadProjectsMs={} loadAgentConfigsMs={} buildIndexMs={} loadThreadsMs={} loadMessagesMs={} statsMs={} metadataMs={} hierarchyMs={} contentMs={} reportsMs={} totalMs={}",
             project_count,
+            loaded_agent_config_count,
             loaded_thread_count,
             loaded_message_count,
             load_projects_elapsed_ms,
+            load_agent_configs_elapsed_ms,
             build_thread_index_elapsed_ms,
             load_threads_elapsed_ms,
             load_messages_elapsed_ms,
@@ -590,6 +596,7 @@ impl AppDataStore {
         self.threads_by_project = state.threads_by_project;
         self.messages_by_thread = state.messages_by_thread;
         self.profiles = state.profiles;
+        self.agent_configs_by_pubkey = state.agent_configs_by_pubkey;
         self.thread_root_index = state.thread_root_index;
 
         self.content.agent_definitions = state.agent_definitions;
@@ -656,9 +663,7 @@ impl AppDataStore {
         // Query for all event kinds we care about, restricted to events newer than
         // the cache's max_created_at (minus clock-skew window).
         let filter = Filter::new()
-            .kinds([
-                31933, 1, 0, 4199, 34199, 4200, 4201, 4202, 4129, 513, 30023,
-            ])
+            .kinds([31933, 1, 0, 4199, 34199, 4200, 4201, 4202, 4129, 513, 30023])
             .since(since)
             .build();
 
@@ -799,6 +804,7 @@ impl AppDataStore {
             threads_by_project: self.threads_by_project.clone(),
             messages_by_thread: self.messages_by_thread.clone(),
             profiles: self.profiles.clone(),
+            agent_configs_by_pubkey: self.agent_configs_by_pubkey.clone(),
             thread_root_index: self.thread_root_index.clone(),
             agent_definitions: self.content.agent_definitions.clone(),
             team_packs: self.content.team_packs.clone(),
@@ -1750,7 +1756,9 @@ impl AppDataStore {
 
     fn handle_profile_event(&mut self, note: &Note) {
         let pubkey = hex::encode(note.pubkey());
-        if let Some(name) = self.extract_profile_name(note) {
+        if let Some(name) = Self::extract_profile_name_from_content(note.content())
+            .or_else(|| self.extract_profile_name(note))
+        {
             self.profiles.insert(pubkey, name);
         }
     }
@@ -2143,6 +2151,29 @@ impl AppDataStore {
         None
     }
 
+    fn extract_profile_name_from_content(content: &str) -> Option<String> {
+        let value: serde_json::Value = serde_json::from_str(content).ok()?;
+        value
+            .get("display_name")
+            .and_then(|name| name.as_str())
+            .and_then(Self::non_empty_profile_name)
+            .or_else(|| {
+                value
+                    .get("name")
+                    .and_then(|name| name.as_str())
+                    .and_then(Self::non_empty_profile_name)
+            })
+    }
+
+    fn non_empty_profile_name(name: &str) -> Option<String> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
+
     // Getters - return references for efficient access
 
     pub fn get_projects(&self) -> &[Project] {
@@ -2255,6 +2286,23 @@ impl AppDataStore {
                     .and_then(|note| AgentConfig::from_note(&note))
             })
             .max_by_key(|config| config.created_at)
+    }
+
+    fn load_agent_configs_for_project_rosters_from_ndb(&mut self) -> usize {
+        let agent_pubkeys: HashSet<String> = self
+            .projects
+            .iter()
+            .flat_map(|project| project.agent_pubkeys.iter().cloned())
+            .collect();
+
+        let mut loaded = 0usize;
+        for agent_pubkey in agent_pubkeys {
+            if let Some(config) = self.get_agent_config_from_ndb(&agent_pubkey) {
+                self.upsert_agent_config(config);
+                loaded += 1;
+            }
+        }
+        loaded
     }
 
     pub fn get_installed_agents(&self, backend_pubkey: &str) -> &[InstalledAgent] {
@@ -2411,16 +2459,9 @@ impl AppDataStore {
             project,
             &self.installed_agents_by_backend,
             &self.agent_configs_by_pubkey,
+            |pubkey| self.get_profile_name(pubkey),
             |backend_pubkey| self.trust.is_approved(backend_pubkey),
         ))
-    }
-
-    /// Get project agents for compatibility with existing callers.
-    ///
-    /// This returns the full 31933 roster, not only online entries. Use each
-    /// agent's `is_online` flag to distinguish approved 24011 availability.
-    pub fn get_online_agents(&self, a_tag: &str) -> Option<Vec<ProjectAgent>> {
-        self.get_project_roster(a_tag)
     }
 
     /// Whether the project has a fresh kind:24010 heartbeat from any approved
@@ -3932,7 +3973,7 @@ mod tests {
             .push(make_test_project(vec!["agent-b", "agent-a"]));
 
         let roster = store
-            .get_online_agents("31933:owner:project")
+            .get_project_roster("31933:owner:project")
             .expect("expected roster for known project");
 
         assert_eq!(roster.len(), 2);
@@ -3968,7 +4009,7 @@ mod tests {
 
         store.handle_status_event_json(json);
         let roster = store
-            .get_online_agents("31933:owner:project")
+            .get_project_roster("31933:owner:project")
             .expect("expected roster for known project");
 
         assert_eq!(
@@ -4005,18 +4046,18 @@ mod tests {
 
         store.handle_status_event_json(json);
         let roster = store
-            .get_online_agents("31933:owner:project")
+            .get_project_roster("31933:owner:project")
             .expect("expected roster for known project");
         assert!(roster.iter().all(|agent| !agent.is_online));
 
         store.add_approved_backend("backend1");
         store.handle_status_event_json(json);
         let roster = store
-            .get_online_agents("31933:owner:project")
+            .get_project_roster("31933:owner:project")
             .expect("expected roster for known project");
 
         assert!(roster[0].is_online);
-        assert_eq!(roster[0].name, "available-a");
+        assert_eq!(roster[0].name, "agent-a...");
         assert_eq!(roster[0].backend_pubkey, "backend1");
         assert!(!roster[1].is_online);
         // 24011 inventory marks per-agent capability ("agent is installed in
@@ -4034,9 +4075,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
-        store
-            .projects
-            .push(make_test_project(vec!["agent-a"]));
+        store.projects.push(make_test_project(vec!["agent-a"]));
         store.add_approved_backend("backend1");
 
         // 24011 alone (inventory present) must NOT mark the project online.
@@ -4091,10 +4130,10 @@ mod tests {
         store.upsert_agent_config(make_test_agent_config("agent-a"));
 
         let roster = store
-            .get_online_agents("31933:owner:project")
+            .get_project_roster("31933:owner:project")
             .expect("expected roster for known project");
 
-        assert_eq!(roster[0].name, "config-agent");
+        assert_eq!(roster[0].name, "agent-a...");
         assert_eq!(roster[0].model.as_deref(), Some("model-active"));
         assert_eq!(roster[0].tools, vec!["tool-active"]);
         assert_eq!(roster[0].skills, vec!["skill-active"]);
@@ -7131,5 +7170,91 @@ mod tests {
         assert_eq!(config.active_skills, vec!["agent-management"]);
         assert_eq!(config.skills, vec!["agent-management", "shell"]);
         assert_eq!(config.active_mcps, vec!["github"]);
+    }
+
+    #[test]
+    fn test_rebuild_from_ndb_loads_kind0_configs_for_project_rosters() {
+        use crate::store::events::{ingest_events, wait_for_event_processing};
+        use nostr_sdk::prelude::*;
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let owner_keys = Keys::generate();
+        let agent_keys = Keys::generate();
+        let backend_keys = Keys::generate();
+        let agent_pubkey = agent_keys.public_key().to_hex();
+        let backend_pubkey = backend_keys.public_key().to_hex();
+
+        let project_event = EventBuilder::new(Kind::Custom(31933), "Project description")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["project".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Project".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+                vec![agent_pubkey.clone()],
+            ))
+            .sign_with_keys(&owner_keys)
+            .unwrap();
+
+        let config_event = EventBuilder::new(
+            Kind::Metadata,
+            serde_json::json!({"name": "human-replica"}).to_string(),
+        )
+        .tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("slug")),
+            vec!["human-replica".to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+            vec![backend_pubkey.clone()],
+        ))
+        .tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("model")),
+            vec!["opus".to_string()],
+        ))
+        .tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
+            vec!["agent-management".to_string(), "active".to_string()],
+        ))
+        .sign_with_keys(&agent_keys)
+        .unwrap();
+
+        ingest_events(&db.ndb, &[project_event, config_event], None).unwrap();
+        assert!(wait_for_event_processing(
+            &db.ndb,
+            nostrdb::Filter::new().kinds([31933]).build(),
+            5000
+        ));
+        assert!(wait_for_event_processing(
+            &db.ndb,
+            nostrdb::Filter::new()
+                .kinds([0])
+                .authors([&agent_keys.public_key().to_bytes()])
+                .build(),
+            5000
+        ));
+
+        let store = AppDataStore::new(db.ndb.clone());
+        let config = store
+            .get_agent_config(&agent_pubkey)
+            .expect("rebuild should populate kind:0 agent configs");
+        assert_eq!(config.active_model.as_deref(), Some("opus"));
+
+        let roster = store
+            .get_project_roster(&format!(
+                "31933:{}:project",
+                owner_keys.public_key().to_hex()
+            ))
+            .expect("project should be present after rebuild");
+        assert_eq!(roster.len(), 1);
+        assert_eq!(roster[0].pubkey, agent_pubkey);
+        assert_eq!(roster[0].name, "human-replica");
+        assert_eq!(roster[0].model.as_deref(), Some("opus"));
+        assert_eq!(roster[0].skills, vec!["agent-management".to_string()]);
     }
 }

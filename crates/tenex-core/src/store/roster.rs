@@ -1,8 +1,9 @@
 use crate::models::{AgentConfig, InstalledAgent, Project, ProjectAgent};
 use std::collections::{HashMap, HashSet};
 
+#[cfg(test)]
 fn fallback_agent_name(pubkey: &str) -> String {
-    pubkey.chars().take(16).collect()
+    crate::agent_display::fallback_pubkey_name(pubkey)
 }
 
 fn best_approved_inventory<'a, F>(
@@ -36,15 +37,18 @@ where
 /// roster entry is the PM/default. kind:24011 inventories from approved
 /// backends mark entries online and provide backend-hosted slugs. kind:0
 /// (NIP-01 metadata) configs enrich entries with the agent's current
-/// model/tools/skills/MCP.
-pub fn build_project_roster<F>(
+/// model/tools/skills/MCP. Display names are resolved by the caller so this
+/// builder does not fall back to backend inventory or config slugs.
+pub fn build_project_roster<F, N>(
     project: &Project,
     installed_agents_by_backend: &HashMap<String, Vec<InstalledAgent>>,
     agent_configs_by_pubkey: &HashMap<String, AgentConfig>,
+    display_name_for_pubkey: N,
     is_backend_approved: F,
 ) -> Vec<ProjectAgent>
 where
     F: Fn(&str) -> bool,
+    N: Fn(&str) -> String,
 {
     let mut seen = HashSet::new();
     let mut roster = Vec::new();
@@ -57,10 +61,7 @@ where
         let config = agent_configs_by_pubkey.get(pubkey);
         let inventory =
             best_approved_inventory(pubkey, installed_agents_by_backend, &is_backend_approved);
-        let name = inventory
-            .map(|agent| agent.slug.clone())
-            .or_else(|| config.map(|cfg| cfg.slug.clone()))
-            .unwrap_or_else(|| fallback_agent_name(pubkey));
+        let name = display_name_for_pubkey(pubkey);
 
         roster.push(ProjectAgent {
             pubkey: pubkey.clone(),
@@ -139,11 +140,15 @@ mod tests {
             &project(vec!["agent-b", "agent-a", "agent-c"]),
             &HashMap::new(),
             &HashMap::new(),
+            fallback_agent_name,
             |_| false,
         );
 
         assert_eq!(
-            roster.iter().map(|agent| agent.pubkey.as_str()).collect::<Vec<_>>(),
+            roster
+                .iter()
+                .map(|agent| agent.pubkey.as_str())
+                .collect::<Vec<_>>(),
             vec!["agent-b", "agent-a", "agent-c"]
         );
         assert!(roster[0].is_pm);
@@ -156,23 +161,32 @@ mod tests {
         let mut installed = HashMap::new();
         installed.insert(
             "approved-backend".to_string(),
-            vec![installed_agent("approved-backend", "agent-a", "available-a")],
+            vec![installed_agent(
+                "approved-backend",
+                "agent-a",
+                "available-a",
+            )],
         );
         installed.insert(
             "untrusted-backend".to_string(),
-            vec![installed_agent("untrusted-backend", "agent-b", "available-b")],
+            vec![installed_agent(
+                "untrusted-backend",
+                "agent-b",
+                "available-b",
+            )],
         );
 
         let roster = build_project_roster(
             &project(vec!["agent-a", "agent-b"]),
             &installed,
             &HashMap::new(),
+            fallback_agent_name,
             |backend| backend == "approved-backend",
         );
 
         assert!(roster[0].is_online);
         assert_eq!(roster[0].backend_pubkey, "approved-backend");
-        assert_eq!(roster[0].name, "available-a");
+        assert_eq!(roster[0].name, "agent-a...");
         assert!(!roster[1].is_online);
         assert!(roster[1].backend_pubkey.is_empty());
     }
@@ -197,10 +211,15 @@ mod tests {
             &project(vec!["agent-a", "agent-b"]),
             &installed,
             &HashMap::new(),
+            |_| "duplicate-name".to_string(),
             |backend| backend == "approved-backend",
         );
 
-        assert_eq!(roster.len(), 2, "two distinct pubkeys must yield two entries");
+        assert_eq!(
+            roster.len(),
+            2,
+            "two distinct pubkeys must yield two entries"
+        );
 
         // Both rows have the same display name…
         assert_eq!(roster[0].name, "duplicate-name");
@@ -212,12 +231,7 @@ mod tests {
         assert_eq!(roster[1].pubkey, "agent-b");
 
         // Lookup-by-pubkey: each query returns exactly the right record.
-        let by_pubkey = |pk: &str| {
-            roster
-                .iter()
-                .filter(|a| a.pubkey == pk)
-                .collect::<Vec<_>>()
-        };
+        let by_pubkey = |pk: &str| roster.iter().filter(|a| a.pubkey == pk).collect::<Vec<_>>();
         let only_a = by_pubkey("agent-a");
         let only_b = by_pubkey("agent-b");
         assert_eq!(only_a.len(), 1);
@@ -240,12 +254,13 @@ mod tests {
             &project(vec!["agent-a", "agent-b"]),
             &HashMap::new(),
             &configs,
+            |_| "duplicate-profile".to_string(),
             |_| false,
         );
 
         assert_eq!(roster.len(), 2);
-        assert_eq!(roster[0].name, "config-name");
-        assert_eq!(roster[1].name, "config-name");
+        assert_eq!(roster[0].name, "duplicate-profile");
+        assert_eq!(roster[1].name, "duplicate-profile");
         assert_eq!(roster[0].pubkey, "agent-a");
         assert_eq!(roster[1].pubkey, "agent-b");
         // First slot is PM; identity is pubkey-keyed.
@@ -262,10 +277,11 @@ mod tests {
             &project(vec!["agent-a"]),
             &HashMap::new(),
             &configs,
+            |_| "profile-name".to_string(),
             |_| false,
         );
 
-        assert_eq!(roster[0].name, "config-name");
+        assert_eq!(roster[0].name, "profile-name");
         assert_eq!(roster[0].model.as_deref(), Some("model-active"));
         assert_eq!(roster[0].tools, vec!["tool-active"]);
         assert_eq!(roster[0].skills, vec!["skill-active"]);

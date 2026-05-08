@@ -97,13 +97,22 @@ final class TenexEventHandler: EventCallback, @unchecked Sendable {
             case .htmlReportUpsert(let report):
                 coreManager.applyHtmlReportUpsert(report: report)
 
-            case .projectStatusChanged(let projectId, let projectATag, let isOnline, let onlineAgents):
+            case .projectStatusChanged(let projectId, let projectATag, let isOnline):
                 coreManager.applyProjectStatusChanged(
                     projectId: projectId,
                     projectATag: projectATag,
-                    isOnline: isOnline,
-                    onlineAgents: onlineAgents
+                    isOnline: isOnline
                 )
+
+            case .projectRosterChanged(let projectId, let projectATag, let agents):
+                coreManager.applyProjectRosterChanged(
+                    projectId: projectId,
+                    projectATag: projectATag,
+                    agents: agents
+                )
+
+            case .agentConfigChanged:
+                coreManager.signalDiagnosticsUpdate()
 
             case .pendingBackendApproval(let backendPubkey, let projectATag):
                 coreManager.handlePendingBackendApproval(

@@ -414,6 +414,8 @@ struct DeltaSummary {
     inbox_upsert: usize,
     report_upsert: usize,
     project_status_changed: usize,
+    project_roster_changed: usize,
+    agent_config_changed: usize,
     pending_backend_approval: usize,
     active_conversations_changed: usize,
     stream_chunk: usize,
@@ -438,6 +440,8 @@ impl DeltaSummary {
             DataChangeType::ReportUpsert { .. } => self.report_upsert += 1,
             DataChangeType::HtmlReportUpsert { .. } => self.report_upsert += 1,
             DataChangeType::ProjectStatusChanged { .. } => self.project_status_changed += 1,
+            DataChangeType::ProjectRosterChanged { .. } => self.project_roster_changed += 1,
+            DataChangeType::AgentConfigChanged { .. } => self.agent_config_changed += 1,
             DataChangeType::PendingBackendApproval { .. } => self.pending_backend_approval += 1,
             DataChangeType::ActiveConversationsChanged { .. } => {
                 self.active_conversations_changed += 1
@@ -456,7 +460,7 @@ impl DeltaSummary {
 
     fn compact(&self) -> String {
         format!(
-            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} content={} stats={} diag={} general={} bunker={} installed={}",
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} roster={} config={} pending={} active={} stream={} mcp={} teams={} content={} stats={} diag={} general={} bunker={} installed={}",
             self.total,
             self.message_appended,
             self.conversation_upsert,
@@ -464,6 +468,8 @@ impl DeltaSummary {
             self.inbox_upsert,
             self.report_upsert,
             self.project_status_changed,
+            self.project_roster_changed,
+            self.agent_config_changed,
             self.pending_backend_approval,
             self.active_conversations_changed,
             self.stream_chunk,
@@ -479,24 +485,38 @@ impl DeltaSummary {
     }
 }
 
-fn project_status_changed_delta(
-    store: &AppDataStore,
-    project_a_tag: String,
-    include_roster: bool,
-) -> DataChangeType {
+fn project_status_changed_delta(store: &AppDataStore, project_a_tag: String) -> DataChangeType {
     let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
     let is_online = store.is_project_online(&project_a_tag);
-    let online_agents = if include_roster {
-        store.get_online_agents(&project_a_tag).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
 
     DataChangeType::ProjectStatusChanged {
         project_id,
         project_a_tag,
         is_online,
-        online_agents,
+    }
+}
+
+fn project_roster_changed_delta(
+    store: &AppDataStore,
+    project_a_tag: String,
+) -> Option<DataChangeType> {
+    let project_id = project_id_from_a_tag(store, &project_a_tag)?;
+    let agents = store.get_project_roster(&project_a_tag)?;
+
+    Some(DataChangeType::ProjectRosterChanged {
+        project_id,
+        project_a_tag,
+        agents,
+    })
+}
+
+fn push_project_roster_deltas(
+    store: &AppDataStore,
+    deltas: &mut Vec<DataChangeType>,
+    project_a_tag: String,
+) {
+    if let Some(delta) = project_roster_changed_delta(store, project_a_tag) {
+        deltas.push(delta);
     }
 }
 
@@ -506,7 +526,7 @@ fn push_roster_deltas_for_agent_pubkeys(
     agent_pubkeys: &HashSet<String>,
 ) {
     for project_a_tag in store.project_a_tags_for_agent_pubkeys(agent_pubkeys) {
-        deltas.push(project_status_changed_delta(store, project_a_tag, true));
+        push_project_roster_deltas(store, deltas, project_a_tag);
     }
 }
 
@@ -604,7 +624,7 @@ fn process_note_keys_with_deltas(
                         deltas.push(DataChangeType::ProjectUpsert {
                             project: project.clone(),
                         });
-                        deltas.push(project_status_changed_delta(store, project.a_tag(), true));
+                        push_project_roster_deltas(store, &mut deltas, project.a_tag());
                     }
                 }
                 0 => {
@@ -614,6 +634,10 @@ fn process_note_keys_with_deltas(
                     // happens here (profile name updates are handled inside
                     // `store.handle_event` above).
                     if let Some(cfg) = AgentConfig::from_note(&note) {
+                        deltas.push(DataChangeType::AgentConfigChanged {
+                            agent_pubkey: cfg.pubkey.clone(),
+                            config: cfg.clone(),
+                        });
                         let affected = HashSet::from([cfg.pubkey]);
                         push_roster_deltas_for_agent_pubkeys(store, &mut deltas, &affected);
                     }
@@ -771,9 +795,16 @@ fn process_note_keys_with_deltas(
 }
 
 /// Process DataChange channel items and return deltas.
+struct NoteKeyProcessingContext<'a> {
+    ndb: &'a Ndb,
+    core_handle: &'a CoreHandle,
+    archived_ids: &'a std::collections::HashSet<String>,
+}
+
 fn process_data_changes_with_deltas(
     store: &mut AppDataStore,
     data_changes: &[DataChange],
+    note_context: Option<&NoteKeyProcessingContext<'_>>,
 ) -> Vec<DataChangeType> {
     let started_at = Instant::now();
     let mut deltas: Vec<DataChangeType> = Vec::new();
@@ -781,6 +812,8 @@ fn process_data_changes_with_deltas(
     let mut installed_agent_changes = 0usize;
     let mut stream_chunks = 0usize;
     let mut mcp_tools_changed = 0usize;
+    let mut note_key_changes = 0usize;
+    let mut note_key_count = 0usize;
 
     for change in data_changes {
         match change {
@@ -812,11 +845,7 @@ fn process_data_changes_with_deltas(
                                     // 24010 is no longer a roster source. Keep
                                     // the status/options signal, but do not carry
                                     // roster agents on this delta.
-                                    deltas.push(project_status_changed_delta(
-                                        store,
-                                        project_a_tag,
-                                        false,
-                                    ));
+                                    deltas.push(project_status_changed_delta(store, project_a_tag));
                                 } else if !store.trust.is_blocked(&status.backend_pubkey)
                                     && !pending_before
                                 {
@@ -849,9 +878,7 @@ fn process_data_changes_with_deltas(
             DataChange::InstalledAgentList { json } => {
                 installed_agent_changes += 1;
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
-                    if let Some(inventory) =
-                        crate::models::InstalledAgent::from_value(&event)
-                    {
+                    if let Some(inventory) = crate::models::InstalledAgent::from_value(&event) {
                         let backend_pubkey = inventory.backend_pubkey;
                         let mut affected_agent_pubkeys: HashSet<String> = store
                             .get_installed_agents(&backend_pubkey)
@@ -914,8 +941,26 @@ fn process_data_changes_with_deltas(
                     });
                 }
             }
-            DataChange::NoteKeys(_) => {
-                // Note keys are re-processed by TUI/REPL runtimes directly via process_note_keys
+            DataChange::NoteKeys(key_ids) => {
+                note_key_changes += 1;
+                note_key_count += key_ids.len();
+                if let Some(ctx) = note_context {
+                    let note_keys: Vec<NoteKey> =
+                        key_ids.iter().map(|&key_id| NoteKey::new(key_id)).collect();
+                    deltas.extend(process_note_keys_with_deltas(
+                        ctx.ndb,
+                        store,
+                        ctx.core_handle,
+                        &note_keys,
+                        ctx.archived_ids,
+                    ));
+                } else {
+                    tlog!(
+                        "FFI",
+                        "DataChange::NoteKeys received without note context count={}",
+                        key_ids.len()
+                    );
+                }
             }
         }
     }
@@ -923,12 +968,14 @@ fn process_data_changes_with_deltas(
     let delta_summary = summarize_deltas(&deltas);
     tlog!(
         "PERF",
-        "process_data_changes_with_deltas input={} projectStatus={} installedAgents={} streamChunks={} mcpToolsChanged={} deltas=[{}] elapsedMs={}",
+        "process_data_changes_with_deltas input={} projectStatus={} installedAgents={} streamChunks={} mcpToolsChanged={} noteKeyChanges={} noteKeys={} deltas=[{}] elapsedMs={}",
         data_changes.len(),
         project_status_changes,
         installed_agent_changes,
         stream_chunks,
         mcp_tools_changed,
+        note_key_changes,
+        note_key_count,
         delta_summary.compact(),
         started_at.elapsed().as_millis()
     );
@@ -962,6 +1009,8 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
                 diagnostics_changed = true;
             }
             DataChangeType::ProjectStatusChanged { .. }
+            | DataChangeType::ProjectRosterChanged { .. }
+            | DataChangeType::AgentConfigChanged { .. }
             | DataChangeType::PendingBackendApproval { .. }
             | DataChangeType::InstalledAgentsChanged { .. }
             | DataChangeType::ActiveConversationsChanged { .. }
@@ -1773,7 +1822,20 @@ pub enum DataChangeType {
         project_id: String,
         project_a_tag: String,
         is_online: bool,
-        online_agents: Vec<ProjectAgent>,
+    },
+    /// Canonical project roster projection changed.
+    ///
+    /// Membership/order comes from kind:31933, availability from approved
+    /// kind:24011 inventories, and per-agent config from fresh kind:0 events.
+    ProjectRosterChanged {
+        project_id: String,
+        project_a_tag: String,
+        agents: Vec<ProjectAgent>,
+    },
+    /// A fresh kind:0 per-agent config was ingested.
+    AgentConfigChanged {
+        agent_pubkey: String,
+        config: AgentConfig,
     },
     /// Backend approval required for a project status event
     PendingBackendApproval {
@@ -1936,6 +1998,10 @@ mod tests {
         }
     }
 
+    fn custom_tag(name: &'static str, values: Vec<String>) -> Tag {
+        Tag::custom(TagKind::Custom(std::borrow::Cow::Borrowed(name)), values)
+    }
+
     #[test]
     fn test_ffi_layout_guardrails() {
         let ffi_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ffi");
@@ -2036,6 +2102,7 @@ mod tests {
                 }"#
                 .to_string(),
             }],
+            None,
         );
 
         let status_delta = deltas
@@ -2043,13 +2110,17 @@ mod tests {
             .find_map(|delta| match delta {
                 DataChangeType::ProjectStatusChanged {
                     project_a_tag,
-                    online_agents,
+                    is_online,
                     ..
-                } if project_a_tag == "31933:owner:project" => Some(online_agents),
+                } if project_a_tag == "31933:owner:project" => Some(*is_online),
                 _ => None,
             })
             .expect("expected project status delta");
-        assert!(status_delta.is_empty());
+        assert!(status_delta);
+        assert!(!deltas.iter().any(|delta| matches!(
+            delta,
+            DataChangeType::ProjectRosterChanged { .. } | DataChangeType::AgentConfigChanged { .. }
+        )));
     }
 
     #[test]
@@ -2077,16 +2148,17 @@ mod tests {
                 }"#
                 .to_string(),
             }],
+            None,
         );
 
         let roster_delta = deltas
             .iter()
             .find_map(|delta| match delta {
-                DataChangeType::ProjectStatusChanged {
+                DataChangeType::ProjectRosterChanged {
                     project_a_tag,
-                    online_agents,
+                    agents,
                     ..
-                } if project_a_tag == "31933:owner:project" => Some(online_agents),
+                } if project_a_tag == "31933:owner:project" => Some(agents),
                 _ => None,
             })
             .expect("expected roster delta for intersecting project");
@@ -2099,9 +2171,114 @@ mod tests {
             vec![("agent-a", false), ("agent-b", true)]
         );
         assert!(!deltas.iter().any(|delta| matches!(
-        delta,
-        DataChangeType::ProjectStatusChanged { project_a_tag, .. }
-            if project_a_tag == "31933:owner:other"
+            delta,
+            DataChangeType::ProjectRosterChanged { project_a_tag, .. }
+                if project_a_tag == "31933:owner:other"
+        )));
+    }
+
+    #[test]
+    fn test_ffi_note_keys_kind0_fans_out_config_and_roster_deltas() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        let owner = Keys::generate();
+        let agent = Keys::generate();
+        let backend = Keys::generate();
+        let agent_pubkey = agent.public_key().to_hex();
+        let backend_pubkey = backend.public_key().to_hex();
+        let project_a_tag = format!("31933:{}:project", owner.public_key().to_hex());
+
+        store.projects.push(Project {
+            id: "project".to_string(),
+            title: "project".to_string(),
+            description: None,
+            repo_url: None,
+            picture_url: None,
+            is_deleted: false,
+            is_private: false,
+            pubkey: owner.public_key().to_hex(),
+            participants: Vec::new(),
+            agent_pubkeys: vec![agent_pubkey.clone()],
+            mcp_tool_ids: Vec::new(),
+            created_at: 1,
+        });
+
+        let config_event = EventBuilder::new(Kind::Metadata, r#"{"name":"Planner"}"#)
+            .tag(custom_tag("slug", vec!["planner".to_string()]))
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::P)),
+                vec![backend_pubkey.clone()],
+            ))
+            .tag(custom_tag("model", vec!["gpt-5".to_string()]))
+            .tag(custom_tag(
+                "skill",
+                vec!["review".to_string(), "active".to_string()],
+            ))
+            .sign_with_keys(&agent)
+            .unwrap();
+
+        ingest_events(&db.ndb, std::slice::from_ref(&config_event), None).unwrap();
+        let mut note_key = None;
+        for _ in 0..50 {
+            let txn = Transaction::new(&db.ndb).unwrap();
+            if let Ok(key) = db.ndb.get_notekey_by_id(&txn, config_event.id.as_bytes()) {
+                note_key = Some(key);
+                break;
+            }
+            drop(txn);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let note_key = note_key.expect("kind:0 note should be persisted");
+
+        let (command_tx, _command_rx) = mpsc::channel::<NostrCommand>();
+        let handle = CoreHandle::new(command_tx);
+        let archived_ids = std::collections::HashSet::new();
+        let note_context = NoteKeyProcessingContext {
+            ndb: db.ndb.as_ref(),
+            core_handle: &handle,
+            archived_ids: &archived_ids,
+        };
+        let deltas = process_data_changes_with_deltas(
+            &mut store,
+            &[DataChange::NoteKeys(vec![note_key.as_u64()])],
+            Some(&note_context),
+        );
+
+        let config_delta = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                DataChangeType::AgentConfigChanged {
+                    agent_pubkey: changed_pubkey,
+                    config,
+                } if changed_pubkey == &agent_pubkey => Some(config),
+                _ => None,
+            })
+            .expect("expected agent config delta from kind:0 note key");
+        assert_eq!(config_delta.slug, "planner");
+        assert_eq!(config_delta.active_model.as_deref(), Some("gpt-5"));
+
+        let roster_agents = deltas
+            .iter()
+            .find_map(|delta| match delta {
+                DataChangeType::ProjectRosterChanged {
+                    project_a_tag: changed_a_tag,
+                    agents,
+                    ..
+                } if changed_a_tag == &project_a_tag => Some(agents),
+                _ => None,
+            })
+            .expect("expected roster delta for project containing agent");
+        assert_eq!(roster_agents.len(), 1);
+        assert_eq!(roster_agents[0].pubkey, agent_pubkey);
+        assert_eq!(roster_agents[0].name, "Planner");
+        assert_eq!(roster_agents[0].model.as_deref(), Some("gpt-5"));
+        assert_eq!(roster_agents[0].skills, vec!["review".to_string()]);
+
+        assert!(!deltas.iter().any(|delta| matches!(
+            delta,
+            DataChangeType::ProjectStatusChanged { project_a_tag: changed_a_tag, .. }
+                if changed_a_tag == &project_a_tag
         )));
     }
 
