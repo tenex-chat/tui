@@ -1,13 +1,6 @@
 import SwiftUI
 
-private struct IndexedToolGroup: Identifiable {
-    let index: Int
-    let group: ToolGroup
-
-    var id: UUID { group.id }
-}
-
-/// A sheet for configuring an agent's model and tools.
+/// A sheet for configuring an agent's model and skills.
 struct AgentConfigSheet: View {
     // MARK: - Properties
 
@@ -29,16 +22,13 @@ struct AgentConfigSheet: View {
 
     // Configuration options loaded from core
     @State private var allModels: [String] = []
-    @State private var toolGroups: [ToolGroup] = []
 
     // User selections
     @State private var selectedModelIndex: Int = 0
-    @State private var selectedTools: Set<String> = []
     @State private var selectedSkills: Set<String> = []
     @State private var selectedMcpServers: [String] = []
     @State private var allSkills: [String] = []
     @State private var saveGlobally: Bool = false
-    @State private var toolSearchText = ""
 
     // MARK: - Body
 
@@ -160,94 +150,6 @@ struct AgentConfigSheet: View {
                     }
                 }
 
-                GlassPanel(
-                    title: "Tools",
-                    subtitle: "Select the tools available to this agent."
-                ) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("\(selectedTools.count) selected")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Spacer(minLength: 0)
-
-                            if !toolGroups.isEmpty {
-                                Button("Select All") {
-                                    selectedTools = Set(toolGroups.flatMap(\.tools))
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(selectedTools == Set(toolGroups.flatMap(\.tools)))
-
-                                Text("•")
-                                    .foregroundStyle(.tertiary)
-
-                                Button("Clear") {
-                                    selectedTools.removeAll()
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(selectedTools.isEmpty)
-                            }
-                        }
-
-                        if toolGroups.isEmpty {
-                            Text("No tools available")
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 6)
-                        } else {
-                            if toolGroups.count > 8 {
-                                TextField("Filter tools", text: $toolSearchText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .autocorrectionDisabled()
-                                    #if os(iOS)
-                                    .textInputAutocapitalization(.never)
-                                    #endif
-                            }
-
-                            if visibleToolGroups.isEmpty {
-                                ContentUnavailableView(
-                                    "No Matching Tools",
-                                    systemImage: "magnifyingglass",
-                                    description: Text("Try a different filter.")
-                                )
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                            } else {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(Array(visibleToolGroups.enumerated()), id: \.element.id) { offset, entry in
-                                        toolGroupRow(group: entry.group, index: entry.index)
-                                        if offset < visibleToolGroups.count - 1 {
-                                            Divider()
-                                                .opacity(0.30)
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                #if os(macOS)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color(nsColor: .windowBackgroundColor))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                                        )
-                                )
-                                #else
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color.systemBackground.opacity(reduceTransparency ? 1 : 0.36))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
-                                        )
-                                )
-                                #endif
-                            }
-                        }
-                    }
-                }
-
                 if !allSkills.isEmpty {
                     GlassPanel(
                         title: "Skills",
@@ -333,12 +235,11 @@ struct AgentConfigSheet: View {
     private var summaryCard: some View {
         GlassPanel(
             title: "Agent",
-            subtitle: "Configure model, tools, skills, and MCP access."
+            subtitle: "Configure model and skills."
         ) {
             HStack(spacing: 10) {
                 statPill(label: "Name", value: agentDisplayName)
                 statPill(label: "Model", value: selectedModelLabel)
-                statPill(label: "Tools", value: "\(selectedTools.count)")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -369,19 +270,6 @@ struct AgentConfigSheet: View {
         return allModels[selectedModelIndex]
     }
 
-    private var visibleToolGroups: [IndexedToolGroup] {
-        let indexedGroups = toolGroups.enumerated().map { IndexedToolGroup(index: $0.offset, group: $0.element) }
-        let query = toolSearchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return indexedGroups }
-
-        return indexedGroups.filter { entry in
-            entry.group.name.lowercased().contains(query)
-                || entry.group.tools.contains { tool in
-                    tool.lowercased().contains(query) || displayName(for: tool).lowercased().contains(query)
-                }
-        }
-    }
-
     private var backgroundView: some View {
         #if os(macOS)
         Color(nsColor: .windowBackgroundColor)
@@ -400,120 +288,11 @@ struct AgentConfigSheet: View {
         #endif
     }
 
-    // MARK: - Tool Group Row
-
-    @ViewBuilder
-    private func toolGroupRow(group: ToolGroup, index: Int) -> some View {
-        if group.tools.count == 1 {
-            // Single tool - show as checkbox
-            singleToolRow(tool: group.tools[0])
-        } else {
-            // Group with multiple tools - expandable
-            DisclosureGroup(isExpanded: Binding(
-                get: { toolGroups[index].isExpanded },
-                set: { toolGroups[index].isExpanded = $0 }
-            )) {
-                ForEach(group.tools, id: \.self) { tool in
-                    singleToolRow(tool: tool)
-                        .padding(.leading, 16)
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    groupCheckbox(group: group)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(group.name)
-                            .font(.body.weight(.medium))
-                        Text("\(group.tools.count) tools")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Text("\(group.tools.filter { selectedTools.contains($0) }.count)/\(group.tools.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .tint(Color.agentBrand)
-        }
-    }
-
-    private func singleToolRow(tool: String) -> some View {
-        Toggle(isOn: Binding(
-            get: { selectedTools.contains(tool) },
-            set: { isSelected in
-                if isSelected {
-                    selectedTools.insert(tool)
-                } else {
-                    selectedTools.remove(tool)
-                }
-            }
-        )) {
-            HStack(spacing: 8) {
-                Text(displayName(for: tool))
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-        }
-        #if os(macOS)
-        .toggleStyle(.checkbox)
-        #endif
-    }
-
-    private func groupCheckbox(group: ToolGroup) -> some View {
-        Button {
-            toggleGroup(group)
-        } label: {
-            Image(systemName: groupSelectionIcon(for: group))
-                .foregroundStyle(group.isFullySelected(selectedTools) || group.isPartiallySelected(selectedTools) ? Color.agentBrand : .secondary)
-        }
-        .buttonStyle(.plain)
-    }
-
     private var agentDisplayName: String {
         AgentDisplayName.resolve(pubkey: agent.pubkey, coreManager: coreManager)
     }
 
-    // MARK: - Display Helpers
-
-    private func groupSelectionIcon(for group: ToolGroup) -> String {
-        if group.isFullySelected(selectedTools) {
-            return "checkmark.square.fill"
-        }
-        if group.isPartiallySelected(selectedTools) {
-            return "minus.square.fill"
-        }
-        return "square"
-    }
-
-    private func displayName(for tool: String) -> String {
-        // For MCP tools, show just the method name
-        if tool.hasPrefix("mcp__") {
-            let parts = tool.split(separator: "__")
-            if parts.count >= 3 {
-                return String(parts[2])
-            }
-        }
-        return tool
-    }
-
     // MARK: - Actions
-
-    private func toggleGroup(_ group: ToolGroup) {
-        if group.isFullySelected(selectedTools) {
-            // Deselect all
-            for tool in group.tools {
-                selectedTools.remove(tool)
-            }
-        } else {
-            // Select all
-            for tool in group.tools {
-                selectedTools.insert(tool)
-            }
-        }
-    }
 
     private func loadConfigOptions() async {
         isLoading = true
@@ -523,13 +302,10 @@ struct AgentConfigSheet: View {
         do {
             guard let config = try await coreManager.core.getAgentConfig(agentPubkey: agent.pubkey) else {
                 allModels = []
-                toolGroups = []
                 allSkills = []
-                selectedTools = []
                 selectedSkills = []
                 selectedMcpServers = []
                 selectedModelIndex = 0
-                toolSearchText = ""
                 loadError = "No kind:0 configuration has been received for this agent yet."
                 isLoading = false
                 return
@@ -539,7 +315,6 @@ struct AgentConfigSheet: View {
             // inventory, not from kind:0 (which now carries only the
             // currently-active model).
             allModels = try await coreManager.core.getModelsForAgent(agentPubkey: agent.pubkey)
-            toolGroups = ToolGroup.buildGroups(from: config.tools)
             allSkills = config.skills
 
             if let currentModel = config.activeModel,
@@ -548,10 +323,8 @@ struct AgentConfigSheet: View {
             } else {
                 selectedModelIndex = 0
             }
-            selectedTools = Set(config.activeTools)
             selectedSkills = Set(config.activeSkills)
             selectedMcpServers = config.activeMcps
-            toolSearchText = ""
 
             isLoading = false
         } catch {
