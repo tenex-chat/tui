@@ -515,29 +515,13 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
-    /// Update an agent's configuration (model and skills).
-    /// Publishes a kind:24020 event to update the agent's config.
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws {
+    /// Update an agent's configuration (model, skills, MCPs).
+    /// Publishes a kind:24020 event — agent-scoped, applies across every
+    /// project this agent is in. Confirmation arrives as kind:0 from the agent.
+    func updateAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws {
         try profiler.measureFFI("updateAgentConfig") {
             do {
                 try core.updateAgentConfig(
-                    projectId: projectId,
-                    agentPubkey: agentPubkey,
-                    model: model,
-                    skills: skills,
-                    mcpServers: mcpServers,
-                    tags: tags
-                )
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws {
-        try profiler.measureFFI("updateGlobalAgentConfig") {
-            do {
-                try core.updateGlobalAgentConfig(
                     agentPubkey: agentPubkey,
                     model: model,
                     skills: skills,
@@ -984,6 +968,78 @@ actor TenexCoreActor: TenexCoreActorProtocol {
     func setVisibleProjects(projectATags: [String]) {
         profiler.measureFFI("setVisibleProjects") {
             core.setVisibleProjects(projectATags: projectATags)
+        }
+    }
+
+    // MARK: - Workspaces
+
+    func getWorkspaces() throws -> [WorkspaceInfo] {
+        try profiler.measureFFI("getWorkspaces") {
+            do {
+                return try core.getWorkspaces()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func getActiveWorkspaceId() throws -> String? {
+        try profiler.measureFFI("getActiveWorkspaceId") {
+            do {
+                return try core.getActiveWorkspaceId()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func addWorkspace(name: String, projectATags: [String]) throws -> WorkspaceInfo {
+        try profiler.measureFFI("addWorkspace") {
+            do {
+                return try core.addWorkspace(name: name, projectATags: projectATags)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func updateWorkspace(id: String, name: String, projectATags: [String]) throws {
+        try profiler.measureFFI("updateWorkspace") {
+            do {
+                try core.updateWorkspace(id: id, name: name, projectATags: projectATags)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func deleteWorkspace(id: String) throws {
+        try profiler.measureFFI("deleteWorkspace") {
+            do {
+                try core.deleteWorkspace(id: id)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func toggleWorkspacePinned(id: String) throws -> Bool {
+        try profiler.measureFFI("toggleWorkspacePinned") {
+            do {
+                return try core.toggleWorkspacePinned(id: id)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    func setActiveWorkspace(id: String?) throws {
+        try profiler.measureFFI("setActiveWorkspace") {
+            do {
+                try core.setActiveWorkspace(id: id)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
         }
     }
 

@@ -712,8 +712,7 @@ impl CompletionMenu {
                             if !first.starts_with("--")
                                 || (first.starts_with("--") && rest.is_empty())
                             {
-                                let flags =
-                                    [("--model", "change model"), ("--global", "apply globally")];
+                                let flags = [("--model", "change model")];
                                 for (flag, desc) in &flags {
                                     if flag_filter.is_empty() || flag.starts_with(flag_filter) {
                                         items.push(CompletionItem {

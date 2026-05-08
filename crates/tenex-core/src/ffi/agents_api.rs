@@ -740,27 +740,26 @@ impl TenexCore {
         Ok(store.get_models_for_agent(&agent_pubkey))
     }
 
-    /// Request an agent configuration change (model and skills).
+    /// Request an agent configuration change (model, skills, MCPs).
     ///
-    /// Publishes a kind:24020 *config-change request* event. This is a
-    /// command, not durable state: confirmation arrives as an updated
-    /// kind:0 (NIP-01 metadata) authored by the agent. Callers should not
-    /// treat this publish as the new current config.
+    /// Publishes a kind:24020 *config-change request* event. The request
+    /// is agent-scoped: it applies to the agent across every project it
+    /// participates in (no project a-tag). This is a command, not durable
+    /// state — confirmation arrives as an updated kind:0 (NIP-01 metadata)
+    /// authored by the agent. Callers should not treat this publish as the
+    /// new current config.
     pub fn update_agent_config(
         &self,
-        project_id: String,
         agent_pubkey: String,
         model: Option<String>,
         skills: Vec<String>,
         mcp_servers: Vec<String>,
         tags: Vec<String>,
     ) -> Result<(), TenexError> {
-        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
         let core_handle = get_core_handle(&self.core_handle)?;
 
         core_handle
             .send(NostrCommand::UpdateAgentConfig {
-                project_a_tag,
                 agent_pubkey,
                 model,
                 skills,
@@ -769,36 +768,6 @@ impl TenexCore {
             })
             .map_err(|e| TenexError::Internal {
                 message: format!("Failed to send update agent config command: {}", e),
-            })?;
-
-        Ok(())
-    }
-
-    /// Request a global agent configuration change (all projects).
-    ///
-    /// Publishes a kind:24020 *config-change request* event without a
-    /// project a-tag (agent-scoped only). Confirmation arrives as an
-    /// updated kind:0 (NIP-01 metadata) authored by the agent.
-    pub fn update_global_agent_config(
-        &self,
-        agent_pubkey: String,
-        model: Option<String>,
-        skills: Vec<String>,
-        mcp_servers: Vec<String>,
-        tags: Vec<String>,
-    ) -> Result<(), TenexError> {
-        let core_handle = get_core_handle(&self.core_handle)?;
-
-        core_handle
-            .send(NostrCommand::UpdateGlobalAgentConfig {
-                agent_pubkey,
-                model,
-                skills,
-                mcp_servers,
-                tags,
-            })
-            .map_err(|e| TenexError::Internal {
-                message: format!("Failed to send update global agent config command: {}", e),
             })?;
 
         Ok(())

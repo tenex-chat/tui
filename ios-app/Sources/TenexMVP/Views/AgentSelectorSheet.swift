@@ -76,7 +76,7 @@ struct AgentSelectorSheet: View {
                 }
             }
             .sheet(item: $agentToConfig) { agent in
-                AgentConfigSheet(agent: agent, projectId: projectId)
+                AgentConfigSheet(agent: agent)
                     .environment(coreManager)
             }
             #if os(iOS)

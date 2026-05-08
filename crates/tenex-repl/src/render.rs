@@ -902,7 +902,6 @@ pub(crate) fn redraw_input(
                     format!("  Select agent ({})", panel.filter)
                 }
             }
-            PanelMode::FlagSelect => "  Options".to_string(),
             PanelMode::ModelSelect => {
                 if panel.filter.is_empty() {
                     format!("  Model for {}", panel.agent_name)
@@ -941,7 +940,6 @@ pub(crate) fn redraw_input(
                     }
                 }
                 PanelMode::AgentSelect => ("", 0),
-                PanelMode::FlagSelect => ("", 0), // markers are baked into item text
                 PanelMode::ModelSelect => {
                     let is_selected = panel.pending_model.as_deref() == Some(item.as_str());
                     if is_selected {
@@ -976,9 +974,8 @@ pub(crate) fn redraw_input(
 
         // Footer per mode
         let footer = match panel.mode {
-            PanelMode::Tools => "  Space: toggle  @: agent  -: options  Enter: save  Esc: cancel",
+            PanelMode::Tools => "  Space: toggle  @: agent  -: model  Enter: save  Esc: cancel",
             PanelMode::AgentSelect => "  Enter: select  Type to filter  Esc: back",
-            PanelMode::FlagSelect => "  Enter: select  Esc: back",
             PanelMode::ModelSelect => "  Enter: select  Type to filter  Esc: back",
         };
         let footer_len = footer.chars().count();

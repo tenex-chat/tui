@@ -9,7 +9,6 @@ use tenex_core::runtime::CoreRuntime;
 pub(crate) enum PanelMode {
     Tools,
     AgentSelect,
-    FlagSelect,
     ModelSelect,
 }
 
@@ -19,7 +18,6 @@ pub(crate) struct ConfigPanel {
     pub(crate) agent_pubkey: String,
     pub(crate) agent_name: String,
     pub(crate) project_a_tag: String,
-    pub(crate) is_global: bool,
     pub(crate) items: Vec<String>,
     pub(crate) cursor: usize,
     pub(crate) scroll_offset: usize,
@@ -41,7 +39,6 @@ impl ConfigPanel {
             agent_pubkey: String::new(),
             agent_name: String::new(),
             project_a_tag: String::new(),
-            is_global: false,
             items: Vec::new(),
             cursor: 0,
             scroll_offset: 0,
@@ -79,19 +76,6 @@ impl ConfigPanel {
         self.items = agent_items;
     }
 
-    pub(crate) fn switch_to_flag_select(&mut self) {
-        self.mode = PanelMode::FlagSelect;
-        self.cursor = 0;
-        self.scroll_offset = 0;
-        self.filter.clear();
-        self.rebuild_flag_items();
-    }
-
-    pub(crate) fn rebuild_flag_items(&mut self) {
-        let global_marker = if self.is_global { "[x]" } else { "[ ]" };
-        self.items = vec![format!("→  --model"), format!("{global_marker} --global")];
-    }
-
     pub(crate) fn switch_to_model_select(&mut self, runtime: &CoreRuntime) {
         self.mode = PanelMode::ModelSelect;
         self.filter.clear();
@@ -105,7 +89,7 @@ impl ConfigPanel {
 
     /// Returns filtered items as (original_index, &item) pairs.
     pub(crate) fn filtered_items(&self) -> Vec<(usize, &String)> {
-        if self.filter.is_empty() || matches!(self.mode, PanelMode::Tools | PanelMode::FlagSelect) {
+        if self.filter.is_empty() || matches!(self.mode, PanelMode::Tools) {
             return self.items.iter().enumerate().collect();
         }
         let lower = self.filter.to_lowercase();
@@ -119,11 +103,7 @@ impl ConfigPanel {
     pub(crate) fn rebuild_origin_command(&mut self) {
         let mut parts = vec!["/config".to_string()];
         if !self.agent_name.is_empty() {
-            // Check if agent differs from default — always include for clarity
             parts.push(format!("@{}", self.agent_name));
-        }
-        if self.is_global {
-            parts.push("--global".to_string());
         }
         if let Some(ref model) = self.pending_model {
             parts.push(format!("--model {model}"));
@@ -197,30 +177,14 @@ impl ConfigPanel {
 
         drop(store_ref);
 
-        let save_type = if self.is_global { "global" } else { "project" };
+        let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
+            agent_pubkey: self.agent_pubkey.clone(),
+            model,
+            skills,
+            mcp_servers,
+            tags: Vec::new(),
+        });
 
-        if self.is_global {
-            let _ = runtime
-                .handle()
-                .send(NostrCommand::UpdateGlobalAgentConfig {
-                    agent_pubkey: self.agent_pubkey.clone(),
-                    model,
-                    skills,
-                    mcp_servers,
-                    tags: Vec::new(),
-                });
-        } else {
-            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
-                project_a_tag: self.project_a_tag.clone(),
-                agent_pubkey: self.agent_pubkey.clone(),
-                model,
-                skills,
-                mcp_servers,
-                tags: Vec::new(),
-            });
-        }
-
-        // Build descriptive message
         let mut changes = Vec::new();
         if self.pending_model.is_some() {
             changes.push(format!(
@@ -230,12 +194,7 @@ impl ConfigPanel {
         }
         changes.push(format!("{} tools", self.tools_selected.len()));
 
-        format!(
-            "Updated {} ({}) [{}]",
-            self.agent_name,
-            save_type,
-            changes.join(", ")
-        )
+        format!("Updated {} [{}]", self.agent_name, changes.join(", "))
     }
 
     /// Save just the model (for quick_save / /model command).
@@ -253,26 +212,13 @@ impl ConfigPanel {
             .unwrap_or_default();
         drop(store_ref);
 
-        if self.is_global {
-            let _ = runtime
-                .handle()
-                .send(NostrCommand::UpdateGlobalAgentConfig {
-                    agent_pubkey: self.agent_pubkey.clone(),
-                    model: model.clone(),
-                    skills,
-                    mcp_servers,
-                    tags: Vec::new(),
-                });
-        } else {
-            let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
-                project_a_tag: self.project_a_tag.clone(),
-                agent_pubkey: self.agent_pubkey.clone(),
-                model: model.clone(),
-                skills,
-                mcp_servers,
-                tags: Vec::new(),
-            });
-        }
+        let _ = runtime.handle().send(NostrCommand::UpdateAgentConfig {
+            agent_pubkey: self.agent_pubkey.clone(),
+            model: model.clone(),
+            skills,
+            mcp_servers,
+            tags: Vec::new(),
+        });
 
         let model_name = model.as_deref().unwrap_or("none");
         format!("Set model for {} → {}", self.agent_name, model_name)

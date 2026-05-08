@@ -490,7 +490,7 @@ async fn run_repl(
                                 continue;
                             }
                             KeyCode::Char('@') => panel.switch_to_agent_select(runtime),
-                            KeyCode::Char('-') => panel.switch_to_flag_select(),
+                            KeyCode::Char('-') => panel.switch_to_model_select(runtime),
                             KeyCode::Esc => panel.deactivate(),
                             KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                                 raw_println!();
@@ -527,32 +527,6 @@ async fn run_repl(
                                 panel.filter.push(c);
                                 panel.cursor = 0;
                                 panel.scroll_offset = 0;
-                            }
-                            _ => {}
-                        },
-                        PanelMode::FlagSelect => match code {
-                            KeyCode::Up => panel.move_up(),
-                            KeyCode::Down => panel.move_down(),
-                            KeyCode::Enter | KeyCode::Char(' ') => {
-                                match panel.cursor {
-                                    0 => {
-                                        // --model
-                                        panel.switch_to_model_select(runtime);
-                                    }
-                                    1 => {
-                                        // --global
-                                        panel.is_global = !panel.is_global;
-                                        panel.rebuild_origin_command();
-                                        panel.switch_to_tools();
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            KeyCode::Esc | KeyCode::Backspace => panel.switch_to_tools(),
-                            KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                                raw_println!();
-                                raw_println!("{}", print_system_raw("Goodbye."));
-                                return Ok(());
                             }
                             _ => {}
                         },

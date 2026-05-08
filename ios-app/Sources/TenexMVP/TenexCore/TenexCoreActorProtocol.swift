@@ -49,8 +49,7 @@ protocol TenexCoreActorProtocol: Actor {
     func getProjectRoster(projectId: String) throws -> [ProjectAgent]
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
     func getModelsForAgent(agentPubkey: String) throws -> [String]
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
+    func updateAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws
     func createAgentDefinition(
         name: String,
         description: String,
@@ -142,6 +141,15 @@ protocol TenexCoreActorProtocol: Actor {
 
     // MARK: - Project Visibility
     func setVisibleProjects(projectATags: [String])
+
+    // MARK: - Workspaces
+    func getWorkspaces() throws -> [WorkspaceInfo]
+    func getActiveWorkspaceId() throws -> String?
+    func addWorkspace(name: String, projectATags: [String]) throws -> WorkspaceInfo
+    func updateWorkspace(id: String, name: String, projectATags: [String]) throws
+    func deleteWorkspace(id: String) throws
+    func toggleWorkspacePinned(id: String) throws -> Bool
+    func setActiveWorkspace(id: String?) throws
 
     func getDocumentThreads(documentATag: String) -> [Thread]
 

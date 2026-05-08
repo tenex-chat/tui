@@ -1876,7 +1876,6 @@ fn handle_request(
             match lookup {
                 Ok(result) => {
                     match core_handle.send(NostrCommand::UpdateAgentConfig {
-                        project_a_tag: result.project_a_tag.clone(),
                         agent_pubkey: result.agent_pubkey.clone(),
                         model: Some(params.model.clone()),
                         skills: result.skills.clone(),

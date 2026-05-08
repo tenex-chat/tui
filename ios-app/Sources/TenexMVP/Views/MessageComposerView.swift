@@ -458,7 +458,7 @@ struct MessageComposerView: View {
             )
         }
         .sheet(item: $workspaceAgentToConfig) { agent in
-            AgentConfigSheet(agent: agent, projectId: selectedProject?.id ?? "")
+            AgentConfigSheet(agent: agent)
                 .environment(coreManager)
         }
         .sheet(isPresented: $showSkillSelector) {

@@ -932,20 +932,10 @@ pub enum NostrCommand {
     /// Request an agent config change (publishes kind:24020 command).
     ///
     /// kind:24020 is a request/command, not durable state. The agent
-    /// confirms by publishing an updated kind:0 metadata event.
+    /// confirms by publishing an updated kind:0 metadata event. The
+    /// request is agent-scoped — config applies to the agent across
+    /// every project it participates in (no project a-tag).
     UpdateAgentConfig {
-        project_a_tag: String,
-        agent_pubkey: String,
-        model: Option<String>,
-        skills: Vec<String>,
-        mcp_servers: Vec<String>,
-        /// Additional marker tags (e.g. ["pm"])
-        tags: Vec<String>,
-    },
-    /// Request a global agent config change (publishes kind:24020 command,
-    /// no project a-tag). Same semantics as `UpdateAgentConfig`: the kind:24020
-    /// is a request, not state — confirmation arrives as kind:0 from the agent.
-    UpdateGlobalAgentConfig {
         agent_pubkey: String,
         model: Option<String>,
         skills: Vec<String>,
@@ -1432,7 +1422,6 @@ impl NostrWorker {
                         }
                     }
                     NostrCommand::UpdateAgentConfig {
-                        project_a_tag,
                         agent_pubkey,
                         model,
                         skills,
@@ -1444,7 +1433,6 @@ impl NostrWorker {
                             &agent_pubkey[..8]
                         ));
                         if let Err(e) = rt.block_on(self.handle_update_agent_config(
-                            project_a_tag,
                             agent_pubkey,
                             model,
                             skills,
@@ -1452,27 +1440,6 @@ impl NostrWorker {
                             tags,
                         )) {
                             tlog!("ERROR", "Failed to update agent config: {}", e);
-                        }
-                    }
-                    NostrCommand::UpdateGlobalAgentConfig {
-                        agent_pubkey,
-                        model,
-                        skills,
-                        mcp_servers,
-                        tags,
-                    } => {
-                        debug_log(&format!(
-                            "Worker: Updating global agent config for {}",
-                            &agent_pubkey[..8]
-                        ));
-                        if let Err(e) = rt.block_on(self.handle_update_global_agent_config(
-                            agent_pubkey,
-                            model,
-                            skills,
-                            mcp_servers,
-                            tags,
-                        )) {
-                            tlog!("ERROR", "Failed to update global agent config: {}", e);
                         }
                     }
                     NostrCommand::SubscribeToProjectMessages { project_a_tag } => {
@@ -3856,9 +3823,10 @@ impl NostrWorker {
         Ok(())
     }
 
+    /// Send a kind:24020 agent config-change *request* (agent-scoped, no
+    /// a-tag). Confirmation arrives as kind:0 from the agent.
     async fn handle_update_agent_config(
         &self,
-        project_a_tag: String,
         agent_pubkey: String,
         model: Option<String>,
         skills: Vec<String>,
@@ -3874,14 +3842,7 @@ impl NostrWorker {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
-        // Parse project coordinate for a-tag
-        let coordinate = Coordinate::parse(&project_a_tag)
-            .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
-
-        // Build kind:24020 agent config-change *request* event with project
-        // a-tag (durable state arrives later as kind:0 from the agent).
-        let base =
-            EventBuilder::new(Kind::Custom(24020), "").tag(Tag::coordinate(coordinate, None));
+        let base = EventBuilder::new(Kind::Custom(24020), "");
         let event = build_agent_config_event(
             base,
             &agent_pubkey,
@@ -3892,7 +3853,6 @@ impl NostrWorker {
         );
         let signed_event = event.sign_with_keys(keys)?;
 
-        // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             client.send_event(&signed_event),
@@ -3906,61 +3866,6 @@ impl NostrWorker {
                 e
             ),
             Err(_) => tlog!("ERROR", "Timeout sending agent config update to relay"),
-        }
-
-        Ok(())
-    }
-
-    /// Send a global kind:24020 agent config-change *request* (no a-tag,
-    /// agent-scoped only). Confirmation arrives as kind:0 from the agent.
-    async fn handle_update_global_agent_config(
-        &self,
-        agent_pubkey: String,
-        model: Option<String>,
-        skills: Vec<String>,
-        mcp_servers: Vec<String>,
-        tags: Vec<String>,
-    ) -> Result<()> {
-        let client = self
-            .client
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self
-            .keys
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
-
-        // Build kind:24020 global agent config-change *request* (no a-tag).
-        let base = EventBuilder::new(Kind::Custom(24020), "");
-        let event = build_agent_config_event(
-            base,
-            &agent_pubkey,
-            model,
-            &skills,
-            &mcp_servers,
-            &tags,
-        );
-        let signed_event = event.sign_with_keys(keys)?;
-
-        // Send to relay with timeout
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.send_event(&signed_event),
-        )
-        .await
-        {
-            Ok(Ok(output)) => {
-                debug_log(&format!("Sent global agent config update: {}", output.id()))
-            }
-            Ok(Err(e)) => tlog!(
-                "ERROR",
-                "Failed to send global agent config update to relay: {}",
-                e
-            ),
-            Err(_) => tlog!(
-                "ERROR",
-                "Timeout sending global agent config update to relay"
-            ),
         }
 
         Ok(())
@@ -5760,9 +5665,20 @@ mod tests {
             arr.len() == 1 && arr.first().and_then(|v| v.as_str()) == Some("mcp")
         });
 
+        let has_a_tag = tags.iter().any(|tag| {
+            let Some(arr) = tag.as_array() else {
+                return false;
+            };
+            arr.first().and_then(|v| v.as_str()) == Some("a")
+        });
+
         assert!(!has_tool_tag, "24020 event must not contain tool tags");
         assert!(has_empty_skill_tag, "expected raw empty skill tag");
         assert!(has_empty_mcp_tag, "expected raw empty mcp tag");
+        assert!(
+            !has_a_tag,
+            "24020 event is agent-scoped — must not carry a project a-tag"
+        );
     }
 
     #[test]

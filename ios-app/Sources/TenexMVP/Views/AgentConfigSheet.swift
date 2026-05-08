@@ -5,7 +5,6 @@ struct AgentConfigSheet: View {
     // MARK: - Properties
 
     let agent: ProjectAgent
-    let projectId: String
 
     // MARK: - Environment
 
@@ -28,7 +27,6 @@ struct AgentConfigSheet: View {
     @State private var selectedSkills: Set<String> = []
     @State private var selectedMcpServers: [String] = []
     @State private var allSkills: [String] = []
-    @State private var saveGlobally: Bool = false
 
     // MARK: - Body
 
@@ -217,14 +215,6 @@ struct AgentConfigSheet: View {
                     }
                 }
 
-                GlassPanel(
-                    title: "Save Scope",
-                    subtitle: "Apply these configuration changes to this agent."
-                ) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Toggle("Change all projects this agent is in", isOn: $saveGlobally)
-                    }
-                }
             }
             .padding(.horizontal, 18)
             .padding(.top, 16)
@@ -341,24 +331,13 @@ struct AgentConfigSheet: View {
             let selectedModel = allModels.isEmpty ? nil : allModels[selectedModelIndex]
             let tags: [String] = []
 
-            if saveGlobally {
-                try await coreManager.core.updateGlobalAgentConfig(
-                    agentPubkey: agent.pubkey,
-                    model: selectedModel,
-                    skills: Array(selectedSkills),
-                    mcpServers: selectedMcpServers,
-                    tags: tags
-                )
-            } else {
-                try await coreManager.core.updateAgentConfig(
-                    projectId: projectId,
-                    agentPubkey: agent.pubkey,
-                    model: selectedModel,
-                    skills: Array(selectedSkills),
-                    mcpServers: selectedMcpServers,
-                    tags: tags
-                )
-            }
+            try await coreManager.core.updateAgentConfig(
+                agentPubkey: agent.pubkey,
+                model: selectedModel,
+                skills: Array(selectedSkills),
+                mcpServers: selectedMcpServers,
+                tags: tags
+            )
 
             dismiss()
         } catch {
@@ -382,8 +361,7 @@ struct AgentConfigSheet: View {
             tools: ["Read", "Write", "Bash"],
             skills: [],
             mcpServers: []
-        ),
-        projectId: "test-project"
+        )
     )
     .environment(TenexCoreManager())
 }

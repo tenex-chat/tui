@@ -599,6 +599,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func addBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?) throws 
     
     /**
+     * Create a saved workspace. Membership is stored as project a-tags.
+     */
+    func addWorkspace(name: String, projectATags: [String]) throws  -> WorkspaceInfo
+    
+    /**
      * Answer an ask event by sending a formatted response.
      *
      * The response is formatted as markdown with each question's title and answer,
@@ -696,6 +701,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func deleteProject(projectId: String) throws 
     
     /**
+     * Delete a saved workspace and clear it if active.
+     */
+    func deleteWorkspace(id: String) throws 
+    
+    /**
      * Force reconnection to relays and restart all subscriptions.
      *
      * This is used by pull-to-refresh to ensure fresh data is fetched from relays.
@@ -727,6 +737,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns nsec, npub, and hex pubkey for the caller to store as needed.
      */
     func generateKeypair() throws  -> GeneratedKeypair
+    
+    /**
+     * Return the active workspace ID, if any.
+     */
+    func getActiveWorkspaceId() throws  -> String?
     
     func getAgentConfig(agentPubkey: String) throws  -> AgentConfig?
     
@@ -917,13 +932,13 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Used by iOS for nudge selection in new conversations.
      */
     func getNudges() throws  -> [Nudge]
-
+    
     /**
      * Get the display name for a pubkey.
      * Returns the kind:0 profile name if available, otherwise a shortened pubkey.
      */
     func getProfileName(pubkey: String)  -> String
-
+    
     /**
      * Get profile picture URL for a pubkey from kind:0 metadata.
      *
@@ -953,13 +968,13 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * agent-config modals with selectable options.
      */
     func getProjectConfigOptions(projectId: String) throws  -> ProjectConfigOptions
-
+    
     /**
      * Get all projects with filter info (visibility, counts).
      * Returns Result to distinguish "no data" from "core error".
      */
     func getProjectFilters() throws  -> [ProjectFilterInfo]
-
+    
     /**
      * Get project roster agents for a project.
      *
@@ -970,31 +985,31 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns empty if the project is not found.
      */
     func getProjectRoster(projectId: String) throws  -> [ProjectAgent]
-
+    
     /**
      * Returns skills (kind:4202) whose d_tag appears in the project's kind:24010
      * (project-scoped skills) or any kind:0 agent-config skill list (built-in,
      * agent-home, and user-global skills — backend-specific, per-agent).
      */
     func getProjectSkills(projectId: String) throws  -> [Skill]
-
+    
     /**
      * Get a list of projects.
      *
      * Queries nostrdb for kind 31933 events and returns them as Project.
      */
     func getProjects()  -> [Project]
-
+    
     /**
      * Get raw Nostr event JSON for an event ID.
      */
     func getRawEventJson(eventId: String)  -> String?
-
+    
     /**
      * Get reports for a project.
      */
     func getReports(projectId: String)  -> [Report]
-
+    
     /**
      * Get all skills (kind:4202 events).
      *
@@ -1032,6 +1047,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns 0 if no data has been processed yet.
      */
     func getTodayRuntimeMs()  -> UInt64
+    
+    /**
+     * Return saved workspace/project-scope definitions.
+     */
+    func getWorkspaces() throws  -> [WorkspaceInfo]
     
     /**
      * Initialize the core. Must be called before other operations.
@@ -1171,6 +1191,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?, referenceReportATag: String?) throws  -> SendMessageResult
     
     /**
+     * Set the active workspace. Pass nil to return to all-project/manual mode.
+     */
+    func setActiveWorkspace(id: String?) throws 
+    
+    /**
      * Enable or disable audio notifications
      */
     func setAudioNotificationsEnabled(enabled: Bool) throws 
@@ -1269,28 +1294,26 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func toggleThreadCollapsed(threadId: String)  -> Bool
     
     /**
+     * Toggle the pinned state for a workspace.
+     */
+    func toggleWorkspacePinned(id: String) throws  -> Bool
+    
+    /**
      * Unarchive a conversation (show in default view).
      */
     func unarchiveConversation(conversationId: String) 
     
     /**
-     * Request an agent configuration change (model and skills).
+     * Request an agent configuration change (model, skills, MCPs).
      *
-     * Publishes a kind:24020 *config-change request* event. This is a
-     * command, not durable state: confirmation arrives as an updated
-     * kind:0 (NIP-01 metadata) authored by the agent. Callers should not
-     * treat this publish as the new current config.
+     * Publishes a kind:24020 *config-change request* event. The request
+     * is agent-scoped: it applies to the agent across every project it
+     * participates in (no project a-tag). This is a command, not durable
+     * state — confirmation arrives as an updated kind:0 (NIP-01 metadata)
+     * authored by the agent. Callers should not treat this publish as the
+     * new current config.
      */
-    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws 
-    
-    /**
-     * Request a global agent configuration change (all projects).
-     *
-     * Publishes a kind:24020 *config-change request* event without a
-     * project a-tag (agent-scoped only). Confirmation arrives as an
-     * updated kind:0 (NIP-01 metadata) authored by the agent.
-     */
-    func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws 
+    func updateAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String]) throws 
     
     /**
      * Update an existing project (kind:31933 replaceable event).
@@ -1298,6 +1321,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
      */
     func updateProject(projectId: String, title: String, description: String, repoUrl: String?, pictureUrl: String?, agentPubkeys: [String], mcpToolIds: [String], isPrivate: Bool) throws 
+    
+    /**
+     * Update an existing workspace's name and project membership.
+     */
+    func updateWorkspace(id: String, name: String, projectATags: [String]) throws 
     
     /**
      * Upload an image to Blossom and return the URL.
@@ -1398,6 +1426,18 @@ open func addBunkerAutoApproveRule(requesterPubkey: String, eventKind: UInt16?)t
         FfiConverterOptionUInt16.lower(eventKind),$0
     )
 }
+}
+    
+    /**
+     * Create a saved workspace. Membership is stored as project a-tags.
+     */
+open func addWorkspace(name: String, projectATags: [String])throws  -> WorkspaceInfo  {
+    return try  FfiConverterTypeWorkspaceInfo_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_add_workspace(self.uniffiClonePointer(),
+        FfiConverterString.lower(name),
+        FfiConverterSequenceString.lower(projectATags),$0
+    )
+})
 }
     
     /**
@@ -1597,6 +1637,16 @@ open func deleteProject(projectId: String)throws   {try rustCallWithError(FfiCon
 }
     
     /**
+     * Delete a saved workspace and clear it if active.
+     */
+open func deleteWorkspace(id: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_delete_workspace(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
      * Force reconnection to relays and restart all subscriptions.
      *
      * This is used by pull-to-refresh to ensure fresh data is fetched from relays.
@@ -1644,6 +1694,16 @@ open func generateAudioNotification(agentPubkey: String, conversationTitle: Stri
 open func generateKeypair()throws  -> GeneratedKeypair  {
     return try  FfiConverterTypeGeneratedKeypair_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_generate_keypair(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Return the active workspace ID, if any.
+     */
+open func getActiveWorkspaceId()throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_active_workspace_id(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -2001,7 +2061,7 @@ open func getNudges()throws  -> [Nudge]  {
     )
 })
 }
-
+    
     /**
      * Get the display name for a pubkey.
      * Returns the kind:0 profile name if available, otherwise a shortened pubkey.
@@ -2072,7 +2132,7 @@ open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
     )
 })
 }
-
+    
     /**
      * Get project roster agents for a project.
      *
@@ -2089,7 +2149,7 @@ open func getProjectRoster(projectId: String)throws  -> [ProjectAgent]  {
     )
 })
 }
-
+    
     /**
      * Returns skills (kind:4202) whose d_tag appears in the project's kind:24010
      * (project-scoped skills) or any kind:0 agent-config skill list (built-in,
@@ -2200,6 +2260,16 @@ open func getTeamComments(teamCoordinate: String, teamEventId: String)throws  ->
 open func getTodayRuntimeMs() -> UInt64  {
     return try!  FfiConverterUInt64.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_today_runtime_ms(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Return saved workspace/project-scope definitions.
+     */
+open func getWorkspaces()throws  -> [WorkspaceInfo]  {
+    return try  FfiConverterSequenceTypeWorkspaceInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_workspaces(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -2473,6 +2543,16 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
 }
     
     /**
+     * Set the active workspace. Pass nil to return to all-project/manual mode.
+     */
+open func setActiveWorkspace(id: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_active_workspace(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(id),$0
+    )
+}
+}
+    
+    /**
      * Enable or disable audio notifications
      */
 open func setAudioNotificationsEnabled(enabled: Bool)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -2653,6 +2733,17 @@ open func toggleThreadCollapsed(threadId: String) -> Bool  {
 }
     
     /**
+     * Toggle the pinned state for a workspace.
+     */
+open func toggleWorkspacePinned(id: String)throws  -> Bool  {
+    return try  FfiConverterBool.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_toggle_workspace_pinned(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),$0
+    )
+})
+}
+    
+    /**
      * Unarchive a conversation (show in default view).
      */
 open func unarchiveConversation(conversationId: String)  {try! rustCall() {
@@ -2663,34 +2754,17 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
 }
     
     /**
-     * Request an agent configuration change (model and skills).
+     * Request an agent configuration change (model, skills, MCPs).
      *
-     * Publishes a kind:24020 *config-change request* event. This is a
-     * command, not durable state: confirmation arrives as an updated
-     * kind:0 (NIP-01 metadata) authored by the agent. Callers should not
-     * treat this publish as the new current config.
+     * Publishes a kind:24020 *config-change request* event. The request
+     * is agent-scoped: it applies to the agent across every project it
+     * participates in (no project a-tag). This is a command, not durable
+     * state — confirmation arrives as an updated kind:0 (NIP-01 metadata)
+     * authored by the agent. Callers should not treat this publish as the
+     * new current config.
      */
-open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+open func updateAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_update_agent_config(self.uniffiClonePointer(),
-        FfiConverterString.lower(projectId),
-        FfiConverterString.lower(agentPubkey),
-        FfiConverterOptionString.lower(model),
-        FfiConverterSequenceString.lower(skills),
-        FfiConverterSequenceString.lower(mcpServers),
-        FfiConverterSequenceString.lower(tags),$0
-    )
-}
-}
-    
-    /**
-     * Request a global agent configuration change (all projects).
-     *
-     * Publishes a kind:24020 *config-change request* event without a
-     * project a-tag (agent-scoped only). Confirmation arrives as an
-     * updated kind:0 (NIP-01 metadata) authored by the agent.
-     */
-open func updateGlobalAgentConfig(agentPubkey: String, model: String?, skills: [String], mcpServers: [String], tags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_update_global_agent_config(self.uniffiClonePointer(),
         FfiConverterString.lower(agentPubkey),
         FfiConverterOptionString.lower(model),
         FfiConverterSequenceString.lower(skills),
@@ -2715,6 +2789,18 @@ open func updateProject(projectId: String, title: String, description: String, r
         FfiConverterSequenceString.lower(agentPubkeys),
         FfiConverterSequenceString.lower(mcpToolIds),
         FfiConverterBool.lower(isPrivate),$0
+    )
+}
+}
+    
+    /**
+     * Update an existing workspace's name and project membership.
+     */
+open func updateWorkspace(id: String, name: String, projectATags: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_update_workspace(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(name),
+        FfiConverterSequenceString.lower(projectATags),$0
     )
 }
 }
@@ -9571,6 +9657,133 @@ public func FfiConverterTypeVoiceInfo_lower(_ value: VoiceInfo) -> RustBuffer {
     return FfiConverterTypeVoiceInfo.lower(value)
 }
 
+
+/**
+ * Saved workspace/project-scope definition for Swift clients.
+ */
+public struct WorkspaceInfo {
+    /**
+     * Stable workspace ID.
+     */
+    public var id: String
+    /**
+     * Display name.
+     */
+    public var name: String
+    /**
+     * Project coordinates (`31933:<pubkey>:<d-tag>`) included in this workspace.
+     */
+    public var projectATags: [String]
+    /**
+     * Unix timestamp when the workspace was created.
+     */
+    public var createdAt: UInt64
+    /**
+     * Whether this workspace should be promoted in switchers.
+     */
+    public var pinned: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Stable workspace ID.
+         */id: String, 
+        /**
+         * Display name.
+         */name: String, 
+        /**
+         * Project coordinates (`31933:<pubkey>:<d-tag>`) included in this workspace.
+         */projectATags: [String], 
+        /**
+         * Unix timestamp when the workspace was created.
+         */createdAt: UInt64, 
+        /**
+         * Whether this workspace should be promoted in switchers.
+         */pinned: Bool) {
+        self.id = id
+        self.name = name
+        self.projectATags = projectATags
+        self.createdAt = createdAt
+        self.pinned = pinned
+    }
+}
+
+#if compiler(>=6)
+extension WorkspaceInfo: Sendable {}
+#endif
+
+
+extension WorkspaceInfo: Equatable, Hashable {
+    public static func ==(lhs: WorkspaceInfo, rhs: WorkspaceInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.projectATags != rhs.projectATags {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        if lhs.pinned != rhs.pinned {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(projectATags)
+        hasher.combine(createdAt)
+        hasher.combine(pinned)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeWorkspaceInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> WorkspaceInfo {
+        return
+            try WorkspaceInfo(
+                id: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                projectATags: FfiConverterSequenceString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                pinned: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: WorkspaceInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterSequenceString.write(value.projectATags, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+        FfiConverterBool.write(value.pinned, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWorkspaceInfo_lift(_ buf: RustBuffer) throws -> WorkspaceInfo {
+    return try FfiConverterTypeWorkspaceInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeWorkspaceInfo_lower(_ value: WorkspaceInfo) -> RustBuffer {
+    return FfiConverterTypeWorkspaceInfo.lower(value)
+}
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
@@ -9869,173 +10082,173 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DataChangeType {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-
+        
         case 1: return .messageAppended(conversationId: try FfiConverterString.read(from: &buf), message: try FfiConverterTypeMessage.read(from: &buf)
         )
-
+        
         case 2: return .conversationUpsert(conversation: try FfiConverterTypeConversationFullInfo.read(from: &buf)
         )
-
+        
         case 3: return .projectUpsert(project: try FfiConverterTypeProject.read(from: &buf)
         )
-
+        
         case 4: return .inboxUpsert(item: try FfiConverterTypeInboxItem.read(from: &buf)
         )
-
+        
         case 5: return .reportUpsert(report: try FfiConverterTypeReport.read(from: &buf)
         )
-
+        
         case 6: return .htmlReportUpsert(report: try FfiConverterTypeHtmlReport.read(from: &buf)
         )
-
+        
         case 7: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf)
         )
-
+        
         case 8: return .projectRosterChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), agents: try FfiConverterSequenceTypeProjectAgent.read(from: &buf)
         )
-
+        
         case 9: return .agentConfigChanged(agentPubkey: try FfiConverterString.read(from: &buf), config: try FfiConverterTypeAgentConfig.read(from: &buf)
         )
-
+        
         case 10: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
         )
-
+        
         case 11: return .installedAgentsChanged(backendPubkey: try FfiConverterString.read(from: &buf)
         )
-
+        
         case 12: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
         )
-
+        
         case 13: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
         )
-
+        
         case 14: return .mcpToolsChanged
-
+        
         case 15: return .teamsChanged
-
+        
         case 16: return .contentCatalogChanged
-
+        
         case 17: return .statsUpdated
-
+        
         case 18: return .diagnosticsUpdated
-
+        
         case 19: return .general
-
+        
         case 20: return .bunkerSignRequest(request: try FfiConverterTypeFfiBunkerSignRequest.read(from: &buf)
         )
-
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: DataChangeType, into buf: inout [UInt8]) {
         switch value {
-
-
+        
+        
         case let .messageAppended(conversationId,message):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterTypeMessage.write(message, into: &buf)
-
-
+            
+        
         case let .conversationUpsert(conversation):
             writeInt(&buf, Int32(2))
             FfiConverterTypeConversationFullInfo.write(conversation, into: &buf)
-
-
+            
+        
         case let .projectUpsert(project):
             writeInt(&buf, Int32(3))
             FfiConverterTypeProject.write(project, into: &buf)
-
-
+            
+        
         case let .inboxUpsert(item):
             writeInt(&buf, Int32(4))
             FfiConverterTypeInboxItem.write(item, into: &buf)
-
-
+            
+        
         case let .reportUpsert(report):
             writeInt(&buf, Int32(5))
             FfiConverterTypeReport.write(report, into: &buf)
-
-
+            
+        
         case let .htmlReportUpsert(report):
             writeInt(&buf, Int32(6))
             FfiConverterTypeHtmlReport.write(report, into: &buf)
-
-
+            
+        
         case let .projectStatusChanged(projectId,projectATag,isOnline):
             writeInt(&buf, Int32(7))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterBool.write(isOnline, into: &buf)
-
-
+            
+        
         case let .projectRosterChanged(projectId,projectATag,agents):
             writeInt(&buf, Int32(8))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterSequenceTypeProjectAgent.write(agents, into: &buf)
-
-
+            
+        
         case let .agentConfigChanged(agentPubkey,config):
             writeInt(&buf, Int32(9))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterTypeAgentConfig.write(config, into: &buf)
-
-
+            
+        
         case let .pendingBackendApproval(backendPubkey,projectATag):
             writeInt(&buf, Int32(10))
             FfiConverterString.write(backendPubkey, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
-
-
+            
+        
         case let .installedAgentsChanged(backendPubkey):
             writeInt(&buf, Int32(11))
             FfiConverterString.write(backendPubkey, into: &buf)
-
-
+            
+        
         case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
             writeInt(&buf, Int32(12))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterSequenceString.write(activeConversationIds, into: &buf)
-
-
+            
+        
         case let .streamChunk(agentPubkey,conversationId,textDelta):
             writeInt(&buf, Int32(13))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterOptionString.write(textDelta, into: &buf)
-
-
+            
+        
         case .mcpToolsChanged:
             writeInt(&buf, Int32(14))
-
-
+        
+        
         case .teamsChanged:
             writeInt(&buf, Int32(15))
-
-
+        
+        
         case .contentCatalogChanged:
             writeInt(&buf, Int32(16))
-
-
+        
+        
         case .statsUpdated:
             writeInt(&buf, Int32(17))
-
-
+        
+        
         case .diagnosticsUpdated:
             writeInt(&buf, Int32(18))
-
-
+        
+        
         case .general:
             writeInt(&buf, Int32(19))
-
-
+        
+        
         case let .bunkerSignRequest(request):
             writeInt(&buf, Int32(20))
             FfiConverterTypeFfiBunkerSignRequest.write(request, into: &buf)
-
+            
         }
     }
 }
@@ -11680,6 +11893,31 @@ fileprivate struct FfiConverterSequenceTypeVoiceInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeWorkspaceInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [WorkspaceInfo]
+
+    public static func write(_ value: [WorkspaceInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeWorkspaceInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [WorkspaceInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [WorkspaceInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeWorkspaceInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeAskQuestion: FfiConverterRustBuffer {
     typealias SwiftType = [AskQuestion]
 
@@ -11790,6 +12028,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_add_bunker_auto_approve_rule() != 50767) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_add_workspace() != 18850) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_answer_ask() != 25528) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11835,6 +12076,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_delete_project() != 53093) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_delete_workspace() != 35435) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_force_reconnect() != 25198) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -11842,6 +12086,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_generate_keypair() != 2950) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_active_workspace_id() != 13307) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_agent_config() != 65313) {
@@ -11979,6 +12226,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_today_runtime_ms() != 8508) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_workspaces() != 18736) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12036,6 +12286,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 45032) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_active_workspace() != 15793) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_audio_notifications_enabled() != 31649) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12084,16 +12337,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_toggle_thread_collapsed() != 55408) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_toggle_workspace_pinned() != 35287) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 51955) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_update_global_agent_config() != 59818) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 8490) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_update_project() != 57824) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_workspace() != 64967) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_upload_image() != 35002) {

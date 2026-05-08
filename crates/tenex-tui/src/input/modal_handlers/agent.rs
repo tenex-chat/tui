@@ -337,7 +337,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     let mcp_servers = settings.selected_mcp_servers_vec();
 
                     if let Some(ref core_handle) = app.core_handle {
-                        if let Err(e) = core_handle.send(NostrCommand::UpdateGlobalAgentConfig {
+                        if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
                             agent_pubkey,
                             model,
                             skills,
