@@ -55,6 +55,9 @@ struct MainShellView: View {
                 selectedProjectId = nil
             }
         }
+        .onChange(of: coreManager.appFilterProjectIds) { _, _ in
+            clearOutOfScopeSelections()
+        }
         .task(id: userNpub) {
             await refreshCurrentUserIdentity()
         }
@@ -71,6 +74,10 @@ struct MainShellView: View {
 
     private var appSidebar: some View {
         List {
+            Section("Workspace") {
+                WorkspaceScopeButton(style: .sidebar)
+            }
+
             Section {
                 ForEach(AppSection.allCases.filter { $0 != .teams && $0 != .agentDefinitions && $0 != .skills && $0 != .settings && $0 != .diagnostics }) { section in
                     shellSidebarRowButton(for: section)
@@ -263,6 +270,22 @@ struct MainShellView: View {
     private func shortUserDisplay(_ npub: String) -> String {
         guard npub.count > 20 else { return npub }
         return "\(npub.prefix(8))...\(npub.suffix(8))"
+    }
+
+    private func clearOutOfScopeSelections() {
+        if let selectedProjectId,
+           !coreManager.includesProjectInCurrentScope(selectedProjectId) {
+            self.selectedProjectId = nil
+        }
+        if let newConversationProjectId,
+           !coreManager.includesProjectInCurrentScope(newConversationProjectId) {
+            self.newConversationProjectId = nil
+            newConversationAgentPubkey = nil
+        }
+        if let selectedAgentInstance,
+           !coreManager.includesProjectInCurrentScope(selectedAgentInstance.projectId) {
+            self.selectedAgentInstance = nil
+        }
     }
 
     @ViewBuilder

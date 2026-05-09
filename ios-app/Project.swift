@@ -55,6 +55,9 @@ let project = Project(
                     // Code signing settings - SANITY ISLAND LLC
                     "DEVELOPMENT_TEAM": "456SHKPP26",
                     "CODE_SIGN_STYLE": "Automatic",
+                    // Version and build number
+                    "MARKETING_VERSION": "1.0",
+                    "CURRENT_PROJECT_VERSION": "202605060000",
                     // Header search paths for the FFI header
                     "HEADER_SEARCH_PATHS": [
                         "$(inherited)",
@@ -141,6 +144,22 @@ let project = Project(
                 ["TenexMVPTests"],
                 configuration: .debug,
                 options: .options(coverage: true, codeCoverageTargets: ["TenexMVP"])
+            ),
+            runAction: .runAction(configuration: .debug, executable: "TenexMVP"),
+            archiveAction: .archiveAction(configuration: .release),
+            profileAction: .profileAction(configuration: .release, executable: "TenexMVP"),
+            analyzeAction: .analyzeAction(configuration: .debug)
+        ),
+        .scheme(
+            name: "TenexMVP-UITests",
+            shared: true,
+            buildAction: .buildAction(targets: ["TenexMVP", "TenexMVPUITests"]),
+            testAction: .targets(
+                ["TenexMVPUITests"],
+                arguments: .arguments(environmentVariables: [
+                    "TENEX_UITEST_DEBUG_NSEC": "$(TENEX_UITEST_DEBUG_NSEC)"
+                ]),
+                configuration: .debug
             ),
             runAction: .runAction(configuration: .debug, executable: "TenexMVP"),
             archiveAction: .archiveAction(configuration: .release),

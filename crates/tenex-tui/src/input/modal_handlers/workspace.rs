@@ -6,7 +6,7 @@ use crate::ui::modal::{
     AppearanceSetting, BunkerAuditState, BunkerRulesState, BunkerSetting, GeneralSetting,
     ModelBrowserState, VoiceBrowserState,
 };
-use crate::ui::views::app_settings::{BackendListItem, build_backends_list};
+use crate::ui::views::app_settings::{build_backends_list, BackendListItem};
 use crate::ui::{self, App, ModalState};
 
 pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
@@ -626,7 +626,10 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         Some(BackendListItem::Pending(pk)) | Some(BackendListItem::Blocked(pk)) => {
                             let pk = pk.clone();
                             app.approve_backend(&pk);
-                            app.set_warning_status(&format!("Approved backend {}", &pk[..8.min(pk.len())]));
+                            app.set_warning_status(&format!(
+                                "Approved backend {}",
+                                &pk[..8.min(pk.len())]
+                            ));
                             let new_len = items.len().saturating_sub(1);
                             if state.backends_index > new_len {
                                 state.backends_index = new_len;
@@ -807,7 +810,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        KeyCode::Char('a') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+        KeyCode::Char('a')
+            if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends =>
+        {
             let items = {
                 let store = app.data_store.borrow();
                 build_backends_list(&store)
@@ -825,7 +830,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 _ => {}
             }
         }
-        KeyCode::Char('b') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+        KeyCode::Char('b')
+            if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends =>
+        {
             let items = {
                 let store = app.data_store.borrow();
                 build_backends_list(&store)
@@ -843,7 +850,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 _ => {}
             }
         }
-        KeyCode::Char('d') if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends => {
+        KeyCode::Char('d')
+            if !state.editing && state.current_tab == ui::modal::SettingsTab::Backends =>
+        {
             let items = {
                 let store = app.data_store.borrow();
                 build_backends_list(&store)

@@ -1,10 +1,5 @@
 use crate::ui::theme;
-use ratatui::{
-    layout::Rect,
-    style::Style,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
 
 /// Render the agent deletion confirmation dialog (kind:24030)
 pub fn render_agent_deletion_confirm(

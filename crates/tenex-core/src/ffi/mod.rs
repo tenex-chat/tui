@@ -50,6 +50,7 @@ use nostr_sdk::prelude::*;
 use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction};
 
 use crate::models::agent_definition::AgentDefinition;
+use crate::models::project_draft::Workspace;
 use crate::models::{
     AgentConfig, AgentInventoryItem, AskEvent, ConversationMetadata, HtmlReport, InboxItem,
     InstalledAgent, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent,
@@ -80,6 +81,7 @@ mod standalone_audio_api;
 mod stats_api;
 mod trust_api;
 mod ui_state_api;
+mod workspaces_api;
 
 /// Shared Tokio runtime for async operations in FFI
 /// Using OnceLock ensures thread-safe lazy initialization
@@ -1023,8 +1025,7 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
                 diagnostics_changed = true;
                 stats_changed = true;
             }
-            DataChangeType::StreamChunk { .. }
-            | DataChangeType::BunkerSignRequest { .. } => {}
+            DataChangeType::StreamChunk { .. } | DataChangeType::BunkerSignRequest { .. } => {}
         }
     }
 
@@ -1100,6 +1101,21 @@ pub struct ProjectFilterInfo {
     pub active_count: u32,
     /// Total conversations in this project
     pub total_count: u32,
+}
+
+/// Saved workspace/project-scope definition for Swift clients.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct WorkspaceInfo {
+    /// Stable workspace ID.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Project coordinates (`31933:<pubkey>:<d-tag>`) included in this workspace.
+    pub project_a_tags: Vec<String>,
+    /// Unix timestamp when the workspace was created.
+    pub created_at: u64,
+    /// Whether this workspace should be promoted in switchers.
+    pub pinned: bool,
 }
 
 /// Ask-event lookup result for q-tag resolution.
@@ -1555,6 +1571,12 @@ pub struct FfiPreferences {
     /// AI Audio Notifications settings
     #[serde(default)]
     pub ai_audio_settings: crate::models::project_draft::AiAudioSettings,
+    /// Saved workspace/project-scope definitions.
+    #[serde(default)]
+    pub workspaces: Vec<Workspace>,
+    /// Currently active workspace ID.
+    #[serde(default)]
+    pub active_workspace_id: Option<String>,
 }
 
 impl FfiPreferences {
@@ -1580,6 +1602,24 @@ impl FfiPreferences {
 
         obj.contains_key("approved_backend_pubkeys") || obj.contains_key("blocked_backend_pubkeys")
     }
+
+    fn workspace_fields_present(path: &std::path::Path) -> bool {
+        let contents = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        let value: serde_json::Value = match serde_json::from_str(&contents) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        let Some(obj) = value.as_object() else {
+            return false;
+        };
+
+        obj.contains_key("workspaces") || obj.contains_key("active_workspace_id")
+    }
 }
 
 /// Wrapper that handles persistence
@@ -1592,8 +1632,10 @@ impl FfiPreferencesStorage {
     fn new(data_dir: &std::path::Path) -> Self {
         let path = data_dir.join("ios_preferences.json");
         let trusted_fields_present = FfiPreferences::trusted_backend_fields_present(&path);
+        let workspace_fields_present = FfiPreferences::workspace_fields_present(&path);
         let mut prefs = FfiPreferences::load_from_file(&path).unwrap_or_default();
         let mut imported_legacy_trust = false;
+        let mut imported_legacy_workspaces = false;
 
         // Migration: if FFI prefs don't contain trust fields yet, import from TUI preferences
         // so desktop app trust state matches TUI and status events are not held as pending.
@@ -1608,11 +1650,22 @@ impl FfiPreferencesStorage {
             }
         }
 
+        if !workspace_fields_present
+            && prefs.workspaces.is_empty()
+            && prefs.active_workspace_id.is_none()
+        {
+            if let Some((workspaces, active_workspace_id)) = Self::read_legacy_tui_workspaces() {
+                prefs.workspaces = workspaces;
+                prefs.active_workspace_id = active_workspace_id;
+                imported_legacy_workspaces = true;
+            }
+        }
+
         // Migrate any existing API keys from JSON to secure storage
         Self::migrate_api_keys(&mut prefs.ai_audio_settings);
 
         let storage = Self { prefs, path };
-        if imported_legacy_trust {
+        if imported_legacy_trust || imported_legacy_workspaces {
             let _ = storage.save();
         }
         storage
@@ -1648,6 +1701,125 @@ impl FfiPreferencesStorage {
         } else {
             Some((approved, blocked))
         }
+    }
+
+    fn read_legacy_tui_workspaces() -> Option<(Vec<Workspace>, Option<String>)> {
+        let path = dirs::home_dir()?
+            .join(".tenex")
+            .join("cli")
+            .join("preferences.json");
+        let contents = std::fs::read_to_string(path).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&contents).ok()?;
+
+        let workspaces: Vec<Workspace> = value
+            .get("workspaces")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+        let active_workspace_id = value
+            .get("active_workspace_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+
+        if workspaces.is_empty() && active_workspace_id.is_none() {
+            None
+        } else {
+            Some((workspaces, active_workspace_id))
+        }
+    }
+
+    fn workspaces(&self) -> Vec<WorkspaceInfo> {
+        self.prefs
+            .workspaces
+            .iter()
+            .map(workspace_to_info)
+            .collect()
+    }
+
+    fn add_workspace(
+        &mut self,
+        name: String,
+        project_a_tags: Vec<String>,
+    ) -> Result<WorkspaceInfo, String> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let workspace = Workspace {
+            id: format!("ws_{}", now.as_millis()),
+            name,
+            project_ids: project_a_tags,
+            created_at: now.as_secs(),
+            pinned: false,
+        };
+        let info = workspace_to_info(&workspace);
+        self.prefs.workspaces.push(workspace);
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))?;
+        Ok(info)
+    }
+
+    fn update_workspace(
+        &mut self,
+        id: &str,
+        name: String,
+        project_a_tags: Vec<String>,
+    ) -> Result<(), String> {
+        let workspace = self
+            .prefs
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == id)
+            .ok_or_else(|| format!("Workspace not found: {}", id))?;
+
+        workspace.name = name;
+        workspace.project_ids = project_a_tags;
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+
+    fn delete_workspace(&mut self, id: &str) -> Result<(), String> {
+        let original_len = self.prefs.workspaces.len();
+        self.prefs.workspaces.retain(|workspace| workspace.id != id);
+        if self.prefs.workspaces.len() == original_len {
+            return Err(format!("Workspace not found: {}", id));
+        }
+        if self.prefs.active_workspace_id.as_deref() == Some(id) {
+            self.prefs.active_workspace_id = None;
+        }
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+
+    fn toggle_workspace_pinned(&mut self, id: &str) -> Result<bool, String> {
+        let pinned = {
+            let workspace = self
+                .prefs
+                .workspaces
+                .iter_mut()
+                .find(|workspace| workspace.id == id)
+                .ok_or_else(|| format!("Workspace not found: {}", id))?;
+            workspace.pinned = !workspace.pinned;
+            workspace.pinned
+        };
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))?;
+        Ok(pinned)
+    }
+
+    fn set_active_workspace(&mut self, id: Option<String>) -> Result<(), String> {
+        if let Some(id) = id.as_deref() {
+            if !self
+                .prefs
+                .workspaces
+                .iter()
+                .any(|workspace| workspace.id == id)
+            {
+                return Err(format!("Workspace not found: {}", id));
+            }
+        }
+        self.prefs.active_workspace_id = id;
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
     }
 
     /// Migrate API keys from JSON to OS secure storage (one-time migration)
@@ -1740,6 +1912,16 @@ impl FfiPreferencesStorage {
         self.prefs.blocked_backend_pubkeys = blocked;
         self.save()
             .map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+}
+
+fn workspace_to_info(workspace: &Workspace) -> WorkspaceInfo {
+    WorkspaceInfo {
+        id: workspace.id.clone(),
+        name: workspace.name.clone(),
+        project_a_tags: workspace.project_ids.clone(),
+        created_at: workspace.created_at,
+        pinned: workspace.pinned,
     }
 }
 

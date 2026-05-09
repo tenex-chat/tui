@@ -158,8 +158,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 return Ok(());
             }
             HotkeyId::CreateProject => {
-                app.modal_state =
-                    ui::modal::ModalState::ProjectDialog(ui::modal::ProjectDialogState::new_creating());
+                app.modal_state = ui::modal::ModalState::ProjectDialog(
+                    ui::modal::ProjectDialogState::new_creating(),
+                );
                 return Ok(());
             }
             HotkeyId::NewConversation => {
@@ -804,8 +805,7 @@ pub(crate) fn handle_project_dialog_key(app: &mut App, key: KeyEvent) {
     use ui::modal::{ProjectDialogDetailsFocus, ProjectDialogTab};
     use ui::views::{
         available_agent_count_dialog, available_mcp_tool_count_dialog,
-        get_agent_id_at_dialog_index, get_mcp_tool_id_at_dialog_index,
-        get_backends_for_add_mode,
+        get_agent_id_at_dialog_index, get_backends_for_add_mode, get_mcp_tool_id_at_dialog_index,
     };
 
     let code = key.code;
@@ -937,8 +937,7 @@ pub(crate) fn handle_project_dialog_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Enter => {
-                if let Some(id) =
-                    get_mcp_tool_id_at_dialog_index(app, &state, state.add_tool_index)
+                if let Some(id) = get_mcp_tool_id_at_dialog_index(app, &state, state.add_tool_index)
                 {
                     state.add_mcp_tool(id);
                     state.in_add_tool_mode = false;
@@ -1027,8 +1026,7 @@ pub(crate) fn handle_project_dialog_key(app: &mut App, key: KeyEvent) {
                 && !state.pending_agent_pubkeys.is_empty()
             {
                 use ui::modal::AgentDeletionState;
-                let agent_pubkey =
-                    state.pending_agent_pubkeys[state.agents_selector_index].clone();
+                let agent_pubkey = state.pending_agent_pubkeys[state.agents_selector_index].clone();
                 let project_a_tag = state.project_a_tag().unwrap_or("").to_string();
                 let agent_name = {
                     let ds = app.data_store.borrow();
@@ -1230,8 +1228,9 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                 return Ok(true);
             }
             HotkeyId::CreateProject => {
-                app.modal_state =
-                    ui::modal::ModalState::ProjectDialog(ui::modal::ProjectDialogState::new_creating());
+                app.modal_state = ui::modal::ModalState::ProjectDialog(
+                    ui::modal::ProjectDialogState::new_creating(),
+                );
                 return Ok(true);
             }
             HotkeyId::NewConversation => {

@@ -42,26 +42,7 @@ extension MessageComposerView {
             currentAgentPubkey: draft.agentPubkey
         )
 
-        // Union: project roster first (has isPm / ordering), then any inventory
-        // agents not already in the roster so we match the TUI's full agent list.
-        let rosterPubkeys = Set(result.availableAgents.map { $0.pubkey })
-        let extraAgents: [ProjectAgent] = coreManager.agentInventory
-            .filter { !rosterPubkeys.contains($0.pubkey) }
-            .map { item in
-                ProjectAgent(
-                    pubkey: item.pubkey,
-                    name: item.slug,
-                    backendPubkey: item.backends.first?.backendPubkey ?? "",
-                    isPm: false,
-                    isOnline: !item.backends.isEmpty,
-                    model: nil,
-                    tools: [],
-                    skills: [],
-                    mcpServers: []
-                )
-            }
-
-        availableAgents = result.availableAgents + extraAgents
+        availableAgents = ComposerViewModel.orderedProjectRosterAgents(result.availableAgents)
         agentsLoadError = nil
         replyTargetAgentName = result.replyTargetAgentName
 

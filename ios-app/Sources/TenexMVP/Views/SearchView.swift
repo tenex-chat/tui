@@ -299,6 +299,9 @@ struct SearchView: View {
         .searchable(text: $searchText, placement: .toolbar, prompt: "Search messages and drafts")
         .toolbar {
             ToolbarItem(placement: .automatic) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
+            ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }
             ToolbarItem(placement: .automatic) {

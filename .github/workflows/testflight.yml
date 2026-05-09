@@ -1,0 +1,86 @@
+name: TestFlight
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      marketing_version:
+        description: Optional version override, for example 1.1.0
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_SCHEME: TenexMVP
+  APPLE_TEAM_ID: 456SHKPP26
+
+jobs:
+  deploy:
+    name: Archive And Upload
+    runs-on: self-hosted
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Show toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Install Rust toolchain
+        run: |
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source "$HOME/.cargo/env"
+          fi
+          rustup target add aarch64-apple-ios
+
+      - name: Build Rust iOS library
+        run: |
+          source "$HOME/.cargo/env" 2>/dev/null || true
+          cargo build -p tenex-core --release --target aarch64-apple-ios
+
+      - name: Bootstrap project
+        run: ./ios-app/ci_scripts/bootstrap_project.sh
+
+      - name: Install signing assets
+        env:
+          APPLE_DISTRIBUTION_CERTIFICATE_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_BASE64 }}
+          APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+          APP_PROVISION_PROFILE_BASE64: ${{ secrets.APP_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: ./ios-app/ci_scripts/install_signing_assets.sh
+
+      - name: Archive, export, and upload
+        id: deploy
+        env:
+          MARKETING_VERSION: ${{ inputs.marketing_version || '' }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_PROVIDER: ${{ secrets.APP_STORE_CONNECT_PROVIDER }}
+        run: ./ios-app/ci_scripts/archive_and_upload.sh
+
+      - name: Upload exported IPA artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-export
+          path: |
+            ios-app/build/ExportOptions.plist
+            ios-app/build/testflight-*
+          if-no-files-found: ignore
+
+      - name: Cleanup signing assets
+        if: always()
+        run: ./ios-app/ci_scripts/cleanup_signing_assets.sh

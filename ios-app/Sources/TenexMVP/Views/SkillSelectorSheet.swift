@@ -3,7 +3,8 @@ import SwiftUI
 /// Skill selector sheet for attaching skills to a message draft.
 ///
 /// Skills are passed in pre-filtered by the caller (typically the union of skills
-/// from the project's kind:24010 and kind:34011 events).
+/// from the project's kind:24010 advertisement and the per-agent kind:0 metadata
+/// of roster agents).
 struct SkillSelectorSheet: View {
     let skills: [Skill]
     @Binding var selectedSkillIds: Set<String>

@@ -1,6 +1,6 @@
 # OpenAI Responses API Server
 
-TENEX TUI now includes an HTTP server mode that exposes an OpenAI Responses API endpoint for integration with ElevenLabs and other services.
+TENEX CLI ships with an HTTP server mode that exposes an OpenAI Responses API endpoint for integration with ElevenLabs and other services. The server runs alongside the daemon in `tenex-cli`.
 
 ## Quick Start
 
@@ -9,16 +9,13 @@ TENEX TUI now includes an HTTP server mode that exposes an OpenAI Responses API 
 ```bash
 # Using nsec from environment variable (recommended)
 export TENEX_NSEC="nsec1..."
-tenex-tui --server
-
-# Or pass nsec directly (not recommended - exposes key in shell history)
-tenex-tui --server --nsec nsec1...
+cargo run -p tenex-cli -- --daemon --http
 
 # Custom bind address
-tenex-tui --server --bind 0.0.0.0:8080
+cargo run -p tenex-cli -- --daemon --http --http-bind 0.0.0.0:8080
 ```
 
-Default server address: `http://127.0.0.1:3000`
+Default server address: `http://127.0.0.1:8080`
 
 ### Making Requests
 
@@ -194,7 +191,7 @@ data: {"type":"response.completed","response":{"id":"resp_...","status":"complet
 
 The primary use case is integrating ElevenLabs conversational AI with TENEX agents:
 
-1. Start TENEX server: `TENEX_NSEC=nsec1... tenex-tui --server`
+1. Start TENEX server: `TENEX_NSEC=nsec1... cargo run -p tenex-cli -- --daemon --http`
 2. Configure ElevenLabs to use your endpoint: `http://127.0.0.1:3000/PROJECT_DTAG/responses`
 3. ElevenLabs will send user speech as messages and stream agent responses for TTS
 

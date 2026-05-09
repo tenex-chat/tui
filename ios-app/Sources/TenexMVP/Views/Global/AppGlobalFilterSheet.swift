@@ -5,6 +5,7 @@ struct AppGlobalFilterToolbarButton: View {
 
     var body: some View {
         Menu {
+            workspaceMenu
             timeMenu
             projectsMenu
             scheduledEventsMenu
@@ -70,6 +71,37 @@ struct AppGlobalFilterToolbarButton: View {
             }
         }
         .accessibilityIdentifier("global_filter_menu_time")
+    }
+
+    private var workspaceMenu: some View {
+        Menu("Workspace") {
+            Button {
+                Task { await coreManager.applyWorkspace(nil) }
+            } label: {
+                selectableLabel(
+                    "All Projects",
+                    isSelected: coreManager.activeWorkspace == nil && coreManager.appFilterProjectIds.isEmpty
+                )
+            }
+            .accessibilityIdentifier("global_filter_workspace_all_projects")
+
+            if coreManager.sortedWorkspaces.isEmpty {
+                Text("No saved workspaces")
+            } else {
+                ForEach(coreManager.sortedWorkspaces, id: \.id) { workspace in
+                    Button {
+                        Task { await coreManager.applyWorkspace(workspace) }
+                    } label: {
+                        selectableLabel(
+                            workspace.name,
+                            isSelected: coreManager.activeWorkspaceId == workspace.id
+                        )
+                    }
+                    .accessibilityIdentifier("global_filter_workspace_\(workspace.id)")
+                }
+            }
+        }
+        .accessibilityIdentifier("global_filter_menu_workspace")
     }
 
     private var scheduledEventsMenu: some View {

@@ -88,6 +88,8 @@ extension TenexCoreManager {
         // Clear Swift-side session data immediately so the UI shows nothing
         // while the next fetchData() runs.
         projects = []
+        workspaces = []
+        activeWorkspaceId = nil
         conversations = []
         appFilterConversationScope = []
         inboxItems = []

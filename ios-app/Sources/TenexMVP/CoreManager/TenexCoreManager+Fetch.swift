@@ -9,6 +9,8 @@ extension TenexCoreManager {
         profiler.logEvent("fetchData start", category: .general)
 
         do {
+            await refreshWorkspacesFromCore()
+            syncActiveWorkspaceFilterFromState()
             let filterSnapshot = appFilterSnapshot
             let loadStartedAt = CFAbsoluteTimeGetCurrent()
 

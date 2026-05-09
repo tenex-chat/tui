@@ -89,10 +89,10 @@ struct ConversationsTabView: View {
     }
 
     private func rebuildProjectCaches() {
-        let projects = coreManager.projects
+        let projects = coreManager.projectsInCurrentScope
         let onlineStatus = coreManager.projectOnlineStatus
 
-        projectTitleById = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0.title) })
+        projectTitleById = Dictionary(uniqueKeysWithValues: coreManager.projects.map { ($0.id, $0.title) })
 
         let sorted = projects.sorted { a, b in
             let aOnline = onlineStatus[a.id] ?? false
@@ -175,6 +175,9 @@ struct ConversationsTabView: View {
             rebuildProjectCaches()
         }
         .onChange(of: coreManager.projectOnlineStatus) { _, _ in
+            rebuildProjectCaches()
+        }
+        .onChange(of: coreManager.appFilterProjectIds) { _, _ in
             rebuildProjectCaches()
         }
         .onChange(of: selectedConversationBinding.wrappedValue?.thread.id) { oldId, newId in
@@ -272,12 +275,18 @@ struct ConversationsTabView: View {
         .toolbar {
             #if os(macOS)
             ToolbarItem(placement: .navigation) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
+            ToolbarItem(placement: .navigation) {
                 AppGlobalFilterToolbarButton()
             }
             ToolbarItem(placement: .navigation) {
                 newConversationMenuButton
             }
             #else
+            ToolbarItem(placement: .automatic) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
             ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }
@@ -397,6 +406,7 @@ struct ConversationsTabView: View {
                 .toolbar {
                     ToolbarItem(placement: .automatic) {
                         ControlGroup {
+                            WorkspaceScopeButton(style: .toolbar)
                             AppGlobalFilterToolbarButton()
                             settingsMenu(compact: true)
                             runtimeButton
@@ -622,6 +632,8 @@ struct ConversationsTabView: View {
                             } label: {
                                 Label(project.title, systemImage: "bolt.fill")
                             }
+                            .accessibilityIdentifier("new_conversation_project_\(project.id)")
+                            .accessibilityValue(project.agentPubkeys.joined(separator: ","))
                         }
                     }
                 }
@@ -634,6 +646,8 @@ struct ConversationsTabView: View {
                             } label: {
                                 Label(project.title, systemImage: "moon.zzz")
                             }
+                            .accessibilityIdentifier("new_conversation_project_\(project.id)")
+                            .accessibilityValue(project.agentPubkeys.joined(separator: ","))
                         }
                     }
                 }
@@ -642,6 +656,7 @@ struct ConversationsTabView: View {
             Image(systemName: "plus")
         }
         .accessibilityLabel("Create conversation")
+        .accessibilityIdentifier("new_conversation_button")
     }
 
     private var runtimeButton: some View {

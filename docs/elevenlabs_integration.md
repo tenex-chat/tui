@@ -18,7 +18,7 @@ By pointing ElevenLabs at the TENEX API server, you can have voice conversations
 
 ```bash
 export TENEX_NSEC="nsec1..."
-tenex-tui --server --bind 0.0.0.0:3000
+cargo run -p tenex-cli -- --daemon --http --http-bind 0.0.0.0:8080
 ```
 
 Note: Use `0.0.0.0` if ElevenLabs needs to access the server from another machine.

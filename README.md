@@ -89,12 +89,13 @@ cd ios-app && tuist generate
 
 ## For Contributors
 
-The repo is a Cargo workspace with three crates and a SwiftUI app:
+The repo is a Cargo workspace with four crates and a SwiftUI app:
 
 ```
 crates/tenex-core/   — Shared library: Nostr, storage, FFI, AI integrations
 crates/tenex-tui/    — Terminal UI (Ratatui)
 crates/tenex-cli/    — CLI daemon + HTTP server
+crates/tenex-repl/   — Interactive REPL client
 ios-app/             — SwiftUI app (iPhone, iPad, Mac via Tuist)
 ```
 

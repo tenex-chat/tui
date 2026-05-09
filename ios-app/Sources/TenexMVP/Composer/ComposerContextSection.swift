@@ -226,6 +226,7 @@ extension MessageComposerView {
                             }
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
+                            .accessibilityIdentifier("new_conversation_agent_\(agent.pubkey)")
 
                             if agent.pubkey != availableAgents.last?.pubkey {
                                 Divider().padding(.leading, 62)
@@ -236,6 +237,8 @@ extension MessageComposerView {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(.bar)
+            .accessibilityIdentifier("new_conversation_agent_selector")
+            .accessibilityValue(availableAgents.map(\.pubkey).joined(separator: ","))
         }
     }
 

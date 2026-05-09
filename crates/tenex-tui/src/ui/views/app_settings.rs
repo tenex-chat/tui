@@ -465,7 +465,11 @@ fn render_backends_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettings
 
         let is_selected = state.backends_index == item_idx;
         let border_char = if is_selected { "▌" } else { "│" };
-        let border_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
+        let border_color = if is_selected {
+            theme::ACCENT_PRIMARY
+        } else {
+            theme::TEXT_MUTED
+        };
         let label_style = if is_selected {
             Style::default()
                 .fg(theme::TEXT_PRIMARY)
@@ -480,8 +484,7 @@ fn render_backends_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettings
             Span::styled(short_pubkey(item.pubkey()), label_style),
         ];
         f.render_widget(
-            Paragraph::new(Line::from(spans))
-                .block(Block::default().borders(Borders::NONE)),
+            Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE)),
             Rect::new(area.x, y_offset, area.width, 1),
         );
 
@@ -835,11 +838,23 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
                 Style::default().fg(theme::TEXT_MUTED),
             ));
             hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-            hints.push(Span::styled("b", Style::default().fg(theme::ACCENT_WARNING)));
-            hints.push(Span::styled(" block", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled(
+                "b",
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
+            hints.push(Span::styled(
+                " block",
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
             hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-            hints.push(Span::styled("d", Style::default().fg(theme::ACCENT_WARNING)));
-            hints.push(Span::styled(" delete", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled(
+                "d",
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
+            hints.push(Span::styled(
+                " delete",
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         } else {
             hints.push(Span::styled(
                 " edit",

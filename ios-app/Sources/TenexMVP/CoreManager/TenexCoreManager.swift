@@ -96,6 +96,8 @@ class TenexCoreManager {
     // With @Observable, SwiftUI tracks reads at the property level.
     // Views only re-render when the specific properties they read change.
     var projects: [Project] = []
+    var workspaces: [WorkspaceInfo] = []
+    var activeWorkspaceId: String?
     var reports: [Report] = []
     var reportsVersion: UInt64 = 0
     var htmlReports: [HtmlReport] = []
@@ -164,7 +166,8 @@ class TenexCoreManager {
     var agentInventory: [AgentInventoryItem] = []
 
     /// Ordered project roster rows derived from kind:31933 `p` tags.
-    /// Availability comes from kind:24011 inventory; config fields come from kind:34011 when present.
+    /// Availability comes from kind:24011 inventory; per-agent config fields
+    /// (model/skills/mcps/tools) come from kind:0 NIP-01 metadata when present.
     var projectRosterAgents: [String: [ProjectAgent]] = [:]
 
     /// Whether any conversation currently has active agents (24133 events with agents)

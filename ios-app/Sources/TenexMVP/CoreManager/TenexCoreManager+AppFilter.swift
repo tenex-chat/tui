@@ -18,6 +18,10 @@ extension TenexCoreManager {
     }
 
     var appFilterProjectSummaryLabel: String {
+        if let activeWorkspace,
+           workspaceProjectIds(for: activeWorkspace) == appFilterProjectIds {
+            return activeWorkspace.name
+        }
         if appFilterProjectIds.isEmpty {
             return "All Projects"
         }
@@ -125,15 +129,17 @@ extension TenexCoreManager {
         interventionReview: InterventionReviewFilter? = nil,
         status: ConversationStatusFilter? = nil,
         hashtags: Set<String>? = nil,
-        showArchived: Bool? = nil
+        showArchived: Bool? = nil,
+        clearActiveWorkspaceOnProjectChange: Bool = true
     ) {
         let newScheduledEvent = scheduledEvent ?? appFilterScheduledEvent
         let newInterventionReview = interventionReview ?? appFilterInterventionReview
         let newStatus = status ?? appFilterStatus
         let newHashtags = AppFilterMetadataNormalizer.normalizedHashtags(hashtags ?? appFilterHashtags)
         let newShowArchived = showArchived ?? appFilterShowArchived
+        let projectScopeChanged = projectIds != appFilterProjectIds
 
-        guard projectIds != appFilterProjectIds
+        guard projectScopeChanged
             || timeWindow != appFilterTimeWindow
             || newScheduledEvent != appFilterScheduledEvent
             || newInterventionReview != appFilterInterventionReview
@@ -141,6 +147,10 @@ extension TenexCoreManager {
             || newHashtags != appFilterHashtags
             || newShowArchived != appFilterShowArchived
         else { return }
+
+        if clearActiveWorkspaceOnProjectChange && projectScopeChanged {
+            clearActiveWorkspaceForManualProjectChange()
+        }
 
         appFilterProjectIds = projectIds
         appFilterTimeWindow = timeWindow

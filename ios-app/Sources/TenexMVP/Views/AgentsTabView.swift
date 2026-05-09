@@ -70,7 +70,7 @@ struct AgentsTabView: View {
 
     private var allAgents: [AgentInstance] {
         var allInstances: [AgentInstance] = []
-        let projects = coreManager.projects
+        let projects = coreManager.projectsInCurrentScope
         let availabilityStatus = coreManager.projectOnlineStatus
         let projectRosters = coreManager.projectRosterAgents
 
@@ -238,6 +238,9 @@ struct AgentsTabView: View {
         }
         .searchable(text: $searchText, prompt: "Search agents...")
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
             ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }

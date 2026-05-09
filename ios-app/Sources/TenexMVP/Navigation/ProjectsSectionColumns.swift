@@ -54,7 +54,7 @@ struct ProjectsTabView: View {
     }
 
     private var sortedProjects: [Project] {
-        coreManager.projects.sorted { a, b in
+        coreManager.projectsInCurrentScope.sorted { a, b in
             let aOnline = coreManager.projectOnlineStatus[a.id] ?? false
             let bOnline = coreManager.projectOnlineStatus[b.id] ?? false
             if aOnline != bOnline { return aOnline }
@@ -237,6 +237,9 @@ struct ProjectsTabView: View {
         .toolbar {
             #if os(macOS)
             ToolbarItem(placement: .navigation) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
+            ToolbarItem(placement: .navigation) {
                 AppGlobalFilterToolbarButton()
             }
             ToolbarItem(placement: .navigation) {
@@ -247,6 +250,9 @@ struct ProjectsTabView: View {
                 }
             }
             #else
+            ToolbarItem(placement: .automatic) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
             ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }
@@ -316,7 +322,7 @@ struct ProjectsTabView: View {
         if !searchText.isEmpty {
             return "Try adjusting your search terms"
         } else if !coreManager.isAppFilterDefault {
-            return "Try adjusting your project/time filter"
+            return "Try adjusting your workspace or project filter"
         } else {
             return "Create a project to get started"
         }

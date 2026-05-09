@@ -24,7 +24,7 @@ cargo run -p tenex-repl
 cargo run -p tenex-tui
 
 # Run CLI daemon
-cargo run -p tenex-cli -- daemon
+cargo run -p tenex-cli -- --daemon
 
 # iOS simulator (build Rust, then generate Xcode project)
 cargo build --target aarch64-apple-ios-sim --release -p tenex-core

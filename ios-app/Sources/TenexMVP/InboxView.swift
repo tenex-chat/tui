@@ -277,6 +277,9 @@ struct InboxView: View {
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
+            ToolbarItem(placement: .automatic) {
                 AppGlobalFilterToolbarButton()
             }
         }
@@ -347,6 +350,9 @@ struct InboxView: View {
             .toolbarTitleDisplayMode(.inline)
             #endif
             .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    WorkspaceScopeButton(style: .toolbar)
+                }
                 ToolbarItem(placement: .automatic) {
                     AppGlobalFilterToolbarButton()
                 }

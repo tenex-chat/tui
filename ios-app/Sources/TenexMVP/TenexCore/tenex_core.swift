@@ -5413,7 +5413,7 @@ public struct HtmlReport {
          */title: String, 
         /**
          * Optional d-tag slug used to group versions of the same HTML report.
-         */slug: String,
+         */slug: String, 
         /**
          * Description (the kind:1 note content)
          */description: String, 
@@ -5511,7 +5511,7 @@ public struct FfiConverterTypeHtmlReport: FfiConverterRustBuffer {
                 eventId: FfiConverterString.read(from: &buf), 
                 url: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
-                slug: FfiConverterString.read(from: &buf),
+                slug: FfiConverterString.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
                 authorPubkey: FfiConverterString.read(from: &buf), 
                 conversationId: FfiConverterString.read(from: &buf), 

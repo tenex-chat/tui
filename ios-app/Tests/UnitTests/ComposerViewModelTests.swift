@@ -400,6 +400,14 @@ private final class MockCoreGateway: CoreGateway {
         profileNamesByPubkey[pubkey] ?? ""
     }
 
+    func getProjectSkills(projectId _: String) async throws -> [Skill] {
+        skills
+    }
+
+    func getSkillsForAgent(projectId _: String, agentPubkey _: String) async throws -> [Skill] {
+        skills
+    }
+
     func sendThread(
         projectId: String,
         title _: String,
