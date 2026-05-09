@@ -6,7 +6,8 @@ use nostrdb::Note;
 /// Agents publish kind:1 events tagged `t:html-report` whose `url` tag points to
 /// either a single HTML document or a `.zip` bundle hosted on Blossom. The note
 /// content holds a human-readable description; an optional `title` tag overrides
-/// the default title derived from the content.
+/// the default title derived from the content. A `d` tag is treated as the
+/// report slug for grouping multiple published versions.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct HtmlReport {
     /// Event ID (hex)
@@ -15,6 +16,8 @@ pub struct HtmlReport {
     pub url: String,
     /// Display title (from `title` tag, or first 80 chars of content)
     pub title: String,
+    /// Optional d-tag slug used to group versions of the same HTML report.
+    pub slug: String,
     /// Description (the kind:1 note content)
     pub description: String,
     /// Author pubkey (hex)
@@ -46,6 +49,7 @@ impl HtmlReport {
 
         let mut url = String::new();
         let mut title = String::new();
+        let mut slug = String::new();
         let mut mime_type = String::new();
         let mut conversation_id = String::new();
         let mut project_a_tag = String::new();
@@ -64,6 +68,9 @@ impl HtmlReport {
                 }
                 (Some("title"), Some(value)) if title.is_empty() => {
                     title = value.to_string();
+                }
+                (Some("d"), Some(value)) if slug.is_empty() => {
+                    slug = value.to_string();
                 }
                 (Some("m"), Some(value)) if mime_type.is_empty() => {
                     mime_type = value.to_string();
@@ -98,6 +105,7 @@ impl HtmlReport {
             event_id,
             url,
             title,
+            slug,
             description,
             author_pubkey,
             conversation_id,
@@ -178,6 +186,7 @@ mod tests {
 
         assert_eq!(report.url, "https://blossom.example/report.html");
         assert_eq!(report.title, "Quarterly summary");
+        assert_eq!(report.slug, "");
         assert_eq!(report.description, "Quarterly summary");
         assert!(!report.is_zip);
         assert!(report.conversation_id.is_empty());
@@ -206,6 +215,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(report.title, "Tagged Title");
+    }
+
+    #[test]
+    fn captures_d_tag_as_slug() {
+        let report = parse_html_report_from_builder(
+            html_report_builder("Command Center").tag(custom_tag("d", "command-center")),
+        )
+        .unwrap();
+
+        assert_eq!(report.slug, "command-center");
     }
 
     #[test]

@@ -17,12 +17,14 @@ enum HtmlReportSource: Equatable {
 
 struct HtmlReportDetailView: View {
     let report: HtmlReport
+    let versions: [HtmlReport]
     @Environment(TenexCoreManager.self) private var coreManager
 
     @State private var loadState: LoadState = .loading
     @State private var loadedSource: HtmlReportSource?
     @State private var resolvedConversation: ConversationFullInfo?
     @State private var showConversation = false
+    @State private var selectedEventId: String?
 
     private enum LoadState: Equatable {
         case loading
@@ -30,22 +32,32 @@ struct HtmlReportDetailView: View {
         case failed(String)
     }
 
+    init(report: HtmlReport, versions: [HtmlReport] = []) {
+        self.report = report
+        self.versions = versions
+    }
+
     var body: some View {
         content
-            .navigationTitle(report.title.isEmpty ? "HTML Report" : report.title)
+            .navigationTitle(activeReport.title.isEmpty ? "HTML Report" : activeReport.title)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #else
             .toolbarTitleDisplayMode(.inline)
             #endif
             .toolbar {
-                if !report.conversationId.isEmpty {
+                if versionList.count > 1 {
+                    ToolbarItem(placement: .primaryAction) {
+                        versionMenu
+                    }
+                }
+                if !activeReport.conversationId.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         openConversationButton
                     }
                 }
             }
-            .task {
+            .task(id: activeReport.eventId) {
                 await loadReport()
                 await resolveConversation()
             }
@@ -58,6 +70,23 @@ struct HtmlReportDetailView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+    }
+
+    private var versionList: [HtmlReport] {
+        var seen = Set<String>()
+        return ([report] + versions)
+            .filter { seen.insert($0.eventId).inserted }
+            .sorted {
+                if $0.createdAt != $1.createdAt {
+                    return $0.createdAt > $1.createdAt
+                }
+                return $0.eventId < $1.eventId
+            }
+    }
+
+    private var activeReport: HtmlReport {
+        let eventId = selectedEventId ?? report.eventId
+        return versionList.first(where: { $0.eventId == eventId }) ?? report
     }
 
     @ViewBuilder
@@ -105,31 +134,82 @@ struct HtmlReportDetailView: View {
         .accessibilityIdentifier("html_report_open_conversation_button")
     }
 
+    private var versionMenu: some View {
+        Menu {
+            ForEach(versionList, id: \.eventId) { version in
+                Button {
+                    selectVersion(version)
+                } label: {
+                    Label(
+                        versionMenuTitle(for: version),
+                        systemImage: version.eventId == activeReport.eventId ? "checkmark" : "doc.richtext"
+                    )
+                }
+            }
+        } label: {
+            Label("Versions", systemImage: "clock.arrow.circlepath")
+        }
+        .accessibilityIdentifier("html_report_versions_button")
+    }
+
+    private func selectVersion(_ version: HtmlReport) {
+        guard activeReport.eventId != version.eventId else { return }
+        selectedEventId = version.eventId
+        loadedSource = nil
+        resolvedConversation = nil
+        showConversation = false
+        loadState = .loading
+    }
+
+    private func versionMenuTitle(for version: HtmlReport) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(version.createdAt))
+            .formatted(date: .abbreviated, time: .shortened)
+        if version.eventId == versionList.first?.eventId {
+            return "Latest - \(date)"
+        }
+        return date
+    }
+
     // MARK: - Loading
 
     private func loadReport() async {
-        detailLogger.info("loadReport start eventId=\(report.eventId) url=\(report.url)")
+        let target = activeReport
+        detailLogger.info("loadReport start eventId=\(target.eventId) url=\(target.url)")
         let started = Date()
         do {
-            let source = try await HtmlReportCache.shared.source(for: report)
+            let source = try await HtmlReportCache.shared.source(for: target)
             let ms = Int(Date().timeIntervalSince(started) * 1000)
-            detailLogger.info("loadReport ok eventId=\(report.eventId) ms=\(ms)")
+            detailLogger.info("loadReport ok eventId=\(target.eventId) ms=\(ms)")
             await MainActor.run {
+                guard activeReport.eventId == target.eventId else { return }
                 loadedSource = source
                 loadState = .loaded
             }
         } catch {
             let ms = Int(Date().timeIntervalSince(started) * 1000)
-            detailLogger.error("loadReport failed eventId=\(report.eventId) ms=\(ms) error=\(error.localizedDescription)")
-            await MainActor.run { loadState = .failed(error.localizedDescription) }
+            detailLogger.error("loadReport failed eventId=\(target.eventId) ms=\(ms) error=\(error.localizedDescription)")
+            await MainActor.run {
+                guard activeReport.eventId == target.eventId else { return }
+                loadState = .failed(error.localizedDescription)
+            }
         }
     }
 
     private func resolveConversation() async {
-        let conversationId = report.conversationId
-        guard !conversationId.isEmpty else { return }
+        let target = activeReport
+        let conversationId = target.conversationId
+        guard !conversationId.isEmpty else {
+            await MainActor.run {
+                guard activeReport.eventId == target.eventId else { return }
+                resolvedConversation = nil
+            }
+            return
+        }
         let matches = await coreManager.core.getConversationsByIds(conversationIds: [conversationId])
-        await MainActor.run { resolvedConversation = matches.first }
+        await MainActor.run {
+            guard activeReport.eventId == target.eventId else { return }
+            resolvedConversation = matches.first
+        }
     }
 
 }

@@ -5354,7 +5354,8 @@ public func FfiConverterTypeHourActivity_lower(_ value: HourActivity) -> RustBuf
  * Agents publish kind:1 events tagged `t:html-report` whose `url` tag points to
  * either a single HTML document or a `.zip` bundle hosted on Blossom. The note
  * content holds a human-readable description; an optional `title` tag overrides
- * the default title derived from the content.
+ * the default title derived from the content. A `d` tag is treated as the
+ * report slug for grouping multiple published versions.
  */
 public struct HtmlReport {
     /**
@@ -5369,6 +5370,10 @@ public struct HtmlReport {
      * Display title (from `title` tag, or first 80 chars of content)
      */
     public var title: String
+    /**
+     * Optional d-tag slug used to group versions of the same HTML report.
+     */
+    public var slug: String
     /**
      * Description (the kind:1 note content)
      */
@@ -5407,6 +5412,9 @@ public struct HtmlReport {
          * Display title (from `title` tag, or first 80 chars of content)
          */title: String, 
         /**
+         * Optional d-tag slug used to group versions of the same HTML report.
+         */slug: String,
+        /**
          * Description (the kind:1 note content)
          */description: String, 
         /**
@@ -5427,6 +5435,7 @@ public struct HtmlReport {
         self.eventId = eventId
         self.url = url
         self.title = title
+        self.slug = slug
         self.description = description
         self.authorPubkey = authorPubkey
         self.conversationId = conversationId
@@ -5450,6 +5459,9 @@ extension HtmlReport: Equatable, Hashable {
             return false
         }
         if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.slug != rhs.slug {
             return false
         }
         if lhs.description != rhs.description {
@@ -5477,6 +5489,7 @@ extension HtmlReport: Equatable, Hashable {
         hasher.combine(eventId)
         hasher.combine(url)
         hasher.combine(title)
+        hasher.combine(slug)
         hasher.combine(description)
         hasher.combine(authorPubkey)
         hasher.combine(conversationId)
@@ -5498,6 +5511,7 @@ public struct FfiConverterTypeHtmlReport: FfiConverterRustBuffer {
                 eventId: FfiConverterString.read(from: &buf), 
                 url: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
+                slug: FfiConverterString.read(from: &buf),
                 description: FfiConverterString.read(from: &buf), 
                 authorPubkey: FfiConverterString.read(from: &buf), 
                 conversationId: FfiConverterString.read(from: &buf), 
@@ -5511,6 +5525,7 @@ public struct FfiConverterTypeHtmlReport: FfiConverterRustBuffer {
         FfiConverterString.write(value.eventId, into: &buf)
         FfiConverterString.write(value.url, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
+        FfiConverterString.write(value.slug, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
         FfiConverterString.write(value.authorPubkey, into: &buf)
         FfiConverterString.write(value.conversationId, into: &buf)

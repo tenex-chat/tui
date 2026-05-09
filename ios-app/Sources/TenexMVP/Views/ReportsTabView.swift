@@ -22,20 +22,70 @@ enum ReportEntry: Identifiable {
 }
 
 enum ReportListEntry: Identifiable {
-    case html(HtmlReport)
+    case html(HtmlReportVersionEntry)
     case markdown(ReportEntry)
 
     var id: String {
         switch self {
-        case .html(let report): return "html:\(report.eventId)"
+        case .html(let entry): return "html:\(entry.id)"
         case .markdown(let entry): return "markdown:\(entry.id)"
         }
     }
 
     var createdAt: UInt64 {
         switch self {
-        case .html(let report): return report.createdAt
+        case .html(let entry): return entry.latest.createdAt
         case .markdown(let entry): return entry.mostRecentCreatedAt
+        }
+    }
+}
+
+struct HtmlReportVersionEntry: Identifiable {
+    let latest: HtmlReport
+    let versions: [HtmlReport]
+
+    var id: String {
+        let slug = latest.slug.trimmingCharacters(in: .whitespacesAndNewlines)
+        if slug.isEmpty {
+            return latest.eventId
+        }
+        return "\(latest.projectATag):\(slug)"
+    }
+
+    static func grouped(from reports: [HtmlReport]) -> [HtmlReportVersionEntry] {
+        var groups: [String: [HtmlReport]] = [:]
+        var entries: [HtmlReportVersionEntry] = []
+
+        for report in reports {
+            let slug = report.slug.trimmingCharacters(in: .whitespacesAndNewlines)
+            if slug.isEmpty {
+                entries.append(HtmlReportVersionEntry(latest: report, versions: [report]))
+            } else {
+                let key = "\(report.projectATag)|\(slug)"
+                groups[key, default: []].append(report)
+            }
+        }
+
+        for versions in groups.values {
+            let sorted = sortedVersions(versions)
+            guard let latest = sorted.first else { continue }
+            entries.append(HtmlReportVersionEntry(latest: latest, versions: sorted))
+        }
+
+        return entries.sorted { lhs, rhs in
+            if lhs.latest.createdAt != rhs.latest.createdAt {
+                return lhs.latest.createdAt > rhs.latest.createdAt
+            }
+            return lhs.id < rhs.id
+        }
+    }
+
+    private static func sortedVersions(_ reports: [HtmlReport]) -> [HtmlReport] {
+        reports.sorted {
+            if $0.createdAt != $1.createdAt {
+                return $0.createdAt > $1.createdAt
+            }
+            return $0.eventId < $1.eventId
         }
     }
 }
@@ -45,7 +95,7 @@ enum ReportListEntry: Identifiable {
 struct ReportsTabView: View {
     @Environment(TenexCoreManager.self) private var coreManager
     @State private var selectedReport: Report?
-    @State private var selectedHtmlReport: HtmlReport?
+    @State private var selectedHtmlReportEntry: HtmlReportVersionEntry?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private var useSplitView: Bool { horizontalSizeClass == .regular }
@@ -58,10 +108,10 @@ struct ReportsTabView: View {
             NavigationSplitView {
                 NavigationStack { listContent }
             } detail: {
-                if let htmlReport = selectedHtmlReport {
-                    HtmlReportDetailView(report: htmlReport)
+                if let htmlReportEntry = selectedHtmlReportEntry {
+                    HtmlReportDetailView(report: htmlReportEntry.latest, versions: htmlReportEntry.versions)
                         .environment(coreManager)
-                        .id(htmlReport.eventId)
+                        .id(htmlReportEntry.id)
                 } else if let report = selectedReport {
                     ReportDetailView(report: report)
                         .environment(coreManager)
@@ -75,14 +125,14 @@ struct ReportsTabView: View {
         } else {
             NavigationStack {
                 listContent
-                    .sheet(isPresented: Binding(get: { selectedHtmlReport != nil }, set: { if !$0 { selectedHtmlReport = nil } })) {
-                        if let htmlReport = selectedHtmlReport {
+                    .sheet(isPresented: Binding(get: { selectedHtmlReportEntry != nil }, set: { if !$0 { selectedHtmlReportEntry = nil } })) {
+                        if let htmlReportEntry = selectedHtmlReportEntry {
                             NavigationStack {
-                                HtmlReportDetailView(report: htmlReport)
+                                HtmlReportDetailView(report: htmlReportEntry.latest, versions: htmlReportEntry.versions)
                                     .environment(coreManager)
                                     .toolbar {
                                         ToolbarItem(placement: .confirmationAction) {
-                                            Button("Done") { selectedHtmlReport = nil }
+                                            Button("Done") { selectedHtmlReportEntry = nil }
                                         }
                                     }
                             }
@@ -108,7 +158,7 @@ struct ReportsTabView: View {
     }
 
     private var reportEntries: [ReportEntry] {
-        let reports = coreManager.reports
+        let reports = scopedReports
 
         var groupCounts: [String: Int] = [:]
         for report in reports where !report.document.isEmpty {
@@ -148,12 +198,26 @@ struct ReportsTabView: View {
         return coreManager.projects.first(where: { $0.id == projectId })
     }
 
-    private var sortedHtmlReports: [HtmlReport] {
-        coreManager.htmlReports.sorted { $0.createdAt > $1.createdAt }
+    private var htmlReportEntries: [HtmlReportVersionEntry] {
+        HtmlReportVersionEntry.grouped(from: scopedHtmlReports)
+    }
+
+    private var scopedReports: [Report] {
+        coreManager.reports.filter { report in
+            let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
+            return coreManager.includesProjectInCurrentScope(projectId)
+        }
+    }
+
+    private var scopedHtmlReports: [HtmlReport] {
+        coreManager.htmlReports.filter { report in
+            let projectId = TenexCoreManager.projectId(fromATag: report.projectATag)
+            return coreManager.includesProjectInCurrentScope(projectId)
+        }
     }
 
     private var chronologicalEntries: [ReportListEntry] {
-        let entries = sortedHtmlReports.map(ReportListEntry.html)
+        let entries = htmlReportEntries.map(ReportListEntry.html)
             + reportEntries.map(ReportListEntry.markdown)
 
         return entries.sorted {
@@ -166,30 +230,31 @@ struct ReportsTabView: View {
 
     private var listContent: some View {
         Group {
-            if coreManager.reports.isEmpty && coreManager.htmlReports.isEmpty {
+            if scopedReports.isEmpty && scopedHtmlReports.isEmpty {
                 emptyStateView
             } else {
                 List {
                     ForEach(chronologicalEntries) { entry in
                         switch entry {
-                        case .html(let htmlReport):
+                        case .html(let htmlReportEntry):
                             Button {
                                 selectedReport = nil
-                                selectedHtmlReport = htmlReport
+                                selectedHtmlReportEntry = htmlReportEntry
                             } label: {
                                 HtmlReportRowView(
-                                    report: htmlReport,
-                                    project: project(for: htmlReport.projectATag)
+                                    report: htmlReportEntry.latest,
+                                    project: project(for: htmlReportEntry.latest.projectATag),
+                                    versionCount: htmlReportEntry.versions.count
                                 )
                             }
                             .buttonStyle(.plain)
-                            .accessibilityIdentifier("html_report_row_\(htmlReport.eventId)")
+                            .accessibilityIdentifier("html_report_row_\(htmlReportEntry.latest.eventId)")
 
                         case .markdown(let markdownEntry):
                             switch markdownEntry {
                             case .single(let report):
                                 Button {
-                                    selectedHtmlReport = nil
+                                    selectedHtmlReportEntry = nil
                                     selectedReport = report
                                 } label: {
                                     ReportRowView(report: report, project: project(for: report.projectATag))
@@ -220,6 +285,14 @@ struct ReportsTabView: View {
             }
         }
         .navigationTitle("Reports")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                WorkspaceScopeButton(style: .toolbar)
+            }
+            ToolbarItem(placement: .automatic) {
+                AppGlobalFilterToolbarButton()
+            }
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #else
@@ -235,13 +308,20 @@ struct ReportsTabView: View {
             Text("No Reports")
                 .font(.title2)
                 .fontWeight(.semibold)
-            Text("Reports will appear here when they are published.")
+            Text(emptyStateMessage)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("reports_empty_state")
+    }
+
+    private var emptyStateMessage: String {
+        if !coreManager.isAppFilterDefault {
+            return "No reports match the current workspace or filter."
+        }
+        return "Reports will appear here when they are published."
     }
 }
 
@@ -308,6 +388,7 @@ struct ReportGroupView: View {
 struct HtmlReportRowView: View {
     let report: HtmlReport
     let project: Project?
+    let versionCount: Int
 
     private var subtitle: String {
         let trimmed = report.description.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -342,6 +423,11 @@ struct HtmlReportRowView: View {
                             .foregroundStyle(.tertiary)
                     } else {
                         Text("HTML")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if versionCount > 1 {
+                        Text("\(versionCount) versions")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
