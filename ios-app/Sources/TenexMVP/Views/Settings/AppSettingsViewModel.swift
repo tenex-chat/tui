@@ -8,6 +8,7 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
     case bunker
     case ai
     case audio
+    case storage
 
     var id: String { rawValue }
 
@@ -19,6 +20,7 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
         case .bunker: return "Bunker"
         case .ai: return "AI"
         case .audio: return "Audio"
+        case .storage: return "Storage"
         }
     }
 
@@ -30,6 +32,7 @@ enum SettingsSection: String, CaseIterable, Hashable, Identifiable {
         case .bunker: return "lock.shield"
         case .ai: return "brain"
         case .audio: return "waveform"
+        case .storage: return "internaldrive"
         }
     }
 }

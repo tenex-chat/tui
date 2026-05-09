@@ -1,7 +1,14 @@
 import Foundation
+import os.log
 #if os(iOS)
 import ZIPFoundation
 #endif
+
+private enum cacheLog {
+    static func info(_ s: String) { print("[HtmlReportCache] \(s)") }
+    static func error(_ s: String) { print("[HtmlReportCache][ERROR] \(s)") }
+    static func debug(_ s: String) { print("[HtmlReportCache] \(s)") }
+}
 
 actor HtmlReportCache {
     static let shared = HtmlReportCache()
@@ -11,28 +18,76 @@ actor HtmlReportCache {
 
     private init() {}
 
+    /// Wipe the on-disk HTML report cache. Clears the current cache directory
+    /// (Caches/) AND any leftover entries at the legacy Application Support
+    /// path used before the iOS 26 sandbox-fix migration. Also clears
+    /// URLCache.shared so a stale 4xx response can't haunt the next fetch.
+    func clearAll() async -> (cleared: Int, errors: [String]) {
+        var cleared = 0
+        var errors: [String] = []
+        let candidates: [URL] = [
+            fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("tenex", isDirectory: true)
+                .appendingPathComponent("html-report-cache", isDirectory: true),
+            fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+                .appendingPathComponent("tenex", isDirectory: true)
+                .appendingPathComponent("html-report-cache", isDirectory: true)
+        ].compactMap { $0 }
+
+        for dir in candidates where fileManager.fileExists(atPath: dir.path) {
+            do {
+                try fileManager.removeItem(at: dir)
+                cleared += 1
+                cacheLog.info("clearAll removed \(dir.path)")
+            } catch {
+                errors.append("\(dir.lastPathComponent): \(error.localizedDescription)")
+                cacheLog.error("clearAll failed path=\(dir.path) error=\(error.localizedDescription)")
+            }
+        }
+
+        URLCache.shared.removeAllCachedResponses()
+        inFlight.removeAll()
+        return (cleared, errors)
+    }
+
     func prefetch(_ reports: [HtmlReport]) async {
+        cacheLog.info("prefetch start count=\(reports.count)")
         await withTaskGroup(of: Void.self) { group in
             for report in reports where !report.url.isEmpty {
                 group.addTask { [weak self] in
-                    _ = try? await self?.source(for: report)
+                    do {
+                        _ = try await self?.source(for: report)
+                    } catch {
+                        cacheLog.error("prefetch failed eventId=\(report.eventId) error=\(error.localizedDescription)")
+                    }
                 }
             }
         }
+        cacheLog.info("prefetch done count=\(reports.count)")
     }
 
     func source(for report: HtmlReport) async throws -> HtmlReportSource {
         let cacheKey = reportCacheKey(report)
         let directory = cacheDirectory(for: cacheKey)
+        cacheLog.info("source request eventId=\(report.eventId) url=\(report.url) isZip=\(report.isZip) key=\(cacheKey)")
 
         if let cached = try? cachedSource(for: report, in: directory) {
+            cacheLog.info("source cache-hit eventId=\(report.eventId)")
             return cached
         }
 
+        var waitedMs: Int = 0
         while inFlight.contains(cacheKey) {
+            cacheLog.debug("source waiting on inFlight eventId=\(report.eventId) waitedMs=\(waitedMs)")
             try await Task.sleep(for: .milliseconds(80))
+            waitedMs += 80
             if let cached = try? cachedSource(for: report, in: directory) {
+                cacheLog.info("source cache-hit-after-wait eventId=\(report.eventId) waitedMs=\(waitedMs)")
                 return cached
+            }
+            if waitedMs > 30_000 {
+                cacheLog.error("source inFlight wedged — giving up wait eventId=\(report.eventId) waitedMs=\(waitedMs)")
+                break
             }
         }
 
@@ -40,44 +95,92 @@ actor HtmlReportCache {
         defer { inFlight.remove(cacheKey) }
 
         guard let url = URL(string: report.url) else {
+            cacheLog.error("source invalid URL eventId=\(report.eventId) url=\(report.url)")
             throw HtmlReportCacheError.invalidURL(report.url)
         }
 
-        let (data, response) = try await URLSession.shared.data(from: url)
+        cacheLog.info("source download start eventId=\(report.eventId)")
+        let downloadStart = Date()
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(from: url)
+        } catch {
+            cacheLog.error("source download failed eventId=\(report.eventId) error=\(error.localizedDescription)")
+            throw error
+        }
+        let downloadMs = Int(Date().timeIntervalSince(downloadStart) * 1000)
+        let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? -1
+        cacheLog.info("source download complete eventId=\(report.eventId) bytes=\(data.count) http=\(httpStatus) ms=\(downloadMs)")
+
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw HtmlReportCacheError.httpStatus(http.statusCode)
         }
 
         let contentType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? ""
         let isZip = contentType.localizedCaseInsensitiveContains("zip") || report.isZip
+        cacheLog.debug("source content-type=\(contentType) isZip=\(isZip)")
 
         if fileManager.fileExists(atPath: directory.path) {
             try? fileManager.removeItem(at: directory)
         }
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            cacheLog.error("source createDirectory failed path=\(directory.path) error=\(error.localizedDescription)")
+            throw error
+        }
 
         if isZip {
-            return try extractZip(data: data, into: directory)
+            do {
+                let extracted = try extractZip(data: data, into: directory)
+                cacheLog.info("source zip extracted eventId=\(report.eventId)")
+                return extracted
+            } catch {
+                cacheLog.error("source zip extract failed eventId=\(report.eventId) error=\(error.localizedDescription)")
+                throw error
+            }
         }
 
         let htmlURL = directory.appendingPathComponent("report.html")
-        try data.write(to: htmlURL, options: .atomic)
+        do {
+            try data.write(to: htmlURL, options: .atomic)
+        } catch {
+            cacheLog.error("source write failed eventId=\(report.eventId) path=\(htmlURL.path) error=\(error.localizedDescription)")
+            throw error
+        }
         let htmlString = decodeHTML(data)
+        cacheLog.info("source html cached eventId=\(report.eventId) chars=\(htmlString.count)")
         return .html(content: htmlString, baseURL: url)
     }
 
     private func cachedSource(for report: HtmlReport, in directory: URL) throws -> HtmlReportSource? {
-        guard fileManager.fileExists(atPath: directory.path) else { return nil }
+        guard fileManager.fileExists(atPath: directory.path) else {
+            cacheLog.debug("cachedSource miss-no-dir eventId=\(report.eventId) path=\(directory.path)")
+            return nil
+        }
 
         if report.isZip {
-            guard let indexURL = locateIndexHTML(in: directory), hasContent(at: indexURL) else { return nil }
+            guard let indexURL = locateIndexHTML(in: directory) else {
+                cacheLog.debug("cachedSource miss-no-index eventId=\(report.eventId)")
+                return nil
+            }
+            guard hasContent(at: indexURL) else {
+                cacheLog.debug("cachedSource miss-empty-index eventId=\(report.eventId) path=\(indexURL.path)")
+                return nil
+            }
             return .local(indexURL: indexURL, baseDirectory: directory)
         }
 
         let htmlURL = directory.appendingPathComponent("report.html")
-        guard fileManager.fileExists(atPath: htmlURL.path) else { return nil }
+        guard fileManager.fileExists(atPath: htmlURL.path) else {
+            cacheLog.debug("cachedSource miss-no-html eventId=\(report.eventId)")
+            return nil
+        }
         let data = try Data(contentsOf: htmlURL)
-        guard !data.isEmpty else { return nil }
+        guard !data.isEmpty else {
+            cacheLog.debug("cachedSource miss-empty-html eventId=\(report.eventId)")
+            return nil
+        }
         let baseURL = URL(string: report.url) ?? htmlURL
         return .html(content: decodeHTML(data), baseURL: baseURL)
     }
@@ -143,7 +246,12 @@ actor HtmlReportCache {
     }
 
     private func cacheDirectory(for key: String) -> URL {
-        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        // Use Caches/ rather than Application Support/. WKWebView's WebContent
+        // process can fail to read from Application Support/ even with
+        // allowingReadAccessTo:, leaving local zip-extracted reports rendering
+        // blank. Caches/ also matches the semantics of an HTTP cache (transient,
+        // not backed up).
+        let base = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first
             ?? fileManager.temporaryDirectory
         return base
             .appendingPathComponent("tenex", isDirectory: true)

@@ -1,6 +1,11 @@
 import SwiftUI
 import WebKit
 
+private enum detailLogger {
+    static func info(_ s: String) { print("[HtmlReportDetailView] \(s)") }
+    static func error(_ s: String) { print("[HtmlReportDetailView][ERROR] \(s)") }
+}
+
 // MARK: - HtmlReportSource
 
 enum HtmlReportSource: Equatable {
@@ -103,13 +108,19 @@ struct HtmlReportDetailView: View {
     // MARK: - Loading
 
     private func loadReport() async {
+        detailLogger.info("loadReport start eventId=\(report.eventId) url=\(report.url)")
+        let started = Date()
         do {
             let source = try await HtmlReportCache.shared.source(for: report)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            detailLogger.info("loadReport ok eventId=\(report.eventId) ms=\(ms)")
             await MainActor.run {
                 loadedSource = source
                 loadState = .loaded
             }
         } catch {
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            detailLogger.error("loadReport failed eventId=\(report.eventId) ms=\(ms) error=\(error.localizedDescription)")
             await MainActor.run { loadState = .failed(error.localizedDescription) }
         }
     }
@@ -160,8 +171,10 @@ extension HtmlReportWebView: UIViewRepresentable {
     private func load(into webView: WKWebView) {
         switch source {
         case .html(let content, let baseURL):
+            print("[HtmlReportWebView] loadHTMLString chars=\(content.count) baseURL=\(baseURL.absoluteString) firstChars=\(content.prefix(80))")
             webView.loadHTMLString(content, baseURL: baseURL)
         case .local(let indexURL, let baseDirectory):
+            print("[HtmlReportWebView] loadFileURL indexURL=\(indexURL.path) baseDir=\(baseDirectory.path)")
             webView.loadFileURL(indexURL, allowingReadAccessTo: baseDirectory)
         }
     }
@@ -277,6 +290,19 @@ extension HtmlReportWebView {
 
         init(_ source: HtmlReportSource) {
             self.lastSource = source
+        }
+
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            print("[HtmlReportWebView] didStartProvisionalNavigation url=\(webView.url?.absoluteString ?? "nil")")
+        }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            print("[HtmlReportWebView] didFinish url=\(webView.url?.absoluteString ?? "nil")")
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            print("[HtmlReportWebView][ERROR] didFail error=\(error.localizedDescription)")
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            print("[HtmlReportWebView][ERROR] didFailProvisionalNavigation error=\(error.localizedDescription)")
         }
     }
 }

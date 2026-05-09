@@ -194,6 +194,70 @@ struct AppSettingsView: View {
         case .audio:
             AudioSettingsSectionView(viewModel: viewModel)
                 .environment(coreManager)
+        case .storage:
+            StorageSettingsSectionView()
+        }
+    }
+}
+
+private struct StorageSettingsSectionView: View {
+    @State private var isClearing = false
+    @State private var resultMessage: String?
+    @State private var showConfirmation = false
+
+    var body: some View {
+        Form {
+            Section {
+                Button(role: .destructive) {
+                    showConfirmation = true
+                } label: {
+                    HStack {
+                        Label("Clear HTML Report Cache", systemImage: "trash")
+                        Spacer()
+                        if isClearing {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                }
+                .disabled(isClearing)
+            } header: {
+                Text("HTML Reports")
+            } footer: {
+                Text("Deletes cached HTML report bundles on this device and any URL-cached responses. Reports will redownload on next view. Use this if reports are showing blank.")
+            }
+
+            if let resultMessage {
+                Section {
+                    Text(resultMessage)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .navigationTitle("Storage")
+        .alert("Clear cache?", isPresented: $showConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Clear", role: .destructive) {
+                Task { await performClear() }
+            }
+        } message: {
+            Text("Cached HTML reports will be deleted. They'll redownload the next time you open one.")
+        }
+    }
+
+    private func performClear() async {
+        isClearing = true
+        resultMessage = nil
+        let result = await HtmlReportCache.shared.clearAll()
+        await MainActor.run {
+            isClearing = false
+            if result.errors.isEmpty {
+                resultMessage = result.cleared == 0
+                    ? "Cache was already empty."
+                    : "Cleared \(result.cleared) cache location\(result.cleared == 1 ? "" : "s")."
+            } else {
+                resultMessage = "Cleared with errors: \(result.errors.joined(separator: "; "))"
+            }
         }
     }
 }
