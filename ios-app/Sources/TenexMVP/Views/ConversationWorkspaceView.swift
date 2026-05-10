@@ -249,10 +249,7 @@ struct ConversationWorkspaceView: View {
     @State private var localReferenceLaunchPayload: ReferenceConversationLaunchPayload?
     /// Shared minute-level transcript clock used by all rows to avoid per-row TimelineView schedulers.
     @State private var transcriptRelativeTimeNow = Date()
-    /// When false (default), only directed messages (with p-tags) are shown; undirected runs are folded.
-    @State private var expandAllUntagged = false
-    /// Which fold groups (identified by their start index) have been individually expanded.
-    @State private var expandedFoldGroups: Set<Int> = []
+    @State private var isTranscriptAtBottom = true
     private let profiler = PerformanceProfiler.shared
 
     private let bottomAnchorId = "workspace-bottom-anchor"
@@ -345,40 +342,16 @@ struct ConversationWorkspaceView: View {
         transcriptMessages.indices
     }
 
-    /// Display items for the transcript, folding undirected message runs when `expandAllUntagged` is false.
+    /// Display items for the transcript: every message renders inline, with `isConsecutive` set
+    /// when the previous message has the same pubkey (used to suppress repeated headers).
     private var transcriptDisplayItems: [TranscriptDisplayItem] {
         var items: [TranscriptDisplayItem] = []
-        var foldBuffer: [Int] = []
         var lastPubkey: String? = nil
-
-        func flushBuffer() {
-            guard !foldBuffer.isEmpty else { return }
-            let startIdx = foldBuffer[0]
-            if expandedFoldGroups.contains(startIdx) {
-                for i in foldBuffer {
-                    let msg = transcriptMessages[i]
-                    items.append(.message(index: i, isConsecutive: lastPubkey == msg.pubkey))
-                    lastPubkey = msg.pubkey
-                }
-            } else {
-                items.append(.foldedGroup(startIndex: startIdx, count: foldBuffer.count))
-                lastPubkey = nil
-            }
-            foldBuffer = []
-        }
-
         for index in messageIndices {
             let message = transcriptMessages[index]
-            if message.pTags.isEmpty && !expandAllUntagged {
-                foldBuffer.append(index)
-            } else {
-                flushBuffer()
-                items.append(.message(index: index, isConsecutive: lastPubkey == message.pubkey))
-                lastPubkey = message.pubkey
-            }
+            items.append(TranscriptDisplayItem(index: index, isConsecutive: lastPubkey == message.pubkey))
+            lastPubkey = message.pubkey
         }
-        flushBuffer()
-
         return items
     }
 
@@ -430,24 +403,6 @@ struct ConversationWorkspaceView: View {
         #else
         .toolbarTitleDisplayMode(.inline)
         #endif
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        expandAllUntagged.toggle()
-                        if !expandAllUntagged {
-                            expandedFoldGroups.removeAll()
-                        }
-                    }
-                } label: {
-                    Label(
-                        expandAllUntagged ? "Directed only" : "Show all",
-                        systemImage: expandAllUntagged ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
-                    )
-                }
-                .help(expandAllUntagged ? "Show only directed messages" : "Show all messages")
-            }
-        }
         .navigationDestination(item: $selectedDelegationConversation) { delegatedConversation in
             ConversationAdaptiveDetailView(
                 conversation: delegatedConversation,
@@ -587,11 +542,25 @@ struct ConversationWorkspaceView: View {
                     .padding()
                     .padding(.bottom, 12)
                 }
+                .transcriptBottomVisibilityTracking(isAtBottom: $isTranscriptAtBottom)
                 #endif
             }
             .background(workspaceBackdropColor)
+            #if os(iOS)
+            .overlay(alignment: .bottomTrailing) {
+                if !isTranscriptAtBottom && !isNewThreadMode {
+                    TranscriptJumpToBottomButton {
+                        scrollToBottom(proxy, animated: true)
+                    }
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 82)
+                    .transition(.scale(scale: 0.88).combined(with: .opacity))
+                }
+            }
+            #endif
             .onAppear {
                 logTranscriptRenderBoundary(reason: "appear")
+                scrollToBottomAfterLayout(proxy, animated: false)
             }
             .onChange(of: transcriptMessages.count) { _, _ in
                 logTranscriptRenderBoundary(reason: "visible-window-change")
@@ -600,12 +569,7 @@ struct ConversationWorkspaceView: View {
                 logTranscriptRenderBoundary(reason: "message-count-change")
             }
             .onChange(of: transcriptMessages.last?.id) { _, _ in
-                guard let lastMessage = transcriptMessages.last else { return }
-                DispatchQueue.main.async {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                    }
-                }
+                scrollToBottomAfterLayout(proxy, animated: true)
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -628,51 +592,54 @@ struct ConversationWorkspaceView: View {
         #endif
     }
 
-    @ViewBuilder
-    private func transcriptRowView(for item: TranscriptDisplayItem) -> some View {
-        switch item {
-        case .message(let index, let isConsecutive):
-            let message = transcriptMessages[index]
-            SlackMessageRow(
-                message: message,
-                isConsecutive: isConsecutive,
-                conversationId: currentConversation.thread.id,
-                projectId: currentConversation.extractedProjectId,
-                relativeTimeNow: transcriptRelativeTimeNow,
-                authorDisplayName: coreManager.displayName(for: message.pubkey),
-                directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
-                    .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
-                    .map { "@\($0)" }
-                    .joined(separator: ", "),
-                onDelegationTap: { delegationId in
-                    openDelegation(byId: delegationId)
-                },
-                onViewRawEvent: { messageId in
-                    viewRawEvent(for: messageId)
-                }
-            )
-            .equatable()
-            .environment(coreManager)
-            .id(message.id)
-            #if os(macOS)
-            .frame(maxWidth: 800, alignment: .leading)
-            #endif
-        case .foldedGroup(let startIndex, let count):
-            FoldedMessagesRow(
-                count: count,
-                isExpanded: expandedFoldGroups.contains(startIndex),
-                onToggle: {
-                    if expandedFoldGroups.contains(startIndex) {
-                        expandedFoldGroups.remove(startIndex)
-                    } else {
-                        expandedFoldGroups.insert(startIndex)
-                    }
-                }
-            )
-            #if os(macOS)
-            .frame(maxWidth: 800, alignment: .leading)
-            #endif
+    private func scrollToBottomAfterLayout(_ proxy: ScrollViewProxy, animated: Bool) {
+        DispatchQueue.main.async {
+            scrollToBottom(proxy, animated: animated)
+            DispatchQueue.main.async {
+                scrollToBottom(proxy, animated: animated)
+            }
         }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        // Update state outside the animation block — state mutations inside withAnimation
+        // run inside a CAAnimation context, which can interfere with UIKit focus/keyboard.
+        isTranscriptAtBottom = true
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(bottomAnchorId, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(bottomAnchorId, anchor: .bottom)
+        }
+    }
+
+    private func transcriptRowView(for item: TranscriptDisplayItem) -> some View {
+        let message = transcriptMessages[item.index]
+        return SlackMessageRow(
+            message: message,
+            isConsecutive: item.isConsecutive,
+            conversationId: currentConversation.thread.id,
+            projectId: currentConversation.extractedProjectId,
+            relativeTimeNow: transcriptRelativeTimeNow,
+            authorDisplayName: coreManager.displayName(for: message.pubkey),
+            directedRecipientsText: message.pTags.isEmpty ? "" : message.pTags
+                .map { AgentNameFormatter.format(coreManager.displayName(for: $0)) }
+                .map { "@\($0)" }
+                .joined(separator: ", "),
+            onDelegationTap: { delegationId in
+                openDelegation(byId: delegationId)
+            },
+            onViewRawEvent: { messageId in
+                viewRawEvent(for: messageId)
+            }
+        )
+        .equatable()
+        .environment(coreManager)
+        .id(message.id)
+        #if os(macOS)
+        .frame(maxWidth: 800, alignment: .leading)
+        #endif
     }
 
     private var inlineComposer: some View {

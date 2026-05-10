@@ -349,6 +349,39 @@ extension MessageComposerView {
 
     @ViewBuilder
     var composerTrailingActionButton: some View {
+        #if os(iOS)
+        // Single stable Button — avoids structural type change in the HStack that hosts the
+        // focused TextField. Swapping Button types (if/else) destroys/recreates the sibling
+        // view, causing SwiftUI's focus system to call becomeFirstResponder() again, which
+        // interrupts iOS native keyboard dictation.
+        let showSend = isInlineComposer && canSend
+        Button {
+            if showSend {
+                sendMessage()
+            } else if dictationManager.state.isIdle && selectedProject != nil {
+                Task {
+                    preDictationText = localText
+                    try? await dictationManager.startRecording()
+                }
+            }
+        } label: {
+            if showSend {
+                Image(systemName: "arrow.up")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Color.accentColor))
+            } else {
+                Image(systemName: "mic.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.composerAction)
+                    .frame(width: 32, height: 32)
+            }
+        }
+        .buttonStyle(.borderless)
+        .disabled(!showSend && (!dictationManager.state.isIdle || selectedProject == nil))
+        .help(showSend ? "Send" : "Voice message")
+        #else
         if isInlineComposer && canSend {
             Button(action: sendMessage) {
                 Image(systemName: "arrow.up")
@@ -358,30 +391,10 @@ extension MessageComposerView {
                     .background(Circle().fill(Color.accentColor))
             }
             .buttonStyle(.borderless)
-            #if os(macOS)
             .keyboardShortcut(.return, modifiers: [.command])
-            #endif
             .help("Send")
-        } else {
-            #if os(iOS)
-            Button {
-                Task {
-                    preDictationText = localText
-                    try? await dictationManager.startRecording()
-                }
-            } label: {
-                Image(systemName: "mic.fill")
-                    .font(.title3)
-                    .foregroundStyle(Color.composerAction)
-                    .frame(width: 32, height: 32)
-            }
-            .buttonStyle(.borderless)
-            .disabled(!dictationManager.state.isIdle || selectedProject == nil)
-            .help("Voice message")
-            #else
-            EmptyView()
-            #endif
         }
+        #endif
     }
 
     /// Toolbar button that opens the skill selector sheet.
