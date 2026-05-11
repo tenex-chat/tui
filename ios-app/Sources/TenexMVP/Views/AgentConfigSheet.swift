@@ -35,7 +35,6 @@ struct AgentConfigSheet: View {
             Group {
                 content
             }
-            .background(backgroundView)
             .navigationTitle("Configure \(agentDisplayName)")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
@@ -118,163 +117,81 @@ struct AgentConfigSheet: View {
     }
 
     private var configContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                summaryCard
+        Form {
+            Section {
+                LabeledContent("Name", value: agentDisplayName)
+            } header: {
+                Text("Agent")
+            }
 
-                GlassPanel(
-                    title: "Model",
-                    subtitle: "Select the AI model for this agent."
-                ) {
-                    if allModels.isEmpty {
-                        Text("No models available")
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 6)
-                    } else {
-                        HStack(spacing: 12) {
-                            Text("Model")
-                                .font(.headline)
-                            Spacer(minLength: 0)
-                            Picker("Model", selection: $selectedModelIndex) {
-                                ForEach(Array(allModels.enumerated()), id: \.offset) { index, model in
-                                    Text(model)
-                                        .tag(index)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .labelsHidden()
-                            .frame(maxWidth: 320)
+            Section {
+                if allModels.isEmpty {
+                    Text("No models available")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Model", selection: $selectedModelIndex) {
+                        ForEach(Array(allModels.enumerated()), id: \.offset) { index, model in
+                            Text(model).tag(index)
                         }
                     }
+                    #if os(iOS)
+                    .pickerStyle(.navigationLink)
+                    #endif
                 }
+            } header: {
+                Text("Model")
+            } footer: {
+                Text("Select the AI model for this agent.")
+            }
 
-                if !allSkills.isEmpty {
-                    GlassPanel(
-                        title: "Skills",
-                        subtitle: "Select the skills available to this agent."
-                    ) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text("\(selectedSkills.count) selected")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                Spacer(minLength: 0)
-
-                                Button("Select All") {
-                                    selectedSkills = Set(allSkills)
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(selectedSkills == Set(allSkills))
-
-                                Text("•")
-                                    .foregroundStyle(.tertiary)
-
-                                Button("Clear") {
-                                    selectedSkills.removeAll()
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(selectedSkills.isEmpty)
-                            }
-
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(Array(allSkills.enumerated()), id: \.element) { offset, skill in
-                                    Toggle(isOn: Binding(
-                                        get: { selectedSkills.contains(skill) },
-                                        set: { isSelected in
-                                            if isSelected {
-                                                selectedSkills.insert(skill)
-                                            } else {
-                                                selectedSkills.remove(skill)
-                                            }
-                                        }
-                                    )) {
-                                        Text(skill)
-                                            .foregroundStyle(.primary)
-                                    }
-                                    #if os(macOS)
-                                    .toggleStyle(.checkbox)
-                                    #endif
-                                    if offset < allSkills.count - 1 {
-                                        Divider()
-                                            .opacity(0.30)
-                                    }
+            if !allSkills.isEmpty {
+                Section {
+                    ForEach(allSkills, id: \.self) { skill in
+                        Toggle(isOn: Binding(
+                            get: { selectedSkills.contains(skill) },
+                            set: { isSelected in
+                                if isSelected {
+                                    selectedSkills.insert(skill)
+                                } else {
+                                    selectedSkills.remove(skill)
                                 }
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.systemBackground.opacity(reduceTransparency ? 1 : 0.36))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
-                                    )
-                            )
+                        )) {
+                            Text(skill)
                         }
+                        #if os(macOS)
+                        .toggleStyle(.checkbox)
+                        #endif
                     }
+                } header: {
+                    HStack {
+                        Text("Skills")
+                        Spacer()
+                        Button("Select All") {
+                            selectedSkills = Set(allSkills)
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
+                        .disabled(selectedSkills == Set(allSkills))
+
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                            .font(.caption)
+
+                        Button("Clear") {
+                            selectedSkills.removeAll()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.borderless)
+                        .disabled(selectedSkills.isEmpty)
+                    }
+                } footer: {
+                    Text("\(selectedSkills.count) of \(allSkills.count) selected")
                 }
-
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 16)
-            .padding(.bottom, 20)
         }
-    }
-
-    private var summaryCard: some View {
-        GlassPanel(
-            title: "Agent",
-            subtitle: "Configure model and skills."
-        ) {
-            HStack(spacing: 10) {
-                statPill(label: "Name", value: agentDisplayName)
-                statPill(label: "Model", value: selectedModelLabel)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func statPill(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
         #if os(macOS)
-        .background(Color(nsColor: .controlColor), in: Capsule())
-        #else
-        .background(Color.systemBackground.opacity(reduceTransparency ? 1 : 0.55), in: Capsule())
-        #endif
-    }
-
-    private var selectedModelLabel: String {
-        guard allModels.indices.contains(selectedModelIndex) else {
-            return "Default"
-        }
-        return allModels[selectedModelIndex]
-    }
-
-    private var backgroundView: some View {
-        #if os(macOS)
-        Color(nsColor: .windowBackgroundColor)
-            .ignoresSafeArea()
-        #else
-        LinearGradient(
-            colors: [
-                Color.agentBrand.opacity(reduceTransparency ? 0.03 : 0.10),
-                Color.systemGroupedBackground,
-                Color.systemGroupedBackground
-            ],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .ignoresSafeArea()
+        .formStyle(.grouped)
         #endif
     }
 

@@ -192,76 +192,11 @@ extension MessageComposerView {
         .background(.bar)
     }
 
-    // MARK: - Inline Agent Selector (new conversations)
-
-    var showsInlineAgentSelector: Bool {
-        isNewConversation
-            && selectedProject != nil
-            && !hasPickedAgentInlineSelector
-            && !availableAgents.isEmpty
-    }
-
-    /// Shown above the text field when starting a new conversation and no agent is selected yet.
-    @ViewBuilder
-    var inlineAgentSelectorSection: some View {
-        if showsInlineAgentSelector {
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(availableAgents, id: \.pubkey) { agent in
-                        VStack(spacing: 0) {
-                            HStack(spacing: 0) {
-                                RosterAgentRowView(
-                                    agent: agent,
-                                    onTap: { selectAgentInline(agent) },
-                                    onConfig: { workspaceAgentToConfig = agent }
-                                )
-                                .environment(coreManager)
-
-                                if draft.agentPubkey == agent.pubkey {
-                                    Image(systemName: "checkmark")
-                                        .font(.footnote.weight(.semibold))
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(.trailing, 4)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .accessibilityIdentifier("new_conversation_agent_\(agent.pubkey)")
-
-                            if agent.pubkey != availableAgents.last?.pubkey {
-                                Divider().padding(.leading, 62)
-                            }
-                        }
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .background(.bar)
-            .accessibilityIdentifier("new_conversation_agent_selector")
-            .accessibilityValue(availableAgents.map(\.pubkey).joined(separator: ","))
-        }
-    }
-
-    func selectAgentInline(_ agent: ProjectAgent) {
-        draft.setAgent(agent.pubkey)
-        isDirty = true
-        hasPickedAgentInlineSelector = true
-        if let projectId = selectedProject?.id {
-            Task {
-                await draftManager.updateAgent(agent.pubkey, conversationId: conversationId, projectId: projectId)
-                await loadSkills()
-            }
-        }
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(100))
-            composerFieldFocused = true
-        }
-    }
-
     var workspaceInlineControlRow: some View {
         HStack(spacing: 12) {
             workspaceAccessoryButton
 
+            #if os(macOS)
             if dictationManager.state.isRecording {
                 DictationRecordingBar(
                     audioLevelSamples: dictationManager.audioLevelSamples,
@@ -278,12 +213,15 @@ extension MessageComposerView {
 
                 Spacer(minLength: 0)
 
-                #if os(macOS)
                 if shouldShowWorkspaceReferenceConversationButton {
                     workspaceReferenceConversationButton
                 }
-                #endif
             }
+            #else
+            workspaceProjectControl
+
+            Spacer(minLength: 0)
+            #endif
 
             // Telegram-style mic ↔ send swap (Liquid Glass: single tinted primary action)
             if canSend {
@@ -359,6 +297,11 @@ extension MessageComposerView {
             Task {
                 preDictationText = localText
                 try? await dictationManager.startRecording()
+                #if os(iOS)
+                if dictationManager.state.isRecording {
+                    recordingSheetPresented = true
+                }
+                #endif
             }
         } label: {
             Image(systemName: dictationManager.state.isRecording ? "mic.fill" : "mic")

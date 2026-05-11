@@ -250,6 +250,11 @@ struct ConversationWorkspaceView: View {
     /// Shared minute-level transcript clock used by all rows to avoid per-row TimelineView schedulers.
     @State private var transcriptRelativeTimeNow = Date()
     @State private var isTranscriptAtBottom = true
+    /// Set after the first message is sent in a new thread, switching the view into existing-conversation mode.
+    @State private var createdConversation: ConversationFullInfo?
+    @State private var agentCoordinator = ComposerAgentCoordinator()
+    @State private var showToolbarAgentSelector = false
+    @State private var toolbarAgentToConfig: ProjectAgent?
     private let profiler = PerformanceProfiler.shared
 
     private let bottomAnchorId = "workspace-bottom-anchor"
@@ -279,9 +284,8 @@ struct ConversationWorkspaceView: View {
     }
 
     private var isNewThreadMode: Bool {
-        if case .newThread = source {
-            return true
-        }
+        guard createdConversation == nil else { return false }
+        if case .newThread = source { return true }
         return false
     }
 
@@ -300,12 +304,27 @@ struct ConversationWorkspaceView: View {
     }
 
     private var currentConversation: ConversationFullInfo {
+        if let created = createdConversation {
+            return coreManager.conversationById[created.thread.id] ?? created
+        }
         switch source {
         case .existing(let conversation):
             return coreManager.conversationById[conversation.thread.id] ?? conversation
         case .newThread:
             return seedConversation
         }
+    }
+
+    private var workspaceTaskKey: String {
+        if let created = createdConversation {
+            return "created-\(created.thread.id)"
+        }
+        return source.identity
+    }
+
+    private var toolbarAvailableAgents: [ProjectAgent] {
+        guard let projectId = project?.id else { return [] }
+        return ComposerViewModel.orderedProjectRosterAgents(coreManager.projectRosterAgents[projectId] ?? [])
     }
 
     private var project: Project? {
@@ -411,7 +430,10 @@ struct ConversationWorkspaceView: View {
             )
                 .environment(coreManager)
         }
-        .task(id: source.identity) {
+        .task(id: workspaceTaskKey) {
+            if let created = createdConversation {
+                viewModel = ConversationDetailViewModel(conversation: created)
+            }
             profiler.logEvent(
                 "workspace task start source=\(source.identity) mode=\(isNewThreadMode ? "new-thread" : "existing")",
                 category: .general
@@ -427,6 +449,54 @@ struct ConversationWorkspaceView: View {
         // Without this, ANY change to those dictionaries triggers a full body
         // re-evaluation including the ForEach over 30+ message rows.
         .background(CoreManagerObserver(viewModel: viewModel))
+        #if os(iOS)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if let pubkey = agentCoordinator.currentAgentPubkey {
+                    Button {
+                        showToolbarAgentSelector = true
+                    } label: {
+                        AgentAvatarView(
+                            agentName: AgentDisplayName.resolve(pubkey: pubkey, coreManager: coreManager),
+                            pubkey: pubkey,
+                            size: 28,
+                            showBorder: false
+                        )
+                        .environment(coreManager)
+                    }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    if let pubkey = agentCoordinator.currentAgentPubkey,
+                       let agent = toolbarAvailableAgents.first(where: { $0.pubkey == pubkey }) {
+                        toolbarAgentToConfig = agent
+                    }
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .disabled(agentCoordinator.currentAgentPubkey == nil)
+            }
+        }
+        .sheet(isPresented: $showToolbarAgentSelector) {
+            if let projectId = project?.id {
+                AgentSelectorSheet(
+                    agents: toolbarAvailableAgents,
+                    projectId: projectId,
+                    selectedPubkey: Binding(
+                        get: { agentCoordinator.currentAgentPubkey },
+                        set: { agentCoordinator.requestedAgentPubkey = $0 }
+                    ),
+                    onDone: nil
+                )
+                .environment(coreManager)
+            }
+        }
+        .sheet(item: $toolbarAgentToConfig) { agent in
+            AgentConfigSheet(agent: agent)
+                .environment(coreManager)
+        }
+        #endif
         .sheet(item: $rawEventDestination) { destination in
             RawEventInspectorSheet(
                 eventId: destination.eventId,
@@ -656,10 +726,13 @@ struct ConversationWorkspaceView: View {
                 inlineLayoutStyle: .workspace,
                 onSend: isNewThreadMode ? { result in
                     onThreadCreated?(result.eventId)
+                    handleThreadCreatedInternally(result.eventId)
                 } : nil,
                 onReferenceConversationRequested: isNewThreadMode ? nil : handleReferenceConversationRequested
             )
+            .id(isNewThreadMode ? "composer-new-\(project?.id ?? "")" : "composer-existing-\(currentConversation.thread.id)")
             .environment(coreManager)
+            .environment(\.composerAgentCoordinator, agentCoordinator)
             #if os(macOS)
             .background(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -769,6 +842,21 @@ struct ConversationWorkspaceView: View {
     private func shortId(_ value: String, prefix: Int = 8, suffix: Int = 6) -> String {
         guard value.count > prefix + suffix else { return value }
         return "\(value.prefix(prefix))...\(value.suffix(suffix))"
+    }
+
+    private func handleThreadCreatedInternally(_ eventId: String) {
+        if let conv = coreManager.conversationById[eventId] {
+            createdConversation = conv
+            return
+        }
+        Task {
+            let convs = await coreManager.core.getConversationsByIds(conversationIds: [eventId])
+            if let conv = convs.first {
+                await MainActor.run {
+                    createdConversation = conv
+                }
+            }
+        }
     }
 
     private func handleReferenceConversationRequested(_ payload: ReferenceConversationLaunchPayload) {

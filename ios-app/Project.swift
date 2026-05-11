@@ -4,7 +4,8 @@ let project = Project(
     name: "TenexMVP",
     packages: [
         .remote(url: "https://github.com/onevcat/Kingfisher.git", requirement: .upToNextMajor(from: "8.1.0")),
-        .remote(url: "https://github.com/weichsel/ZIPFoundation", requirement: .upToNextMajor(from: "0.9.0"))
+        .remote(url: "https://github.com/weichsel/ZIPFoundation", requirement: .upToNextMajor(from: "0.9.0")),
+        .local(path: "../../VoiceCaptureKit")
     ],
     targets: [
         .target(
@@ -48,6 +49,7 @@ let project = Project(
             dependencies: [
                 .package(product: "Kingfisher", type: .runtime),
                 .package(product: "ZIPFoundation", type: .runtime),
+                .package(product: "VoiceCaptureKit", type: .runtime),
                 .sdk(name: "AppIntents", type: .framework)
             ],
             settings: .settings(
