@@ -34,6 +34,8 @@ final class DictationManager {
     private var audioEngine: AVAudioEngine?
     private var sttService: ElevenLabsSTTService?
     private var accumulatedText: String = ""
+    // Cumulative partial text for the current VAD segment (reset when a new segment starts)
+    private var currentSegmentText: String = ""
 
     // MARK: - Recording Control
 
@@ -42,6 +44,7 @@ final class DictationManager {
 
         error = nil
         accumulatedText = ""
+        currentSegmentText = ""
         audioLevelSamples = []
         recordingStartDate = nil
 
@@ -80,6 +83,13 @@ final class DictationManager {
         audioEngine = nil
         sttService = nil
 
+        // Commit any in-flight segment text that was never finalized
+        if !currentSegmentText.isEmpty {
+            if !accumulatedText.isEmpty { accumulatedText += " " }
+            accumulatedText += currentSegmentText
+            currentSegmentText = ""
+        }
+
         if finalText.isEmpty && !capturedPartialText.isEmpty {
             finalText = capturedPartialText
         }
@@ -100,6 +110,7 @@ final class DictationManager {
 
         finalText = ""
         accumulatedText = ""
+        currentSegmentText = ""
         audioLevelSamples = []
         recordingStartDate = nil
         state = .idle
@@ -108,6 +119,7 @@ final class DictationManager {
     func reset() {
         finalText = ""
         accumulatedText = ""
+        currentSegmentText = ""
         audioLevelSamples = []
         recordingStartDate = nil
         state = .idle
@@ -146,22 +158,32 @@ final class DictationManager {
                 guard let self = self else { return }
                 guard case .recording = self.state else { return }
 
+                Self.logger.error("onTranscript: isFinal=\(result.isFinal) text='\(result.text, privacy: .public)' accumulated='\(self.accumulatedText, privacy: .public)' segment='\(self.currentSegmentText, privacy: .public)'")
+
                 if result.isFinal {
-                    if !result.text.isEmpty {
-                        if !self.accumulatedText.isEmpty {
-                            self.accumulatedText += " "
-                        }
-                        self.accumulatedText += result.text
+                    // Use result.text if available; fall back to whatever was in the current segment
+                    let toCommit = result.text.isEmpty ? self.currentSegmentText : result.text
+                    if !toCommit.isEmpty {
+                        if !self.accumulatedText.isEmpty { self.accumulatedText += " " }
+                        self.accumulatedText += toCommit
                         self.finalText = self.accumulatedText
                     }
+                    self.currentSegmentText = ""
                     self.state = .recording(partialText: self.accumulatedText)
-                } else {
-                    let displayText: String
-                    if self.accumulatedText.isEmpty {
-                        displayText = result.text
-                    } else {
-                        displayText = self.accumulatedText + " " + result.text
+                } else if !result.text.isEmpty {
+                    // Detect a new VAD segment: ElevenLabs resets its partial after a commit but
+                    // doesn't always send is_final=true. If the new partial doesn't extend the
+                    // current segment text, the server started a fresh segment — commit the old one.
+                    if !self.currentSegmentText.isEmpty && !result.text.hasPrefix(self.currentSegmentText) {
+                        Self.logger.info("onTranscript: new VAD segment detected, committing '\(self.currentSegmentText, privacy: .public)'")
+                        if !self.accumulatedText.isEmpty { self.accumulatedText += " " }
+                        self.accumulatedText += self.currentSegmentText
+                        self.finalText = self.accumulatedText
                     }
+                    self.currentSegmentText = result.text
+                    let displayText = self.accumulatedText.isEmpty
+                        ? self.currentSegmentText
+                        : self.accumulatedText + " " + self.currentSegmentText
                     self.state = .recording(partialText: displayText)
                 }
             }

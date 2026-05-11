@@ -90,12 +90,25 @@ struct HtmlReportVersionEntry: Identifiable {
     }
 }
 
+// MARK: - ReportSelectionItem
+
+private enum ReportSelectionItem: Identifiable {
+    case html(HtmlReportVersionEntry)
+    case markdown(Report)
+
+    var id: String {
+        switch self {
+        case .html(let entry): return "html:\(entry.id)"
+        case .markdown(let report): return "markdown:\(report.id)"
+        }
+    }
+}
+
 // MARK: - ReportsTabView
 
 struct ReportsTabView: View {
     @Environment(TenexCoreManager.self) private var coreManager
-    @State private var selectedReport: Report?
-    @State private var selectedHtmlReportEntry: HtmlReportVersionEntry?
+    @State private var selectedItem: ReportSelectionItem?
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private var useSplitView: Bool { horizontalSizeClass == .regular }
@@ -103,19 +116,30 @@ struct ReportsTabView: View {
     private var useSplitView: Bool { true }
     #endif
 
+    private var markdownReportBinding: Binding<Report?> {
+        Binding(
+            get: {
+                guard case .markdown(let r) = selectedItem else { return nil }
+                return r
+            },
+            set: { selectedItem = $0.map { .markdown($0) } }
+        )
+    }
+
     var body: some View {
         if useSplitView {
             NavigationSplitView {
                 NavigationStack { listContent }
             } detail: {
-                if let htmlReportEntry = selectedHtmlReportEntry {
-                    HtmlReportDetailView(report: htmlReportEntry.latest, versions: htmlReportEntry.versions)
+                switch selectedItem {
+                case .html(let entry):
+                    HtmlReportDetailView(report: entry.latest, versions: entry.versions)
                         .environment(coreManager)
-                        .id(htmlReportEntry.id)
-                } else if let report = selectedReport {
+                        .id(entry.id)
+                case .markdown(let report):
                     ReportDetailView(report: report)
                         .environment(coreManager)
-                } else {
+                case nil:
                     Text("Select a report to read")
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,27 +149,25 @@ struct ReportsTabView: View {
         } else {
             NavigationStack {
                 listContent
-                    .sheet(isPresented: Binding(get: { selectedHtmlReportEntry != nil }, set: { if !$0 { selectedHtmlReportEntry = nil } })) {
-                        if let htmlReportEntry = selectedHtmlReportEntry {
+                    .sheet(item: $selectedItem) { item in
+                        switch item {
+                        case .html(let entry):
                             NavigationStack {
-                                HtmlReportDetailView(report: htmlReportEntry.latest, versions: htmlReportEntry.versions)
+                                HtmlReportDetailView(report: entry.latest, versions: entry.versions)
                                     .environment(coreManager)
                                     .toolbar {
                                         ToolbarItem(placement: .confirmationAction) {
-                                            Button("Done") { selectedHtmlReportEntry = nil }
+                                            Button("Done") { selectedItem = nil }
                                         }
                                     }
                             }
-                        }
-                    }
-                    .sheet(isPresented: Binding(get: { selectedReport != nil }, set: { if !$0 { selectedReport = nil } })) {
-                        if let report = selectedReport {
+                        case .markdown(let report):
                             NavigationStack {
                                 ReportDetailView(report: report)
                                     .environment(coreManager)
                                     .toolbar {
                                         ToolbarItem(placement: .confirmationAction) {
-                                            Button("Done") { selectedReport = nil }
+                                            Button("Done") { selectedItem = nil }
                                         }
                                     }
                             }
@@ -238,8 +260,7 @@ struct ReportsTabView: View {
                         switch entry {
                         case .html(let htmlReportEntry):
                             Button {
-                                selectedReport = nil
-                                selectedHtmlReportEntry = htmlReportEntry
+                                selectedItem = .html(htmlReportEntry)
                             } label: {
                                 HtmlReportRowView(
                                     report: htmlReportEntry.latest,
@@ -254,8 +275,7 @@ struct ReportsTabView: View {
                             switch markdownEntry {
                             case .single(let report):
                                 Button {
-                                    selectedHtmlReportEntry = nil
-                                    selectedReport = report
+                                    selectedItem = .markdown(report)
                                 } label: {
                                     ReportRowView(report: report, project: project(for: report.projectATag))
                                 }
@@ -267,7 +287,7 @@ struct ReportsTabView: View {
                                     ReportGroupView(
                                         docTag: docTag,
                                         reports: reports,
-                                        selectedReport: $selectedReport,
+                                        selectedReport: markdownReportBinding,
                                         project: project(for: projectATag)
                                     )
                                 } label: {

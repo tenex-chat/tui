@@ -368,8 +368,12 @@ extension MessageComposerView {
         // view, causing SwiftUI's focus system to call becomeFirstResponder() again, which
         // interrupts iOS native keyboard dictation.
         let showSend = isInlineComposer && canSend
+        let isRecording = dictationManager.state.isRecording
         Button {
-            if showSend {
+            if isRecording {
+                // Stop recording; the onChange(.idle) handler will send whatever was transcribed
+                Task { await dictationManager.stopRecording() }
+            } else if showSend {
                 sendMessage()
             } else if dictationManager.state.isIdle && selectedProject != nil {
                 Task {
@@ -381,7 +385,7 @@ extension MessageComposerView {
                 }
             }
         } label: {
-            if showSend {
+            if showSend || isRecording {
                 Image(systemName: "arrow.up")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(Color.white)
@@ -395,8 +399,8 @@ extension MessageComposerView {
             }
         }
         .buttonStyle(.borderless)
-        .disabled(!showSend && (!dictationManager.state.isIdle || selectedProject == nil))
-        .help(showSend ? "Send" : "Voice message")
+        .disabled(!showSend && !isRecording && (!dictationManager.state.isIdle || selectedProject == nil))
+        .help(showSend || isRecording ? "Send" : "Voice message")
         #else
         if isInlineComposer && canSend {
             Button(action: sendMessage) {

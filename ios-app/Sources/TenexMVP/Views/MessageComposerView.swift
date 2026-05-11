@@ -646,7 +646,7 @@ struct MessageComposerView: View {
                 isDirty = true
             case .idle:
                 recordingSheetPresented = false
-                // Recording stopped — commit whatever text is in the editor
+                // Recording stopped — commit text and auto-send
                 if preDictationText != nil {
                     let currentText = localText
                     preDictationText = nil
@@ -656,6 +656,7 @@ struct MessageComposerView: View {
                         }
                     }
                     dictationManager.reset()
+                    sendMessage()
                 }
             }
         }
