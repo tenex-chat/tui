@@ -9,6 +9,8 @@ require_env() {
 require_env APP_STORE_CONNECT_KEY_ID
 require_env APP_STORE_CONNECT_ISSUER_ID
 require_env APP_STORE_CONNECT_API_KEY_P8
+require_env KEYCHAIN_PATH
+require_env CI_APP_PROFILE_SPECIFIER
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -39,27 +41,24 @@ mkdir -p "$AUTH_KEY_DIR"
 printf '%s' "$APP_STORE_CONNECT_API_KEY_P8" > "$AUTH_KEY_PATH"
 chmod 600 "$AUTH_KEY_PATH"
 
-# When a CI keychain is set up (Distribution cert installed), use manual signing.
-SIGNING_STYLE="automatic"
-CODE_SIGN_ARGS=()
-if [[ -n "${KEYCHAIN_PATH:-}" ]]; then
-  SIGNING_STYLE="manual"
-  CODE_SIGN_ARGS=(
-    CODE_SIGN_STYLE=Manual
-    "CODE_SIGN_IDENTITY=Apple Distribution"
-    "CI_APP_PROFILE_SPECIFIER=${CI_APP_PROFILE_SPECIFIER:-}"
-  )
+if [[ ! -f "$KEYCHAIN_PATH" ]]; then
+  echo "Signing keychain does not exist at $KEYCHAIN_PATH." >&2
+  exit 1
 fi
 
-PROVISIONING_PROFILES_XML=""
-if [[ "$SIGNING_STYLE" == "manual" ]] && [[ -n "${CI_APP_PROFILE_SPECIFIER:-}" ]]; then
-  PROVISIONING_PROFILES_XML="
+CODE_SIGN_ARGS=(
+  CODE_SIGN_STYLE=Manual
+  "CODE_SIGN_IDENTITY=Apple Distribution"
+  "PROVISIONING_PROFILE_SPECIFIER=${CI_APP_PROFILE_SPECIFIER}"
+  "CI_APP_PROFILE_SPECIFIER=${CI_APP_PROFILE_SPECIFIER}"
+)
+
+PROVISIONING_PROFILES_XML="
   <key>provisioningProfiles</key>
   <dict>
     <key>com.tenex.mvp</key>
     <string>${CI_APP_PROFILE_SPECIFIER}</string>
   </dict>"
-fi
 
 cat > "$EXPORT_OPTIONS_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -71,7 +70,9 @@ cat > "$EXPORT_OPTIONS_PLIST" <<EOF
   <key>method</key>
   <string>app-store-connect</string>
   <key>signingStyle</key>
-  <string>${SIGNING_STYLE}</string>
+  <string>manual</string>
+  <key>signingCertificate</key>
+  <string>Apple Distribution</string>
   <key>stripSwiftSymbols</key>
   <true/>
   <key>teamID</key>

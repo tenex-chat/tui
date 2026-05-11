@@ -12,10 +12,10 @@ Options:
   --auth-key <path>                 Path to AuthKey_*.p8. Defaults to newest in ~/Downloads.
   --key-id <id>                     App Store Connect key ID. Defaults from AuthKey filename.
   --provider <name>                 Optional App Store Connect provider short name.
-  --p12 <path>                      Optional Apple Distribution .p12 export.
-  --p12-password <password>         Optional .p12 export password. Prompted if omitted.
-  --keychain-password <password>    Optional temp CI keychain password. Random if omitted.
-  --app-profile <path>              Optional app provisioning profile.
+  --p12 <path>                      Apple Distribution .p12 export for manual signing.
+  --p12-password <password>         .p12 export password. Prompted if omitted.
+  --keychain-password <password>    Temp CI keychain password. Random if omitted.
+  --app-profile <path>              App Store provisioning profile for com.tenex.mvp.
   --help                            Show this help.
 
 Examples:
