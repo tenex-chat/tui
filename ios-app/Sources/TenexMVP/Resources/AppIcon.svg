@@ -26,10 +26,10 @@
   </defs>
 
   <!-- Background -->
-  <rect width="1024" height="1024" rx="224" fill="url(#bgGrad)"/>
+  <rect width="1024" height="1024" fill="url(#bgGrad)"/>
 
   <!-- Scanline overlay for CRT feel -->
-  <rect width="1024" height="1024" rx="224" fill="url(#scanlines)"/>
+  <rect width="1024" height="1024" fill="url(#scanlines)"/>
 
   <!-- Terminal prompt: >_ -->
   <g filter="url(#glow)" opacity="0.35">
