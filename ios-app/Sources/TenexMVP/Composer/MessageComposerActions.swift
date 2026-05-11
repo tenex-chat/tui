@@ -120,6 +120,7 @@ extension MessageComposerView {
         sendError = nil
         contentSyncTask?.cancel()
         triggerDetectionTask?.cancel()
+        agentCoordinator?.smartReplySuggestions = []
 
         draft.updateContent(localText)
         draft.imageAttachments = localImageAttachments

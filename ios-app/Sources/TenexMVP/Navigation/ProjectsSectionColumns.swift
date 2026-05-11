@@ -158,7 +158,7 @@ struct ProjectsTabView: View {
             projectsListView
                 .navigationTitle("Projects")
                 .navigationDestination(for: String.self) { projectId in
-                    ProjectSettingsView(
+                    ProjectDetailView(
                         projectId: projectId,
                         selectedProjectId: selectedProjectIdBinding
                     )
@@ -177,12 +177,17 @@ struct ProjectsTabView: View {
     @ViewBuilder
     private var projectDetailContent: some View {
         if showNewProjectBinding.wrappedValue {
-            CreateProjectView(onComplete: { showNewProjectBinding.wrappedValue = false })
+            NavigationStack {
+                CreateProjectView(onComplete: { showNewProjectBinding.wrappedValue = false })
+            }
         } else if let projectId = selectedProjectIdBinding.wrappedValue {
-            ProjectSettingsView(
-                projectId: projectId,
-                selectedProjectId: selectedProjectIdBinding
-            )
+            NavigationStack {
+                ProjectDetailView(
+                    projectId: projectId,
+                    selectedProjectId: selectedProjectIdBinding
+                )
+            }
+            .id(projectId)
         } else {
             ContentUnavailableView(
                 "Select a Project",

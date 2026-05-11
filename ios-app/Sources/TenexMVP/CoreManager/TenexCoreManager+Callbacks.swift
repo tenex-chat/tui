@@ -19,6 +19,8 @@ extension TenexCoreManager {
         )
         // Start observing APNs token delivery so we can publish kind:25000 events.
         registerApnsObserver()
+        // Watch for network path changes so we can reconnect when connectivity returns.
+        startNetworkMonitoring()
     }
 
     /// Unregister the event callback.
@@ -26,6 +28,7 @@ extension TenexCoreManager {
     func unregisterEventCallback() async {
         // Stop APNs observer and publish deregistration event before clearing core state.
         unregisterApnsObserver()
+        stopNetworkMonitoring()
         await core.clearEventCallback()
         eventHandler = nil
         projectStatusUpdateTask?.cancel()
@@ -34,6 +37,32 @@ extension TenexCoreManager {
         streamingFlushTask = nil
         pendingStreamingDeltas.removeAll(keepingCapacity: true)
         profiler.logEvent("event callback unregistered", category: .general)
+    }
+
+    /// Reconnect all relays, restart subscriptions, and refresh UI data.
+    /// Called on foreground return and when network reachability is restored.
+    /// Debounced to 5 seconds to prevent double-reconnects from overlapping triggers.
+    func reconnectAndRefresh() async {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastReconnectAt >= 5.0 else {
+            profiler.logEvent("reconnectAndRefresh throttled", category: .general, level: .debug)
+            return
+        }
+        lastReconnectAt = now
+
+        let startedAt = now
+        let core = self.core
+        await Task.detached {
+            try? await core.forceReconnect()
+        }.value
+        await fetchData()
+        refreshRuntimeText()
+        let elapsedMs = (CFAbsoluteTimeGetCurrent() - startedAt) * 1000
+        profiler.logEvent(
+            "reconnectAndRefresh complete elapsedMs=\(String(format: "%.2f", elapsedMs))",
+            category: .general,
+            level: elapsedMs >= 500 ? .error : .info
+        )
     }
 
     /// Manual refresh for pull-to-refresh gesture.

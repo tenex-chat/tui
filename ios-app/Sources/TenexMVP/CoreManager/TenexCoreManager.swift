@@ -272,6 +272,15 @@ class TenexCoreManager {
     /// Last message refresh timestamp per conversation for lightweight throttling.
     @ObservationIgnored var lastConversationMessageRefreshAt: [String: CFAbsoluteTime] = [:]
 
+    // MARK: - Network & Reconnect
+
+    /// NWPathMonitor instance watching for connectivity changes.
+    @ObservationIgnored var networkPathMonitor: AnyObject?
+    /// Whether the last observed network path was satisfied (used to detect transitions).
+    @ObservationIgnored var lastNetworkPathSatisfied: Bool = true
+    /// Timestamp of the last forced reconnect, for debouncing.
+    @ObservationIgnored var lastReconnectAt: CFAbsoluteTime = 0
+
     /// Cache for profile picture URLs to prevent repeated FFI calls
     @ObservationIgnored nonisolated let profilePictureCache = ProfilePictureCache.shared
 

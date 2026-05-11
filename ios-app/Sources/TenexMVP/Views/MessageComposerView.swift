@@ -585,6 +585,11 @@ struct MessageComposerView: View {
                 }
             }
         }
+        .onChange(of: agentCoordinator?.requestedSuggestionText) { _, text in
+            guard let text else { return }
+            agentCoordinator?.requestedSuggestionText = nil
+            applySuggestion(text)
+        }
         .onChange(of: coreManager.projectRosterAgents) { _, newRosters in
             // Reactively update availableAgents when the 31933/24011-backed roster changes.
             if let projectId = selectedProject?.id {
@@ -616,6 +621,11 @@ struct MessageComposerView: View {
             // Text attachment chips (for all conversations)
             if !localTextAttachments.isEmpty && selectedProject != nil {
                 textAttachmentChipsView
+            }
+
+            // Smart reply chips — shown for existing conversations when the composer is empty.
+            if !isNewConversation && localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                smartReplySuggestionsView
             }
 
             if usesWorkspaceInlineLayout {

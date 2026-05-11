@@ -255,6 +255,11 @@ struct ConversationWorkspaceView: View {
     @State private var agentCoordinator = ComposerAgentCoordinator()
     @State private var showToolbarAgentSelector = false
     @State private var toolbarAgentToConfig: ProjectAgent?
+    /// ID of the last agent reply for which we've already generated smart reply suggestions.
+    /// Skips the first observation so we don't fire on initial load.
+    @State private var lastPredictedReplyId: String? = nil
+    @State private var predictionTask: Task<Void, Never>? = nil
+    @State private var currentUserPubkey: String? = nil
     private let profiler = PerformanceProfiler.shared
 
     private let bottomAnchorId = "workspace-bottom-anchor"
@@ -449,6 +454,9 @@ struct ConversationWorkspaceView: View {
         // Without this, ANY change to those dictionaries triggers a full body
         // re-evaluation including the ForEach over 30+ message rows.
         .background(CoreManagerObserver(viewModel: viewModel))
+        .onChange(of: viewModel.latestReply?.id) { _, newReplyId in
+            scheduleResponsePrediction(latestReplyId: newReplyId)
+        }
         #if os(iOS)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -755,6 +763,64 @@ struct ConversationWorkspaceView: View {
         #endif
     }
 
+    private func scheduleResponsePrediction(latestReplyId: String?) {
+        guard !isNewThreadMode else { return }
+        guard let replyId = latestReplyId else { return }
+
+        // Skip the first observation (initial load) — only predict on arriving messages.
+        guard lastPredictedReplyId != nil else {
+            lastPredictedReplyId = replyId
+            return
+        }
+        guard replyId != lastPredictedReplyId else { return }
+
+        // Only predict if the last speaker was an agent (not the user).
+        guard viewModel.lastAgentPubkey != nil else { return }
+        let latestReply = viewModel.latestReply
+        guard let reply = latestReply, reply.toolName == nil, !reply.content.isEmpty else { return }
+        let userPubkey = currentUserPubkey
+
+        lastPredictedReplyId = replyId
+
+        // Clear stale suggestions immediately while the new request is in flight.
+        agentCoordinator.smartReplySuggestions = []
+
+        predictionTask?.cancel()
+        let messages = viewModel.messages
+        let agentCoordinator = agentCoordinator
+
+        predictionTask = Task {
+            // Fetch model and API key before spending time on the request.
+            guard let settings = try? await coreManager.core.getAiAudioSettings() else { return }
+            guard let model = OpenRouterModelSelectionCodec.selectedModel(
+                for: .responsePrediction,
+                from: settings.openrouterModel
+            ), !model.isEmpty else { return }
+
+            let keyResult = await KeychainService.shared.loadOpenRouterApiKeyAsync()
+            guard case .success(let apiKey) = keyResult, !apiKey.isEmpty else { return }
+
+            guard !Task.isCancelled else { return }
+
+            do {
+                let suggestions = try await OpenRouterResponsePredictionService.predictReplies(
+                    messages: messages,
+                    currentUserPubkey: userPubkey,
+                    apiKey: apiKey,
+                    model: model
+                )
+
+                guard !Task.isCancelled else { return }
+
+                await MainActor.run {
+                    agentCoordinator.smartReplySuggestions = suggestions
+                }
+            } catch {
+                // Silently ignore — smart reply is a best-effort enhancement.
+            }
+        }
+    }
+
     private func initializeWorkspace() async {
         let startedAt = CFAbsoluteTimeGetCurrent()
         visibleMessageWindow = 30
@@ -763,6 +829,7 @@ struct ConversationWorkspaceView: View {
             await viewModel.loadData()
         }
         let currentUserPubkey = await coreManager.core.getCurrentUser()?.pubkey
+        self.currentUserPubkey = currentUserPubkey
         viewModel.setCurrentUserPubkey(currentUserPubkey)
         // Warm display-name and profile-picture caches so the first transcript
         // render doesn't hit cold FFI lookups for every unique author.

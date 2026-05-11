@@ -195,5 +195,10 @@ struct AppRootSceneView: View {
 
         // Recalculate badge in case filter scope changed while inactive.
         coreManager.updateAppBadge()
+
+        // Reconnect relays when returning from background — connections are likely stale.
+        if previousScenePhase == .background {
+            await coreManager.reconnectAndRefresh()
+        }
     }
 }

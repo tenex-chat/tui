@@ -161,8 +161,18 @@ final class DictationManager {
                 Self.logger.error("onTranscript: isFinal=\(result.isFinal) text='\(result.text, privacy: .public)' accumulated='\(self.accumulatedText, privacy: .public)' segment='\(self.currentSegmentText, privacy: .public)'")
 
                 if result.isFinal {
-                    // Use result.text if available; fall back to whatever was in the current segment
-                    let toCommit = result.text.isEmpty ? self.currentSegmentText : result.text
+                    // Prefer whichever is longer: the server's final or our accumulated partial.
+                    // ElevenLabs VAD can commit a segment with text shorter than the running partial
+                    // (the partial runs ahead of the VAD boundary). Using the shorter final would
+                    // cause the display to jump backwards, which looks like a "restart" to the user.
+                    let toCommit: String
+                    if result.text.isEmpty {
+                        toCommit = self.currentSegmentText
+                    } else if self.currentSegmentText.count > result.text.count {
+                        toCommit = self.currentSegmentText
+                    } else {
+                        toCommit = result.text
+                    }
                     if !toCommit.isEmpty {
                         if !self.accumulatedText.isEmpty { self.accumulatedText += " " }
                         self.accumulatedText += toCommit

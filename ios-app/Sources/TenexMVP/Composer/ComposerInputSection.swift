@@ -547,6 +547,54 @@ extension MessageComposerView {
         showSkillSelector = true
     }
 
+    // MARK: - Smart Reply Suggestions
+
+    @ViewBuilder
+    var smartReplySuggestionsView: some View {
+        let suggestions = agentCoordinator?.smartReplySuggestions ?? []
+        if !suggestions.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(suggestions, id: \.self) { suggestion in
+                        Button {
+                            applySuggestion(suggestion)
+                        } label: {
+                            Text(suggestion)
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(
+                                    Capsule(style: .continuous)
+                                        .fill(Color.systemGray6)
+                                        .overlay(
+                                            Capsule(style: .continuous)
+                                                .stroke(Color.systemGray4.opacity(0.5), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    func applySuggestion(_ text: String) {
+        isProgrammaticUpdate = true
+        localText = text
+        isDirty = true
+        agentCoordinator?.smartReplySuggestions = []
+
+        if let projectId = selectedProject?.id {
+            Task {
+                await draftManager.updateContent(text, conversationId: conversationId, projectId: projectId)
+            }
+        }
+    }
+
     func openAgentSelector(initialQuery: String = "") {
         agentSelectorInitialQuery = initialQuery
         if usesWorkspaceInlineLayout {
