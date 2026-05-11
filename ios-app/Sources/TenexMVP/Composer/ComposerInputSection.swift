@@ -290,6 +290,7 @@ extension MessageComposerView {
     /// Telegram-style single-row composer: attach (left), text field (center, expandable), mic↔send (right).
     var telegramStyleComposerRow: some View {
         Group {
+            #if os(macOS)
             if dictationManager.state.isRecording {
                 HStack(spacing: 12) {
                     DictationRecordingBar(
@@ -319,6 +320,18 @@ extension MessageComposerView {
                 .padding(.bottom, 10)
                 .modifier(ToolbarGlassBackground())
             }
+            #else
+            HStack(alignment: .bottom, spacing: 8) {
+                composerLeadingAttachButton
+                contentEditorView
+                    .frame(maxWidth: .infinity)
+                composerTrailingActionButton
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            .modifier(ToolbarGlassBackground())
+            #endif
         }
     }
 
@@ -362,6 +375,9 @@ extension MessageComposerView {
                 Task {
                     preDictationText = localText
                     try? await dictationManager.startRecording()
+                    if dictationManager.state.isRecording {
+                        recordingSheetPresented = true
+                    }
                 }
             }
         } label: {

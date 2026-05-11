@@ -1,4 +1,3 @@
-#if os(macOS)
 import Foundation
 import OSLog
 
@@ -253,4 +252,3 @@ extension ElevenLabsSTTService: URLSessionWebSocketDelegate {
         }
     }
 }
-#endif

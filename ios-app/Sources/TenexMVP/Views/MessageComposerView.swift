@@ -87,6 +87,8 @@ struct MessageComposerView: View {
     @State var dictationManager = DictationManager()
     /// Captures localText before dictation starts, so partial results can replace from this point
     @State var preDictationText: String?
+    @State var recordingSheetPresented = false
+    @State var showDictationError = false
     @State var showDraftBrowser = false
     @State var draftSavedConfirmation = false
     @State var pinnedPromptManager = PinnedPromptManager.shared
@@ -504,7 +506,22 @@ struct MessageComposerView: View {
                 handleImageSelected(data: imageData, mimeType: mimeType)
             }
         }
+        .sheet(isPresented: $recordingSheetPresented, onDismiss: {
+            Task { await dictationManager.stopRecording() }
+        }) {
+            VoiceRecordingSheet(
+                dictationManager: dictationManager,
+                onStop: { Task { await dictationManager.stopRecording() } }
+            )
+            .presentationDetents([.height(360)])
+            .presentationDragIndicator(.hidden)
+        }
         #endif
+        .alert("Voice Recording Error", isPresented: $showDictationError) {
+            Button("OK") { dictationManager.reset() }
+        } message: {
+            Text(dictationManager.error ?? "")
+        }
         .alert("Image Upload Failed", isPresented: $showImageUploadError) {
             Button("OK") { }
         } message: {
@@ -617,6 +634,7 @@ struct MessageComposerView: View {
                 localText = prefix + (prefix.isEmpty ? "" : " ") + partialText
                 isDirty = true
             case .idle:
+                recordingSheetPresented = false
                 // Recording stopped — commit whatever text is in the editor
                 if preDictationText != nil {
                     let currentText = localText
@@ -628,6 +646,12 @@ struct MessageComposerView: View {
                     }
                     dictationManager.reset()
                 }
+            }
+        }
+        .onChange(of: dictationManager.error) { _, newError in
+            if newError != nil {
+                recordingSheetPresented = false
+                showDictationError = true
             }
         }
         #if os(macOS)
