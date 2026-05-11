@@ -10,7 +10,6 @@ struct AgentConfigSheet: View {
 
     @Environment(TenexCoreManager.self) var coreManager
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     // MARK: - State
 
