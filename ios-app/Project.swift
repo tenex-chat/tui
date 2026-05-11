@@ -22,6 +22,8 @@ let project = Project(
                 "CFBundleDisplayName": "TENEX",
                 "CFBundleIconFile": "AppIcon",
                 "CFBundleIconName": "AppIcon",
+                "CFBundleShortVersionString": "$(MARKETING_VERSION)",
+                "CFBundleVersion": "$(CURRENT_PROJECT_VERSION)",
                 "ITSAppUsesNonExemptEncryption": false,
                 "NSCameraUsageDescription": "TENEX needs camera access to scan QR codes for login",
                 "NSMicrophoneUsageDescription": "TENEX needs microphone access for voice dictation",
