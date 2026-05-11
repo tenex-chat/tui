@@ -49,6 +49,7 @@ extension MessageComposerView {
         if draft.agentPubkey != result.selectedAgentPubkey {
             draft.setAgent(result.selectedAgentPubkey)
         }
+        agentCoordinator?.currentAgentPubkey = draft.agentPubkey
     }
 
     func loadSkills() async {
@@ -164,6 +165,10 @@ extension MessageComposerView {
 
                 if let convId = conversationId {
                     coreManager.recordUserActivity(conversationId: convId)
+                }
+
+                if isNewConversation, let agentPubkey = validatedAgentPubkey, !agentPubkey.isEmpty, let project = selectedProject {
+                    UserDefaults.standard.set(agentPubkey, forKey: "tenex.lastAgent.\(project.id)")
                 }
 
                 onSend?(result)

@@ -66,7 +66,7 @@ final class ElevenLabsSTTService: NSObject {
             throw STTError.noApiKey
         }
 
-        let endpoint = "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v1&language_code=en&audio_format=pcm_16000"
+        let endpoint = "wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=vad"
 
         guard let url = URL(string: endpoint) else {
             throw STTError.connectionFailed("Invalid endpoint URL")

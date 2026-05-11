@@ -18,7 +18,7 @@ extension View {
 /// Shows conversation title, agent avatar + name, text snippet, progress bar, and controls.
 struct NowPlayingBar: View {
     @Environment(TenexCoreManager.self) var coreManager
-    @ObservedObject var player = AudioNotificationPlayer.shared
+    private var player: AudioNotificationPlayer { AudioNotificationPlayer.shared }
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var showQueueSheet = false
@@ -180,7 +180,7 @@ struct NowPlayingBar: View {
 
 struct AudioQueueSheet: View {
     @Environment(TenexCoreManager.self) var coreManager
-    @ObservedObject var player = AudioNotificationPlayer.shared
+    private var player: AudioNotificationPlayer { AudioNotificationPlayer.shared }
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

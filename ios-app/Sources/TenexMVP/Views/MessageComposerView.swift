@@ -121,9 +121,10 @@ struct MessageComposerView: View {
     @State var triggerDetectionTask: Task<Void, Never>?
     @State var workspaceAgentToConfig: ProjectAgent?
     @State var showWorkspaceAgentPopover = false
-    /// True once the user has explicitly tapped an agent in the inline selector for a new conversation.
-    @State var hasPickedAgentInlineSelector: Bool = false
     @FocusState var composerFieldFocused: Bool
+
+    // MARK: - Environment (coordinator)
+    @Environment(\.composerAgentCoordinator) var agentCoordinator
 
     // Workspace inline layout metrics
     @ScaledMetric(relativeTo: .body) var workspaceContextRowHeight: CGFloat = 34
@@ -568,9 +569,20 @@ struct MessageComposerView: View {
                 await loadAgents()
             }
         }
-        .onChange(of: draft.agentPubkey) { _, _ in
+        .onChange(of: draft.agentPubkey) { _, newPubkey in
+            agentCoordinator?.currentAgentPubkey = newPubkey
             Task {
                 await loadSkills()
+            }
+        }
+        .onChange(of: agentCoordinator?.requestedAgentPubkey) { _, pubkey in
+            guard let pubkey, pubkey != draft.agentPubkey else { return }
+            draft.agentPubkey = pubkey
+            isDirty = true
+            if let projectId = selectedProject?.id {
+                Task {
+                    await draftManager.updateAgent(pubkey, conversationId: conversationId, projectId: projectId)
+                }
             }
         }
         .onChange(of: coreManager.projectRosterAgents) { _, newRosters in
@@ -611,10 +623,9 @@ struct MessageComposerView: View {
                 contentEditorView
                 workspaceInlineControlRow
             } else {
-                inlineAgentSelectorSection
                 // In the modal (non-inline) case the VStack fills the full sheet height;
                 // Spacer pushes the input row down when there is no flexible picker above it.
-                if !isInlineComposer && !showsInlineAgentSelector {
+                if !isInlineComposer {
                     Spacer(minLength: 0)
                 }
                 #if os(macOS)

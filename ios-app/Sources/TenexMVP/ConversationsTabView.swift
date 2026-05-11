@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ConversationsTabView: View {
     @Environment(TenexCoreManager.self) var coreManager
-    @ObservedObject private var audioPlayer = AudioNotificationPlayer.shared
+    private var audioPlayer: AudioNotificationPlayer { AudioNotificationPlayer.shared }
     let layoutMode: ConversationsLayoutMode
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
     private let newConversationProjectIdBindingOverride: Binding<String?>?
@@ -154,32 +154,24 @@ struct ConversationsTabView: View {
                 audioNotificationsEnabled = settings.enabled
             }
         }
-        .onChange(of: coreManager.conversations) { _, _ in
-            if let pendingId = pendingCreatedConversationId,
-               let conversation = coreManager.conversationById[pendingId] {
-                selectCreatedConversation(conversation)
-            }
-            scheduleHierarchyRebuild()
-            if let selectedId = selectedConversationBinding.wrappedValue?.thread.id,
-               !filteredConversations.contains(where: { $0.thread.id == selectedId }) {
-                selectedConversationBinding.wrappedValue = nil
-                newConversationProjectIdBinding.wrappedValue = nil
-                pendingCreatedConversationId = nil
-                newConversationSeedState = nil
-            }
-        }
-        .onChange(of: coreManager.appFilterShowArchived) { _, _ in
-            rebuildHierarchy()
-        }
-        .onChange(of: coreManager.projects) { _, _ in
-            rebuildProjectCaches()
-        }
-        .onChange(of: coreManager.projectOnlineStatus) { _, _ in
-            rebuildProjectCaches()
-        }
-        .onChange(of: coreManager.appFilterProjectIds) { _, _ in
-            rebuildProjectCaches()
-        }
+        .background(ConversationsTabObserver(
+            onConversationsChanged: {
+                if let pendingId = pendingCreatedConversationId,
+                   let conversation = coreManager.conversationById[pendingId] {
+                    selectCreatedConversation(conversation)
+                }
+                scheduleHierarchyRebuild()
+                if let selectedId = selectedConversationBinding.wrappedValue?.thread.id,
+                   !filteredConversations.contains(where: { $0.thread.id == selectedId }) {
+                    selectedConversationBinding.wrappedValue = nil
+                    newConversationProjectIdBinding.wrappedValue = nil
+                    pendingCreatedConversationId = nil
+                    newConversationSeedState = nil
+                }
+            },
+            onHierarchyDataChanged: { rebuildHierarchy() },
+            onProjectDataChanged: { rebuildProjectCaches() }
+        ))
         .onChange(of: selectedConversationBinding.wrappedValue?.thread.id) { oldId, newId in
             if oldId != newId {
                 detailNavigationPath.removeAll()
@@ -229,12 +221,6 @@ struct ConversationsTabView: View {
         }
         .sheet(isPresented: $showStats) {
             StatsView()
-                .environment(coreManager)
-                .tenexModalPresentation(detents: [.large])
-        }
-        .sheet(item: $projectForNewConversation) { selectedProject in
-            // TODO(#modal-composer-deprecation): migrate this modal composer entry point to inline flow.
-            MessageComposerView(project: selectedProject.project)
                 .environment(coreManager)
                 .tenexModalPresentation(detents: [.large])
         }
@@ -423,6 +409,15 @@ struct ConversationsTabView: View {
                         #if os(iOS)
                         .toolbar(.hidden, for: .tabBar)
                         #endif
+                }
+                .navigationDestination(item: $projectForNewConversation) { item in
+                    ConversationWorkspaceView(
+                        source: .newThread(project: item.project, agentPubkey: item.agentPubkey)
+                    )
+                    .environment(coreManager)
+                    #if os(iOS)
+                    .toolbar(.hidden, for: .tabBar)
+                    #endif
                 }
         }
     }
@@ -734,10 +729,11 @@ struct ConversationsTabView: View {
             #if os(macOS)
             selectedConversationBinding.wrappedValue = nil
             newConversationProjectIdBinding.wrappedValue = project.id
-            newConversationAgentPubkeyBinding.wrappedValue = nil
+            newConversationAgentPubkeyBinding.wrappedValue = UserDefaults.standard.string(forKey: "tenex.lastAgent.\(project.id)")
             newConversationSeedState = nil
             #else
-            projectForNewConversation = SelectedProjectForComposer(project: project)
+            let lastAgentPubkey = UserDefaults.standard.string(forKey: "tenex.lastAgent.\(project.id)")
+            projectForNewConversation = SelectedProjectForComposer(project: project, agentPubkey: lastAgentPubkey)
             #endif
         }
     }
@@ -796,14 +792,39 @@ struct ConversationsTabView: View {
     }
 }
 
-private struct SelectedProjectForComposer: Identifiable {
+private struct SelectedProjectForComposer: Identifiable, Hashable {
+    let id = UUID()
     let project: Project
-    var id: String { project.id }
+    let agentPubkey: String?
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 private struct ProjectMenuState {
     var booted: [Project] = []
     var unbooted: [Project] = []
+}
+
+// MARK: - Core Manager Observer
+
+/// Isolates hot coreManager property tracking to a zero-size background view.
+/// Without this, ConversationsTabView.body re-renders on every conversation upsert,
+/// project status change, etc. — the same pattern used in ConversationWorkspaceView.
+private struct ConversationsTabObserver: View {
+    @Environment(TenexCoreManager.self) private var coreManager
+    let onConversationsChanged: () -> Void
+    let onHierarchyDataChanged: () -> Void
+    let onProjectDataChanged: () -> Void
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .onChange(of: coreManager.conversations) { _, _ in onConversationsChanged() }
+            .onChange(of: coreManager.appFilterShowArchived) { _, _ in onHierarchyDataChanged() }
+            .onChange(of: coreManager.projects) { _, _ in onProjectDataChanged() }
+            .onChange(of: coreManager.projectOnlineStatus) { _, _ in onProjectDataChanged() }
+            .onChange(of: coreManager.appFilterProjectIds) { _, _ in onProjectDataChanged() }
+    }
 }
 
 // MARK: - Empty State

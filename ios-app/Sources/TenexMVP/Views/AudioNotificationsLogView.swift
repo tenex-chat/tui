@@ -4,7 +4,7 @@ import SwiftUI
 /// massaged text, and allows playback of generated audio files.
 struct AudioNotificationsLogView: View {
     @Environment(TenexCoreManager.self) var coreManager
-    @StateObject private var player = AudioNotificationPlayer.shared
+    private var player: AudioNotificationPlayer { AudioNotificationPlayer.shared }
 
     @State private var notifications: [AudioNotificationInfo] = []
     @State private var isLoading = true
@@ -122,7 +122,7 @@ private struct AudioNotificationRow: View {
 
 private struct AudioNotificationDetailView: View {
     let notification: AudioNotificationInfo
-    @ObservedObject var player: AudioNotificationPlayer
+    var player: AudioNotificationPlayer
     let coreManager: TenexCoreManager
 
     var body: some View {

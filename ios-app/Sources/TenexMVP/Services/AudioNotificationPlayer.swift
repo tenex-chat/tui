@@ -21,24 +21,24 @@ struct QueuedAudioItem: Identifiable {
 /// - Playback state management
 /// - Audio queue (new notifications enqueue instead of interrupting)
 /// - Metadata tracking for Now Playing bar
-@MainActor
-final class AudioNotificationPlayer: NSObject, ObservableObject {
-    // MARK: - Published Properties
+@Observable @MainActor
+final class AudioNotificationPlayer: NSObject {
+    // MARK: - Observable Properties
 
     /// Current playback state (observable for UI updates)
-    @Published private(set) var playbackState: AudioPlaybackState = .idle
+    private(set) var playbackState: AudioPlaybackState = .idle
 
     /// Metadata from the currently playing audio notification
-    @Published private(set) var currentAgentPubkey: String?
-    @Published private(set) var currentConversationTitle: String?
-    @Published private(set) var currentTextSnippet: String?
-    @Published private(set) var currentConversationId: String?
+    private(set) var currentAgentPubkey: String?
+    private(set) var currentConversationTitle: String?
+    private(set) var currentTextSnippet: String?
+    private(set) var currentConversationId: String?
 
-    /// Published progress (0.0 to 1.0), updated by timer for SwiftUI reactivity
-    @Published private(set) var playbackProgress: Double = 0
+    /// Progress (0.0 to 1.0), updated by timer for SwiftUI reactivity
+    private(set) var playbackProgress: Double = 0
 
     /// Audio queue — upcoming notifications waiting to play
-    @Published private(set) var queue: [QueuedAudioItem] = []
+    private(set) var queue: [QueuedAudioItem] = []
 
     /// Whether audio is currently playing
     var isPlaying: Bool {
