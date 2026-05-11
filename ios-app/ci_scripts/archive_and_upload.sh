@@ -9,7 +9,6 @@ require_env() {
 require_env APP_STORE_CONNECT_KEY_ID
 require_env APP_STORE_CONNECT_ISSUER_ID
 require_env APP_STORE_CONNECT_API_KEY_P8
-require_env KEYCHAIN_PATH
 require_env CI_APP_PROFILE_SPECIFIER
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,7 +40,7 @@ mkdir -p "$AUTH_KEY_DIR"
 printf '%s' "$APP_STORE_CONNECT_API_KEY_P8" > "$AUTH_KEY_PATH"
 chmod 600 "$AUTH_KEY_PATH"
 
-if [[ ! -f "$KEYCHAIN_PATH" ]]; then
+if [[ -n "${KEYCHAIN_PATH:-}" && ! -f "$KEYCHAIN_PATH" ]]; then
   echo "Signing keychain does not exist at $KEYCHAIN_PATH." >&2
   exit 1
 fi

@@ -40,10 +40,52 @@ install_profile() {
   fi
 }
 
-: "${APPLE_DISTRIBUTION_CERTIFICATE_BASE64:?APPLE_DISTRIBUTION_CERTIFICATE_BASE64 is required for TestFlight signing}"
-: "${APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD:=}"
-: "${KEYCHAIN_PASSWORD:?KEYCHAIN_PASSWORD is required for TestFlight signing}"
-: "${APP_PROVISION_PROFILE_BASE64:?APP_PROVISION_PROFILE_BASE64 is required for TestFlight signing}"
+find_installed_app_profile() {
+  local destination_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
+  local profile
+
+  for profile in "$destination_dir"/*.mobileprovision; do
+    [[ -f "$profile" ]] || continue
+
+    local plist_path="${RUNNER_TEMP:-/tmp}/installed-profile.$$.plist"
+    security cms -D -i "$profile" > "$plist_path" 2>/dev/null || continue
+
+    local app_id
+    app_id="$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$plist_path" 2>/dev/null || true)"
+    if [[ "$app_id" == "${APPLE_TEAM_ID}.com.tenex.mvp" ]]; then
+      /usr/libexec/PlistBuddy -c 'Print :Name' "$plist_path"
+      rm -f "$plist_path"
+      return 0
+    fi
+
+    rm -f "$plist_path"
+  done
+
+  return 1
+}
+
+APPLE_TEAM_ID="${APPLE_TEAM_ID:-456SHKPP26}"
+APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD="${APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD:-}"
+
+if [[ -n "${APP_PROVISION_PROFILE_BASE64:-}" ]]; then
+  install_profile "$APP_PROVISION_PROFILE_BASE64" "CI_APP_PROFILE_SPECIFIER"
+elif profile_name="$(find_installed_app_profile)"; then
+  echo "Using installed provisioning profile '$profile_name'."
+  if [[ -n "${GITHUB_ENV:-}" ]]; then
+    echo "CI_APP_PROFILE_SPECIFIER=$profile_name" >> "$GITHUB_ENV"
+  fi
+else
+  echo "APP_PROVISION_PROFILE_BASE64 is required because no installed com.tenex.mvp App Store profile was found." >&2
+  exit 1
+fi
+
+if security find-identity -v -p codesigning | grep -q "Apple Distribution: .*(${APPLE_TEAM_ID})"; then
+  echo "Using existing Apple Distribution identity from the runner keychain."
+  exit 0
+fi
+
+: "${APPLE_DISTRIBUTION_CERTIFICATE_BASE64:?APPLE_DISTRIBUTION_CERTIFICATE_BASE64 is required because no local Apple Distribution identity was found}"
+: "${KEYCHAIN_PASSWORD:?KEYCHAIN_PASSWORD is required when importing TestFlight signing assets}"
 
 CERTIFICATE_PATH="${RUNNER_TEMP:-/tmp}/apple_distribution.p12"
 KEYCHAIN_PATH="${RUNNER_TEMP:-/tmp}/app-signing.keychain-db"
@@ -62,5 +104,3 @@ if [[ -n "${GITHUB_ENV:-}" ]]; then
 fi
 
 echo "Installed Apple distribution certificate into a temporary keychain."
-
-install_profile "$APP_PROVISION_PROFILE_BASE64" "CI_APP_PROFILE_SPECIFIER"
