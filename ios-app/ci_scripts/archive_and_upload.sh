@@ -45,13 +45,6 @@ if [[ -n "${KEYCHAIN_PATH:-}" && ! -f "$KEYCHAIN_PATH" ]]; then
   exit 1
 fi
 
-CODE_SIGN_ARGS=(
-  CODE_SIGN_STYLE=Manual
-  "CODE_SIGN_IDENTITY=Apple Distribution"
-  "PROVISIONING_PROFILE_SPECIFIER=${CI_APP_PROFILE_SPECIFIER}"
-  "CI_APP_PROFILE_SPECIFIER=${CI_APP_PROFILE_SPECIFIER}"
-)
-
 PROVISIONING_PROFILES_XML="
   <key>provisioningProfiles</key>
   <dict>
@@ -95,8 +88,7 @@ xcodebuild \
   "DEVELOPMENT_TEAM=${APPLE_TEAM_ID}" \
   "MARKETING_VERSION=${MARKETING_VERSION}" \
   "CURRENT_PROJECT_VERSION=${BUILD_NUMBER}" \
-  archive \
-  "${CODE_SIGN_ARGS[@]}"
+  archive
 
 xcodebuild \
   -exportArchive \
