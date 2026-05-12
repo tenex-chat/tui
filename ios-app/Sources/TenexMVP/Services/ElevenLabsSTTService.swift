@@ -186,16 +186,20 @@ final class ElevenLabsSTTService: NSObject {
                 return
             }
 
-            if let text = json["text"] as? String {
-                let isFinal = json["is_final"] as? Bool ?? false
-                let language = json["language"] as? String
-                onTranscript?(TranscriptResult(text: text, isFinal: isFinal, language: language))
-            } else if let type = json["type"] as? String, type == "transcript",
-                      let resultData = json["data"] as? [String: Any],
-                      let text = resultData["text"] as? String {
-                let isFinal = resultData["is_final"] as? Bool ?? false
-                let language = resultData["language"] as? String
-                onTranscript?(TranscriptResult(text: text, isFinal: isFinal, language: language))
+            // Scribe v2 realtime messages are distinguished by `message_type`, not `is_final`.
+            // - partial_transcript: interim text for the current segment (may be revised)
+            // - committed_transcript: finalized segment text (append to history, reset live area)
+            if let messageType = json["message_type"] as? String,
+               let text = json["text"] as? String {
+                let language = json["language_code"] as? String
+                switch messageType {
+                case "partial_transcript":
+                    onTranscript?(TranscriptResult(text: text, isFinal: false, language: language))
+                case "committed_transcript", "committed_transcript_with_timestamps":
+                    onTranscript?(TranscriptResult(text: text, isFinal: true, language: language))
+                default:
+                    break
+                }
             }
         } catch {
             // Silently ignore unparseable messages (e.g., keep-alive pings)

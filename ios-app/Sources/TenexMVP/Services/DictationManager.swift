@@ -158,13 +158,13 @@ final class DictationManager {
                 guard let self = self else { return }
                 guard case .recording = self.state else { return }
 
-                Self.logger.error("onTranscript: isFinal=\(result.isFinal) text='\(result.text, privacy: .public)' accumulated='\(self.accumulatedText, privacy: .public)' segment='\(self.currentSegmentText, privacy: .public)'")
+                Self.logger.info("onTranscript: isFinal=\(result.isFinal) text='\(result.text, privacy: .public)' accumulated='\(self.accumulatedText, privacy: .public)' segment='\(self.currentSegmentText, privacy: .public)'")
 
                 if result.isFinal {
-                    // Prefer whichever is longer: the server's final or our accumulated partial.
-                    // ElevenLabs VAD can commit a segment with text shorter than the running partial
-                    // (the partial runs ahead of the VAD boundary). Using the shorter final would
-                    // cause the display to jump backwards, which looks like a "restart" to the user.
+                    // committed_transcript: server has finalized this segment.
+                    // Prefer the longer of the commit or the running partial — the partial can
+                    // race a few frames ahead of the commit boundary, so using the shorter would
+                    // visibly drop trailing words.
                     let toCommit: String
                     if result.text.isEmpty {
                         toCommit = self.currentSegmentText
@@ -181,15 +181,10 @@ final class DictationManager {
                     self.currentSegmentText = ""
                     self.state = .recording(partialText: self.accumulatedText)
                 } else if !result.text.isEmpty {
-                    // Detect a new VAD segment: ElevenLabs resets its partial after a commit but
-                    // doesn't always send is_final=true. If the new partial doesn't extend the
-                    // current segment text, the server started a fresh segment — commit the old one.
-                    if !self.currentSegmentText.isEmpty && !result.text.hasPrefix(self.currentSegmentText) {
-                        Self.logger.info("onTranscript: new VAD segment detected, committing '\(self.currentSegmentText, privacy: .public)'")
-                        if !self.accumulatedText.isEmpty { self.accumulatedText += " " }
-                        self.accumulatedText += self.currentSegmentText
-                        self.finalText = self.accumulatedText
-                    }
+                    // partial_transcript: replace the current segment with the latest revision.
+                    // Partials are authoritative for the in-progress segment and may be revised
+                    // (punctuation, casing, word corrections). Never derive commits from partials —
+                    // committed_transcript is the only commit signal.
                     self.currentSegmentText = result.text
                     let displayText = self.accumulatedText.isEmpty
                         ? self.currentSegmentText
