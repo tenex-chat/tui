@@ -736,7 +736,17 @@ struct ConversationWorkspaceView: View {
                     onThreadCreated?(result.eventId)
                     handleThreadCreatedInternally(result.eventId)
                 } : nil,
-                onReferenceConversationRequested: isNewThreadMode ? nil : handleReferenceConversationRequested
+                onReferenceConversationRequested: isNewThreadMode ? nil : handleReferenceConversationRequested,
+                isConversationActive: !isNewThreadMode && viewModel.currentIsActive,
+                onStop: isNewThreadMode ? nil : {
+                    let cid = currentConversation.thread.id
+                    Task {
+                        try? await coreManager.core.stopConversation(
+                            conversationId: cid,
+                            reason: "User stopped from iOS app"
+                        )
+                    }
+                }
             )
             .id(isNewThreadMode ? "composer-new-\(project?.id ?? "")" : "composer-existing-\(currentConversation.thread.id)")
             .environment(coreManager)
@@ -779,6 +789,8 @@ struct ConversationWorkspaceView: View {
         let latestReply = viewModel.latestReply
         guard let reply = latestReply, reply.toolName == nil, !reply.content.isEmpty else { return }
         let userPubkey = currentUserPubkey
+        // Only predict when the agent message explicitly p-tags the current user.
+        guard let userPubkey, reply.pTags.contains(where: { $0.caseInsensitiveCompare(userPubkey) == .orderedSame }) else { return }
 
         lastPredictedReplyId = replyId
 

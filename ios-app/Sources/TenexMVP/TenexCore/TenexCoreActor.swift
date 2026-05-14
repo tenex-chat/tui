@@ -342,6 +342,17 @@ actor TenexCoreActor: TenexCoreActorProtocol {
         }
     }
 
+    /// Stop active agents working on a conversation (sends kind:24134).
+    func stopConversation(conversationId: String, reason: String) throws {
+        try profiler.measureFFI("stopConversation") {
+            do {
+                try core.stopConversation(conversationId: conversationId, reason: reason)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Inbox
 
     /// Get inbox items.

@@ -113,6 +113,43 @@ extension MessageComposerView {
         }
     }
 
+    /// Called when dictation stops. Cleans up filler words via LLM before sending.
+    /// Only cleans the dictated portion; `typedPrefix` is preserved unchanged.
+    func sendDictatedMessage(_ rawText: String, typedPrefix: String?) async {
+        let prefix = typedPrefix ?? ""
+        let dictatedPortion: String
+        if prefix.isEmpty {
+            dictatedPortion = rawText
+        } else if rawText.hasPrefix(prefix + " ") {
+            dictatedPortion = String(rawText.dropFirst(prefix.count + 1))
+        } else {
+            dictatedPortion = rawText
+        }
+
+        let cleanedDictated = await cleanDictatedText(dictatedPortion)
+
+        if cleanedDictated != dictatedPortion {
+            let cleanedFull = prefix.isEmpty ? cleanedDictated : prefix + " " + cleanedDictated
+            isProgrammaticUpdate = true
+            localText = cleanedFull
+        }
+
+        if let projectId = selectedProject?.id {
+            await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
+        }
+        sendMessage()
+    }
+
+    private func cleanDictatedText(_ text: String) async -> String {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 8 else { return text }
+        guard case .success(let apiKey) = await KeychainService.shared.loadOpenRouterApiKeyAsync() else { return text }
+        do {
+            return try await OpenRouterPromptRewriteService.cleanDictatedText(text, apiKey: apiKey)
+        } catch {
+            return text
+        }
+    }
+
     func sendMessage() {
         guard canSend, let project = selectedProject else { return }
 

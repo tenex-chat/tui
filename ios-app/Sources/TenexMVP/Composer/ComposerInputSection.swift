@@ -369,12 +369,15 @@ extension MessageComposerView {
         // interrupts iOS native keyboard dictation.
         let showSend = isInlineComposer && canSend
         let isRecording = dictationManager.state.isRecording
+        let showStop = isConversationActive && !showSend && !isRecording
         Button {
             if isRecording {
                 // Stop recording; the onChange(.idle) handler will send whatever was transcribed
                 Task { await dictationManager.stopRecording() }
             } else if showSend {
                 sendMessage()
+            } else if showStop {
+                onStop?()
             } else if dictationManager.state.isIdle && selectedProject != nil {
                 Task {
                     preDictationText = localText
@@ -391,6 +394,12 @@ extension MessageComposerView {
                     .foregroundStyle(Color.white)
                     .frame(width: 32, height: 32)
                     .background(Circle().fill(Color.accentColor))
+            } else if showStop {
+                Image(systemName: "stop.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Color.red))
             } else {
                 Image(systemName: "mic.fill")
                     .font(.title3)
@@ -399,10 +408,20 @@ extension MessageComposerView {
             }
         }
         .buttonStyle(.borderless)
-        .disabled(!showSend && !isRecording && (!dictationManager.state.isIdle || selectedProject == nil))
-        .help(showSend || isRecording ? "Send" : "Voice message")
+        .disabled(!showSend && !isRecording && !showStop && (!dictationManager.state.isIdle || selectedProject == nil))
+        .help(showSend || isRecording ? "Send" : showStop ? "Stop agents" : "Voice message")
         #else
-        if isInlineComposer && canSend {
+        if isInlineComposer && isConversationActive && !canSend {
+            Button(action: { onStop?() }) {
+                Image(systemName: "stop.fill")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(Color.red))
+            }
+            .buttonStyle(.borderless)
+            .help("Stop agents")
+        } else if isInlineComposer && canSend {
             Button(action: sendMessage) {
                 Image(systemName: "arrow.up")
                     .font(.headline.weight(.semibold))

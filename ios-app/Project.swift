@@ -59,7 +59,6 @@ let project = Project(
                 base: [
                     // Code signing settings - SANITY ISLAND LLC
                     "DEVELOPMENT_TEAM": "456SHKPP26",
-                    "CODE_SIGN_STYLE": "Automatic",
                     // Version and build number
                     "MARKETING_VERSION": "1.0",
                     "CURRENT_PROJECT_VERSION": "202605060000",
@@ -100,6 +99,16 @@ let project = Project(
                         "$(inherited)",
                         "$(SRCROOT)/Sources/TenexMVP/TenexCoreFFI"
                     ]
+                ],
+                configurations: [
+                    .debug(name: "Debug", settings: [
+                        "CODE_SIGN_STYLE": "Automatic"
+                    ]),
+                    .release(name: "Release", settings: [
+                        "CODE_SIGN_STYLE": "Manual",
+                        "CODE_SIGN_IDENTITY": "Apple Distribution",
+                        "PROVISIONING_PROFILE_SPECIFIER": "$(CI_APP_PROFILE_SPECIFIER)"
+                    ])
                 ]
             )
         ),

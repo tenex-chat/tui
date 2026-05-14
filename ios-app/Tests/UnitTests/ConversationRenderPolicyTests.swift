@@ -317,6 +317,63 @@ final class ConversationRenderPolicyTests: XCTestCase {
         XCTAssertEqual(summary.text, "Executing")
     }
 
+    // MARK: - toolSummary: MCP tools
+
+    func testMcpToolWithUrlRendersServerAndHumanizedTool() {
+        let summary = ConversationRenderPolicy.toolSummary(
+            toolName: "mcp__playwright__browser_navigate",
+            toolArgs: json(["url": "https://cascade.f7z.io/"]),
+            contentFallback: nil
+        )
+        XCTAssertEqual(summary.text, "playwright · Browser Navigate https://cascade.f7z.io/")
+        XCTAssertEqual(summary.icon, "puzzlepiece")
+    }
+
+    func testMcpToolWithoutArgsRendersServerAndTool() {
+        let summary = ConversationRenderPolicy.toolSummary(
+            toolName: "mcp__playwright__browser_snapshot",
+            toolArgs: "{}",
+            contentFallback: nil
+        )
+        XCTAssertEqual(summary.text, "playwright · Browser Snapshot")
+    }
+
+    func testMcpToolPrefersDescriptionWhenPresent() {
+        let summary = ConversationRenderPolicy.toolSummary(
+            toolName: "mcp__github__create_pr",
+            toolArgs: json(["description": "Open PR for branch fix-foo"]),
+            contentFallback: nil
+        )
+        XCTAssertEqual(summary.text, "Open PR for branch fix-foo")
+    }
+
+    func testParseMCPTool() {
+        XCTAssertEqual(
+            ConversationRenderPolicy.parseMCPTool("mcp__playwright__browser_navigate")?.server,
+            "playwright"
+        )
+        XCTAssertEqual(
+            ConversationRenderPolicy.parseMCPTool("mcp__playwright__browser_navigate")?.tool,
+            "browser_navigate"
+        )
+        XCTAssertNil(ConversationRenderPolicy.parseMCPTool("read"))
+        XCTAssertNil(ConversationRenderPolicy.parseMCPTool("mcp__server"))
+        XCTAssertNil(ConversationRenderPolicy.parseMCPTool("mcp____tool"))
+    }
+
+    func testHumanizeSnakeCase() {
+        XCTAssertEqual(
+            ConversationRenderPolicy.humanizeSnakeCase("browser_navigate"),
+            "Browser Navigate"
+        )
+        XCTAssertEqual(ConversationRenderPolicy.humanizeSnakeCase("snapshot"), "Snapshot")
+        XCTAssertEqual(
+            ConversationRenderPolicy.humanizeSnakeCase("multi_word_tool"),
+            "Multi Word Tool"
+        )
+        XCTAssertEqual(ConversationRenderPolicy.humanizeSnakeCase(""), "")
+    }
+
     // MARK: - toolSummary: truncation via extractTarget
 
     func testLongCommandGetsTruncated() {

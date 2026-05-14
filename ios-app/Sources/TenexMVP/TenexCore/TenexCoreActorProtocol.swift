@@ -31,6 +31,7 @@ protocol TenexCoreActorProtocol: Actor {
     func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String], referenceConversationId: String?, referenceReportATag: String?) throws -> SendMessageResult
     func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws -> SendMessageResult
+    func stopConversation(conversationId: String, reason: String) throws
 
     // MARK: - Inbox
     func getInbox() -> [InboxItem]

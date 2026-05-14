@@ -52,6 +52,12 @@ struct MessageComposerView: View {
     /// Callback when the view is dismissed
     var onDismiss: (() -> Void)?
 
+    /// Whether agents are actively working on this conversation (kind:24133 state)
+    var isConversationActive: Bool = false
+
+    /// Callback to stop active agents (sends kind:24134)
+    var onStop: (() -> Void)?
+
     /// Rendering style for the composer container
     let displayStyle: DisplayStyle
 
@@ -256,7 +262,9 @@ struct MessageComposerView: View {
         inlineLayoutStyle: InlineLayoutStyle = .standard,
         onSend: ((SendMessageResult) -> Void)? = nil,
         onReferenceConversationRequested: ((ReferenceConversationLaunchPayload) -> Void)? = nil,
-        onDismiss: (() -> Void)? = nil
+        onDismiss: (() -> Void)? = nil,
+        isConversationActive: Bool = false,
+        onStop: (() -> Void)? = nil
     ) {
         self.initialProject = project
         self.conversationId = conversationId
@@ -271,6 +279,8 @@ struct MessageComposerView: View {
         self.onSend = onSend
         self.onReferenceConversationRequested = onReferenceConversationRequested
         self.onDismiss = onDismiss
+        self.isConversationActive = isConversationActive
+        self.onStop = onStop
 
         // Initialize state with project if provided
         _selectedProject = State(initialValue: project)
@@ -656,17 +666,15 @@ struct MessageComposerView: View {
                 isDirty = true
             case .idle:
                 recordingSheetPresented = false
-                // Recording stopped — commit text and auto-send
+                // Recording stopped — clean filler words via LLM, then auto-send
                 if preDictationText != nil {
-                    let currentText = localText
+                    let rawText = localText
+                    let capturedPrefix = preDictationText
                     preDictationText = nil
-                    if let projectId = selectedProject?.id {
-                        Task {
-                            await draftManager.updateContent(currentText, conversationId: conversationId, projectId: projectId)
-                        }
-                    }
                     dictationManager.reset()
-                    sendMessage()
+                    Task {
+                        await sendDictatedMessage(rawText, typedPrefix: capturedPrefix)
+                    }
                 }
             }
         }

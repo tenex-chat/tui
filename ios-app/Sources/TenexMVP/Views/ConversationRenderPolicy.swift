@@ -74,6 +74,9 @@ enum ConversationRenderPolicy {
             } else if let fallback = contentFallback?.trimmingCharacters(in: .whitespacesAndNewlines),
                !fallback.isEmpty {
                 text = truncate(fallback, max: 80)
+            } else if let (server, mcpTool) = parseMCPTool(normalizedName) {
+                let header = "\(server) · \(humanizeSnakeCase(mcpTool))"
+                text = target.isEmpty ? header : "\(header) \(target)"
             } else {
                 let verb = toolVerb(for: normalizedName)
                 if verb.isEmpty {
@@ -172,7 +175,34 @@ enum ConversationRenderPolicy {
             return "\"\(truncate(query, max: 30))\""
         }
 
+        if let url = nonEmptyString(args["url"]) {
+            return truncate(url, max: 60)
+        }
+
         return nil
+    }
+
+    /// Parse `mcp__server__tool` into (server, tool). Returns nil for non-MCP names.
+    static func parseMCPTool(_ name: String) -> (server: String, tool: String)? {
+        guard name.hasPrefix("mcp__") else { return nil }
+        let stripped = String(name.dropFirst("mcp__".count))
+        guard let separator = stripped.range(of: "__") else { return nil }
+        let server = String(stripped[..<separator.lowerBound])
+        let tool = String(stripped[separator.upperBound...])
+        guard !server.isEmpty, !tool.isEmpty else { return nil }
+        return (server, tool)
+    }
+
+    /// Convert snake_case (or whitespace-separated) text to "Title Case" words.
+    static func humanizeSnakeCase(_ text: String) -> String {
+        let parts = text.split { $0 == "_" || $0.isWhitespace }
+        return parts
+            .map { part -> String in
+                guard let first = part.first else { return "" }
+                return String(first).uppercased() + part.dropFirst()
+            }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 
     private static func parseArgs(_ toolArgs: String?) -> [String: Any] {

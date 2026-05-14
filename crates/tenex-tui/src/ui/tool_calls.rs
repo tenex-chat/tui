@@ -111,6 +111,36 @@ pub fn parse_message_content(content: &str) -> MessageContent {
     }
 }
 
+/// Parse an MCP tool name of the form `mcp__server__tool` into (server, tool).
+/// Returns None for non-MCP names or malformed inputs.
+pub fn parse_mcp_tool(name: &str) -> Option<(&str, &str)> {
+    let stripped = name.strip_prefix("mcp__")?;
+    let mut parts = stripped.splitn(2, "__");
+    let server = parts.next()?;
+    let tool = parts.next()?;
+    if server.is_empty() || tool.is_empty() {
+        return None;
+    }
+    Some((server, tool))
+}
+
+/// Convert snake_case (or already-spaced) text into "Title Case" words.
+pub fn humanize_snake_case(s: &str) -> String {
+    s.split(|c: char| c == '_' || c.is_whitespace())
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            let mut chars = p.chars();
+            match chars.next() {
+                Some(first) => {
+                    first.to_uppercase().collect::<String>() + chars.as_str()
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Get semantic verb for a tool (e.g., "Reading", "Writing")
 pub fn tool_verb(name: &str) -> &'static str {
     let lower = name.to_lowercase();
@@ -187,6 +217,11 @@ pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
     // Query for web search
     if let Some(query) = params.get("query").and_then(|v| v.as_str()) {
         return Some(format!("\"{}\"", truncate_with_ellipsis(query, 30)));
+    }
+
+    // URL — common in browser/MCP tools
+    if let Some(url) = params.get("url").and_then(|v| v.as_str()) {
+        return Some(truncate_with_ellipsis(url, 60));
     }
 
     None
@@ -374,18 +409,28 @@ pub fn render_tool_line(
                     }
                 }
 
-                // Fall back to verb + target or just tool name
-                let verb = tool_verb(&tool_call.name);
-                if verb.is_empty() {
+                // MCP tools: show "server · Tool Name" with target appended
+                if let Some((server, tool)) = parse_mcp_tool(&tool_call.name) {
+                    let header = format!("{} · {}", server, humanize_snake_case(tool));
                     if target.is_empty() {
-                        tool_call.name.clone()
+                        header
                     } else {
-                        format!("{} {}", tool_call.name, target)
+                        format!("{} {}", header, target)
                     }
-                } else if target.is_empty() {
-                    verb.to_string()
                 } else {
-                    format!("{} {}", verb, target)
+                    // Fall back to verb + target or just tool name
+                    let verb = tool_verb(&tool_call.name);
+                    if verb.is_empty() {
+                        if target.is_empty() {
+                            tool_call.name.clone()
+                        } else {
+                            format!("{} {}", tool_call.name, target)
+                        }
+                    } else if target.is_empty() {
+                        verb.to_string()
+                    } else {
+                        format!("{} {}", verb, target)
+                    }
                 }
             }
         }
@@ -425,6 +470,91 @@ mod tests {
             }
             _ => panic!("Expected Mixed content"),
         }
+    }
+
+    #[test]
+    fn test_parse_mcp_tool() {
+        assert_eq!(
+            parse_mcp_tool("mcp__playwright__browser_navigate"),
+            Some(("playwright", "browser_navigate"))
+        );
+        assert_eq!(
+            parse_mcp_tool("mcp__chrome__navigate_page"),
+            Some(("chrome", "navigate_page"))
+        );
+        // Tool name may contain extra `__` - splitn(2) keeps the rest as a single tool name
+        assert_eq!(
+            parse_mcp_tool("mcp__server__deep__nested"),
+            Some(("server", "deep__nested"))
+        );
+        assert_eq!(parse_mcp_tool("read"), None);
+        assert_eq!(parse_mcp_tool("mcp__"), None);
+        assert_eq!(parse_mcp_tool("mcp__server"), None);
+        assert_eq!(parse_mcp_tool("mcp____tool"), None);
+    }
+
+    #[test]
+    fn test_humanize_snake_case() {
+        assert_eq!(humanize_snake_case("browser_navigate"), "Browser Navigate");
+        assert_eq!(humanize_snake_case("snapshot"), "Snapshot");
+        assert_eq!(humanize_snake_case("multi_word_tool"), "Multi Word Tool");
+        assert_eq!(humanize_snake_case(""), "");
+        assert_eq!(humanize_snake_case("__leading"), "Leading");
+    }
+
+    #[test]
+    fn test_render_mcp_tool_with_url() {
+        let tool_call = ToolCall {
+            id: "1".to_string(),
+            name: "mcp__playwright__browser_navigate".to_string(),
+            parameters: serde_json::json!({"url": "https://cascade.f7z.io/"}),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(
+            text.contains("playwright · Browser Navigate"),
+            "got: {}",
+            text
+        );
+        assert!(
+            text.contains("https://cascade.f7z.io/"),
+            "should include URL, got: {}",
+            text
+        );
+        assert!(!text.contains("Executing"), "should not say Executing");
+    }
+
+    #[test]
+    fn test_render_mcp_tool_no_args() {
+        let tool_call = ToolCall {
+            id: "1".to_string(),
+            name: "mcp__playwright__browser_snapshot".to_string(),
+            parameters: serde_json::json!({}),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(
+            text.contains("playwright · Browser Snapshot"),
+            "got: {}",
+            text
+        );
+        assert!(!text.contains("Executing"), "should not say Executing");
+    }
+
+    #[test]
+    fn test_render_unknown_non_mcp_tool_still_uses_verb() {
+        let tool_call = ToolCall {
+            id: "1".to_string(),
+            name: "weird_unknown_tool".to_string(),
+            parameters: serde_json::json!({}),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        // Non-MCP unknown tools keep the existing "Executing" fallback
+        assert!(text.contains("Executing"), "got: {}", text);
     }
 
     #[test]

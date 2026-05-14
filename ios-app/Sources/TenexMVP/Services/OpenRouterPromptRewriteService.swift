@@ -78,6 +78,55 @@ struct OpenRouterPromptRewriteService {
         let choices: [Choice]
     }
 
+    static func cleanDictatedText(
+        _ text: String,
+        apiKey: String
+    ) async throws -> String {
+        guard let url = URL(string: "https://openrouter.ai/api/v1/chat/completions") else {
+            throw OpenRouterPromptRewriteError.invalidResponse
+        }
+
+        let requestBody = ChatRequest(
+            model: "openai/gpt-4o-mini",
+            messages: [
+                ChatRequest.Message(
+                    role: "system",
+                    content: "Remove filler words (um, uh, like, you know, sort of, I mean) and redundant restarts from this voice-dictated message. Do not paraphrase, summarize, rewrite, or change wording. Preserve the user's exact phrasing, punctuation intent, and meaning. Return only the cleaned text, nothing else."
+                ),
+                ChatRequest.Message(role: "user", content: text)
+            ],
+            temperature: 0.1
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(requestBody)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenRouterPromptRewriteError.invalidResponse
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let message = (try? JSONDecoder().decode(ErrorEnvelope.self, from: data).error?.message)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            throw OpenRouterPromptRewriteError.invalidStatus(code: httpResponse.statusCode, message: message)
+        }
+
+        let decoded = try JSONDecoder().decode(ChatResponse.self, from: data)
+        let output = decoded.choices.first?.message.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !output.isEmpty else {
+            throw OpenRouterPromptRewriteError.emptyOutput
+        }
+
+        return output
+    }
+
     static func rewritePrompt(
         currentPrompt: String,
         rewriteInstruction: String,

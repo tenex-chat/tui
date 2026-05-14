@@ -1282,6 +1282,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func stopBunker() throws 
     
     /**
+     * Stop active agents working on a conversation.
+     *
+     * Sends a kind:24134 StopOperations event to halt all working agents on the
+     * given conversation. No-op if no agents are currently active.
+     */
+    func stopConversation(conversationId: String, reason: String) throws 
+    
+    /**
      * Toggle archive status for a conversation.
      * Returns true if the conversation is now archived.
      */
@@ -2704,6 +2712,20 @@ open func startBunker()throws  -> String  {
      */
 open func stopBunker()throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_stop_bunker(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
+     * Stop active agents working on a conversation.
+     *
+     * Sends a kind:24134 StopOperations event to halt all working agents on the
+     * given conversation. No-op if no agents are currently active.
+     */
+open func stopConversation(conversationId: String, reason: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_stop_conversation(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),
+        FfiConverterString.lower(reason),$0
     )
 }
 }
@@ -12344,6 +12366,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_stop_bunker() != 36083) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_stop_conversation() != 5702) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_toggle_conversation_archived() != 43672) {

@@ -32,8 +32,19 @@ struct ProjectDetailView: View {
     let projectId: String
     @Binding var selectedProjectId: String?
 
+    @State private var conversationHierarchy = ConversationFullHierarchy(conversations: [])
+    @State private var showNewConversation = false
+    @State private var isBooting = false
+    @State private var showBootError = false
+    @State private var bootError: String?
+    private var audioPlayer: AudioNotificationPlayer { AudioNotificationPlayer.shared }
+
     private var project: Project? {
         coreManager.projects.first { $0.id == projectId }
+    }
+
+    private var isOnline: Bool {
+        coreManager.projectOnlineStatus[projectId] ?? false
     }
 
     private var projectConversations: [ConversationFullInfo] {
@@ -96,6 +107,29 @@ struct ProjectDetailView: View {
         #else
         .toolbarTitleDisplayMode(.inline)
         #endif
+        .task(id: projectConversations.map(\.thread.id)) {
+            conversationHierarchy = ConversationFullHierarchy(conversations: projectConversations)
+            await coreManager.hierarchyCache.preloadForConversations(projectConversations)
+        }
+        .navigationDestination(isPresented: $showNewConversation) {
+            if let project {
+                ConversationWorkspaceView(
+                    source: .newThread(
+                        project: project,
+                        agentPubkey: UserDefaults.standard.string(forKey: "tenex.lastAgent.\(projectId)")
+                    )
+                )
+                .environment(coreManager)
+                #if os(iOS)
+                .toolbar(.hidden, for: .tabBar)
+                #endif
+            }
+        }
+        .alert("Boot Failed", isPresented: $showBootError) {
+            Button("OK") { bootError = nil }
+        } message: {
+            if let bootError { Text(bootError) }
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink {
@@ -107,6 +141,43 @@ struct ProjectDetailView: View {
                     Image(systemName: "gearshape")
                 }
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showNewConversation = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+            }
+            if !isOnline {
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: bootProject) {
+                        if isBooting {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "power")
+                                .foregroundStyle(Color.agentBrand)
+                        }
+                    }
+                    .disabled(isBooting)
+                }
+            }
+        }
+    }
+
+    private func bootProject() {
+        isBooting = true
+        bootError = nil
+        Task {
+            do {
+                try await coreManager.core.bootProject(projectId: projectId)
+            } catch {
+                await MainActor.run {
+                    bootError = error.localizedDescription
+                    showBootError = true
+                }
+            }
+            await MainActor.run { isBooting = false }
         }
     }
 
@@ -114,6 +185,7 @@ struct ProjectDetailView: View {
     private func itemRow(for item: ProjectFeedItem) -> some View {
         switch item {
         case .conversation(let conversation):
+            let hierarchy = coreManager.hierarchyCache.getHierarchy(for: conversation.thread.id)
             NavigationLink {
                 ConversationAdaptiveDetailView(conversation: conversation)
                     .environment(coreManager)
@@ -121,7 +193,19 @@ struct ProjectDetailView: View {
                     .toolbar(.hidden, for: .tabBar)
                     #endif
             } label: {
-                ConversationFeedRow(conversation: conversation)
+                ConversationRowFull(
+                    conversation: conversation,
+                    projectTitle: nil,
+                    isHierarchicallyActive: conversationHierarchy.isHierarchicallyActive(conversation.id),
+                    pTaggedRecipientInfo: hierarchy?.pTaggedRecipientInfo,
+                    delegationAgentInfos: hierarchy?.delegationAgentInfos ?? [],
+                    isPlayingAudio: audioPlayer.playbackState != .idle && audioPlayer.currentConversationId == conversation.thread.id,
+                    isAudioPlaying: audioPlayer.isPlaying,
+                    showsChevron: false,
+                    onSelect: nil,
+                    onToggleArchive: nil
+                )
+                .equatable()
             }
 
         case .htmlReport(let entry):
@@ -160,73 +244,3 @@ struct ProjectDetailView: View {
     }
 }
 
-// MARK: - Conversation Feed Row
-
-private struct ConversationFeedRow: View {
-    let conversation: ConversationFullInfo
-
-    private var statusColor: Color {
-        Color.conversationStatus(for: conversation.thread.statusLabel, isActive: conversation.isActive)
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 10, height: 10)
-                if conversation.isActive {
-                    Circle()
-                        .stroke(statusColor.opacity(0.5), lineWidth: 2)
-                        .frame(width: 16, height: 16)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .top) {
-                    Text(conversation.thread.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                    Spacer()
-                    RelativeTimeText(
-                        timestamp: conversation.thread.effectiveLastActivity,
-                        style: .localizedAbbreviated
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                }
-
-                if let summary = conversation.thread.summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                } else if let status = conversation.thread.statusCurrentActivity, !status.isEmpty {
-                    Text(status)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                HStack(spacing: 6) {
-                    Image(systemName: "bubble.left")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Text("\(conversation.messageCount)")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    if let label = conversation.thread.statusLabel, !label.isEmpty {
-                        Text("·")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        Text(label)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}

@@ -102,6 +102,49 @@ impl TenexCore {
         }
     }
 
+    /// Stop active agents working on a conversation.
+    ///
+    /// Sends a kind:24134 StopOperations event to halt all working agents on the
+    /// given conversation. No-op if no agents are currently active.
+    pub fn stop_conversation(
+        &self,
+        conversation_id: String,
+        reason: String,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        let (project_a_tag, agent_pubkeys) = {
+            let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+                message: format!("Failed to acquire store lock: {}", e),
+            })?;
+            let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+                message: "Store not initialized".to_string(),
+            })?;
+
+            let project_a_tag = store
+                .find_project_for_thread(&conversation_id)
+                .ok_or_else(|| TenexError::Internal {
+                    message: format!(
+                        "Could not resolve project for conversation: {}",
+                        conversation_id
+                    ),
+                })?;
+            let agent_pubkeys = store.operations.get_working_agents(&conversation_id);
+            (project_a_tag, agent_pubkeys)
+        };
+
+        core_handle
+            .send(NostrCommand::StopOperations {
+                project_a_tag,
+                event_ids: vec![conversation_id],
+                agent_pubkeys,
+                reason,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send stop command: {}", e),
+            })
+    }
+
     /// Answer an ask event by sending a formatted response.
     ///
     /// The response is formatted as markdown with each question's title and answer,
