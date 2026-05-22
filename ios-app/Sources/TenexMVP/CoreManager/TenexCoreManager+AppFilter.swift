@@ -261,7 +261,8 @@ extension TenexCoreManager {
         guard !conversations.isEmpty else { return [] }
 
         let conversationsById = Dictionary(
-            uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) }
+            conversations.map { ($0.thread.id, $0) },
+            uniquingKeysWith: { first, _ in first }
         )
         var rootIdByConversationId: [String: String] = [:]
         var rootVisibilityById: [String: Bool] = [:]

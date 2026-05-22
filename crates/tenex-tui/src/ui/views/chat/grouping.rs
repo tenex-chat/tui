@@ -56,6 +56,13 @@ fn item_pubkey<'a>(item: &'a DisplayItem<'a>) -> &'a str {
     }
 }
 
+fn is_tool_call_item(item: &DisplayItem<'_>) -> bool {
+    match item {
+        DisplayItem::SingleMessage { message, .. } => message.tool_name.is_some(),
+        DisplayItem::DelegationPreview { .. } => false,
+    }
+}
+
 /// Calculate consecutive states by comparing pubkeys of adjacent items
 fn calculate_consecutive_states(items: &mut [DisplayItem<'_>]) {
     let len = items.len();
@@ -63,12 +70,18 @@ fn calculate_consecutive_states(items: &mut [DisplayItem<'_>]) {
         return;
     }
 
-    // First pass: collect pubkeys
+    // First pass: collect pubkeys and tool-call status
     let pubkeys: Vec<String> = items.iter().map(|i| item_pubkey(i).to_string()).collect();
+    let is_tool: Vec<bool> = items.iter().map(|i| is_tool_call_item(i)).collect();
 
     // Second pass: calculate and apply states
     for i in 0..len {
-        let is_consecutive = i > 0 && pubkeys[i] == pubkeys[i - 1];
+        let same_pubkey = i > 0 && pubkeys[i] == pubkeys[i - 1];
+        // Tool messages render without an author line. A non-tool message immediately
+        // after a tool message from the same pubkey must not be marked consecutive —
+        // it needs its own author line or the renderer emits a lone "." instead.
+        let is_consecutive =
+            same_pubkey && !(i > 0 && is_tool[i - 1] && !is_tool[i]);
         let has_next_consecutive = i < len - 1 && pubkeys[i] == pubkeys[i + 1];
 
         match &mut items[i] {

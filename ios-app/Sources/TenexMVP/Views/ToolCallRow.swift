@@ -32,12 +32,12 @@ struct ToolCallRow: View {
             HStack(spacing: 8) {
                 Image(systemName: displayInfo.icon)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(displayInfo.color ?? .secondary)
                     .frame(width: 16)
 
                 Text(displayInfo.text)
                     .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(displayInfo.color ?? .secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
 

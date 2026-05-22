@@ -92,7 +92,7 @@ struct ConversationsTabView: View {
         let projects = coreManager.projectsInCurrentScope
         let onlineStatus = coreManager.projectOnlineStatus
 
-        projectTitleById = Dictionary(uniqueKeysWithValues: coreManager.projects.map { ($0.id, $0.title) })
+        projectTitleById = Dictionary(coreManager.projects.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
 
         let sorted = projects.sorted { a, b in
             let aOnline = onlineStatus[a.id] ?? false

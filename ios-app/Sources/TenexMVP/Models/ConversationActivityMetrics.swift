@@ -26,8 +26,8 @@ enum ConversationActivityMetrics {
         }
 
         let hierarchy = ConversationFullHierarchy(conversations: Array(conversationsById.values))
-        return Dictionary(uniqueKeysWithValues: directChildren.map { child in
+        return Dictionary(directChildren.map { child in
             (child.thread.id, hierarchy.isHierarchicallyActive(child.thread.id))
-        })
+        }, uniquingKeysWith: { first, _ in first })
     }
 }

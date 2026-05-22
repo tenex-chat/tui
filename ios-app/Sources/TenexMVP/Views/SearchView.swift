@@ -361,11 +361,11 @@ struct SearchView: View {
             // Fetch conversation info for titles
             let conversationIds = Array(grouped.keys)
             let conversations = await coreManager.core.getConversationsByIds(conversationIds: conversationIds)
-            let conversationMap = Dictionary(uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) })
+            let conversationMap = Dictionary(conversations.map { ($0.thread.id, $0) }, uniquingKeysWith: { first, _ in first })
 
             // Get projects for project name lookup
             let projects = await coreManager.core.getProjects()
-            let projectMap = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0.title) })
+            let projectMap = Dictionary(projects.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
 
             // Build grouped results
             let groups = grouped.compactMap { threadId, matches -> ConversationSearchGroup? in

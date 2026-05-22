@@ -261,9 +261,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Render unified agent configuration modal if showing
     let filtered_agents = app.filtered_agents();
-    let filtered_agent_names: Vec<String> = filtered_agents
+    let filtered_agent_parts: Vec<(String, Option<String>)> = filtered_agents
         .iter()
-        .map(|agent| app.agent_display_name(&agent.pubkey))
+        .map(|agent| app.agent_selector_parts(agent))
         .collect();
     let active_backend_name: Option<String> =
         if let ModalState::AgentConfig(ref state) = app.modal_state {
@@ -281,7 +281,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             area,
             state,
             &filtered_agents,
-            &filtered_agent_names,
+            &filtered_agent_parts,
             active_backend_name,
         );
     }
@@ -599,7 +599,7 @@ fn render_agent_config_modal(
     area: Rect,
     state: &mut crate::ui::modal::AgentConfigState,
     agents: &[crate::models::ProjectAgent],
-    agent_display_names: &[String],
+    agent_name_parts: &[(String, Option<String>)],
     active_backend_name: Option<String>,
 ) {
     use crate::ui::components::visible_items_in_content_area;
@@ -858,11 +858,21 @@ fn render_agent_config_modal(
             };
             let pm_prefix = if agent.is_pm { "[PM] " } else { "" };
             let available_name_width = content_width.saturating_sub(pm_prefix.chars().count());
-            let display_name = agent_display_names
+            let (raw_name, raw_suffix) = agent_name_parts
                 .get(idx)
-                .map(String::as_str)
-                .unwrap_or(agent.pubkey.as_str());
-            let name_text = truncate_with_ellipsis(display_name, available_name_width.max(1));
+                .map(|(n, s)| (n.as_str(), s.as_deref()))
+                .unwrap_or((agent.pubkey.as_str(), None));
+
+            // Reserve space for backend suffix; drop it if there's no room.
+            let suffix_len = raw_suffix.map(|s| s.chars().count()).unwrap_or(0);
+            let name_budget = available_name_width.saturating_sub(suffix_len);
+            let name_text = truncate_with_ellipsis(raw_name, name_budget.max(1));
+            let suffix_text = if suffix_len > 0 && name_budget > 0 {
+                raw_suffix.unwrap_or("").to_string()
+            } else {
+                String::new()
+            };
+
             let pm_style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
@@ -873,10 +883,16 @@ fn render_agent_config_modal(
                     .fg(theme::ACCENT_WARNING)
                     .add_modifier(Modifier::BOLD)
             };
+            let suffix_style = if is_selected {
+                Style::default().fg(Color::Black).bg(theme::ACCENT_WARNING)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED)
+            };
 
             let line = Line::from(vec![
                 Span::styled(pm_prefix.to_string(), pm_style),
                 Span::styled(name_text, name_style),
+                Span::styled(suffix_text, suffix_style),
             ]);
             f.render_widget(Paragraph::new(line), row_area);
         }

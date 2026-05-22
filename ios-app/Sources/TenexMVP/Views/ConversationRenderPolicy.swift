@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Shared conversation render policy matching TUI semantics for tool summaries
 /// and q-tag behavior.
@@ -12,6 +13,7 @@ enum ConversationRenderPolicy {
     struct ToolSummary {
         let icon: String
         let text: String
+        var color: Color? = nil
     }
 
     static func shouldRenderQTags(toolName: String?) -> Bool {
@@ -55,6 +57,12 @@ enum ConversationRenderPolicy {
         case "task", "agent":
             let description = nonEmptyString(args["description"]) ?? "agent"
             text = "▶ \(truncate(description, max: 40))"
+        case "run_workflow":
+            let name = nonEmptyString(args["name"]) ?? "workflow"
+            text = "▶ \(name)"
+        case "kill":
+            let target = nonEmptyString(args["target"]) ?? "agent"
+            return ToolSummary(icon: icon(for: normalizedName), text: "✕ \(target)", color: .red)
         case "change_model":
             let variant = nonEmptyString(args["variant"]) ?? "default"
             text = "🧠 → \(variant)"
@@ -110,8 +118,10 @@ enum ConversationRenderPolicy {
             return "square.and.pencil"
         case "glob", "find", "grep", "search", "web_search", "websearch", "fs_glob", "fs_grep":
             return "magnifyingglass"
-        case "task", "agent":
+        case "task", "agent", "run_workflow":
             return "play.fill"
+        case "kill":
+            return "xmark.circle"
         case "ask", "askuserquestion":
             return "questionmark.circle"
         case "change_model":

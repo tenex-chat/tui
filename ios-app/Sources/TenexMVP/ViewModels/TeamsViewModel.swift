@@ -310,7 +310,7 @@ final class TeamsViewModel: ObservableObject {
     }
 
     private func buildThread(rows: [TeamCommentRow]) -> [TeamCommentThread] {
-        let rowById = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        let rowById = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
 
         var repliesByParent: [String: [TeamCommentRow]] = [:]
         var roots: [TeamCommentRow] = []

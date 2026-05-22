@@ -3106,38 +3106,19 @@ impl App {
         reasoning_delta: Option<String>,
         is_finish: bool,
     ) {
+        // A stream buffer is purely "the bytes streamed since this agent's last
+        // kind:1 in this conversation". The worker already drops deltas older
+        // than the latest kind:1 (created_at supersession), and the kind:1
+        // arrival path (runtime.rs) finalizes/kills the buffer. We must NOT
+        // speculatively hand off here: doing so on every delta would rebase a
+        // fresh streaming round onto the agent's *previous* turn's message.
         self.conversation.handle_local_stream_chunk(
-            agent_pubkey.clone(),
-            conversation_id.clone(),
+            agent_pubkey,
+            conversation_id,
             text_delta,
             reasoning_delta,
             is_finish,
         );
-        // Fix race: kind:1 may arrive (and call handoff) before the buffer is created.
-        // If buffer exists but hasn't been handed off yet, check if kind:1 is already in
-        // the store and apply the handoff now.
-        let buffer_needs_handoff = self
-            .conversation
-            .local_stream_buffers
-            .get(&conversation_id)
-            .map(|b| b.superseded_message_id.is_none() && !b.is_complete)
-            .unwrap_or(false);
-        if buffer_needs_handoff {
-            let handoff = self
-                .data_store
-                .borrow()
-                .messages_by_thread
-                .get(&conversation_id)
-                .and_then(|msgs| msgs.iter().rev().find(|m| m.pubkey == agent_pubkey).map(|m| (m.id.clone(), m.pubkey.clone(), m.content.clone())));
-            if let Some((id, pubkey, content)) = handoff {
-                self.conversation.handoff_local_stream_to_kind1(
-                    &conversation_id,
-                    &id,
-                    &pubkey,
-                    &content,
-                );
-            }
-        }
     }
 
     /// Convert live stream buffer into authoritative kind:1 content and animate
@@ -3438,6 +3419,36 @@ impl App {
 
     pub fn backend_display_name(&self, backend_pubkey: &str) -> String {
         self.data_store.borrow().get_profile_name(backend_pubkey)
+    }
+
+    /// Returns true when the available agents for the current project span more than one backend.
+    pub fn agents_have_multiple_backends(&self) -> bool {
+        let agents = self.available_agents();
+        let mut seen: Option<&str> = None;
+        for agent in &agents {
+            match seen {
+                None => seen = Some(agent.backend_pubkey.as_str()),
+                Some(first) if first != agent.backend_pubkey.as_str() => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Display label parts for an agent in the selector.
+    /// Returns `(agent_name, Some("@backendName"))` when the project has agents on
+    /// multiple backends, or `(agent_name, None)` when there is only one backend.
+    pub fn agent_selector_parts(
+        &self,
+        agent: &crate::models::ProjectAgent,
+    ) -> (String, Option<String>) {
+        let name = self.agent_display_name(&agent.pubkey);
+        if self.agents_have_multiple_backends() {
+            let backend = self.backend_display_name(&agent.backend_pubkey);
+            (name, Some(format!("@{}", backend)))
+        } else {
+            (name, None)
+        }
     }
 
     pub fn agent_inventory_item(&self, agent_pubkey: &str) -> Option<AgentInventoryItem> {

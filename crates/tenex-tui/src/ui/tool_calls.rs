@@ -238,17 +238,99 @@ pub fn render_tool_line(
     let name = tool_call.name.to_lowercase();
     let target = extract_target(tool_call).unwrap_or_default();
 
-    let display_text = if is_todo_write(&name) {
-        // todo_write: collapsed count (supports both "todos" and "items")
-        let count = tool_call
+    // todo_write: rich colorized display with progress count and active task
+    if is_todo_write(&name) {
+        let todos = tool_call
             .parameters
             .get("todos")
             .or_else(|| tool_call.parameters.get("items"))
-            .and_then(|v| v.as_array())
-            .map(|a| a.len())
-            .unwrap_or(0);
-        format!("▸ {} tasks", count)
-    } else {
+            .and_then(|v| v.as_array());
+
+        let total = todos.map(|a| a.len()).unwrap_or(0);
+
+        let mut spans = vec![
+            Span::styled("│", Style::default().fg(indicator_color)),
+            Span::raw("  "),
+        ];
+
+        if total == 0 {
+            spans.push(Span::styled("0 tasks", Style::default().fg(theme::TEXT_MUTED)));
+            return Line::from(spans);
+        }
+
+        let todos = todos.unwrap();
+
+        let done_count = todos
+            .iter()
+            .filter(|t| {
+                t.get("status")
+                    .and_then(|s| s.as_str())
+                    .map(|s| {
+                        matches!(
+                            s.to_lowercase().as_str(),
+                            "done" | "completed" | "skipped"
+                        )
+                    })
+                    .unwrap_or(false)
+            })
+            .count();
+
+        let in_progress = todos.iter().find(|t| {
+            t.get("status")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_lowercase() == "in_progress")
+                .unwrap_or(false)
+        });
+
+        let last_done = if in_progress.is_none() {
+            todos.iter().rev().find(|t| {
+                t.get("status")
+                    .and_then(|s| s.as_str())
+                    .map(|s| matches!(s.to_lowercase().as_str(), "done" | "completed"))
+                    .unwrap_or(false)
+            })
+        } else {
+            None
+        };
+
+        let item_title = |item: &serde_json::Value| -> String {
+            item.get("title")
+                .or_else(|| item.get("content"))
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_with_ellipsis(s, 45))
+                .unwrap_or_default()
+        };
+
+        let count_style = if done_count > 0 {
+            theme::todo_done()
+        } else {
+            Style::default().fg(theme::TEXT_MUTED)
+        };
+
+        spans.push(Span::styled(
+            format!("{}/{}", done_count, total),
+            count_style,
+        ));
+        spans.push(Span::styled(" tasks", Style::default().fg(theme::TEXT_DIM)));
+
+        if let Some(item) = in_progress {
+            let title = item_title(item);
+            if !title.is_empty() {
+                spans.push(Span::styled("  ⟳ ", theme::todo_in_progress()));
+                spans.push(Span::styled(title, theme::todo_in_progress()));
+            }
+        } else if let Some(item) = last_done {
+            let title = item_title(item);
+            if !title.is_empty() {
+                spans.push(Span::styled("  ✓ ", theme::todo_done()));
+                spans.push(Span::styled(title, Style::default().fg(theme::TEXT_MUTED)));
+            }
+        }
+
+        return Line::from(spans);
+    }
+
+    let display_text = {
         match name.as_str() {
             // Bash: "$ command" or "$ description"
             "bash" | "execute_bash" | "shell" => format!("$ {}", target),
@@ -323,6 +405,33 @@ pub fn render_tool_line(
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 format!("↺ {}", truncate_with_ellipsis(prompt, 60))
+            }
+
+            // Kill/stop an agent: show target ID in error color
+            "kill" => {
+                let target = tool_call
+                    .parameters
+                    .get("target")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("agent");
+                return Line::from(vec![
+                    Span::styled("│", Style::default().fg(indicator_color)),
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("✕ {}", target),
+                        Style::default().fg(theme::ACCENT_ERROR),
+                    ),
+                ]);
+            }
+
+            // Workflow execution: show workflow name
+            "run_workflow" => {
+                let name = tool_call
+                    .parameters
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("workflow");
+                format!("▶ {}", name)
             }
 
             // Model change: show variant being switched to
@@ -555,6 +664,24 @@ mod tests {
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         // Non-MCP unknown tools keep the existing "Executing" fallback
         assert!(text.contains("Executing"), "got: {}", text);
+    }
+
+    #[test]
+    fn test_render_run_workflow() {
+        let tool_call = ToolCall {
+            id: "1".to_string(),
+            name: "run_workflow".to_string(),
+            parameters: serde_json::json!({
+                "force": true,
+                "name": "testflight-deploy",
+                "task": "Deploy the current iOS app build to TestFlight via xcodebuild + altool"
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("▶ testflight-deploy"), "got: {}", text);
+        assert!(!text.contains("Executing"), "should not say Executing, got: {}", text);
     }
 
     #[test]

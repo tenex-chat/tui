@@ -436,7 +436,8 @@ class TenexCoreManager {
         projects: [Project]
     ) -> [BackendApprovalRequest] {
         let projectTitlesById = Dictionary(
-            uniqueKeysWithValues: projects.map { ($0.id, $0.title) }
+            projects.map { ($0.id, $0.title) },
+            uniquingKeysWith: { first, _ in first }
         )
         let grouped = Dictionary(grouping: pending) { $0.backendPubkey }
 

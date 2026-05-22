@@ -144,17 +144,33 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let input_bg = theme::BG_INPUT;
 
-    // Agent display with model info in a single selectable chip (no @ prefix)
-    let agent_chip_display = app
+    // Agent display with model info in a single selectable chip (no @ prefix).
+    // Clone fields first to release the immutable borrow before calling display methods.
+    let selected_agent_fields = app
         .selected_agent()
-        .map(|a| {
-            let model_display = a
-                .model
+        .map(|a| (a.pubkey.clone(), a.backend_pubkey.clone(), a.model.clone()));
+    // (agent_name, Option<"@backendName">, model_str) — parts kept separate for coloring.
+    let agent_chip_parts: Option<(String, Option<String>, String)> =
+        selected_agent_fields.map(|(pubkey, backend_pubkey, model)| {
+            let (name, suffix) = {
+                let n = app.agent_display_name(&pubkey);
+                if app.agents_have_multiple_backends() {
+                    let b = app.backend_display_name(&backend_pubkey);
+                    (n, Some(format!("@{}", b)))
+                } else {
+                    (n, None)
+                }
+            };
+            let model_str = model
                 .as_ref()
-                .map(|m| format!("({})", m))
-                .unwrap_or_else(|| "(no model)".to_string());
-            format!("{} {}", a.name, model_display)
-        })
+                .map(|m| format!(" ({})", m))
+                .unwrap_or_else(|| " (no model)".to_string());
+            (name, suffix, model_str)
+        });
+    // Combined string used only for width calculation in the context line.
+    let agent_chip_display = agent_chip_parts
+        .as_ref()
+        .map(|(n, s, m)| format!("{}{}{}", n, s.as_deref().unwrap_or(""), m))
         .unwrap_or_else(|| "none (no model)".to_string());
 
     // Check if current tab is a draft (new conversation) - project selector only available for drafts
@@ -385,13 +401,30 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(" ".repeat(input_padding), Style::default().bg(input_bg)),
     ];
 
-    // Agent chip (highlighted if focused)
-    let agent_style = if context_focus == Some(InputContextFocus::Agent) {
+    // Agent chip (highlighted if focused): agent name + optional @backend suffix + model.
+    let agent_focused = context_focus == Some(InputContextFocus::Agent);
+    let agent_style = if agent_focused {
         focused_style(theme::ACCENT_PRIMARY)
     } else {
         Style::default().fg(theme::ACCENT_PRIMARY).bg(input_bg)
     };
-    context_spans.push(Span::styled(agent_chip_display.clone(), agent_style));
+    let backend_style = if agent_focused {
+        // Invert like the rest of the chip but slightly dimmer.
+        Style::default()
+            .fg(Color::Rgb(30, 30, 30))
+            .bg(theme::ACCENT_PRIMARY)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED).bg(input_bg)
+    };
+    if let Some((name, suffix, model_str)) = &agent_chip_parts {
+        context_spans.push(Span::styled(name.clone(), agent_style));
+        if let Some(s) = suffix {
+            context_spans.push(Span::styled(s.clone(), backend_style));
+        }
+        context_spans.push(Span::styled(model_str.clone(), agent_style));
+    } else {
+        context_spans.push(Span::styled(agent_chip_display.clone(), agent_style));
+    }
 
     // Project (selectable only for draft tabs, otherwise muted)
     context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));

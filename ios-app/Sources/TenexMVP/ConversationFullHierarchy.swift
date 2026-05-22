@@ -25,7 +25,7 @@ final class ConversationFullHierarchy {
     /// - Parameter conversations: All conversations to process
     init(conversations: [ConversationFullInfo]) {
         // Step 1: Build O(1) lookup maps
-        let byId = Dictionary(uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) })
+        let byId = Dictionary(conversations.map { ($0.thread.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.conversationById = byId
 
         // Step 2: Build parent→children map (O(n))
@@ -85,7 +85,7 @@ final class ConversationFullHierarchy {
         childrenMap: [String: [ConversationFullInfo]],
         activityMap: inout [String: Bool]
     ) {
-        let conversationsById = Dictionary(uniqueKeysWithValues: conversations.map { ($0.thread.id, $0) })
+        let conversationsById = Dictionary(conversations.map { ($0.thread.id, $0) }, uniquingKeysWith: { first, _ in first })
         var visited = Set<String>()
 
         // Process all conversations using DFS with memoization
