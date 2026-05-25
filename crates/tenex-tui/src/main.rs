@@ -13,12 +13,42 @@ use anyhow::Result;
 use clap::Parser;
 use nostr::NostrCommand;
 use nostr_sdk::prelude::*;
+use std::os::unix::io::AsRawFd;
 use tenex_core::config::CoreConfig;
 use tenex_core::runtime::CoreRuntime;
 
 use crate::runtime::run_app;
 use ui::views::login::LoginStep;
 use ui::{App, InputMode, View};
+
+/// Acquire an exclusive non-blocking flock on a lock file in the data directory.
+/// Returns the open File (lock is released on drop) or an error message.
+fn acquire_instance_lock(data_dir: &std::path::Path) -> Result<std::fs::File, String> {
+    let lock_path = data_dir.join("tenex-tui.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&lock_path)
+        .map_err(|e| format!("Could not open lock file {}: {}", lock_path.display(), e))?;
+
+    let fd = file.as_raw_fd();
+    // LOCK_EX | LOCK_NB: exclusive, non-blocking — fails immediately if another process holds it
+    let ret = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if ret != 0 {
+        Err(format!(
+            "Another tenex-tui instance is already running (lock file: {}).\n\
+             Only one instance can be open at a time to prevent database corruption.\n\
+             Kill the existing instance first (press Ctrl+C twice in it).",
+            lock_path.display()
+        ))
+    } else {
+        // Write our PID so it's easy to identify the owner
+        use std::io::Write;
+        let _ = (&file).write_all(format!("{}\n", std::process::id()).as_bytes());
+        Ok(file)
+    }
+}
 
 /// TENEX TUI Client
 #[derive(Parser, Debug)]
@@ -166,6 +196,17 @@ async fn main() -> Result<()> {
 
     let config = CoreConfig::default();
     let data_dir = config.data_dir.to_str().unwrap_or("tenex_data").to_string();
+
+    // Prevent two instances from sharing the LMDB database — concurrent writes corrupt it.
+    std::fs::create_dir_all(&config.data_dir)?;
+    let _instance_lock = match acquire_instance_lock(&config.data_dir) {
+        Ok(f) => f,
+        Err(msg) => {
+            eprintln!("Error: {}", msg);
+            std::process::exit(1);
+        }
+    };
+
     let mut core_runtime = CoreRuntime::new(config)?;
     let core_handle = core_runtime.handle();
 

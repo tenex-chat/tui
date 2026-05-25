@@ -3572,6 +3572,7 @@ dependencies = [
  "crossterm",
  "futures",
  "hex",
+ "libc",
  "nostr-sdk",
  "nostrdb",
  "png 0.17.16",
