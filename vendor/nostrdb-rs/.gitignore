@@ -1,0 +1,10 @@
+.direnv/
+/nostrdb
+Cargo.lock
+*.txt
+tags
+build.log
+target/
+rusty-tags.vi
+.build-result
+.buildcmd
