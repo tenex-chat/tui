@@ -47,10 +47,6 @@ keyring = { version = "3", features = ["apple-native"] }
 rodio = "0.19"
 bincode = "1"
 
-# Patch nostr-ndb's nostrdb dependency to use our fork
+# Patch nostr-ndb's nostrdb dependency to use our fork (which has the MDB_NOLOCK fix)
 [patch.crates-io]
-nostrdb = { path = "vendor/nostrdb-rs" }
-
-# Override the git dependency with our local vendor copy (MDB_NOLOCK patch)
-[patch."https://github.com/pablof7z/nostrdb-rs"]
-nostrdb = { path = "vendor/nostrdb-rs" }
+nostrdb = { git = "https://github.com/pablof7z/nostrdb-rs", branch = "master" }
