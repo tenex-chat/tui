@@ -20,7 +20,7 @@ hex = "0.4"
 # Reverted to 0.44.1 from crates.io
 nostr-sdk = { version = "0.44.1", features = ["nip49", "nip04", "nip44"] }
 nostr = { version = "0.44", default-features = false, features = ["std", "nip46"] }
-nostr-ndb = "0.44.0"
+nostr-ndb = { git = "https://github.com/pablof7z/nostr-ndb", branch = "master" }
 nostrdb = { git = "https://github.com/pablof7z/nostrdb-rs", branch = "master" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
@@ -47,6 +47,6 @@ keyring = { version = "3", features = ["apple-native"] }
 rodio = "0.19"
 bincode = "1"
 
-# Patch nostr-ndb's nostrdb dependency to use our fork (which has the MDB_NOLOCK fix)
 [patch.crates-io]
 nostrdb = { git = "https://github.com/pablof7z/nostrdb-rs", branch = "master" }
+nostr-ndb = { git = "https://github.com/pablof7z/nostr-ndb", branch = "master" }
