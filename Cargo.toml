@@ -49,4 +49,8 @@ bincode = "1"
 
 # Patch nostr-ndb's nostrdb dependency to use our fork
 [patch.crates-io]
-nostrdb = { git = "https://github.com/pablof7z/nostrdb-rs", branch = "master" }
+nostrdb = { path = "vendor/nostrdb-rs" }
+
+# Override the git dependency with our local vendor copy (MDB_NOLOCK patch)
+[patch."https://github.com/pablof7z/nostrdb-rs"]
+nostrdb = { path = "vendor/nostrdb-rs" }

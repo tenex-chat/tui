@@ -181,7 +181,7 @@ pub fn process_note_key_ids(
 impl CoreRuntime {
     pub fn new(config: CoreConfig) -> Result<Self> {
         std::fs::create_dir_all(&config.data_dir)?;
-        let ndb_config = nostrdb::Config::new().set_mapsize(8 * 1024 * 1024 * 1024);
+        let ndb_config = nostrdb::Config::new().set_mapsize(16 * 1024 * 1024 * 1024);
         let ndb = open_ndb_with_lock_recovery(&config.data_dir, &ndb_config)?;
 
         let data_store = Rc::new(RefCell::new(AppDataStore::new_with_cache(
