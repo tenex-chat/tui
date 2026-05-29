@@ -442,21 +442,23 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let idx = app.current_selection();
                 match app.home_panel_focus {
                     HomeTab::Inbox => {
-                        let items = app.inbox_items();
-                        if let Some(item) = items.get(idx) {
-                            let item_id = item.id.clone();
+                        let selected = app.inbox_items().get(idx).map(|item| {
+                            (
+                                item.id.clone(),
+                                item.project_a_tag.clone(),
+                                item.thread_id.clone(),
+                            )
+                        });
+                        if let Some((item_id, project_a_tag, thread_id_opt)) = selected {
                             app.data_store.borrow_mut().inbox.mark_read(&item_id);
-
-                            if let Some(ref thread_id) = item.thread_id {
-                                let project_a_tag = item.project_a_tag.clone();
+                            if let Some(thread_id) = thread_id_opt {
                                 let thread = app
                                     .data_store
                                     .borrow()
                                     .get_threads(&project_a_tag)
                                     .iter()
-                                    .find(|t| t.id == *thread_id)
+                                    .find(|t| t.id == thread_id)
                                     .cloned();
-
                                 if let Some(thread) = thread {
                                     app.open_thread_from_home(&thread, &project_a_tag);
                                 }

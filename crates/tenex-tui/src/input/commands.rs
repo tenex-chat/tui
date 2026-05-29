@@ -93,9 +93,12 @@ pub static COMMANDS: &[Command] = &[
                 && matches!(app.home_panel_focus, HomeTab::Conversations)
         },
         execute: |app| {
-            let threads = app.recent_threads();
-            if let Some((thread, project_a_tag)) = threads.get(app.current_selection()) {
-                app.open_thread_from_home(thread, project_a_tag);
+            let selected = app
+                .recent_threads()
+                .get(app.current_selection())
+                .map(|(t, a)| (t.clone(), a.clone()));
+            if let Some((thread, project_a_tag)) = selected {
+                app.open_thread_from_home(&thread, &project_a_tag);
             }
         },
     },
@@ -107,21 +110,24 @@ pub static COMMANDS: &[Command] = &[
             app.view == View::Home && !app.sidebar_focused && app.home_panel_focus == HomeTab::Inbox
         },
         execute: |app| {
-            // Inbox open is handled by the view handler, but we can trigger it here
-            let items = app.inbox_items();
-            if let Some(item) = items.get(app.current_selection()) {
-                if let Some(ref thread_id) = item.thread_id {
-                    let store = app.data_store.borrow();
-                    if let Some(thread) = store
-                        .get_threads(&item.project_a_tag)
-                        .iter()
-                        .find(|t| t.id == *thread_id)
-                    {
-                        let thread = thread.clone();
-                        let a_tag = item.project_a_tag.clone();
-                        drop(store);
-                        app.open_thread_from_home(&thread, &a_tag);
-                    }
+            let selected = app
+                .inbox_items()
+                .get(app.current_selection())
+                .and_then(|item| {
+                    item.thread_id
+                        .as_ref()
+                        .map(|t| (item.project_a_tag.clone(), t.clone()))
+                });
+            if let Some((project_a_tag, thread_id)) = selected {
+                let thread = app
+                    .data_store
+                    .borrow()
+                    .get_threads(&project_a_tag)
+                    .iter()
+                    .find(|t| t.id == thread_id)
+                    .cloned();
+                if let Some(thread) = thread {
+                    app.open_thread_from_home(&thread, &project_a_tag);
                 }
             }
         },
@@ -157,9 +163,12 @@ pub static COMMANDS: &[Command] = &[
                     export_thread_as_jsonl(app, &thread.id.clone());
                 }
             } else if app.view == View::Home {
-                let threads = app.recent_threads();
-                if let Some((thread, _)) = threads.get(app.current_selection()) {
-                    export_thread_as_jsonl(app, &thread.id.clone());
+                let thread_id = app
+                    .recent_threads()
+                    .get(app.current_selection())
+                    .map(|(t, _)| t.id.clone());
+                if let Some(id) = thread_id {
+                    export_thread_as_jsonl(app, &id);
                 }
             }
         },
@@ -1050,39 +1059,43 @@ fn archive_toggle(app: &mut App) {
                     }
                 }
                 HomeTab::Inbox => {
-                    let items = app.inbox_items();
-                    if let Some(item) = items.get(app.current_selection()) {
-                        if let Some(ref thread_id) = item.thread_id {
-                            let thread_id = thread_id.clone();
-                            let thread_title = app
-                                .data_store
-                                .borrow()
-                                .get_threads(&item.project_a_tag)
-                                .iter()
-                                .find(|t| t.id == thread_id)
-                                .map(|t| t.title.clone())
-                                .unwrap_or_else(|| "Conversation".to_string());
-                            let is_now_archived = app.toggle_thread_archived(&thread_id);
+                    let selected = app
+                        .inbox_items()
+                        .get(app.current_selection())
+                        .and_then(|item| {
+                            item.thread_id
+                                .as_ref()
+                                .map(|t| (item.project_a_tag.clone(), t.clone()))
+                        });
+                    if let Some((project_a_tag, thread_id)) = selected {
+                        let thread_title = app
+                            .data_store
+                            .borrow()
+                            .get_threads(&project_a_tag)
+                            .iter()
+                            .find(|t| t.id == thread_id)
+                            .map(|t| t.title.clone())
+                            .unwrap_or_else(|| "Conversation".to_string());
+                        let is_now_archived = app.toggle_thread_archived(&thread_id);
 
-                            app.last_undo_action = Some(if is_now_archived {
-                                UndoAction::ThreadArchived {
-                                    thread_id,
-                                    thread_title: thread_title.clone(),
-                                }
-                            } else {
-                                UndoAction::ThreadUnarchived {
-                                    thread_id,
-                                    thread_title: thread_title.clone(),
-                                }
-                            });
+                        app.last_undo_action = Some(if is_now_archived {
+                            UndoAction::ThreadArchived {
+                                thread_id,
+                                thread_title: thread_title.clone(),
+                            }
+                        } else {
+                            UndoAction::ThreadUnarchived {
+                                thread_id,
+                                thread_title: thread_title.clone(),
+                            }
+                        });
 
-                            let status = if is_now_archived {
-                                format!("Archived: {} (Ctrl+T u to undo)", thread_title)
-                            } else {
-                                format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
-                            };
-                            app.set_warning_status(&status);
-                        }
+                        let status = if is_now_archived {
+                            format!("Archived: {} (Ctrl+T u to undo)", thread_title)
+                        } else {
+                            format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
+                        };
+                        app.set_warning_status(&status);
                     }
                 }
                 _ => {

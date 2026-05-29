@@ -386,6 +386,10 @@ pub struct App {
     pub last_esc_time: Option<std::time::Instant>,
     /// Last time an autosave was performed (for periodic crash protection)
     pub last_autosave: std::time::Instant,
+    /// Cached inbox items — recomputed every tick (~50ms) to avoid per-frame allocation
+    cached_inbox_items: Vec<crate::models::InboxItem>,
+    /// Cached recent threads — recomputed every tick (~50ms) to avoid per-frame allocation
+    cached_recent_threads: Vec<(Thread, String)>,
 }
 
 /// Pure value-object that holds the merged inputs flowing into
@@ -573,6 +577,8 @@ impl App {
             last_user_activity_by_thread: HashMap::new(),
             last_esc_time: None,
             last_autosave: std::time::Instant::now(),
+            cached_inbox_items: Vec::new(),
+            cached_recent_threads: Vec::new(),
         }
     }
 
@@ -665,6 +671,7 @@ impl App {
             .tick_stream_animation(STREAM_CHARS_PER_TICK, STREAM_KIND1_HANDOFF_CHARS_PER_TICK);
         self.notification_manager.tick();
         self.tick_tts_playback();
+        self.refresh_home_caches();
     }
 
     /// Update TTS queue state based on audio player state.
@@ -2672,7 +2679,11 @@ impl App {
 
     /// Get recent threads across all projects for Home view (filtered by visible_projects, time_filter, archived)
     /// Now properly filters by visible projects FIRST, then applies time filter without arbitrary limits.
-    pub fn recent_threads(&self) -> Vec<(Thread, String)> {
+    pub fn recent_threads(&self) -> &[(Thread, String)] {
+        &self.cached_recent_threads
+    }
+
+    fn compute_recent_threads(&self) -> Vec<(Thread, String)> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
             return vec![];
@@ -2717,11 +2728,20 @@ impl App {
             .collect()
     }
 
+    pub fn inbox_items(&self) -> &[crate::models::InboxItem] {
+        &self.cached_inbox_items
+    }
+
+    pub fn refresh_home_caches(&mut self) {
+        self.cached_inbox_items = self.compute_inbox_items();
+        self.cached_recent_threads = self.compute_recent_threads();
+    }
+
     /// Get inbox items for Home view (filtered by time_filter, archived)
     /// NOTE: Inbox items are NOT filtered by visible_projects - if someone asks you a question,
     /// you should see it regardless of project filtering.
     /// NOTE: A hard cap of 48 hours is always applied to keep the inbox focused on recent items.
-    pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
+    fn compute_inbox_items(&self) -> Vec<crate::models::InboxItem> {
         let items = self.data_store.borrow().inbox.get_items().to_vec();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
