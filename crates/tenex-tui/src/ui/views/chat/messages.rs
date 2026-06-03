@@ -1229,8 +1229,25 @@ pub(crate) fn render_messages_panel(
         // Use scroll_offset, clamped to max
         let scroll = app.scroll_offset.min(max_scroll);
 
+        // PERF: Only hand the Paragraph the lines that are actually visible.
+        // ratatui re-runs grapheme segmentation over every line it receives on
+        // each frame, so passing the whole conversation (and relying on
+        // `.scroll()` to skip off-screen rows) re-segments the entire history
+        // ~20×/s and pegs a core. Since each line is pre-wrapped to one visual
+        // row (markdown_lines() handles wrapping), we can slice the window
+        // directly and render with no scroll offset.
+        //
+        // truncate() drops the tail below the viewport; split_off() drops the
+        // head above it, leaving exactly the visible rows in `visible` without
+        // cloning any Line. Index safety: `scroll <= end` always holds because
+        // `scroll <= max_scroll = total_lines - visible_height` when the history
+        // overflows the viewport, and `scroll == 0` otherwise.
+        let end = (scroll + visible_height).min(total_lines);
+        messages_text.truncate(end);
+        let visible = messages_text.split_off(scroll);
+
         // No Wrap - wrapping is handled in cards.rs markdown_lines()
-        let messages = Paragraph::new(messages_text).scroll((scroll as u16, 0));
+        let messages = Paragraph::new(visible);
 
         f.render_widget(messages, messages_area);
     }
